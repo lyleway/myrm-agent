@@ -6,7 +6,7 @@
 - app.api.cron.schemas::DeliveryHealthResponse (POS: cron request/response Pydantic models)
 
 [OUTPUT]
-- GET /{job_id}/delivery-health — what the destination the job delivers to has done in the last day (404 unknown job; 204 without a body when there is no verdict)
+- GET /{job_id}/delivery-health — what the latest delivery attempts say about the destination the job delivers to (404 unknown job; 204 without a body when there is no verdict)
 
 [POS]
 Server REST API router behind the delivery-health badge in a job's delivery settings.
@@ -27,7 +27,7 @@ router = APIRouter()
 # empty answer that client is built for.
 _NO_VERDICT: dict[int | str, dict[str, str]] = {
     status.HTTP_204_NO_CONTENT: {
-        "description": "No verdict: nothing leaves the application, or nothing was delivered there lately"
+        "description": "No verdict: nothing leaves the application, or no delivery there has been recorded"
     },
 }
 

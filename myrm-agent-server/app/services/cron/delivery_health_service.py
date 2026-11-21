@@ -1,9 +1,8 @@
 """Delivery health of the destination a cron job delivers to.
 
 The verdict is about the destination (a channel plus the exact address), not about one job: every job that delivers
-there adds its delivery attempts in the last day, whatever its status. It is a failure streak, the category of the
-latest failure and one of three states (HEALTHY, DEGRADED, DOWN); a destination with no attempt in the window has no
-verdict.
+there adds its delivery attempts, whatever its status. It is a failure streak, the category of the latest failure and
+one of three states (HEALTHY, DEGRADED, DOWN); a destination nothing was delivered to has no verdict.
 
 [INPUT]
 - myrm_agent_harness.api (POS: public facade; the delivery failure taxonomy and the identity of a destination)
@@ -27,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from itertools import takewhile
 
@@ -41,9 +40,9 @@ from app.core.cron.adapters.sqlalchemy_mapping import as_utc
 from app.database.models.cron import CronJobModel, CronRunModel
 from app.database.repositories.uow import UnitOfWork
 
-# Delivery attempts of one destination that the verdict is read from, newest first, and how far back they may lie.
+# The newest delivery attempts of one destination, however long ago they were, are what the verdict is read from: a
+# destination that is delivered to rarely has nothing newer to say, and the cap keeps the read small.
 _MAX_ATTEMPTS = 50
-_WINDOW = timedelta(hours=24)
 # A destination is DOWN once this many deliveries in a row have failed.
 _DOWN_AFTER_FAILURES = 3
 # Failures no retry can fix, because the credential or the address itself has to change: one is enough for DOWN.
@@ -114,18 +113,17 @@ class DeliveryHealthService:
         """The health of the destination ``channel`` and ``target`` name.
 
         None when there is no verdict: the channel sends nothing outside the application, or no delivery to the
-        destination was attempted in the last day.
+        destination has been recorded.
         """
         key = _destination_key(channel, target)
         if not key:
             return None
-        since = datetime.now(UTC) - _WINDOW
 
         async with UnitOfWork() as uow:
             db = uow.session
             assert db is not None
-            # Every job is read and filtered here: its status does not matter, its delivery attempts in the window
-            # do. Only the delivery column is read, which is all the key derives from.
+            # Every job is read and filtered here: its status does not matter, its delivery attempts do. Only the
+            # delivery column is read, which is all the key derives from.
             jobs = await db.execute(select(CronJobModel.id, CronJobModel.delivery))
             job_ids = [job_id for job_id, delivery in jobs if _job_destination_key(delivery) == key]
             if not job_ids:
@@ -139,7 +137,6 @@ class DeliveryHealthService:
                 select(CronRunModel)
                 .where(
                     CronRunModel.job_id.in_(job_ids),
-                    CronRunModel.finished_at >= since,
                     CronRunModel.delivery_status.in_(("delivered", "failed")),
                     func.json_extract(CronRunModel.metadata_json, "$.delivery_key") == key,
                 )

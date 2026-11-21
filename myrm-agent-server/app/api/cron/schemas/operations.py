@@ -74,7 +74,10 @@ class PrerequisiteCheckResponse(BaseModel):
 
 
 class DeliveryHealthResponse(BaseModel):
-    """What the destination a job delivers to has done in the last day; the failure fields are empty while healthy."""
+    """What the latest delivery attempts say about the destination a job delivers to.
+
+    The failure fields are empty while the destination is healthy.
+    """
 
     status: str
     failure_streak: int
