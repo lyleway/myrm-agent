@@ -9,17 +9,14 @@
  * value shape of the two value modules, re-exported.
  *
  * [POS]
- * Type entry of the config sync layer: optimistic-lock versions, field-level change tracking and multi-device sync are
- * built on the keys and the value map defined here. The value shapes live in two files by theme; importers use this
- * module as the single entry.
+ * Type entry of the config sync layer: optimistic-lock versions and multi-device sync are built on the keys and the
+ * value map defined here. The value shapes live in two files by theme; importers use this module as the single entry.
  */
 
 import type {
-  CommandsConfigValue,
   ConfigValueMap,
   MCPServersConfigValue,
   PersonalSettingsConfigValue,
-  RetrievalConfigValue,
   SearchServicesConfigValue,
 } from './configValues';
 
@@ -182,44 +179,9 @@ export function incrementVersion(current: ConfigVersion): ConfigVersion {
   return `${now}_0`;
 }
 
-/**
- * 比较版本号
- *
- * @returns 正数表示 a > b，负数表示 a < b，0 表示相等
- */
-export function compareVersions(a: ConfigVersion, b: ConfigVersion): number {
-  const [aTs, aCtr] = a.split('_').map(Number);
-  const [bTs, bCtr] = b.split('_').map(Number);
-
-  if (aTs !== bTs) {
-    return aTs - bTs;
-  }
-  return aCtr - bCtr;
-}
-
-/**
- * 解析版本号
- */
-export function parseVersion(version: ConfigVersion): { timestamp: number; counter: number } {
-  const [timestamp, counter] = version.split('_').map(Number);
-  return { timestamp, counter };
-}
-
 // ============================================================================
 // 同步相关类型
 // ============================================================================
-
-/**
- * 字段变更记录
- */
-export interface FieldChange {
-  /** 字段路径，如 ['providers', 0, 'apiKey'] */
-  path: (string | number)[];
-  /** 变更前的值 */
-  oldValue: unknown;
-  /** 变更后的值 */
-  newValue: unknown;
-}
 
 /**
  * 配置变更记录
@@ -346,34 +308,4 @@ export const DEFAULT_MCP_SERVERS: MCPServersConfigValue = {
  */
 export const DEFAULT_SEARCH_SERVICES: SearchServicesConfigValue = {
   searchServiceConfigs: [],
-};
-
-/**
- * 默认的 Commands 配置
- */
-export const DEFAULT_COMMANDS: CommandsConfigValue = {
-  commands: [],
-  recentCommandIds: [],
-};
-
-/**
- * 默认的 Retrieval 配置
- */
-export const DEFAULT_RETRIEVAL: RetrievalConfigValue = {
-  embeddingConfig: {
-    provider: 'siliconflow',
-    model: 'BAAI/bge-m3',
-    apiKey: '',
-    apiBase: '',
-  },
-  embeddingApplied: false,
-  embeddingAppliedAt: undefined,
-  rerankerConfig: {
-    provider: 'siliconflow',
-    model: 'BAAI/bge-reranker-v2-m3',
-    apiKey: '',
-    apiBase: '',
-  },
-  rerankerApplied: false,
-  rerankerAppliedAt: undefined,
 };

@@ -50,13 +50,9 @@ export type {
 export {
   createInitialVersion,
   incrementVersion,
-  compareVersions,
-  parseVersion,
   DEFAULT_PERSONAL_SETTINGS,
   DEFAULT_MCP_SERVERS,
   DEFAULT_SEARCH_SERVICES,
-  DEFAULT_COMMANDS,
-  DEFAULT_RETRIEVAL,
 } from './types';
 
 // 错误类型导出
