@@ -2,19 +2,15 @@
 
 ## 架构概述
 
-通用后台任务 Map 状态（`task_id` → `Task`）。与 `hooks/tasks/` WebSocket 订阅配合；区别于 `useCommandStore` 的 Slash 命令中心。
+后台任务的类型契约；目录内没有 store 与运行时代码。任务状态与 SSE 订阅见 `hooks/tasks/`。
 
 ## 文件清单
 
-| 文件       | 职责                                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `types.ts` | `Task` 与任务状态枚举，以及图像生成任务的结果形状（`provider` 可选：任务结果不带供应商，见 `shared/config/media_generation_contract.json`） |
+| 文件       | 职责                                                                                                                                                                                                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types.ts` | `Task`（任务记录：状态、载荷、结果、错误、进度与时间戳）、`TaskStatus`（六种状态）、`TaskError`（`recoverable` 区分瞬时与永久失败）与图像生成任务的结果形状 `ImageGenerationResult`（`provider` 可选：任务结果不带供应商，见 `shared/config/media_generation_contract.json`） |
 
 ## 依赖
 
-- `@/lib/api` — `apiRequest`
-- `hooks/tasks/` — 实时推送写入 store
-
-## 约束
-
-- 新后台任务域优先复用本 store，避免平行 `Map` 实现
+- 无：`types.ts` 不 import 任何模块
+- 被 `hooks/tasks/`、`services/mediaTasks.ts`、`components/features/task-card/`、`components/features/background-tasks/` 引用
