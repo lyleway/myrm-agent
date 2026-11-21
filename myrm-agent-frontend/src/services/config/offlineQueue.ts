@@ -30,7 +30,10 @@ import type { ConfigChange } from './types';
 /** The key of a queue that belongs to no particular account; a signed-in account's queue lives under `<key>:<userId>`. */
 const OFFLINE_QUEUE_KEY = 'config-offline-queue';
 
-/** Read per call: the signed-in account can change while the page lives. */
+/**
+ * Read per call: this tab's own sign-in or sign-out changes the account without a reload (a change made in another tab
+ * reloads the page instead, see `AuthInitializer`).
+ */
 function queueKey(): string {
   const token = getAuthToken();
   const userId = token ? parseCpAuthTokenUserId(token) : null;

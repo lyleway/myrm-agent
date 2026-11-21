@@ -248,16 +248,6 @@ class ConfigSyncManager {
     this.outbox.enqueue({ key, value, expectedVersion: currentVersion, timestamp: Date.now() }, immediate);
   }
 
-  /** 删除配置 */
-  async delete(key: ConfigKey): Promise<boolean> {
-    const success = await this.adapter.delete(key);
-    if (success) {
-      this.cache.delete(key);
-      this.baseCache.delete(key);
-    }
-    return success;
-  }
-
   /** 订阅配置变更 */
   subscribe<K extends ConfigKey>(key: K, listener: ConfigChangeListener<K>): () => void {
     return this.listeners.subscribe(key, listener);

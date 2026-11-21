@@ -60,7 +60,7 @@ export {
 } from './types';
 
 // 错误类型导出
-export { ConfigConflictError, ConfigSyncError } from './types';
+export { ConfigSyncError } from './types';
 
 // 适配器导出
 export { BaseConfigAdapter, TauriConfigAdapter, SandboxConfigAdapter } from './adapters';

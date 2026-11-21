@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markLocalBackendUnreachable } from '@/lib/backend-health';
 import { TauriConfigAdapter } from '@/services/config/adapters/TauriAdapter';
 import { ConfigSyncError, DEFAULT_PERSONAL_SETTINGS, type ConfigChange } from '@/services/config/types';
+import { answerWithBody, brokenBody, malformedBody, runOutBodyDeadline, stalledBody } from './bodyDeadlineKit';
 
 vi.mock('@/lib/deploy-mode', () => ({
   getApiBaseUrl: () => '/api/v1',
@@ -126,5 +127,59 @@ describe('TauriConfigAdapter backend unavailable', () => {
         expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
       },
     );
+  });
+
+  describe('an answer whose body does not arrive', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('makes get throw Backend not available once the deadline has passed', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+
+      const call = adapter.get('chatSettings');
+      await runOutBodyDeadline(call);
+
+      await expect(call).rejects.toThrow(new ConfigSyncError('Backend not available'));
+      expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+    });
+
+    it('makes getAll throw Backend not available once the deadline has passed', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+
+      const call = adapter.getAll();
+      await runOutBodyDeadline(call);
+
+      await expect(call).rejects.toThrow(new ConfigSyncError('Backend not available'));
+      expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports Backend not available for a sync answer that never finishes', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+
+      const call = adapter.sync(CHANGES);
+      await runOutBodyDeadline(call);
+
+      await expect(call).resolves.toEqual(BACKEND_NOT_AVAILABLE);
+      expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports Backend not available when the connection breaks while a sync answer is read', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, brokenBody));
+
+      await expect(adapter.sync(CHANGES)).resolves.toEqual(BACKEND_NOT_AVAILABLE);
+      expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets an answer that is not JSON through: that is a defect, not an unreachable backend', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, malformedBody));
+
+      await expect(adapter.sync(CHANGES)).rejects.toBeInstanceOf(SyntaxError);
+      expect(markLocalBackendUnreachable).not.toHaveBeenCalled();
+    });
   });
 });

@@ -1,29 +1,24 @@
 /**
  * [INPUT]
- * - `../types` ConfigAdapter / SyncResult / createInitialVersion / incrementVersion (POS: adapter contract, backend answer, version arithmetic)
+ * - `@/lib/utils/withTimeout` withTimeout (POS: the generic wait limit for a promise; a result that arrives after the limit is dropped)
+ * - `../types` ConfigAdapter / SyncResult (POS: adapter contract and the backend's answer to a sync)
  *
  * [OUTPUT]
- * BaseConfigAdapter: device id, version helpers and the abstract adapter surface.
+ * BaseConfigAdapter: device id and the abstract adapter surface.
  * BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult: the failed `SyncResult` of a write that never reached a backend.
  * isTransportFailure: whether a rejected `fetch()` call is a delivery failure rather than a bug.
+ * RESPONSE_BODY_DEADLINE_MS / readJson / isLostAnswer: the limit on reading an answer's body, and whether a failed read means the answer was lost rather than wrong.
  *
  * [POS]
  * What the Tauri and Sandbox adapters share. Both answer a reachability failure the same way, because the sync layer
  * keeps a write for a later retry only when it sees this result: reads (`getAll` / `get`) throw, so "unknown" is never
- * mistaken for "no such row", and `sync` returns the failed result instead of throwing. Whatever else a backend refuses
- * is an error the caller sees.
+ * mistaken for "no such row", and `sync` returns the failed result instead of throwing. Reachability covers the body of
+ * an answer as well as the request: a body that never finishes or breaks off counts as an unreachable backend, a body
+ * that is not JSON does not. Whatever else a backend refuses is an error the caller sees.
  */
 
-import type {
-  ConfigAdapter,
-  ConfigKey,
-  ConfigRecord,
-  ConfigChange,
-  SyncResult,
-  ConfigVersion,
-  ConfigValueMap,
-} from '../types';
-import { createInitialVersion, incrementVersion } from '../types';
+import { withTimeout } from '@/lib/utils/withTimeout';
+import type { ConfigAdapter, ConfigKey, ConfigRecord, ConfigChange, SyncResult, ConfigVersion } from '../types';
 
 /** `SyncResult.error` of a write that did not reach a backend that could take it; `isRecoverableSyncError` matches it. */
 export const BACKEND_NOT_AVAILABLE_ERROR = 'Backend not available';
@@ -47,12 +42,31 @@ export function isTransportFailure(error: unknown): boolean {
 }
 
 /**
- * 适配器基类
- *
- * 提供：
- * - 设备 ID 管理
- * - 版本号生成
- * - 通用工具方法
+ * How long the body of an answer may take once its headers have arrived. The adapters' own 10 s timer ends with the
+ * headers, so without this limit a backend that stalls in the middle of an answer leaves the read pending forever.
+ * Equal to the default of the app's generic request layer (`fetchWithTimeout`).
+ */
+export const RESPONSE_BODY_DEADLINE_MS = 30_000;
+
+/**
+ * The JSON body of an answer, read within `RESPONSE_BODY_DEADLINE_MS`. The read is abandoned, not cancelled: whatever the
+ * backend sends after the deadline is dropped.
+ */
+export function readJson<T>(response: Response): Promise<T> {
+  return withTimeout(response.json() as Promise<T>, RESPONSE_BODY_DEADLINE_MS);
+}
+
+/**
+ * Whether a failed `readJson` means the answer never made it (it stalled past the deadline, or the connection broke while
+ * it was read) rather than that it arrived wrong. A body that is not JSON (`SyntaxError`) is a server defect and stays
+ * visible.
+ */
+export function isLostAnswer(error: unknown): boolean {
+  return !(error instanceof SyntaxError);
+}
+
+/**
+ * 适配器基类：持有设备 ID，并声明子类必须实现的读取与批量同步。
  */
 export abstract class BaseConfigAdapter implements ConfigAdapter {
   protected deviceId: string;
@@ -85,27 +99,6 @@ export abstract class BaseConfigAdapter implements ConfigAdapter {
     return this.deviceId;
   }
 
-  /**
-   * 创建新的配置记录
-   */
-  protected createRecord<K extends ConfigKey>(
-    key: K,
-    value: ConfigValueMap[K],
-    existingVersion?: ConfigVersion,
-  ): ConfigRecord<K> {
-    const version = existingVersion ? incrementVersion(existingVersion) : createInitialVersion();
-
-    return {
-      key,
-      value,
-      meta: {
-        version,
-        updatedAt: new Date().toISOString(),
-        deviceId: this.deviceId,
-      },
-    };
-  }
-
   // ============================================================================
   // 抽象方法 - 子类必须实现
   // ============================================================================
@@ -113,14 +106,6 @@ export abstract class BaseConfigAdapter implements ConfigAdapter {
   abstract getAll(keys?: readonly ConfigKey[]): Promise<Map<ConfigKey, ConfigRecord>>;
 
   abstract get<K extends ConfigKey>(key: K): Promise<ConfigRecord<K> | null>;
-
-  abstract set<K extends ConfigKey>(
-    key: K,
-    value: ConfigValueMap[K],
-    expectedVersion?: ConfigVersion,
-  ): Promise<ConfigRecord<K>>;
-
-  abstract delete(key: ConfigKey): Promise<boolean>;
 
   abstract sync(changes: ConfigChange[]): Promise<SyncResult>;
 }
