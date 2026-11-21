@@ -275,6 +275,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/providers/discord/test_discord_reaction_lifecycle.py` | 单元 | Discord `Message.remove_reaction`：空串撤销已加的反应且只撤一次，没加过不碰消息，添加失败抛出且不记账，没有机器人用户时无从撤销 |
 | `channels/providers/discord/test_discord_reasoning.py` | 单元 | Discord 回复里的推理只出现一次、是 Markdown 引用而非 HTML 标签；占位消息的编辑结果经真实渠道，不带页脚，回复隐藏推理时一点不剩 |
 | `channels/providers/discord/test_discord_outbound_edges.py` | 单元 | Discord 占位消息、删除、反应与输入提示在 Discord 够不着或拒绝时的去向：占位消息发出的消息号就是占位消息号，频道够不着或消息被拒时没有占位消息（拒绝写日志）；删除失败只写日志、不连累调用方；空表情撤回的是本渠道加的那一个（频道没了则不撤、没加过则不碰 Discord）；输入提示被拒只写日志；只有文件没有文字的消息单独发出并返回最后一条消息号；不是可发消息频道的 id 视为够不着 |
+| `channels/providers/discord/test_discord_channel.py` | 单元 | Discord 渠道的启停与入站：带网关启动与不带网关启动，停止（网关会话已失败时仍完成停止），消息分发，忽略机器人，群聊里去掉提及并注入元数据，附件抽取（图片、文档、多个附件、没有附件、没有类型时按尺寸判成图片）；同目录按主题分文件：`test_discord_forum_and_send.py`（论坛判定与帖子名、论坛与普通频道发送、长消息拆分、回复只指向首块、论坛帖子的话题继承）、`test_discord_message_ops.py`（编辑、删除、反应、输入提示、频道解析、历史拉取）、`test_discord_config_and_health.py`（允许频道解析、语音配置字段、凭据规格、健康检查）；`conftest.py` 提供 `config`、`channel` 夹具 |
 | `channels/providers/feishu/test_feishu_webhook_routes.py` | 单元 | 飞书 webhook 路由注册在路由注册器上，不是注册器的对象被忽略 |
 | `channels/providers/feishu/test_feishu_webhook_handler.py` | 单元 | 飞书 webhook 路由经真实 Starlette 请求、真实安全中间件与注册的处理函数：没有回复的事件应答 200 `{"ok": true}`，事件处理的结果作为应答正文，别的应用的事件 403（`app-id-mismatch`）且不处理，不是 JSON 的正文 400 且不处理，处理中抛出的错误应答 500 且正文不带原因 |
 | `channels/providers/feishu/sdk/test_at_all_defused.py` | 单元 | 智能体文本里的「@所有人」标记（`<at user_id="all">`、`<at id=all>`，含单引号、等号两侧空白、大小写、换行写法）不会通知整个飞书群：文本、富文本、卡片三种消息体经发送、回复、更新三条路径一律在出口处被拆开；指向具体用户、`all_hands` 之类的标记与普通文本原样发出 |
@@ -372,6 +373,11 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/policy_resolver_testkit.py` | 辅助 | `make_message()` / `make_resolver()`：`PolicyResolver` 各测试文件共用的 `InboundMessage` 与解析器构造（配对与策略仓库、消息副作用为替身，群上下文缓冲为真实对象） |
 | `channels/channel_class_testkit.py` | 辅助 | `channel_class_or_skip()` / `channels_missing_their_sdk()`：遍历全部注册渠道的测试解析渠道类，可选 SDK（`ChannelSpec.sdk_package`）没装的渠道跳过，其余导入失败照常抛出；合规、入站画像、默认状态表情测试共用 |
 | `channels/test_channel_class_testkit.py` | 单元 | 渠道类查找辅助：可导入的渠道正常返回，可选 SDK 缺失的渠道被跳过并列入缺失清单，没有可选 SDK 的渠道导入失败不被当作缺失（照常抛出，不会掩盖真缺陷） |
+| `channels/bus_testkit.py` | 辅助 | 消息总线测试的共享替身：`FakeChannel`（记录发出的消息、可指定能力；名字与能力是类级状态，同类实例共享）、`make_out()`（出站消息构造）、`EditRecordingChannel` / `NoEditCapabilityChannel`（各自声明能力、记录编辑调用）；`test_bus.py`、`test_bus_edge_cases.py`、`test_bus_outbound.py` 与 `channels/core/test_outbound_downgrade.py` 共用 |
+| `channels/test_bus.py` | 单元 | `MessageBus` 的注册（后注册的替换先注册的，未知渠道取不到）、`send_tracked`（返回消息号、记录出站活动、未知渠道返回空、渠道不支持按钮时降级）、编辑（成功；渠道没有编辑能力或渠道未知返回 False）、入站路由到队列，以及启停、重复启动、投递循环发消息、毒丸消息不拖垮循环并记失败、投递前失败不经持久化恢复形成死循环 |
+| `channels/test_bus_edge_cases.py` | 单元 | `MessageBus` 的边界：入站与出站队列满时丢弃，发往未知渠道的消息被丢弃，渠道发送失败记错误、返回空发送结果进死信而不误确认，已停止/已禁用渠道的 `send_tracked` 返回空，永久失败回调（发送失败时触发、有账本时不重复、启动时合并启动前已通知的、回调抛错不外溢、无死信目录也可调用），编辑抛错返回 False，注销渠道 |
+| `channels/test_bus_outbound.py` | 单元 | 出站风险闸门与控制平面出站：无规则、空正文、未命中时原样放行，命中时替换正文且保留渠道与收件人，投递循环与 `send_tracked` 都先过闸门；路由到控制平面时不经本地渠道也不留待投递记录，渠道已停止时消息保留在磁盘，未注册渠道的控制平面出站被确认 |
+| `channels/core/test_outbound_downgrade.py` | 单元 | `downgrade_components`：渠道支持时原样保留，不支持时按钮、选择菜单、必填快捷回复、媒体分别降成文字且互不牵连；链接按钮显示链接，非必填快捷回复丢弃；降级文案默认英文、元数据指定时用中文；降级写一条 INFO 日志 |
 | `channels/test_routing_policy_resolver.py` | 单元 | `PolicyResolver` 私聊解析与 LID 回退：控制面转发带来的身份只在带控制面标记时采纳；关闭 / 开放（未映射 LID 与未配对发送者成为访客）/ 配对（通过、被拒、待审、新发送者）/ 白名单（通过、被拒、未配对）各模式，缺省策略按白名单；LID 经缓存解析并继承其手机号的状态、角色与配额，未配对手机号的 LID 不绑定，缓存未命中且白名单策略下无结果 |
 | `channels/test_routing_policy_group_resolution.py` | 单元 | `PolicyResolver` 群聊解析：预先解析的群用户绕过策略检查；策略关闭或群未启用；访客须显式点名（只回复不算）；点名触发、未配对发送者在已启用群里为访客、未点名只缓冲；all / prefix 触发模式（前缀不匹配不触发）；无默认用户返回空，无策略时缺省关闭 |
 | `channels/test_routing_policy_group_gates.py` | 单元 | 群聊的跟进豁免（追踪器的 LRU 与 TTL、按 thread 的豁免与静音、自由回复聊天白名单）与机器人发送者闸门：机器人闲聊即使在自由回复群里也被忽略、显式点名可触发、闸门触发后点名与私聊被拒、真人点名不受影响；机器人闲聊不进上下文缓冲，缓冲下来的闲聊凭据已打码，触发归因只写一次 |
