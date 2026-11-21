@@ -38,7 +38,7 @@ def test_rewritten_multimodal_learn_triggers_gate() -> None:
 
 class TestLearnWebuiConverterIntegration:
     @pytest.mark.asyncio
-    async def test_explore_preset_raw_learn_rewrites_and_elevates_skill_manage(
+    async def test_explore_preset_raw_learn_rewrites_and_leaves_skill_manage_to_the_saved_config(
         self,
     ) -> None:
         request = AgentRequest(
@@ -65,7 +65,13 @@ class TestLearnWebuiConverterIntegration:
 
         security_config = params.security_config_raw
         assert isinstance(security_config, dict)
-        permissions = security_config.get("permissions")
-        assert isinstance(permissions, dict)
-        assert permissions.get("file_write") == "deny"
-        assert permissions.get("skill_manage") == "ask"
+        # The preset is one restriction layer beside the saved permissions: it keeps refusing writes, and the
+        # /learn turn leaves out only `skill_manage`, which then answers to the saved config. No permission is
+        # written into the saved config itself.
+        assert "permissions" not in security_config
+        restrictions = security_config.get("restrictions")
+        assert isinstance(restrictions, list)
+        explore_layer = restrictions[-1]
+        assert isinstance(explore_layer, dict)
+        assert explore_layer.get("file_write") == "deny"
+        assert "skill_manage" not in explore_layer
