@@ -72,7 +72,11 @@ Discord provider 完整实现了 `ReplyContext` 协议（与其他 7 个渠道�
 
 | 文件 | 职责 |
 |------|------|
-| `test_discord_channel.py` | Gateway/forum/lifecycle（含网关任务已失败时的停止）、edit/delete、原生 reply 引用（首分片携带 message_id + channel_id）、voice 配置、health_check REST probe |
+| `conftest.py` | 提供 `config`、`channel` 夹具 |
+| `test_discord_channel.py` | 渠道的启停与入站：带网关启动与不带网关启动，停止（网关会话已失败时仍完成停止），消息分发，忽略机器人，群聊里去掉提及并注入元数据，附件抽取（图片、文档、多个附件、没有附件、没有类型时按尺寸判成图片） |
+| `test_discord_forum_and_send.py` | 论坛判定与帖子名、论坛与普通频道发送、长消息拆分、回复只指向首块（原生 reply 引用带 message_id + channel_id）、论坛帖子的话题继承 |
+| `test_discord_message_ops.py` | 编辑、删除、反应、输入提示、频道解析、历史拉取 |
+| `test_discord_config_and_health.py` | 允许频道解析、语音配置字段、凭据规格、健康检查 |
 | `test_discord_stop_voice.py` | 停止时的语音离开：真实 `VoiceConnectionState`（只替换网络），覆盖网关永远不确认、某个公会在等待之前就卡住、网关正常确认、`stop()` 在等待中被取消四种情形；前两种在限时内返回，所有公会的套接字都已释放；另钉住语音离开上限小于网关停止上限 |
 | `test_discord_voice_manager_lifetime.py` | 语音管理器的生命周期：第二次 READY 沿用管理器及其会话（`stop()` 仍断开该会话一次）；被取消的 `stop()` 之后重启得到新管理器 |
 | `test_discord_voice_command_admission.py` | `/voice` 命令的发送者准入：命令先于判定应答（defer）、所有回复走 followup；被拒绝的调用者三个子命令都只收到仅自己可见的拒绝回复，不加入、不离开、不回报状态；判定未接线时拒绝所有人；所有者三个子命令照常；判定收到的消息字段（发送者、频道、群聊，不带 `user_id`）；拒绝记带频道的 WARNING；`join` / `leave` 另需所有者，未列为只读的动作同样（被准入的非所有者收到专用提示、不加入不离开，`status` 不受影响；所有者判定未接线时拒绝；被拒绝准入的调用者不再被问是否所有者；所有者判定收到的消息字段；真实路由器与策略下所有者、协作成员、启用群聊里未配对的成员三类调用者三个子命令各自的结果） |
@@ -81,7 +85,10 @@ Discord provider 完整实现了 `ReplyContext` 协议（与其他 7 个渠道�
 | `gateway_testkit.py` | 构造不联网的 `DiscordChannel` 与网关客户端替身（生命周期、语音命令、身份三组测试共用） |
 | `test_discord_allowed_mentions.py` | 网关客户端的提及策略：discord.py 实际发出的 `allowed_mentions` 载荷只放行用户与回复引用，不含 everyone、角色 |
 | `test_discord_reply_context.py` | `_parse_reply_context` / `_resolve_mentioned` 单元测试（reference.resolved API 验证） |
-| `test_discord_embed_and_contract.py` | Embed/View 纯函数、`ChannelTestBase` 契约合规、入站消息与按钮交互分发（机器人自己的消息与非组件交互被忽略）、编辑方法由 Discord 渠道自己实现、媒体与投递错误分类 |
+| `send_testkit.py` | 发送与入站测试共用的构造器：出站消息 `make_msg`、挂着模拟客户端的 `DiscordChannel`（`make_mock_channel`）、模拟的可发消息频道（`make_mock_messageable`） |
+| `test_discord_embed_and_contract.py` | Embed/View 纯函数、`ChannelTestBase` 契约合规、入站消息与按钮交互分发（机器人自己的消息与非组件交互被忽略）、编辑方法由 Discord 渠道自己实现 |
+| `test_discord_send_media.py` | `send()` 的附件处理：文件随消息上传，没带附件时不传 `files`，本地路径转成 `discord.File`，只有 URL 的附件作为链接发出，读不了的文件与没有来源的附件记为失败 |
+| `test_discord_send_delivery.py` | `send()` 送达或抛错：频道够不着抛可重试错误，HTTP 错误按状态码分重试类，其他 Discord 错误可重试；URL 附件作为链接送达；读不了的文件在文字送达后报告，只有读不了的文件时不发消息且可重试；论坛帖子带文件，论坛占位消息失败不抛；非论坛的服务器频道走普通发送 |
 | `test_discord_outbound_edges.py` | 占位消息、删除、反应与输入提示在 Discord 够不着或拒绝时的去向；只有文件的消息；不是可发消息频道的 id |
 | `test_discord_outbound_components.py` | 按钮与选择菜单在 Discord 的去向：能力声明不含原生组件；链接按钮、回调按钮与选择菜单经真实 `prepare_outbound` 降成文字行，`send` 发出的内容就是这段文字、不带 `view` |
 | `test_discord_reasoning.py` | 推理在 Discord 里只出现一次、是 Markdown 引用而非 HTML 标签；占位消息的编辑结果不带页脚；回复隐藏推理时占位消息里一点也不剩 |
