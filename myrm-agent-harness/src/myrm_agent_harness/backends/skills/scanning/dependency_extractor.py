@@ -6,7 +6,8 @@ Extracts declared dependencies from skill directories and manifest files:
 - pyproject.toml (PyPI ecosystem: PEP 621 project.dependencies, Poetry tool dependencies)
 
 [INPUT]
-- (none)
+- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
+- core.security.path::read_text_bounded, ReadRefusal (POS: text read that stops at a character limit and never waits on a FIFO or device)
 
 [OUTPUT]
 - DeclaredDependency: structured representation of a declared dependency
@@ -17,7 +18,8 @@ Extracts declared dependencies from skill directories and manifest files:
 - extract_dependencies_from_bun_lock: extract npm locked dependencies from bun.lock text
 - extract_dependencies_from_package_lock_json: extract npm locked dependencies from package-lock.json text
 - extract_dependencies_from_files: scan in-memory files dict for declared dependencies
-- extract_skill_dependencies: scan a skill directory on disk for declared dependencies
+- extract_skill_dependencies: scan a skill directory on disk for declared dependencies (at any depth, in every folder
+  but node_modules; a symbolic link is not followed)
 
 [POS]
 Supply chain dependency manifest extraction for installed and in-quarantine skills.
@@ -30,13 +32,17 @@ import json
 import logging
 import re
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
+from myrm_agent_harness.core.security.path import ReadRefusal, read_text_bounded
+
 logger = logging.getLogger(__name__)
 
-_SKIPPED_DIRS = frozenset({"node_modules", ".git", "__pycache__", ".venv", "venv", ".tox", "dist", "build"})
-_MAX_DIR_DEPTH = 3
+# Lockfiles of large workspaces run to several megabytes; a file past this is not a dependency list.
+_MAX_DEPENDENCY_FILE_CHARS = 16 * 1024 * 1024
 
 _REQ_COMMENT_RE = re.compile(r"#.*$")
 _REQ_ENV_MARKER_RE = re.compile(r";.*$")
@@ -370,83 +376,71 @@ def extract_dependencies_from_package_lock_json(
     return dependencies
 
 
+_Extractor = Callable[[str, str], list[DeclaredDependency]]
+
+
+def _extractor_for(filename: str) -> _Extractor | None:
+    """The extractor for a manifest or lockfile, chosen by the last part of *filename* in any case, else None."""
+    name = Path(filename).name.lower()
+    if name == "package.json":
+        return extract_dependencies_from_package_json
+    if name == "uv.lock":
+        return extract_dependencies_from_uv_lock
+    if name == "bun.lock":
+        return extract_dependencies_from_bun_lock
+    if name == "package-lock.json":
+        return extract_dependencies_from_package_lock_json
+    if name.endswith(".txt") and "requirement" in name:
+        return extract_dependencies_from_requirements_txt
+    if name == "pyproject.toml":
+        return extract_dependencies_from_pyproject_toml
+    return None
+
+
 def extract_dependencies_from_files(
     files: dict[str, bytes],
 ) -> list[DeclaredDependency]:
     """Extract all declared dependencies from an in-memory dictionary of files."""
     dependencies: list[DeclaredDependency] = []
     for filename, content in files.items():
-        name_lower = Path(filename).name.lower()
-        if name_lower == "package.json":
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_package_json(text, filename))
-        elif name_lower == "uv.lock":
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_uv_lock(text, filename))
-        elif name_lower == "bun.lock":
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_bun_lock(text, filename))
-        elif name_lower == "package-lock.json":
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_package_lock_json(text, filename))
-        elif name_lower.endswith(".txt") and "requirement" in name_lower:
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_requirements_txt(text, filename))
-        elif name_lower == "pyproject.toml":
-            text = content.decode("utf-8", errors="replace")
-            dependencies.extend(extract_dependencies_from_pyproject_toml(text, filename))
-
+        extractor = _extractor_for(filename)
+        if extractor is not None:
+            dependencies.extend(extractor(content.decode("utf-8", errors="replace"), filename))
     return dependencies
 
 
+def _read_dependency_file(found: WalkedFile) -> str | None:
+    """The text of a manifest or lockfile found on disk, or None (logged) when it cannot be taken."""
+    try:
+        read = read_text_bounded(found.path, _MAX_DEPENDENCY_FILE_CHARS, errors="replace")
+    except OSError as exc:
+        logger.debug("Cannot read file %s: %s", found.path, exc)
+        return None
+    if read.refusal is ReadRefusal.TOO_LARGE:
+        logger.warning("Skipped %s: it is longer than %d characters", found.path, _MAX_DEPENDENCY_FILE_CHARS)
+    return read.text
+
+
 def extract_skill_dependencies(skill_dir: Path | str) -> list[DeclaredDependency]:
-    """Scan a skill directory on disk and extract all declared dependencies."""
+    """Scan a skill directory on disk and extract all declared dependencies.
+
+    The files are the ones ``tree_walk`` finds: at any depth, in every folder but ``node_modules``. A symbolic link is
+    not followed (what it leads to is not the skill's own file), a file over ``_MAX_DEPENDENCY_FILE_CHARS`` is skipped,
+    and a part of the tree the walk could not examine is logged: the result is then incomplete, not wrong.
+    """
     directory = Path(skill_dir).resolve()
     if not directory.is_dir():
         return []
 
     dependencies: list[DeclaredDependency] = []
-
-    def _walk(current: Path, depth: int) -> None:
-        if depth > _MAX_DIR_DEPTH:
-            return
-
-        try:
-            entries = sorted(current.iterdir())
-        except OSError as exc:
-            logger.debug("Cannot read directory %s: %s", current, exc)
-            return
-
-        for entry in entries:
-            if entry.name in _SKIPPED_DIRS:
-                continue
-
-            if entry.is_dir():
-                _walk(entry, depth + 1)
-            elif entry.is_file():
-                name_lower = entry.name.lower()
-                rel_path = str(entry.relative_to(directory))
-                try:
-                    if name_lower == "package.json":
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_package_json(text, rel_path))
-                    elif name_lower == "uv.lock":
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_uv_lock(text, rel_path))
-                    elif name_lower == "bun.lock":
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_bun_lock(text, rel_path))
-                    elif name_lower == "package-lock.json":
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_package_lock_json(text, rel_path))
-                    elif name_lower.endswith(".txt") and "requirement" in name_lower:
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_requirements_txt(text, rel_path))
-                    elif name_lower == "pyproject.toml":
-                        text = entry.read_text(encoding="utf-8", errors="replace")
-                        dependencies.extend(extract_dependencies_from_pyproject_toml(text, rel_path))
-                except OSError as exc:
-                    logger.debug("Cannot read file %s: %s", entry, exc)
-
-    _walk(directory, 0)
+    for found in walk_tree(directory, lambda name: _extractor_for(name) is not None):
+        if isinstance(found, WalkProblem):
+            logger.warning("Dependency scan of %s is incomplete at %r: %s", directory, found.relative, found.reason)
+            continue
+        extractor = _extractor_for(found.path.name)
+        if extractor is None or found.is_symlink:
+            continue
+        text = _read_dependency_file(found)
+        if text is not None:
+            dependencies.extend(extractor(text, found.relative))
     return dependencies

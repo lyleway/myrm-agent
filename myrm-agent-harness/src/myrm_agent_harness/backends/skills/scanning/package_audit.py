@@ -2,7 +2,8 @@
 
 Audits package.json files for supply chain attack vectors:
 - Install-time lifecycle scripts (the ones a bare ``npm install`` runs)
-- Install-time hook files, which run without any declared script (``binding.gyp``, ``.pnpmfile.cjs``, ``.npm-extension.cjs``)
+- Install-time hook files, which run without any declared script (``binding.gyp``, ``.pnpmfile.cjs``,
+  ``.npm-extension.cjs``)
 - Suspicious commands inside any script
 - Entry points and build artifacts that are missing, empty or escape the package
 - A manifest the audit cannot take (bad JSON, a repeated key, too deep, over 1 MB, a symbolic link) is a high

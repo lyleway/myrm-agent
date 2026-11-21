@@ -15,8 +15,9 @@ finds cannot mistake a partial look for a clean one.
 - walk_tree(): breadth-first walk yielding the wanted files and the problems
 
 [POS]
-File discovery for the readers of a skill's package manifests on disk, so that what they examine is what an installer
-reads (every folder, at any depth) and a partial look is reported as one.
+File discovery shared by the two readers of a skill's package manifests on disk (the lifecycle-script audit and the
+dependency extractor), so that what they examine is what an installer reads (every folder, at any depth) and a partial
+look is reported as one.
 """
 
 from __future__ import annotations
