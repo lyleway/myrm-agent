@@ -12,7 +12,7 @@ import pytest
 
 from app.channels.types import TopicContext
 
-from .preamble_testkit import PreambleProbe, inbound_message, prepare, stubbed_preamble
+from .preamble_testkit import PreambleProbe, awaited_kwargs, inbound_message, prepare, stubbed_preamble
 
 
 @pytest.fixture
@@ -26,8 +26,8 @@ async def test_the_agent_a_topic_is_bound_to_serves_its_turn(preamble: PreambleP
     await prepare(inbound_message(), TopicContext(topic_id="t", agent_id="agent-a"))
 
     preamble.profiles.resolve.assert_awaited_once_with("agent-a")
-    assert preamble.session.await_args.kwargs["resolved_agent_id"] == "agent-a"
-    assert preamble.builder.await_args.kwargs["resolved_agent_id"] == "agent-a"
+    assert awaited_kwargs(preamble.session)["resolved_agent_id"] == "agent-a"
+    assert awaited_kwargs(preamble.builder)["resolved_agent_id"] == "agent-a"
 
 
 @pytest.mark.asyncio
@@ -44,5 +44,5 @@ async def test_a_turn_no_agent_claims_is_served_by_the_default_agent(preamble: P
     await prepare(inbound_message(), topic)
 
     preamble.profiles.resolve.assert_not_awaited()
-    assert preamble.session.await_args.kwargs["resolved_agent_id"] is None
-    assert preamble.builder.await_args.kwargs["resolved_agent_id"] is None
+    assert awaited_kwargs(preamble.session)["resolved_agent_id"] is None
+    assert awaited_kwargs(preamble.builder)["resolved_agent_id"] is None

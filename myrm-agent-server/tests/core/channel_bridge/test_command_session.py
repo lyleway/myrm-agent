@@ -34,8 +34,8 @@ _MESSAGE = InboundMessage(
     channel="telegram", sender_id="u1", chat_id="g1", thread_id="th1", content="/undo", user_id="uid1", is_group=True
 )
 _PERSISTENT = SessionPolicy(mode=SessionResetMode.PERSISTENT)
-_PERSON_KEEPS_ONE_CONVERSATION = {"sessionPolicy": {"mode": "persistent"}}
-_PERSON_RESETS_DAILY = {"sessionPolicy": {"mode": "daily"}}
+_PERSON_KEEPS_ONE_CONVERSATION: dict[str, object] = {"sessionPolicy": {"mode": "persistent"}}
+_PERSON_RESETS_DAILY: dict[str, object] = {"sessionPolicy": {"mode": "daily"}}
 
 
 def _topic(agent_id: str | None, *, frozen: bool = False) -> TopicContext:
@@ -137,7 +137,7 @@ async def test_an_agent_whose_profile_cannot_be_resolved_leaves_the_persons_poli
 
 
 async def test_a_frozen_identity_does_not_apply_its_agents_policy() -> None:
-    bindings = {_CHAT: _topic("agent-c", frozen=True)}
+    bindings: dict[tuple[str, str | None], TopicContext] = {_CHAT: _topic("agent-c", frozen=True)}
     with _stubbed(
         bindings, personal=_PERSON_KEEPS_ONE_CONVERSATION, agent_policies={"agent-c": {"mode": "daily"}}
     ) as profile_lookup:

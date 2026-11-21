@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.channels.types import TopicContext
+
 
 @dataclass
 class FakeAgentProfile:
@@ -18,15 +20,10 @@ class FakeAgentProfile:
     display_name: str | None = None
 
 
-@dataclass
-class FakeTopicContext:
-    agent_id: str | None = None
-
-
 class FakeTopicManager:
     """Stub for SqlTopicManager that returns no binding."""
 
-    async def resolve_topic(self, *args, **kwargs) -> FakeTopicContext | None:
+    async def resolve_topic(self, *args, **kwargs) -> TopicContext | None:
         return None
 
 
@@ -205,7 +202,7 @@ class TestAgentCommandWebhookIntegration:
 
         class BoundTopicManager(FakeTopicManager):
             async def resolve_topic(self, *args, **kwargs):
-                return FakeTopicContext(agent_id="active-agent")
+                return TopicContext(topic_id="t", agent_id="active-agent")
 
         with (
             patch(

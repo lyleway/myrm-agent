@@ -8,9 +8,11 @@ one, because the executor serves the message with the first binding that exists,
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from app.channels.protocols.topic import TopicManager
 from app.channels.routing.pipeline.execution import RouterExecutionMixin
 from app.channels.routing.topic_binding import resolve_bound_topic
 from app.channels.types import InboundMessage, TopicContext
@@ -34,6 +36,11 @@ class _Topics:
     async def resolve_topic(self, channel: str, chat_id: str, thread_id: str | None) -> TopicContext | None:
         self.lookups.append((channel, chat_id, thread_id))
         return self._table.get((chat_id, thread_id))
+
+
+async def _serve(topics: _Topics, msg: InboundMessage) -> TopicContext | None:
+    """The cascade only reads bindings, so the store a test passes in needs ``resolve_topic`` and nothing else of the protocol."""
+    return await resolve_bound_topic(cast(TopicManager, topics), msg)
 
 
 def _group_message(*, thread_id: str | None = "th1") -> InboundMessage:
@@ -70,7 +77,7 @@ _LAYOUTS = [
 async def test_the_first_level_with_a_binding_serves_the_message(
     table: dict[tuple[str, str | None], TopicContext], thread_id: str | None, expected: tuple[str, str | None] | None
 ) -> None:
-    served = await resolve_bound_topic(_Topics(table), _group_message(thread_id=thread_id))
+    served = await _serve(_Topics(table), _group_message(thread_id=thread_id))
 
     assert (None if served is None else (served.matched_by, served.agent_id)) == expected
 
@@ -78,7 +85,7 @@ async def test_the_first_level_with_a_binding_serves_the_message(
 async def test_levels_after_the_first_binding_are_not_asked() -> None:
     topics = _Topics({_THREAD: _binding("t"), _CHAT: _binding("c")})
 
-    await resolve_bound_topic(topics, _group_message())
+    await _serve(topics, _group_message())
 
     assert topics.lookups == [("telegram", "g1", "th1")]
 
@@ -87,7 +94,7 @@ async def test_levels_after_the_first_binding_are_not_asked() -> None:
 async def test_a_message_without_a_thread_never_asks_the_thread_level(thread_id: str | None) -> None:
     topics = _Topics({})
 
-    await resolve_bound_topic(topics, _group_message(thread_id=thread_id))
+    await _serve(topics, _group_message(thread_id=thread_id))
 
     assert topics.lookups == [("telegram", "g1", None), ("telegram", "__global__", None)]
 
@@ -95,7 +102,7 @@ async def test_a_message_without_a_thread_never_asks_the_thread_level(thread_id:
 async def test_a_direct_chat_is_looked_up_by_its_sender() -> None:
     topics = _Topics({("u1", None): _binding("c")})
 
-    served = await resolve_bound_topic(topics, InboundMessage(channel="telegram", sender_id="u1", content="hi"))
+    served = await _serve(topics, InboundMessage(channel="telegram", sender_id="u1", content="hi"))
 
     assert served is not None
     assert (served.matched_by, served.agent_id) == ("chat_binding", "c")
@@ -104,7 +111,7 @@ async def test_a_direct_chat_is_looked_up_by_its_sender() -> None:
 async def test_the_stored_binding_keeps_its_own_settings_and_only_gains_the_level() -> None:
     stored = TopicContext(topic_id="t", agent_id="a", project_id="p", identity_revoked=True)
 
-    served = await resolve_bound_topic(_Topics({_CHAT: stored}), _group_message(thread_id=None))
+    served = await _serve(_Topics({_CHAT: stored}), _group_message(thread_id=None))
 
     assert served is not None
     assert (served.topic_id, served.agent_id, served.project_id, served.identity_revoked) == ("t", "a", "p", True)
@@ -118,12 +125,12 @@ async def test_the_router_resolves_a_message_the_way_the_commands_do(
     msg = _group_message(thread_id=thread_id)
     host = SimpleNamespace(_topic_resolver=_Topics(table))
 
-    routed = await RouterExecutionMixin._resolve_topic(host, msg)  # type: ignore[arg-type]
+    routed = await RouterExecutionMixin._resolve_topic(host, msg)
 
-    assert routed == await resolve_bound_topic(_Topics(table), msg)
+    assert routed == await _serve(_Topics(table), msg)
 
 
 async def test_a_router_without_a_topic_store_serves_no_binding() -> None:
     host = SimpleNamespace(_topic_resolver=None)
 
-    assert await RouterExecutionMixin._resolve_topic(host, _group_message()) is None  # type: ignore[arg-type]
+    assert await RouterExecutionMixin._resolve_topic(host, _group_message()) is None

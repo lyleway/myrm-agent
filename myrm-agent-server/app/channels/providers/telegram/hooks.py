@@ -7,6 +7,7 @@ Mixin providing _pre_emit_hook and related interceptors used by TelegramChannel.
 - channels.i18n::get_text
 - services.agent.agent_service::AgentService
 - core.channel_bridge.topic_config::SqlTopicManager
+- channels.routing.topic_binding::resolve_bound_topic (POS: the one cascade behind "which binding serves this message")
 
 [OUTPUT]
 - TelegramHooksMixin: _pre_emit_hook, agent picker, auto-topic application
@@ -83,7 +84,8 @@ class TelegramHooksMixin:
         return msg
 
     async def _send_agent_picker(self, msg: InboundMessage) -> None:
-        """Query available agents and send an inline keyboard picker."""
+        """Query available agents and send an inline keyboard picker; the agent that serves this chat is marked."""
+        from app.channels.routing.topic_binding import resolve_bound_topic
         from app.core.channel_bridge.topic_config import SqlTopicManager
         from app.services.agent.agent_service import AgentService
 
@@ -100,16 +102,8 @@ class TelegramHooksMixin:
             )
             return
 
-        topic_mgr = SqlTopicManager()
-        bound_agent_id: str | None = None
-        if msg.thread_id:
-            ctx = await topic_mgr.resolve_topic(msg.channel, chat_id, msg.thread_id)
-            if ctx and ctx.agent_id:
-                bound_agent_id = ctx.agent_id
-        if not bound_agent_id:
-            ctx = await topic_mgr.resolve_topic(msg.channel, chat_id, None)
-            if ctx and ctx.agent_id:
-                bound_agent_id = ctx.agent_id
+        topic = await resolve_bound_topic(SqlTopicManager(), msg)
+        bound_agent_id = topic.effective_agent_id if topic else None
 
         keyboard_rows: list[list[dict[str, str]]] = []
         for agent in agents:

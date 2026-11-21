@@ -1,13 +1,13 @@
 """Shared builders for the preamble tests.
 
 An inbound message, user configs, ``build_channel_execution_agent`` with every argument but the varying ones at its plain
-default, the params its agent is created from, the turn it assembles for a message, and the preamble itself with every
-collaborator stood in for.
+default, the params its agent is created from, the turn it assembles for a message, the preamble itself with every
+collaborator stood in for, and what a collaborator was last awaited with.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -193,3 +193,9 @@ def stubbed_preamble() -> Iterator[PreambleProbe]:
 async def prepare(msg: InboundMessage, topic: TopicContext | None) -> None:
     """Run the preamble for ``msg`` served by ``topic`` (inside ``stubbed_preamble``)."""
     await prepare_channel_execution(AsyncMock(), msg, is_resume=False, topic_context=topic, untrusted_sender=False)
+
+
+def awaited_kwargs(collaborator: AsyncMock) -> Mapping[str, object]:
+    """The keyword arguments of the collaborator's last await; fails the test when it was never awaited."""
+    assert collaborator.await_args is not None
+    return collaborator.await_args.kwargs
