@@ -2,35 +2,40 @@
 
 Audits package.json files for supply chain attack vectors:
 - Install-time lifecycle scripts (the ones a bare ``npm install`` runs)
+- Install-time hook files, which run without any declared script (``binding.gyp``, ``.pnpmfile.cjs``, ``.npm-extension.cjs``)
 - Suspicious commands inside any script
 - Entry points and build artifacts that are missing, empty or escape the package
-- A manifest the audit cannot take (bad JSON, a repeated key, too deep, a symbolic link) is a high ``invalid_manifest``
-  finding: the installer reads it all the same, so it is never clean
+- A manifest the audit cannot take (bad JSON, a repeated key, too deep, over 1 MB, a symbolic link) is a high
+  ``invalid_manifest`` finding: the installer reads it all the same, so it is never clean. So is a tree the audit cannot
+  look at in full (a folder it cannot list, more entries or manifests than it audits)
 
 [INPUT]
+- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
+- core.security.path::read_text_bounded, ReadRefusal (POS: text read that stops at a character limit and never waits on a FIFO or device)
 - utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 
 [OUTPUT]
 - PackageAuditFinding: single finding from package audit; its texts are UTF-8 encodable and its description and detail are bounded
 - audit_package_json(): audit a package.json string for security issues
 - audit_package_manifest_dict(): audit a parsed manifest for lifecycle scripts and suspicious commands
-- check_lifecycle_scripts(): audit every package.json of an in-memory file map
-- audit_skill_directory(): scan a skill directory for package.json issues
+- check_lifecycle_scripts(): audit every package.json and hook file of an in-memory file map
+- audit_skill_directory(): scan a skill directory for package.json and hook file issues
 - audit_package_entry_artifacts(): audit entry files and build artifacts for existence and integrity
 
 [POS]
 Supply chain security audit for skill package manifests.
-Catches install script attacks that can execute arbitrary code on npm install. Whatever a manifest holds, the audit
-answers with findings instead of raising.
+Catches install script attacks that can execute arbitrary code on npm install. Whatever a manifest holds, and whatever
+the tree around it looks like, the audit answers with findings instead of raising.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
+from myrm_agent_harness.core.security.path import ReadRefusal, read_text_bounded
 from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 # The scripts a bare ``npm install`` runs for the package root; bun, pnpm and yarn each run a subset of them.
@@ -44,9 +49,11 @@ _LIFECYCLE_SCRIPTS = (
     "postprepare",
 )
 _MANIFEST_NAME = "package.json"
-_SKIPPED_DIRS = frozenset({"node_modules", ".git", "__pycache__", ".venv", "venv"})
-_MAX_DIR_DEPTH = 3
-_MAX_FILES = 100
+# Files a package manager runs at install although no script is declared (a ``binding.gyp`` is built with node-gyp, an
+# npm extension is loaded by npm and a pnpmfile by pnpm), each of which can run any command.
+_HOOK_FILES = frozenset({"binding.gyp", ".npm-extension.cjs", ".npm-extension.mjs", ".pnpmfile.cjs", ".pnpmfile.mjs"})
+_MAX_MANIFESTS = 100
+_MAX_MANIFEST_CHARS = 1024 * 1024
 _MAX_FINDING_TEXT_CHARS = 500
 
 
@@ -123,6 +130,24 @@ def _is_manifest_name(name: str) -> bool:
     return name.lower() == _MANIFEST_NAME
 
 
+def _is_hook_file_name(name: str) -> bool:
+    """Case-insensitive for the same reason as the manifest name."""
+    return name.lower() in _HOOK_FILES
+
+
+def _is_audited_name(name: str) -> bool:
+    return _is_manifest_name(name) or _is_hook_file_name(name)
+
+
+def _hook_file_finding(name: str, file_path: str) -> PackageAuditFinding:
+    return PackageAuditFinding(
+        threat_type="supply_chain",
+        severity="high",
+        description=f"Install-time hook file: {name}",
+        file_path=file_path,
+    )
+
+
 def _script_finding(severity: str, description: str, name: str, command: str, file_path: str) -> PackageAuditFinding:
     """A supply-chain finding about one script, quoting the first 200 characters of its command."""
     return PackageAuditFinding(
@@ -154,11 +179,14 @@ def audit_package_manifest_dict(pkg: dict[str, object], file_path: str = "") -> 
 
 
 def check_lifecycle_scripts(files: dict[str, bytes]) -> list[PackageAuditFinding]:
-    """Audit every package.json of an in-memory file map (an archive before extraction)."""
+    """Audit every package.json and install-time hook file of an in-memory file map (an archive before extraction)."""
     findings: list[PackageAuditFinding] = []
     for filename, content in files.items():
-        if _is_manifest_name(Path(filename).name):
+        name = Path(filename).name
+        if _is_manifest_name(name):
             findings.extend(audit_package_json(content.decode("utf-8", errors="replace"), filename))
+        elif _is_hook_file_name(name):
+            findings.append(_hook_file_finding(name, filename))
     return findings
 
 
@@ -176,35 +204,40 @@ def audit_package_json(content: str, file_path: str = "") -> list[PackageAuditFi
 
 
 def audit_skill_directory(skill_dir: str | Path) -> list[PackageAuditFinding]:
-    """Scan a skill directory for package.json files and audit them.
+    """Audit every package.json and install-time hook file under a skill directory, at any depth.
 
-    Walks the directory tree (up to MAX_DIR_DEPTH levels) looking for
-    package.json files. Skips node_modules, .git, etc.
+    ``node_modules`` is not entered (see ``tree_walk``). What the audit cannot look at in full is a high finding: a
+    folder it cannot list, a tree of more than ``tree_walk.MAX_ENTRIES`` entries, and the manifest after the first
+    ``_MAX_MANIFESTS``, which is not audited.
 
     Args:
         skill_dir: Path to the skill directory
 
     Returns:
-        Combined findings from all package.json files found
+        Combined findings from all manifests and hook files found
     """
     root = Path(skill_dir)
     if not root.is_dir():
         return []
 
-    all_findings: list[PackageAuditFinding] = []
-    files_checked = 0
-
-    for file_path in _walk_files(root):
-        if files_checked >= _MAX_FILES:
-            break
-
-        if not _is_manifest_name(file_path.name):
-            continue
-
-        files_checked += 1
-        all_findings.extend(_audit_manifest_file(file_path, str(file_path.relative_to(root))))
-
-    return all_findings
+    findings: list[PackageAuditFinding] = []
+    manifests = 0
+    for found in walk_tree(root, _is_audited_name):
+        if isinstance(found, WalkProblem):
+            findings.append(_unauditable_finding(found.reason, found.relative))
+        elif _is_manifest_name(found.path.name):
+            manifests += 1
+            if manifests > _MAX_MANIFESTS:
+                findings.append(
+                    _unauditable_finding(
+                        f"the skill holds more than {_MAX_MANIFESTS} package.json files", found.relative
+                    )
+                )
+                break
+            findings.extend(_audit_manifest_file(found))
+        else:
+            findings.append(_hook_file_finding(found.path.name, found.relative))
+    return findings
 
 
 def _audit_manifest_text(text: str, file_path: str, artifact_dir: Path | None = None) -> list[PackageAuditFinding]:
@@ -220,16 +253,20 @@ def _audit_manifest_text(text: str, file_path: str, artifact_dir: Path | None = 
     return findings
 
 
-def _audit_manifest_file(manifest_path: Path, relative: str) -> list[PackageAuditFinding]:
+def _audit_manifest_file(manifest: WalkedFile) -> list[PackageAuditFinding]:
     """Audit one package.json on disk: its scripts and the artifacts it declares."""
-    if manifest_path.is_symlink():
+    if manifest.is_symlink:
         # An installer follows the link, so what it would read is not what this audit can vouch for.
-        return [_unauditable_finding("it is a symbolic link", relative)]
+        return [_unauditable_finding("it is a symbolic link", manifest.relative)]
     try:
-        raw = manifest_path.read_bytes()
+        read = read_text_bounded(manifest.path, _MAX_MANIFEST_CHARS, errors="replace")
     except OSError:
-        return [_unauditable_finding("it cannot be read", relative)]
-    return _audit_manifest_text(raw.decode("utf-8", errors="replace"), relative, manifest_path.parent)
+        return [_unauditable_finding("it cannot be read", manifest.relative)]
+    if read.text is None:
+        if read.refusal is ReadRefusal.TOO_LARGE:
+            return [_unauditable_finding(f"it is longer than {_MAX_MANIFEST_CHARS:,} characters", manifest.relative)]
+        return [_unauditable_finding("it is not a regular file", manifest.relative)]
+    return _audit_manifest_text(read.text, manifest.relative, manifest.path.parent)
 
 
 def audit_package_entry_artifacts(
@@ -365,35 +402,6 @@ def _verify_entry_artifact(
         )
 
     return findings
-
-
-def _walk_files(root: Path) -> Iterator[Path]:
-    """Yield the files under *root* level by level (down to ``_MAX_DIR_DEPTH``), skipping ignored directories.
-
-    A symbolic link is yielded only when it is named like a manifest: an installer follows it, so it must be reported.
-    """
-    queue: list[tuple[int, Path]] = [(0, root)]
-
-    while queue:
-        depth, current = queue.pop(0)
-        try:
-            entries = sorted(current.iterdir())
-        except PermissionError:
-            continue
-
-        for entry in entries:
-            if entry.name.startswith(".") and entry.name not in {".env", ".gitignore"}:
-                continue
-            if entry.name in _SKIPPED_DIRS:
-                continue
-            if entry.is_symlink():
-                if _is_manifest_name(entry.name):
-                    yield entry
-                continue
-            if entry.is_file():
-                yield entry
-            elif entry.is_dir() and depth < _MAX_DIR_DEPTH:
-                queue.append((depth + 1, entry))
 
 
 def _contains_suspicious_command(script: str) -> bool:

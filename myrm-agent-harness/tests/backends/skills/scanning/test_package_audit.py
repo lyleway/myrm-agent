@@ -140,14 +140,14 @@ class TestAuditSkillDirectory:
         findings = audit_skill_directory("/nonexistent/path")
         assert findings == []
 
-    def test_max_depth_respected(self, tmp_path):
-        # Create deeply nested package.json
-        deep = tmp_path / "a" / "b" / "c" / "d"
+    def test_a_manifest_at_any_depth_is_audited(self, tmp_path):
+        deep = tmp_path.joinpath(*"abcdefghij")
         deep.mkdir(parents=True)
         pkg = {"name": "deep", "scripts": {"preinstall": "evil"}}
         (deep / "package.json").write_text(json.dumps(pkg))
         findings = audit_skill_directory(tmp_path)
-        assert findings == []  # Too deep
+        expected = str((deep / "package.json").relative_to(tmp_path))
+        assert [(f.severity, f.file_path) for f in findings] == [("high", expected)]
 
 
 class TestPackageAuditFinding:
