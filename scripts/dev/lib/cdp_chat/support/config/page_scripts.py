@@ -180,7 +180,9 @@ PUT_E2E_YOLO_CONFIG_JS = """(async () => {
   } catch (error) {
     return { ok: false, err: String(error), targets };
   }
-})()""".replace("__SHARED_API_BASE__", shared_api_base()).replace("__DROP_OFFLINE_QUEUES__", _DROP_OFFLINE_QUEUES_JS)
+})()""".replace("__SHARED_API_BASE__", shared_api_base()).replace(
+    "__DROP_OFFLINE_QUEUES__", _DROP_OFFLINE_QUEUES_JS
+)
 
 PUT_E2E_HITL_CONFIG_JS = """(async () => {
   const privateApi = String(window.__MYRM_E2E_API_BASE__ || '').replace(/\\/+$/, '');
@@ -255,4 +257,6 @@ PUT_E2E_HITL_CONFIG_JS = """(async () => {
   } catch (error) {
     return { ok: false, err: String(error), targets };
   }
-})()""".replace("__SHARED_API_BASE__", shared_api_base()).replace("__DROP_OFFLINE_QUEUES__", _DROP_OFFLINE_QUEUES_JS)
+})()""".replace("__SHARED_API_BASE__", shared_api_base()).replace(
+    "__DROP_OFFLINE_QUEUES__", _DROP_OFFLINE_QUEUES_JS
+)
