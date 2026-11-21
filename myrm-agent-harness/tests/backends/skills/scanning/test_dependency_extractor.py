@@ -106,6 +106,7 @@ def test_extract_skill_dependencies_on_disk(tmp_path: Path) -> None:
     assert len(deps) == 2
     assert {d.name for d in deps} == {"debug", "numpy"}
 
+
 def test_extract_dependencies_from_pyproject_toml_poetry_dict() -> None:
     toml_str = """
     [tool.poetry.dependencies]

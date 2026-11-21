@@ -15,9 +15,7 @@ from myrm_agent_harness.backends.skills.scanning.dependency_extractor import (
 from myrm_agent_harness.backends.skills.scanning.rescan_engine import (
     InstalledSkillRescanEngine,
 )
-from myrm_agent_harness.backends.skills.scanning.scanner import (
-    SkillTrustRecommendation,
-)
+from myrm_agent_harness.backends.skills.types import SkillTrustRecommendation
 
 
 def test_dependency_extractor_adversarial_inputs() -> None:
