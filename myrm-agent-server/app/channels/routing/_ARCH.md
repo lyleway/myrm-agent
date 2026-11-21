@@ -234,6 +234,13 @@ before marking the peer for a fresh Chat:
 Only after cleanup does `handle_new_session` (commands/session.py) flag the peer and
 send the confirmation reply.
 
+The flag (`_new_session_peers`) is spent by the next turn (`_prepare_execution_context` sets `force_new_epoch` on it),
+never by a command in between. `_dispatch_system_command` calls `carry_new_session_to_command` first: while the flag
+waits, the command message gets `force_new_epoch`, so `resolve_command_session_key` finds no conversation and `/undo`,
+`/retry`, `/compact`, `/handoff` and `/goal` act on none (not on the one `/new` just ended). A message that already
+arrives with `force_new_epoch` (the channel ingress takes it) puts the flag back, so the next turn, which may come
+without it, still starts the new conversation.
+
 ## Consume-Loop Resilience
 
 `_consume_loop` (`pipeline/lifecycle.py`) consumes the inbound queue and hands each message to

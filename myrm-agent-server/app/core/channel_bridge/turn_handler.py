@@ -3,7 +3,7 @@
 [INPUT]
 - app.channels.protocols.turn_management::RetryHandler, RetryResult, UndoHandler, UndoResult
 - app.channels.types::InboundMessage
-- app.core.channel_bridge.command_session::resolve_command_session_key (POS: Session key a message's conversation is stored under)
+- app.core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on, None while /new has ended it)
 - app.services.chat.chat_service::ChatService
 - app.services.files.revert_hydrate::cleanup_persisted_snapshots (POS: Server-side revert snapshot disk hydrate and cleanup)
 - myrm_agent_harness.agent.meta_tools.file_ops.revert_service::RevertService
@@ -11,11 +11,14 @@
 [OUTPUT]
 - ChannelRetryHandler: RetryHandler 业务实现
 - ChannelUndoHandler: UndoHandler 业务实现
+- _current_chat_id: chat holding the conversation a command acts on, None when /new has ended it or nothing was stored
+- _revert_deleted_turn: restore the files a deleted turn changed, with the counts
 - _revert_messages: best-effort file revert + restore_inbox notify
 
 [POS]
 将框架层的 RetryHandler / UndoHandler 协议映射到 ChatService 的
 retry_last_turn / undo_last_turn 方法，并联动 RevertService 还原关联文件快照。
+命令作用于 `resolve_command_session_key` 解出的会话；`/new` 之后、下一回合之前没有会话，命令照「没有可操作的回合」处理。
 """
 
 from __future__ import annotations
@@ -82,33 +85,46 @@ async def _revert_messages(session_id: str, message_ids: list[str]) -> RevertMes
     )
 
 
+_NOTHING_REVERTED = RevertMessagesOutcome(reverted_count=0, not_revertible_count=0)
+
+
+async def _current_chat_id(msg: InboundMessage) -> str | None:
+    """The chat holding ``msg``'s conversation; ``None`` when ``/new`` has ended it or nothing was stored yet."""
+    session_key = await resolve_command_session_key(msg)
+    chat = await ChatService.get_channel_chat_by_key(session_key) if session_key else None
+    return chat.id if chat else None
+
+
+async def _revert_deleted_turn(handler: str, chat_id: str, deleted_message_ids: list[str]) -> RevertMessagesOutcome:
+    """Restore the files the deleted turn changed, and say how many came back."""
+    if not deleted_message_ids:
+        return _NOTHING_REVERTED
+    outcome = await _revert_messages(chat_id, deleted_message_ids)
+    if outcome.reverted_count:
+        logger.info("%s: reverted %d files for chat %s", handler, outcome.reverted_count, chat_id)
+    return outcome
+
+
 class ChannelRetryHandler:
     """Business-layer RetryHandler for /retry command."""
 
     async def __call__(self, msg: InboundMessage, user_id: str) -> RetryResult:
-        session_key = await resolve_command_session_key(msg)
-
-        chat = await ChatService.get_channel_chat_by_key(session_key)
-        if not chat:
+        chat_id = await _current_chat_id(msg)
+        if chat_id is None:
             return RetryResult(success=False)
-        svc_result = await ChatService.retry_last_turn(chat.id)
+        svc_result = await ChatService.retry_last_turn(chat_id)
 
-        revert_outcome = RevertMessagesOutcome(reverted_count=0, not_revertible_count=0)
-        if svc_result.success and svc_result.deleted_message_ids:
-            revert_outcome = await _revert_messages(chat.id, svc_result.deleted_message_ids)
-            if revert_outcome.reverted_count:
-                logger.info(
-                    "ChannelRetryHandler: reverted %d files for chat %s",
-                    revert_outcome.reverted_count,
-                    chat.id,
-                )
-
+        reverted = (
+            await _revert_deleted_turn("ChannelRetryHandler", chat_id, svc_result.deleted_message_ids)
+            if svc_result.success
+            else _NOTHING_REVERTED
+        )
         return RetryResult(
             success=svc_result.success,
             query=svc_result.query,
             deleted_count=svc_result.deleted_count,
-            reverted_count=revert_outcome.reverted_count,
-            files_not_revertible=revert_outcome.not_revertible_count,
+            reverted_count=reverted.reverted_count,
+            files_not_revertible=reverted.not_revertible_count,
         )
 
 
@@ -116,26 +132,19 @@ class ChannelUndoHandler:
     """Business-layer UndoHandler for /undo command."""
 
     async def __call__(self, msg: InboundMessage, user_id: str) -> UndoResult:
-        session_key = await resolve_command_session_key(msg)
-
-        chat = await ChatService.get_channel_chat_by_key(session_key)
-        if not chat:
+        chat_id = await _current_chat_id(msg)
+        if chat_id is None:
             return UndoResult(success=False)
-        svc_result = await ChatService.undo_last_turn(chat.id)
+        svc_result = await ChatService.undo_last_turn(chat_id)
 
-        revert_outcome = RevertMessagesOutcome(reverted_count=0, not_revertible_count=0)
-        if svc_result.success and svc_result.deleted_message_ids:
-            revert_outcome = await _revert_messages(chat.id, svc_result.deleted_message_ids)
-            if revert_outcome.reverted_count:
-                logger.info(
-                    "ChannelUndoHandler: reverted %d files for chat %s",
-                    revert_outcome.reverted_count,
-                    chat.id,
-                )
-
+        reverted = (
+            await _revert_deleted_turn("ChannelUndoHandler", chat_id, svc_result.deleted_message_ids)
+            if svc_result.success
+            else _NOTHING_REVERTED
+        )
         return UndoResult(
             success=svc_result.success,
             deleted_count=svc_result.deleted_count,
-            reverted_count=revert_outcome.reverted_count,
-            files_not_revertible=revert_outcome.not_revertible_count,
+            reverted_count=reverted.reverted_count,
+            files_not_revertible=reverted.not_revertible_count,
         )
