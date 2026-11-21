@@ -8,10 +8,10 @@ Audits package.json files for supply chain attack vectors:
   finding: the installer reads it all the same, so it is never clean
 
 [INPUT]
-- (none)
+- utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 
 [OUTPUT]
-- PackageAuditFinding: single finding from package audit
+- PackageAuditFinding: single finding from package audit; its texts are UTF-8 encodable and its description and detail are bounded
 - audit_package_json(): audit a package.json string for security issues
 - audit_package_manifest_dict(): audit a parsed manifest for lifecycle scripts and suspicious commands
 - check_lifecycle_scripts(): audit every package.json of an in-memory file map
@@ -31,6 +31,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
+
 # The scripts a bare ``npm install`` runs for the package root; bun, pnpm and yarn each run a subset of them.
 _LIFECYCLE_SCRIPTS = (
     "preinstall",
@@ -45,17 +47,28 @@ _MANIFEST_NAME = "package.json"
 _SKIPPED_DIRS = frozenset({"node_modules", ".git", "__pycache__", ".venv", "venv"})
 _MAX_DIR_DEPTH = 3
 _MAX_FILES = 100
+_MAX_FINDING_TEXT_CHARS = 500
 
 
 @dataclass(frozen=True, slots=True)
 class PackageAuditFinding:
-    """A single finding from package.json audit."""
+    """A single finding from package.json audit.
+
+    The texts of a finding quote what the audited package controls (a script name, an entry path, a file name) and a
+    finding is echoed in responses, so the constructor makes it fit for that: every text is UTF-8 encodable, and the
+    description and the detail are cut to 500 characters.
+    """
 
     threat_type: str
     severity: str  # "high" or "medium"
     description: str
     file_path: str = ""
     detail: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "description", encodable_text(self.description[:_MAX_FINDING_TEXT_CHARS]))
+        object.__setattr__(self, "detail", encodable_text(self.detail[:_MAX_FINDING_TEXT_CHARS]))
+        object.__setattr__(self, "file_path", encodable_text(self.file_path))
 
 
 class _DuplicateKeyError(ValueError):

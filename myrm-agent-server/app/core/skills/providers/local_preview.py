@@ -5,6 +5,7 @@
 - existing_skills: Currently active skills list
 - compute_id_fn: Stable skill id of a skill directory (the provider's `compute_local_skill_id`)
 - myrm_agent_harness.backends.skills.scanning::scan_skill_directory, compute_scan_summary (POS: the directory scan and its 0-100 score)
+- myrm_agent_harness.utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - preview_skill_path: Probed skill list and validation report; each item carries `is_safe` and `security_score`, and a
@@ -23,8 +24,8 @@ import re
 from pathlib import Path
 from typing import Callable
 
-import yaml
 from myrm_agent_harness.api.skills import parse_skill_frontmatter
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 from ..models import Skill
 
@@ -65,7 +66,7 @@ def _extract_skill_preview(
     fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if fm_match:
         try:
-            loaded = yaml.safe_load(fm_match.group(1))
+            loaded = load_clean_yaml(fm_match.group(1))
             if isinstance(loaded, dict):
                 raw_yaml = loaded
         except Exception:
@@ -78,8 +79,6 @@ def _extract_skill_preview(
     candidate_tags: object = raw_yaml.get("tags")
     if candidate_tags is None:
         candidate_tags = yaml_metadata.get("tags")
-    if candidate_tags is None and hasattr(frontmatter, "tags"):
-        candidate_tags = frontmatter.tags
     if candidate_tags is None and isinstance(frontmatter.metadata, dict):
         candidate_tags = frontmatter.metadata.get("tags")
 

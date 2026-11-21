@@ -5,6 +5,7 @@
 
 [INPUT]
 - backends.skills.market_protocols::SkillSearchResult (POS: skill market backend protocol: the unified interface for searching and installing external skills)
+- utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - GitHubSkillSource: class — Git Hub Skill Source
@@ -25,11 +26,11 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
-import yaml
 
 from myrm_agent_harness.agent.skills.market.taps import TapSubscription
 from myrm_agent_harness.backends.skills.market_protocols import SkillSearchResult
 from myrm_agent_harness.infra.tls_compat import create_httpx_client
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class GitHubSkillSource:
     def __init__(
         self,
         token: str | None = None,
-        extra_taps: Sequence[TapSubscription | Mapping[str, object]] | None = None,
+        extra_taps: Sequence[TapSubscription | Mapping[str, str]] | None = None,
     ):
         self._token = token
         self._tap_source = None
@@ -225,7 +226,7 @@ def _extract_description_from_skill_md(content: str) -> str | None:
     if not match:
         return None
     try:
-        frontmatter = yaml.safe_load(match.group(1))
+        frontmatter = load_clean_yaml(match.group(1))
         if isinstance(frontmatter, dict):
             return str(frontmatter.get("description", ""))
     except Exception:

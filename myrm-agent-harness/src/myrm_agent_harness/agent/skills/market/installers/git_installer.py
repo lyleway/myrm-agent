@@ -7,6 +7,7 @@
 [INPUT]
 - core.security.path::is_within_boundary, safe_join_path (POS: real-path containment of the clone)
 - agent.skills.market.sanitizer::is_blocked_file, check_size_budget (POS: the same file filter and size limits the install step applies)
+- utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - GitInstaller: class — Git Installer
@@ -25,9 +26,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-import yaml
-
 from myrm_agent_harness.core.security.path import is_within_boundary, safe_join_path
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 from ..sanitizer import SKILL_MD_FILE, check_size_budget, is_blocked_file
 from .base import InstalledSkillFiles
@@ -241,7 +241,7 @@ def _parse_skill_md_metadata(content: bytes) -> tuple[str, str]:
     if not match:
         return "unnamed_skill", ""
     try:
-        frontmatter = yaml.safe_load(match.group(1))
+        frontmatter = load_clean_yaml(match.group(1))
         if isinstance(frontmatter, dict):
             name = str(frontmatter.get("name", "unnamed_skill"))
             description = str(frontmatter.get("description", ""))

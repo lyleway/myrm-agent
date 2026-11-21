@@ -11,9 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import yaml
-
 from myrm_agent_harness.backends.skills.scanning.zip_extract import safe_extract_zip
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +105,9 @@ class HermesBatchParser:
 
         return results
 
-    def _parse_hermes_metadata(self, content: bytes, fallback_name: str) -> tuple[str, str, list[str], str, dict]:
+    def _parse_hermes_metadata(
+        self, content: bytes, fallback_name: str
+    ) -> tuple[str, str, list[str], str, dict[str, object]]:
         """解析 Frontmatter 并分离元数据与正文"""
         text = content.decode("utf-8", errors="replace")
 
@@ -116,12 +117,12 @@ class HermesBatchParser:
         description = ""
         trigger_keywords: list[str] = []
         pure_content = text
-        metadata = {}
+        metadata: dict[str, object] = {}
 
         if match:
             pure_content = text[match.end() :].strip()
             try:
-                frontmatter = yaml.safe_load(match.group(1))
+                frontmatter = load_clean_yaml(match.group(1))
                 if isinstance(frontmatter, dict):
                     metadata = frontmatter
                     name = str(frontmatter.get("name", name))
