@@ -10,11 +10,13 @@
 
 [POS]
 A local skill directory is text the user did not write. The preview parses its frontmatter twice (once for the skill, once for
-the raw fields it echoes), and both parses must leave text the JSON response can encode.
+the raw fields it echoes), and both parses must leave text the JSON response can encode; a failure while listing the
+directory is answered with a message of the product's own, not with what the exception happened to say.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -55,3 +57,26 @@ def test_the_preview_of_a_frontmatter_spelling_lone_surrogates_is_a_normal_answe
         f"au{REPLACED}",
     )
     assert skill["tags"] == [f"t{REPLACED}"]
+
+
+def test_a_directory_that_fails_to_scan_is_reported_with_a_fixed_message(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scanned = tmp_path.resolve()
+    real_iterdir = Path.iterdir
+
+    def iterdir(self: Path) -> Iterator[Path]:
+        if self == scanned:
+            raise RuntimeError(f"internal detail of {scanned}")
+        return real_iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+
+    with (
+        patch("app.api.skills.local.require_local_skills_capability"),
+        patch("app.api.skills.local.skills_service.list_skills", new_callable=AsyncMock, return_value=[]),
+    ):
+        response = client.post("/api/v1/skills/local/paths/preview", json={"path": str(tmp_path)})
+
+    assert response.status_code == 200
+    assert response.json()["warning_message"] == "The directory could not be scanned"

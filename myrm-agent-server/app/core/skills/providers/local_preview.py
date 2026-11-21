@@ -9,7 +9,8 @@
 
 [OUTPUT]
 - preview_skill_path: Probed skill list and validation report; each item carries `is_safe` and `security_score`, and a
-  skill whose scan could not complete is reported unsafe
+  skill whose scan could not complete is reported unsafe; a directory that cannot be listed is reported with a fixed
+  message, never with the exception text
 
 [POS]
 - core/skills/providers/local_preview.py: Local skill discovery and dry-run diagnosis. The adopt gate
@@ -208,6 +209,6 @@ def preview_skill_path(
         return expanded_path, True, True, [], "Permission denied accessing directory"
     except Exception as e:
         logger.warning("Failed to scan directory %s during preview: %s", expanded_path, e)
-        return expanded_path, True, True, [], f"Scan error: {e}"
+        return expanded_path, True, True, [], "The directory could not be scanned"
 
     return expanded_path, True, True, items, warning_msg
