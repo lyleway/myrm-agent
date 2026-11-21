@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from typing import TypeGuard
 
 from myrm_agent_harness.agent.security.engine import merge
 from myrm_agent_harness.agent.security.restrictions import DENY_EVERYTHING, restriction_layer
@@ -112,17 +113,27 @@ def _permissions_ruleset(permissions: dict[str, str | dict[str, str]]) -> Permis
     return from_config(expand_capability_surface_permissions(normalize_delegate_permissions(permissions)))
 
 
+def _is_permission_map(raw: object) -> TypeGuard[dict[str, str | dict[str, str]]]:
+    """Whether *raw* maps each permission to an action or to ``{pattern: action}``, every key being text.
+
+    A pattern that is no text would parse and then raise in the matcher on every call it is compared with.
+    """
+    return isinstance(raw, dict) and all(
+        isinstance(permission, str)
+        and (isinstance(rule, str) or (isinstance(rule, dict) and all(isinstance(pattern, str) for pattern in rule)))
+        for permission, rule in raw.items()
+    )
+
+
 def _parse_restriction_layer(raw: object) -> PermissionRuleset:
     """One restriction layer from its permission map; a layer that cannot be read denies every call.
 
     Leaving an unreadable layer out would lift a restriction nobody chose to lift.
     """
-    if isinstance(raw, dict) and all(
-        isinstance(key, str) and isinstance(value, (str, dict)) for key, value in raw.items()
-    ):
+    if _is_permission_map(raw):
         try:
             return restriction_layer(_permissions_ruleset(raw))
-        except (ValueError, TypeError):  # an action that is no PermissionAction, a pattern that is no text
+        except ValueError:  # an action that is no PermissionAction
             pass
     logger.warning("Unreadable security restriction layer, denying every call instead: %.200r", raw)
     return DENY_EVERYTHING

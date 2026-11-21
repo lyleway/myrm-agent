@@ -290,6 +290,7 @@ class TestParseRestrictions:
             {"file_write": 5},
             {5: "deny"},
             {"file_read": {"*.env": 5}},
+            {"file_read": {5: "deny"}},
         ],
     )
     def test_a_layer_that_cannot_be_read_denies_every_call(
