@@ -70,12 +70,12 @@ class TestMessageBusSendTracked:
         bus = MessageBus()
         ch = FakeChannel(caps=ChannelCapabilities(buttons=False))
         bus.register_channel(ch)
-        btn = ActionButton(label="Click", action_id="test:click")
+        btn = ActionButton(label="Click", action_id="test:click", url="https://example.com/click")
         msg = make_out(content="Do:", components=((btn,),))
         await bus.send_tracked(msg)
         assert len(ch.sent) == 1
         assert len(ch.sent[0].components) == 0
-        assert "Click" in ch.sent[0].content
+        assert "Click → https://example.com/click" in ch.sent[0].content
 
 
 class TestMessageBusEditMessage:

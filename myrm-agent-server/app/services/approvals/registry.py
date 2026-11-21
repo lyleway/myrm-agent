@@ -5,6 +5,8 @@
 - app.database.factory::acquire_write_lock (POS: 事务起始处获取 SQLite 写锁，供读后写的工作单元使用)
 - app.services.approvals.outbound_draft::finalize_outbound_draft (POS: 被扣留回复定案后的发送/释放/收尾)
 - app.services.skills.growth.constants::GROWTH_ACTION_TYPES, is_background_growth_approval (POS: growth draft 分流 SSOT)
+- app.core.notifications.approval_card::build_approval_card (POS: 审批卡文案，按发送路由决定是否带按钮)
+- app.core.channel_bridge.locale_provider::resolve_user_locale (POS: 所有者的语言偏好)
 
 [OUTPUT]
 - ApprovalRegistry: 统一的拦截审批注册与唤醒中枢
@@ -13,6 +15,8 @@
 
 [POS]
 统一审批流调度器。负责将各种拦截节点落库并推送 SSE 事件，接收 resolve 指令。
+待审批记录的会话来自 IM 时，还会把审批卡推给该会话的对端（与通知分发器同一张卡：所有者语言，按钮只给点得动的路由，不带请求载荷）；
+outbound_draft 不推：它只由所有者决定，所有者收到的是通知分发器的卡，会话对端已有「待审核」占位。
 outbound_draft 的定案（WebUI/IM 按钮/`/draft`/批量/TTL）统一在此收口：状态提交后调用 finalize_outbound_draft。
 定案是读后写（resolve_approval、TTL 清理），事务起始先取 SQLite 写锁：并发的定案只有一方生效，另一方等待后读到已定案状态
 （resolve_approval 返回 None），不会重复发送；等锁最多一个 busy_timeout，超时才以 "database is locked" 失败。续跑时结算的浏览器接管审批同样逐条走 resolve_approval。
@@ -33,6 +37,8 @@ from app.services.event.app_event_bus import AppEvent, AppEventType, get_event_b
 from app.services.skills.growth.constants import GROWTH_ACTION_TYPES, is_background_growth_approval
 
 logger = logging.getLogger(__name__)
+
+_OUTBOUND_DRAFT = "outbound_draft"
 
 
 class ApprovalRegistry:
@@ -68,7 +74,7 @@ class ApprovalRegistry:
             for record in expired_records:
                 record.resolved_at = datetime.now(timezone.utc)
 
-                if record.action_type == "outbound_draft":
+                if record.action_type == _OUTBOUND_DRAFT:
                     timeout_action = (record.payload or {}).get("draft_timeout_action", "auto_reject")
                     if timeout_action == "auto_send":
                         record.status = "APPROVED"
@@ -158,65 +164,62 @@ class ApprovalRegistry:
         except Exception as e:
             logger.error("Failed to publish approval event: %s", e)
 
-        # Broadcast to Channel (Native Approval Blocks) if it's a channel chat
-        if chat_id and status == "PENDING":
-            try:
-                from app.database.models.chat import Chat
-
-                async with get_session() as db:
-                    chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
-
-                if chat and chat.source and chat.source != "web" and chat.channel_session_key:
-                    from app.channels.types.components import ActionButton, ButtonStyle
-                    from app.channels.types.messages import MessagePriority, OutboundMessage
-                    from app.channels.types.session import SessionKey
-                    from app.core.channel_bridge import get_channel_gateway
-
-                    # Parse session key to find recipient ID
-                    # We strip the epoch suffix if present (e.g. :e=...)
-                    raw_key = chat.channel_session_key.split(":e=")[0]
-                    sk = SessionKey.parse(raw_key)
-
-                    if sk and sk.peer_id:
-                        # Construct native block UI
-                        timeout_str = f" (Expires: {expires_at.strftime('%H:%M:%S UTC')})" if expires_at else ""
-                        msg_text = f"⚠️ **Approval Required**\nAction: `{action_type}`\nReason: {reason or 'Requires your review'}{timeout_str}"
-
-                        components = (
-                            (
-                                ActionButton(
-                                    label="✅ Approve",
-                                    action_id=f"approval:approve:{record.id}",
-                                    style=ButtonStyle.PRIMARY,
-                                    value="approve",
-                                ),
-                                ActionButton(
-                                    label="❌ Deny",
-                                    action_id=f"approval:deny:{record.id}",
-                                    style=ButtonStyle.DANGER,
-                                    value="deny",
-                                ),
-                            ),
-                        )
-
-                        outbound_msg = OutboundMessage(
-                            channel=sk.channel,
-                            recipient_id=sk.peer_id,
-                            user_id="sandbox",
-                            content=msg_text,
-                            components=components,
-                            priority=MessagePriority.SYSTEM,
-                        )
-
-                        gw = get_channel_gateway()
-                        # Publish via message bus instead of directly blocking
-                        await gw.publish(outbound_msg)
-                        logger.info("Pushed Native Approval Block to channel '%s' for recipient '%s'", sk.channel, sk.peer_id)
-            except Exception as e:
-                logger.error("Failed to push Native Approval Block to channel: %s", e)
+        if chat_id and status == "PENDING" and action_type != _OUTBOUND_DRAFT:
+            await cls._push_card_to_chat_peer(record, chat_id)
 
         await cls._sync_copilot_pending(chat_id)
         return record
+
+    @classmethod
+    async def _push_card_to_chat_peer(cls, record: ApprovalRecord, chat_id: str) -> None:
+        """Send the approval card to the IM peer of ``chat_id``; web chats have no peer. Best effort: never raises.
+
+        It is the notification dispatcher's card: in the owner's language, with decision buttons only where a click
+        can be resolved. It is built from the request's identity, severity and reason only: the payload (tool
+        arguments, drafted text) is not for whoever else is in the chat.
+        """
+        try:
+            from app.database.models.chat import Chat
+
+            async with get_session() as db:
+                chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
+            if not (chat and chat.source and chat.source != "web" and chat.channel_session_key):
+                return
+
+            from app.channels.types.messages import MessagePriority, OutboundMessage
+            from app.channels.types.session import SessionKey
+            from app.core.channel_bridge import get_channel_gateway
+            from app.core.channel_bridge.locale_provider import resolve_user_locale
+            from app.core.notifications.approval_card import build_approval_card
+
+            # The stored key may carry an epoch suffix (``:e=...``) that is not part of the peer's address.
+            session_key = SessionKey.parse(chat.channel_session_key.split(":e=")[0])
+            if not (session_key and session_key.peer_id):
+                return
+
+            content, components = build_approval_card(
+                {
+                    "approval_id": record.id,
+                    "action_type": record.action_type,
+                    "severity": record.severity,
+                    "reason": record.reason,
+                },
+                session_key.channel,
+                await resolve_user_locale(),
+            )
+            await get_channel_gateway().publish(
+                OutboundMessage(
+                    channel=session_key.channel,
+                    recipient_id=session_key.peer_id,
+                    user_id="sandbox",
+                    content=content,
+                    components=components,
+                    priority=MessagePriority.SYSTEM,
+                )
+            )
+            logger.info("Pushed approval card to channel '%s' for recipient '%s'", session_key.channel, session_key.peer_id)
+        except Exception as e:
+            logger.error("Failed to push approval card to channel: %s", e)
 
     @classmethod
     async def resolve_approval(
@@ -254,7 +257,7 @@ class ApprovalRegistry:
             await db.commit()
             await db.refresh(record)
 
-        if record.action_type == "outbound_draft":
+        if record.action_type == _OUTBOUND_DRAFT:
             # Here rather than in each resolver (WebUI, IM button, ``/draft``, batch), so every decision on a held
             # reply sends or releases it and closes the sender's placeholder, whichever door it came through.
             # After the session is released: sending talks to the channel and must not hold a connection.
@@ -281,7 +284,7 @@ class ApprovalRegistry:
             stmt = (
                 select(ApprovalRecord)
                 .where(ApprovalRecord.status == "PENDING")
-                .where(ApprovalRecord.action_type == "outbound_draft")
+                .where(ApprovalRecord.action_type == _OUTBOUND_DRAFT)
                 .where(ApprovalRecord.id.startswith(id_prefix, autoescape=True))
                 .limit(2)
             )

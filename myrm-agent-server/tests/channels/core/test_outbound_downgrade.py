@@ -30,13 +30,23 @@ class TestDowngradeComponents:
         result = downgrade_components(msg, ch.capabilities, channel_name=ch.name)
         assert result is msg
 
-    def test_buttons_downgraded_when_unsupported(self) -> None:
+    def test_callback_buttons_are_dropped_when_unsupported(self) -> None:
+        """A button with only a callback id has no text form: no handler resolves a command made from it."""
         ch = FakeChannel(caps=ChannelCapabilities(buttons=False))
         btn = ActionButton(label="OK", action_id="test:ok")
         msg = make_out(content="Choose:", components=((btn,),))
         result = downgrade_components(msg, ch.capabilities, channel_name=ch.name)
-        assert len(result.components) == 0
-        assert "OK" in result.content
+        assert result.components == ()
+        assert result.content == "Choose:"
+
+    def test_link_button_beside_a_callback_button_keeps_only_the_link(self) -> None:
+        ch = FakeChannel(caps=ChannelCapabilities(buttons=False))
+        approve = ActionButton(label="Approve", action_id="approval:approve:r1")
+        open_link = ActionButton(label="Open", action_id="artifact:open", url="https://example.com/a")
+        msg = make_out(content="Review:", components=((approve, open_link),))
+        result = downgrade_components(msg, ch.capabilities, channel_name=ch.name)
+        assert result.components == ()
+        assert result.content == "Review:\n\n• Open → https://example.com/a"
 
     def test_select_menu_downgraded_independently(self) -> None:
         ch = FakeChannel(caps=ChannelCapabilities(buttons=True, select_menus=False))
@@ -211,7 +221,9 @@ class TestDowngradeComponents:
 
         # Buttons should be kept
         assert len(result.components) == 1
-        assert result.components[0][0].label == "OK"
+        kept = result.components[0][0]
+        assert isinstance(kept, ActionButton)
+        assert kept.label == "OK"
 
         # Media should be stripped and appended to text
         assert len(result.media) == 0

@@ -58,11 +58,14 @@ exact payload `myrm-agent-harness.apply_approval_decisions` expects:
 Approval requests reach IM chats as `ActionButton`s whose `action_id` is
 `approval:{approve|deny}:{record_id}`. Two senders produce them:
 
-- `ApprovalRegistry.create_approval()` posts an approval block into the chat the
-  request belongs to (`chat.source != "web"`).
+- `ApprovalRegistry.create_approval()` posts the same card into the chat the
+  request belongs to (`chat.source != "web"`), except for held replies (`outbound_draft`):
+  only the owner decides those and the owner gets the dispatcher's card.
 - The notification dispatcher's owner card (`core/notifications/approval_card.py`)
-  attaches buttons only for `APPROVAL_CLICK_CHANNELS` (Telegram). Other channels
-  get a localized "open the app" hint, since their clicks never reach this handler.
+  attaches buttons only for `APPROVAL_CLICK_CHANNELS` (Telegram) and only when the send
+  stays local: control-plane egress (cloud sandbox) carries plain text, so a hosted Telegram
+  card gets the hint too. Every other route gets a localized "open the app" hint, since a click
+  there never reaches this handler.
 
 Telegram's inbound parser is the only one that turns a click into
 `InboundMessage(content="approval:approve:{id}", metadata={"callback_prefix": "act",

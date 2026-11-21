@@ -194,7 +194,7 @@ wechat_d4e5f6   ← 额外实例 2
 
 1. **能力检测**：读取 `ChannelCapabilities`（`buttons` / `quick_replies` / `select_menus`）
 2. **按行降级**：
-   - `ActionButton` → `"• {label} → /{action_id}"` 或 `"• {label} → {url}"`
+   - `ActionButton` → 有 `url` 时为 `"• {label} → {url}"`；只有 `action_id` 的按钮没有文字等价物（没有任何处理器会解析由回调 id 推出的命令），整个按钮省略；要给文字渠道留可输入的替代，用显式的 `QuickReply(required=True)`
    - `SelectMenu` → `"• {placeholder}: option1, option2, ..."`
    - `QuickReply` (required=True) → `"1️⃣ {label}\n2️⃣ {label2}\n\n↩️ 回复数字选择"`
    - `QuickReply` (required=False) → 静默丢弃（避免杂乱）
@@ -206,11 +206,11 @@ wechat_d4e5f6   ← 额外实例 2
 
 ```
 原始消息：
-content: "请批准这个请求："
-components: [[ActionButton(label="批准", action_id="approve")]]
+content: "报告已生成："
+components: [[ActionButton(label="打开报告", action_id="report:open", url="https://example.com/r/1")]]
 
 降级后（WhatsApp）：
-content: "请批准这个请求：\n\n• 批准 → /approve"
+content: "报告已生成：\n\n• 打开报告 → https://example.com/r/1"
 components: []
 ```
 
@@ -278,8 +278,9 @@ Discord / Signal / Feishu / iMessage / **Mattermost** / **Matrix**）会把
 
 **审批按钮（ActionButton）**：审批请求以 `approval:{approve|deny}:{record_id}` 按钮发往 IM。
 目前只有 Telegram 入站解析器会把点击转成 `callback_prefix="act"` 的消息并交给
-`_handle_action_button_approval`，其他渠道的按钮点击不会进入该处理器，因此 owner 通知卡片
-只在 Telegram 附带按钮，其余渠道提示打开应用审核；被拦截的回复还会附上 `/draft approve <code>` /
+`_handle_action_button_approval`，其他渠道的按钮点击不会进入该处理器，因此审批卡只在 Telegram 且发送留在本机时附带按钮
+（云端沙箱走控制面出口，出站只带纯文本，托管渠道上的 Telegram 卡片同样没有按钮），其余路由提示打开应用审核；
+`ApprovalRegistry` 推给会话对端的是同一张卡（不带请求载荷；被拦截的回复不推，只由通知分发器发给 owner）；被拦截的回复还会附上 `/draft approve <code>` /
 `/draft reject <code>`（`<code>` 为审批 ID 前 8 位，命令接受 6 位及以上），owner 可直接在聊天里决定。
 被拦截的回复（`outbound_draft`）只有 owner
 （控制面转发或 ADMIN 配对）可批准/拒绝，详见 `routing/_ARCH.md` 的 *ActionButton Callback Approval*

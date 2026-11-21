@@ -274,6 +274,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/providers/mattermost/test_mattermost_reaction_lifecycle.py` | 单元 | Mattermost 按用户、帖子、名称删除自己加的反应：空串撤销已加的，没加过不发请求，添加失败抛出且不记账 |
 | `channels/providers/discord/test_discord_reaction_lifecycle.py` | 单元 | Discord `Message.remove_reaction`：空串撤销已加的反应且只撤一次，没加过不碰消息，添加失败抛出且不记账，没有机器人用户时无从撤销 |
 | `channels/providers/discord/test_discord_reasoning.py` | 单元 | Discord 回复里的推理只出现一次、是 Markdown 引用而非 HTML 标签；占位消息的编辑结果经真实渠道，不带页脚，回复隐藏推理时一点不剩 |
+| `channels/providers/discord/test_discord_outbound_components.py` | 单元 | Discord 出站只发文字和文件：渠道声明没有原生按钮与选择菜单；链接按钮与选择菜单经出站准备后以文字行到达，只有回调 id 的按钮不留任何文字，发出的消息从不带 `view` 参数 |
 | `channels/providers/discord/test_discord_outbound_edges.py` | 单元 | Discord 占位消息、删除、反应与输入提示在 Discord 够不着或拒绝时的去向：占位消息发出的消息号就是占位消息号，频道够不着或消息被拒时没有占位消息（拒绝写日志）；删除失败只写日志、不连累调用方；空表情撤回的是本渠道加的那一个（频道没了则不撤、没加过则不碰 Discord）；输入提示被拒只写日志；只有文件没有文字的消息单独发出并返回最后一条消息号；不是可发消息频道的 id 视为够不着 |
 | `channels/providers/discord/test_discord_channel.py` | 单元 | Discord 渠道的启停与入站：带网关启动与不带网关启动，停止（网关会话已失败时仍完成停止），消息分发，忽略机器人，群聊里去掉提及并注入元数据，附件抽取（图片、文档、多个附件、没有附件、没有类型时按尺寸判成图片）；同目录按主题分文件：`test_discord_forum_and_send.py`（论坛判定与帖子名、论坛与普通频道发送、长消息拆分、回复只指向首块、论坛帖子的话题继承）、`test_discord_message_ops.py`（编辑、删除、反应、输入提示、频道解析、历史拉取）、`test_discord_config_and_health.py`（允许频道解析、语音配置字段、凭据规格、健康检查）；`conftest.py` 提供 `config`、`channel` 夹具 |
 | `channels/providers/feishu/test_feishu_webhook_routes.py` | 单元 | 飞书 webhook 路由注册在路由注册器上，不是注册器的对象被忽略 |
@@ -366,7 +367,8 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `services/approvals/test_outbound_draft.py` | 单元 | 被扣留回复定案后的收尾：按评审后的正文发出（含仅附件），无快照、快照不可解码或无内容则不发；批准后发不出去时告知 owner（错误 toast 与通知中心，按 owner 语言）且永不抛出；拒绝或超时不发送并释放临时附件；关闭发送方的“待审核”占位消息（无占位则不动，平台不可编辑则删除，平台挂起有时限，网关不可达不撤销决定） |
 | `services/approvals/test_registry_concurrency.py` | 集成 | 生产同构 SQLite（WAL + 延迟 BEGIN 升级写锁）上的并发定案：批准与拒绝同时、TTL 清理与点击同时，每条被扣留回复恰好定案并收尾一次，落败方读到已定案状态而不是 `database is locked`；其他写入不断提交时，续跑的浏览器接管结算每次都成功 |
 | `services/approvals/test_registry_digest_sync.py` | 集成 | 定案后运行摘要的待审批计数与审批一致：TTL 清理后没有运行的聊天（多个聊天各自）回到空闲，在跑的会话回到 running，没有聊天的审批不发起同步；续跑时结算浏览器接管审批后，暂停的运行回到 running 且待审批为 0；待审批计数、全局列表与背景成长列表对「什么算待审批」一致（无 thread 的后台成长草稿只出现在成长列表，不计数、不进全局列表） |
-| `core/notifications/test_approval_card.py` | 单元 | 审批通知卡片：草稿正文预览（截断/附件摘要/自动发送提示/剩余时间）不含内部标识与链接，仅 Telegram 带批准/拒绝按钮、其他渠道提示打开应用，按用户语言渲染 |
+| `services/approvals/test_registry_channel_push.py` | 集成 | 审批创建时推给 IM 会话对端的卡片：本机 Telegram 带批准/拒绝按钮，托管路由与点不动的渠道只带「打开应用」提示，按所有者语言出，会话键的纪元后缀不进对端地址，请求载荷（工具参数）不外泄；被扣留回复不推（只经通知分发器发给 owner）、网页会话与非待审批记录不推；推送失败不影响审批落库 |
+| `core/notifications/test_approval_card.py` | 单元 | 审批通知卡片：草稿正文预览（截断/附件摘要/自动发送提示/剩余时间）不含内部标识与链接，仅发送留在本机的 Telegram 带批准/拒绝按钮（托管路由与其他渠道提示打开应用），按用户语言渲染 |
 | `channels/reliability/test_inbound_replay.py` | 集成 | 入站日志的重放保真：按生产路径（回合开始写日志条目 → SQLite → 网关启动恢复 → 路由闸门）走一遍，重放回来的消息与原消息逐字段相等（仅多出 `is_recovery` 标记）；交给真实的 `_handle_merged` 后，到达回合的消息仍带着附件、引用回复、群上下文、发送者与发送时间，日志条目被确认且不重复写；无聊天标识的消息仍无；控制面转发重放后仍带着它的身份；yolo 窗口不跨重启；本地文件已不存在的附件有 url 则保留 url、否则从附件里去掉并在正文里点名；无法解码的条目不拖垮其后的条目；另一种列结构的表在打开时重建，日志继续可用 |
 | `channels/reliability/test_inbound_replay_merging.py` | 集成 | 重放经过会话闸门的合并：同一聊天的两条重放合并成一个回合，回合带着两条日志条目，经真实闸门、`_handle_merged` 与 SQLite 日志走完后两个条目都被确认；重放与实时消息不合并，按到达顺序各占一个回合（两种先后顺序），实时消息不带条目 |
 | `channels/inbound_message_testkit.py` | 辅助 | `full_message()`：每个会持久化的字段都取非默认值的 `InboundMessage`（含两层嵌套的引用回复、群上下文、关联上下文与一个本地附件），`test_inbound_wire.py` 与 `test_inbound_replay.py` 共用 |
@@ -377,7 +379,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/test_bus.py` | 单元 | `MessageBus` 的注册（后注册的替换先注册的，未知渠道取不到）、`send_tracked`（返回消息号、记录出站活动、未知渠道返回空、渠道不支持按钮时降级）、编辑（成功；渠道没有编辑能力或渠道未知返回 False）、入站路由到队列，以及启停、重复启动、投递循环发消息、毒丸消息不拖垮循环并记失败、投递前失败不经持久化恢复形成死循环 |
 | `channels/test_bus_edge_cases.py` | 单元 | `MessageBus` 的边界：入站与出站队列满时丢弃，发往未知渠道的消息被丢弃，渠道发送失败记错误、返回空发送结果进死信而不误确认，已停止/已禁用渠道的 `send_tracked` 返回空，永久失败回调（发送失败时触发、有账本时不重复、启动时合并启动前已通知的、回调抛错不外溢、无死信目录也可调用），编辑抛错返回 False，注销渠道 |
 | `channels/test_bus_outbound.py` | 单元 | 出站风险闸门与控制平面出站：无规则、空正文、未命中时原样放行，命中时替换正文且保留渠道与收件人，投递循环与 `send_tracked` 都先过闸门；路由到控制平面时不经本地渠道也不留待投递记录，渠道已停止时消息保留在磁盘，未注册渠道的控制平面出站被确认 |
-| `channels/core/test_outbound_downgrade.py` | 单元 | `downgrade_components`：渠道支持时原样保留，不支持时按钮、选择菜单、必填快捷回复、媒体分别降成文字且互不牵连；链接按钮显示链接，非必填快捷回复丢弃；降级文案默认英文、元数据指定时用中文；降级写一条 INFO 日志 |
+| `channels/core/test_outbound_downgrade.py` | 单元 | `downgrade_components`：渠道支持时原样保留，不支持时按钮、选择菜单、必填快捷回复、媒体分别降成文字且互不牵连；链接按钮显示链接（与只有回调 id 的按钮同行时只留链接），只有回调 id 的按钮没有文字形式、整个丢弃，非必填快捷回复丢弃；降级文案默认英文、元数据指定时用中文；降级写一条 INFO 日志 |
 | `channels/test_routing_policy_resolver.py` | 单元 | `PolicyResolver` 私聊解析与 LID 回退：控制面转发带来的身份只在带控制面标记时采纳；关闭 / 开放（未映射 LID 与未配对发送者成为访客）/ 配对（通过、被拒、待审、新发送者）/ 白名单（通过、被拒、未配对）各模式，缺省策略按白名单；LID 经缓存解析并继承其手机号的状态、角色与配额，未配对手机号的 LID 不绑定，缓存未命中且白名单策略下无结果 |
 | `channels/test_routing_policy_group_resolution.py` | 单元 | `PolicyResolver` 群聊解析：预先解析的群用户绕过策略检查；策略关闭或群未启用；访客须显式点名（只回复不算）；点名触发、未配对发送者在已启用群里为访客、未点名只缓冲；all / prefix 触发模式（前缀不匹配不触发）；无默认用户返回空，无策略时缺省关闭 |
 | `channels/test_routing_policy_group_gates.py` | 单元 | 群聊的跟进豁免（追踪器的 LRU 与 TTL、按 thread 的豁免与静音、自由回复聊天白名单）与机器人发送者闸门：机器人闲聊即使在自由回复群里也被忽略、显式点名可触发、闸门触发后点名与私聊被拒、真人点名不受影响；机器人闲聊不进上下文缓冲，缓冲下来的闲聊凭据已打码，触发归因只写一次 |
