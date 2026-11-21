@@ -6,7 +6,7 @@
 - app.channels.types::InboundMessage, ReplyContext, MediaAttachment, MediaType (POS: channel message value types)
 
 [OUTPUT]
-- DiscordInboundMixin: message / reaction / interaction parsing, reply context, media extraction, auto-threading and history fetch used by DiscordChannel
+- DiscordInboundMixin: message / reaction parsing, reply context, media extraction, auto-threading and history fetch used by DiscordChannel
 
 [POS]
 Inbound half of DiscordChannel. The host owns the gateway client and the policy; the mixin only turns Discord events into InboundMessage.
@@ -275,44 +275,6 @@ class DiscordInboundMixin(BaseChannel):
             mentioned=True,
             message_id=target_msg_id,
             metadata={"reaction": True, "target_message_id": target_msg_id},
-        )
-        await self._emit_inbound(inbound)
-
-    async def _on_interaction(self, interaction: discord.Interaction) -> None:
-        """Process incoming Discord interaction (button click, select menu)."""
-        if interaction.type != discord.InteractionType.component:
-            return
-
-        await interaction.response.defer()
-
-        data = interaction.data
-        custom_id = str(data.get("custom_id", "")) if data else ""
-        action = custom_id.replace("act:", "", 1) if custom_id.startswith("act:") else custom_id
-
-        ch = interaction.channel
-        topic: str | None = getattr(ch, "topic", None)
-        if not topic and isinstance(ch, discord.Thread):
-            parent = getattr(ch, "parent", None)
-            if parent is not None:
-                topic = getattr(parent, "topic", None)
-
-        inbound = InboundMessage(
-            channel=self.name,
-            sender_id=str(interaction.user.id),
-            sender_name=interaction.user.display_name,
-            sent_at=time.time(),
-            sent_timezone="UTC",
-            chat_id=str(interaction.channel_id),
-            content=f"/action {action}",
-            message_id=str(interaction.id),
-            is_group=interaction.guild_id is not None,
-            mentioned=True,
-            metadata={
-                "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
-                "interaction_type": "component",
-                "custom_id": custom_id,
-                "channel_topic": topic,
-            },
         )
         await self._emit_inbound(inbound)
 

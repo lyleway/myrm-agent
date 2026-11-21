@@ -12,13 +12,10 @@ import { isSandbox } from '@/lib/deploy-mode';
 import type { DiscordCredentials } from '@/services/channels';
 import { getDiscordCredentials, saveDiscordCredentials, testDiscordConnection } from '@/services/channels';
 import { ConnectionBadge } from './ConnectionBadge';
-import { CpInboundUrlBanner } from './CpInboundUrlBanner';
 import { useChannelConfig } from './useChannelConfig';
 
 const EMPTY_CREDS: DiscordCredentials = {
   botToken: '',
-  applicationId: '',
-  publicKey: '',
   enableGateway: true,
   botPolicy: 'mention_only',
   autoThread: true,
@@ -33,19 +30,17 @@ const EMPTY_CREDS: DiscordCredentials = {
   voiceAllowedChannels: '',
 };
 
+const REQUIRED_FIELDS: (keyof DiscordCredentials)[] = ['botToken'];
+
 export function DiscordConfigCard() {
   const t = useTranslations('channels');
   const sandbox = isSandbox();
   const [showToken, setShowToken] = useState(false);
 
-  const requiredFields: (keyof DiscordCredentials)[] = sandbox
-    ? ['botToken', 'applicationId', 'publicKey']
-    : ['botToken'];
-
   const { creds, dirty, loading, saving, testing, connStatus, statusLabel, handleChange, handleSave, handleTest } =
     useChannelConfig<DiscordCredentials>({
       emptyCreds: EMPTY_CREDS,
-      requiredFields,
+      requiredFields: REQUIRED_FIELDS,
       getCreds: getDiscordCredentials,
       saveCreds: saveDiscordCredentials,
       testConnection: (c) => testDiscordConnection(c.botToken),
@@ -65,43 +60,23 @@ export function DiscordConfigCard() {
       <div className="space-y-4">
         <ConnectionBadge status={connStatus} label={statusLabel} />
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="discord-bot-token">{t('discordBotToken')}</Label>
-            <div className="relative">
-              <Input
-                id="discord-bot-token"
-                type={showToken ? 'text' : 'password'}
-                value={creds.botToken}
-                onChange={(e) => handleChange('botToken', e.target.value)}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
-                onClick={() => setShowToken(!showToken)}
-              >
-                {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="discord-app-id">{t('discordApplicationId')}</Label>
+        <div className="space-y-2">
+          <Label htmlFor="discord-bot-token">{t('discordBotToken')}</Label>
+          <div className="relative">
             <Input
-              id="discord-app-id"
-              value={creds.applicationId ?? ''}
-              onChange={(e) => handleChange('applicationId', e.target.value)}
+              id="discord-bot-token"
+              type={showToken ? 'text' : 'password'}
+              value={creds.botToken}
+              onChange={(e) => handleChange('botToken', e.target.value)}
+              className="pr-10"
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="discord-public-key">{t('discordPublicKey')}</Label>
-            <Input
-              id="discord-public-key"
-              value={creds.publicKey ?? ''}
-              onChange={(e) => handleChange('publicKey', e.target.value)}
-            />
+            <button
+              type="button"
+              className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground"
+              onClick={() => setShowToken(!showToken)}
+            >
+              {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+            </button>
           </div>
         </div>
 
@@ -306,8 +281,6 @@ export function DiscordConfigCard() {
           </>
         )}
       </div>
-
-      {sandbox && <CpInboundUrlBanner channel="discord" />}
 
       <div className="flex items-center gap-3 pt-2">
         <Button onClick={handleSave} disabled={saving || !dirty} size="sm">

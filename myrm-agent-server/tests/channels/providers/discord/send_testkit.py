@@ -11,14 +11,13 @@ import discord
 
 from app.channels.providers.discord.channel import DiscordChannel
 from app.channels.providers.discord.config import DiscordChannelConfig
-from app.channels.types import ActionButton, OutboundMessage, SelectMenu, ToolStep
+from app.channels.types import OutboundMessage, ToolStep
 
 
 def make_msg(
     content: str = "Hello",
     reasoning: str | None = None,
     tool_steps: tuple[ToolStep, ...] = (),
-    components: tuple[tuple[ActionButton | SelectMenu, ...], ...] = (),
     metadata: dict[str, object] | None = None,
 ) -> OutboundMessage:
     return OutboundMessage(
@@ -28,7 +27,6 @@ def make_msg(
         reasoning=reasoning,
         user_id="u1",
         tool_steps=tool_steps,
-        components=components,
         metadata=metadata,
     )
 

@@ -334,36 +334,3 @@ async def test_on_message_regular_channel_no_topic(channel):
 
     assert len(received) == 1
     assert received[0].metadata["channel_topic"] is None
-
-
-@pytest.mark.asyncio
-async def test_on_interaction_forum_thread_topic(channel):
-    """Interaction in a Forum thread should inherit parent topic in metadata."""
-    mock_interaction = MagicMock()
-    mock_interaction.type = discord.InteractionType.component
-    mock_interaction.response = MagicMock()
-    mock_interaction.response.defer = AsyncMock()
-    mock_interaction.user.id = 123
-    mock_interaction.user.display_name = "user"
-    mock_interaction.channel_id = 789
-    mock_interaction.guild_id = 456
-    mock_interaction.id = 111
-    mock_interaction.data = {"custom_id": "act:approve"}
-
-    mock_interaction.channel = MagicMock(spec=discord.Thread)
-    mock_interaction.channel.topic = None
-    parent = MagicMock()
-    parent.topic = "Support Forum — please be specific"
-    mock_interaction.channel.parent = parent
-
-    received = []
-
-    async def handler(msg):
-        received.append(msg)
-
-    channel.set_inbound_handler(handler)
-    await channel._on_interaction(mock_interaction)
-
-    assert len(received) == 1
-    assert received[0].metadata["channel_topic"] == "Support Forum — please be specific"
-    assert received[0].content == "/action approve"
