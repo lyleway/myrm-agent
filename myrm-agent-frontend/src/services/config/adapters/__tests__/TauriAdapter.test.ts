@@ -1,9 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { markLocalBackendUnreachable } from '@/lib/backend-health';
+import { RESPONSE_BODY_DEADLINE_MS } from '@/services/config/adapters/BaseAdapter';
 import { TauriConfigAdapter } from '@/services/config/adapters/TauriAdapter';
 import { ConfigSyncError, DEFAULT_PERSONAL_SETTINGS, type ConfigChange } from '@/services/config/types';
-import { answerWithBody, brokenBody, malformedBody, runOutBodyDeadline, stalledBody } from './bodyDeadlineKit';
+import {
+  answerWithBody,
+  brokenBody,
+  malformedBody,
+  runOutBodyDeadline,
+  signalOfRequest,
+  stalledBody,
+} from './bodyDeadlineKit';
 
 vi.mock('@/lib/deploy-mode', () => ({
   getApiBaseUrl: () => '/api/v1',
@@ -139,44 +147,58 @@ describe('TauriConfigAdapter backend unavailable', () => {
     });
 
     it('makes get throw Backend not available once the deadline has passed', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.get('chatSettings');
       await runOutBodyDeadline(call);
 
       await expect(call).rejects.toThrow(new ConfigSyncError('Backend not available'));
       expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('makes getAll throw Backend not available once the deadline has passed', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.getAll();
       await runOutBodyDeadline(call);
 
       await expect(call).rejects.toThrow(new ConfigSyncError('Backend not available'));
       expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+      expect(signalOfRequest().aborted).toBe(true);
+    });
+
+    it('cancels the request of an answer it never reads once the deadline has passed', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(503, stalledBody));
+
+      await expect(adapter.get('chatSettings')).rejects.toThrow(new ConfigSyncError('Backend not available'));
+      await vi.advanceTimersByTimeAsync(RESPONSE_BODY_DEADLINE_MS - 1);
+      expect(signalOfRequest().aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('reports Backend not available for a sync answer that never finishes', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.sync(CHANGES);
       await runOutBodyDeadline(call);
 
       await expect(call).resolves.toEqual(BACKEND_NOT_AVAILABLE);
       expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('reports Backend not available when the connection breaks while a sync answer is read', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, brokenBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, brokenBody));
 
       await expect(adapter.sync(CHANGES)).resolves.toEqual(BACKEND_NOT_AVAILABLE);
       expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
     });
 
     it('lets an answer that is not JSON through: that is a defect, not an unreachable backend', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, malformedBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, malformedBody));
 
       await expect(adapter.sync(CHANGES)).rejects.toBeInstanceOf(SyntaxError);
       expect(markLocalBackendUnreachable).not.toHaveBeenCalled();

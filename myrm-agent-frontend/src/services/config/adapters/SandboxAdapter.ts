@@ -2,7 +2,7 @@
  * [INPUT]
  * - `@/lib/guest` getAuthToken (POS: the session's bearer token)
  * - `@/lib/deploy-mode` getApiBaseUrl (POS: cloud API origin)
- * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure / readJson / isLostAnswer (POS: the failure answer and the answer-body limit both adapters share)
+ * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer (POS: the failure answer and the deadline-bound request both adapters share)
  * - `../types` ConfigSyncError / record and change shapes (POS: adapter contract)
  *
  * [OUTPUT]
@@ -22,9 +22,11 @@ import { getApiBaseUrl } from '@/lib/deploy-mode';
 import {
   BaseConfigAdapter,
   backendUnavailableSyncResult,
+  fetchWithDeadlines,
   isLostAnswer,
   isTransportFailure,
-  readJson,
+  type DeadlineAnswer,
+  type DeadlineInit,
 } from './BaseAdapter';
 import type { ConfigKey, ConfigRecord, ConfigChange, SyncResult, ConfigVersion, ConfigValueMap } from '../types';
 import { ConfigSyncError } from '../types';
@@ -56,7 +58,7 @@ interface ApiSyncResponse {
 export class SandboxConfigAdapter extends BaseConfigAdapter {
   async getAll(keys?: readonly ConfigKey[]): Promise<Map<ConfigKey, ConfigRecord>> {
     const url = keys?.length ? `/config?keys=${encodeURIComponent(keys.join(','))}` : '/config';
-    const response = await this.authFetch(url);
+    const { response, readJson } = await this.authFetch(url);
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -65,7 +67,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       throw new ConfigSyncError(`Failed to get all configs: ${response.statusText}`);
     }
 
-    const data = await readJson<ApiAllConfigsResponse>(response);
+    const data = await readJson<ApiAllConfigsResponse>();
     const result = new Map<ConfigKey, ConfigRecord>();
 
     for (const [key, record] of Object.entries(data.configs)) {
@@ -76,7 +78,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
   }
 
   async get<K extends ConfigKey>(key: K): Promise<ConfigRecord<K> | null> {
-    const response = await this.authFetch(`/config/${key}`);
+    const { response, readJson } = await this.authFetch(`/config/${key}`);
 
     if (response.status === 404) {
       return null;
@@ -86,7 +88,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       throw new ConfigSyncError(`Failed to get config '${key}': ${response.statusText}`);
     }
 
-    const data = await readJson<ApiConfigResponse<K>>(response);
+    const data = await readJson<ApiConfigResponse<K>>();
     return this.toConfigRecord(data);
   }
 
@@ -99,9 +101,9 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       };
     }
 
-    let response: Response;
+    let answer: DeadlineAnswer;
     try {
-      response = await this.authFetch('/config/sync', {
+      answer = await this.authFetch('/config/sync', {
         method: 'POST',
         body: JSON.stringify({
           changes,
@@ -116,6 +118,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       return backendUnavailableSyncResult();
     }
 
+    const { response, readJson } = answer;
     if (UNDELIVERED_SYNC_STATUSES.has(response.status)) {
       console.warn(`[SandboxAdapter] Backend not available (HTTP ${response.status}), sync failed`);
       return backendUnavailableSyncResult();
@@ -127,7 +130,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
 
     let data: ApiSyncResponse;
     try {
-      data = await readJson<ApiSyncResponse>(response);
+      data = await readJson<ApiSyncResponse>();
     } catch (error) {
       if (!isLostAnswer(error)) {
         throw error;
@@ -158,24 +161,21 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
     };
   }
 
-  private async authFetch(path: string, options?: RequestInit): Promise<Response> {
+  private async authFetch(path: string, options?: DeadlineInit): Promise<DeadlineAnswer> {
     const token = getAuthToken();
     if (!token) {
-      return new Response(null, { status: 401, statusText: 'Unauthorized' });
+      // Made up here, never on the network: there is nothing to wait for and nothing to cancel.
+      const response = new Response(null, { status: 401, statusText: 'Unauthorized' });
+      return { response, readJson: <T>() => response.json() as Promise<T> };
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
-    const baseUrl = getApiBaseUrl();
-    return fetch(`${baseUrl}${path}`, {
+    return fetchWithDeadlines(`${getApiBaseUrl()}${path}`, {
       ...options,
-      signal: controller.signal,
       headers: {
         ...options?.headers,
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-    }).finally(() => clearTimeout(timeoutId));
+    });
   }
 }

@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RESPONSE_BODY_DEADLINE_MS } from '@/services/config/adapters/BaseAdapter';
+import { answerWithBody, stalledBody } from '@/services/config/adapters/__tests__/bodyDeadlineKit';
 import { getConfigSyncManager, resetConfigSyncManager } from '@/services/config/ConfigSyncManager';
 import { serveCloudBackend, storedKeys } from './fakeCloudBackend';
 
@@ -25,8 +26,8 @@ vi.mock('@/lib/guest', () => ({
 
 const answer = (body: unknown) => ({ ok: true, status: 200, json: () => Promise.resolve(body) }) as Response;
 
-/** An answer with status 200 whose body never ends. */
-const stalledAnswer = () => ({ ok: true, status: 200, json: () => new Promise<unknown>(() => undefined) }) as Response;
+/** An answer with status 200 whose body never ends, until the request that produced it is aborted. */
+const stalledAnswer = answerWithBody(200, stalledBody);
 
 describe('the sync layer facing an answer body that never ends', () => {
   beforeEach(() => {
@@ -63,7 +64,7 @@ describe('the sync layer facing an answer body that never ends', () => {
       }
       if (!rowReadStalled && new URL(String(url)).pathname === '/config/chatSettings') {
         rowReadStalled = true;
-        return Promise.resolve(stalledAnswer());
+        return stalledAnswer(url, init);
       }
       return normal(url, init);
     }) as unknown as typeof fetch;
@@ -87,7 +88,7 @@ describe('the sync layer facing an answer body that never ends', () => {
   });
 
   it('ends the initial load offline once every attempt has waited out the deadline', async () => {
-    global.fetch = vi.fn(() => Promise.resolve(stalledAnswer())) as unknown as typeof fetch;
+    global.fetch = vi.fn(stalledAnswer) as unknown as typeof fetch;
     const manager = getConfigSyncManager();
 
     const settled = vi.fn();

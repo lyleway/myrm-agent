@@ -1,13 +1,13 @@
 /**
  * [INPUT]
- * - `@/lib/utils/withTimeout` withTimeout (POS: the generic wait limit for a promise; a result that arrives after the limit is dropped)
  * - `../types` ConfigAdapter / SyncResult (POS: adapter contract and the backend's answer to a sync)
  *
  * [OUTPUT]
  * BaseConfigAdapter: device id and the abstract adapter surface.
  * BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult: the failed `SyncResult` of a write that never reached a backend.
  * isTransportFailure: whether a rejected `fetch()` call is a delivery failure rather than a bug.
- * RESPONSE_BODY_DEADLINE_MS / readJson / isLostAnswer: the limit on reading an answer's body, and whether a failed read means the answer was lost rather than wrong.
+ * fetchWithDeadlines / RESPONSE_HEADERS_DEADLINE_MS / RESPONSE_BODY_DEADLINE_MS: the request call of both adapters; a request whose headers or body outlast their deadline is cancelled.
+ * isLostAnswer: whether a failed body read means the answer was lost rather than wrong.
  *
  * [POS]
  * What the Tauri and Sandbox adapters share. Both answer a reachability failure the same way, because the sync layer
@@ -17,7 +17,6 @@
  * that is not JSON does not. Whatever else a backend refuses is an error the caller sees.
  */
 
-import { withTimeout } from '@/lib/utils/withTimeout';
 import type { ConfigAdapter, ConfigKey, ConfigRecord, ConfigChange, SyncResult, ConfigVersion } from '../types';
 
 /** `SyncResult.error` of a write that did not reach a backend that could take it; `isRecoverableSyncError` matches it. */
@@ -34,26 +33,58 @@ export function backendUnavailableSyncResult(): SyncResult {
 
 /**
  * A `fetch()` that produced no response: offline, DNS or TLS failure (a `TypeError` in every browser, whatever its
- * wording) or the adapter's own timeout abort. Apply it to the `fetch()` call only; a `TypeError` from handling the
- * answer is a bug and must stay visible.
+ * wording) or the abort of the headers deadline of `fetchWithDeadlines`. Apply it to the `fetch()` call only; a
+ * `TypeError` from handling the answer is a bug and must stay visible.
  */
 export function isTransportFailure(error: unknown): boolean {
   return error instanceof TypeError || (error instanceof DOMException && error.name === 'AbortError');
 }
 
+/** How long a backend may take to start answering: the time until the headers of the answer arrive. */
+export const RESPONSE_HEADERS_DEADLINE_MS = 10_000;
+
 /**
- * How long the body of an answer may take once its headers have arrived. The adapters' own 10 s timer ends with the
- * headers, so without this limit a backend that stalls in the middle of an answer leaves the read pending forever.
- * Equal to the default of the app's generic request layer (`fetchWithTimeout`).
+ * How long the body of an answer may take once its headers have arrived. Equal to the default of the app's generic
+ * request layer (`fetchWithTimeout`).
  */
 export const RESPONSE_BODY_DEADLINE_MS = 30_000;
 
+/** Request options of `fetchWithDeadlines`: everything `fetch()` takes except the signal, which the deadlines own. */
+export type DeadlineInit = Omit<RequestInit, 'signal'>;
+
+/** Reads the JSON body of an answer; the body deadline stops counting once the read has settled. */
+export type ReadJson = <T>() => Promise<T>;
+
+/** An answer whose headers have arrived, with the call that reads its JSON body within the body deadline. */
+export interface DeadlineAnswer {
+  response: Response;
+  readJson: ReadJson;
+}
+
 /**
- * The JSON body of an answer, read within `RESPONSE_BODY_DEADLINE_MS`. The read is abandoned, not cancelled: whatever the
- * backend sends after the deadline is dropped.
+ * `fetch()` with a deadline on the headers and a later one on the body, both enforced by cancelling the request. An
+ * answer that is only abandoned keeps its connection, and a browser allows few of them per origin (six over HTTP/1.1):
+ * a backend that stalls again and again would starve every other request of the page, while a cancelled request frees
+ * its connection. The body deadline starts when the headers arrive and also cancels a body nobody reads (an error
+ * status the caller only inspects), which would hold its connection just the same.
  */
-export function readJson<T>(response: Response): Promise<T> {
-  return withTimeout(response.json() as Promise<T>, RESPONSE_BODY_DEADLINE_MS);
+export async function fetchWithDeadlines(url: string, init: DeadlineInit): Promise<DeadlineAnswer> {
+  const controller = new AbortController();
+  const abortIn = (ms: number) => setTimeout(() => controller.abort(), ms);
+
+  const headersTimer = abortIn(RESPONSE_HEADERS_DEADLINE_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(headersTimer);
+  }
+
+  const bodyTimer = abortIn(RESPONSE_BODY_DEADLINE_MS);
+  return {
+    response,
+    readJson: <T>() => (response.json() as Promise<T>).finally(() => clearTimeout(bodyTimer)),
+  };
 }
 
 /**

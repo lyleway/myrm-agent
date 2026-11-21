@@ -4,7 +4,14 @@ import { getAuthToken } from '@/lib/guest';
 import { RESPONSE_BODY_DEADLINE_MS } from '@/services/config/adapters/BaseAdapter';
 import { SandboxConfigAdapter } from '@/services/config/adapters/SandboxAdapter';
 import { ConfigSyncError, DEFAULT_PERSONAL_SETTINGS, type ConfigChange } from '@/services/config/types';
-import { answerWithBody, brokenBody, malformedBody, runOutBodyDeadline, stalledBody } from './bodyDeadlineKit';
+import {
+  answerWithBody,
+  brokenBody,
+  malformedBody,
+  runOutBodyDeadline,
+  signalOfRequest,
+  stalledBody,
+} from './bodyDeadlineKit';
 
 vi.mock('@/lib/deploy-mode', () => ({
   getApiBaseUrl: () => 'http://test.local',
@@ -148,46 +155,60 @@ describe('SandboxConfigAdapter', () => {
     });
 
     it('makes get throw once the deadline has passed: the state of the row is unknown', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.get('chatSettings');
       await runOutBodyDeadline(call);
 
-      await expect(call).rejects.toThrow(`timed out after ${RESPONSE_BODY_DEADLINE_MS} ms`);
+      await expect(call).rejects.toHaveProperty('name', 'AbortError');
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('makes getAll throw once the deadline has passed', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.getAll(['chatSettings']);
       await runOutBodyDeadline(call);
 
-      await expect(call).rejects.toThrow(`timed out after ${RESPONSE_BODY_DEADLINE_MS} ms`);
+      await expect(call).rejects.toHaveProperty('name', 'AbortError');
+      expect(signalOfRequest().aborted).toBe(true);
+    });
+
+    it('cancels the request of an answer it never reads once the deadline has passed', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(503, stalledBody));
+
+      await expect(adapter.get('chatSettings')).rejects.toThrow(ConfigSyncError);
+      await vi.advanceTimersByTimeAsync(RESPONSE_BODY_DEADLINE_MS - 1);
+      expect(signalOfRequest().aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('makes get throw when the connection breaks while the body is read', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, brokenBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, brokenBody));
 
       await expect(adapter.get('chatSettings')).rejects.toBeInstanceOf(TypeError);
     });
 
     it('reports Backend not available for a sync answer that never finishes', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, stalledBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, stalledBody));
 
       const call = adapter.sync(CHANGES);
       await runOutBodyDeadline(call);
 
       await expect(call).resolves.toEqual(BACKEND_NOT_AVAILABLE);
+      expect(signalOfRequest().aborted).toBe(true);
     });
 
     it('reports Backend not available when the connection breaks while a sync answer is read', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, brokenBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, brokenBody));
 
       await expect(adapter.sync(CHANGES)).resolves.toEqual(BACKEND_NOT_AVAILABLE);
     });
 
     it('lets a sync answer that is not JSON through: that is a server defect, not an unreachable backend', async () => {
-      vi.mocked(fetch).mockResolvedValueOnce(answerWithBody(200, malformedBody));
+      vi.mocked(fetch).mockImplementationOnce(answerWithBody(200, malformedBody));
 
       await expect(adapter.sync(CHANGES)).rejects.toBeInstanceOf(SyntaxError);
     });
