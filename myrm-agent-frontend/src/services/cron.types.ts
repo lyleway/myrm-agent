@@ -147,7 +147,10 @@ export interface CronProgressStep {
 export type MonitorContractErrorCode = 'invalid_json_like_output';
 export type MonitorFailureCountSource = 'persistent_state' | 'memory_fallback';
 
-/** Why a run's delivery failed and where it was headed; `target` has its credentials masked. */
+/**
+ * Why a run's delivery failed and where it was headed. `target` masks a password and sensitive query values only,
+ * so a secret in the path (the token of a Feishu, Slack or Discord hook) stays as written.
+ */
 export interface ConnectorFailureDetail {
   category: string;
   target: string;
