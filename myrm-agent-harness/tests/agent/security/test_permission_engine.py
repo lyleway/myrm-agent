@@ -14,17 +14,16 @@ from myrm_agent_harness.agent.security.config import (
     from_config,
     parse_security_config,
     remote_exposed_permissions,
-    security_config_to_dict,
 )
 from myrm_agent_harness.agent.security.engine import (
     _resolve_target,
     check_capability,
-    disabled_permissions,
     evaluate,
     evaluate_tool_call,
     merge,
 )
 from myrm_agent_harness.agent.security.path_rules import check_tool_path_policy
+from myrm_agent_harness.agent.security.restrictions import disabled_permissions, restriction_layer
 from myrm_agent_harness.agent.security.types import (
     DEFAULT_CAPABILITIES,
     DEFAULT_RULESET,
@@ -444,17 +443,22 @@ class TestEvaluateToolCall:
 class TestDisabledPermissions:
     def test_denied_by_capability(self) -> None:
         caps = frozenset({Capability("file_read", "*")})
-        result = disabled_permissions(["file_read", "shell_exec"], DEFAULT_RULESET, caps)
+        result = disabled_permissions(["file_read", "shell_exec"], SecurityConfig(capabilities=caps))
         assert "shell_exec" in result
 
     def test_denied_by_ruleset(self) -> None:
         ruleset = (PermissionRule("shell_exec", "*", PermissionAction.DENY),)
-        result = disabled_permissions(["shell_exec"], ruleset)
+        result = disabled_permissions(["shell_exec"], SecurityConfig(ruleset=ruleset))
         assert "shell_exec" in result
 
     def test_allowed_not_in_result(self) -> None:
-        result = disabled_permissions(["file_read"], DEFAULT_RULESET)
+        result = disabled_permissions(["file_read"], SecurityConfig(ruleset=DEFAULT_RULESET))
         assert "file_read" not in result
+
+    def test_denied_by_a_restriction_layer(self) -> None:
+        layer = restriction_layer((PermissionRule("shell_exec", "*", PermissionAction.DENY),))
+        result = disabled_permissions(["shell_exec", "file_read"], SecurityConfig(restrictions=(layer,)))
+        assert result == frozenset({"shell_exec"})
 
 
 class TestParseSecurityConfigDomainHitl:
@@ -651,16 +655,6 @@ class TestRiskClassificationIntegration:
 
 
 class TestSecurityConfigSerialization:
-    def test_security_config_to_dict_exports_permissions_and_yolo(self) -> None:
-        config = SecurityConfig(
-            ruleset=(PermissionRule(permission="shell_exec", pattern="*", action=PermissionAction.ASK),),
-            yolo_mode_enabled=True,
-        )
-        exported = security_config_to_dict(config)
-        assert exported["permissions"] == {"shell_exec": "ask"}
-        assert exported["yoloModeEnabled"] is True
-        assert exported["yolo_mode_enabled"] is True
-
     def test_remote_exposed_permissions_returns_deny_map(self) -> None:
         perms = remote_exposed_permissions()
         assert isinstance(perms, dict)

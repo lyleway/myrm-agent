@@ -77,20 +77,20 @@ def test_a_session_yolo_state_that_is_not_a_timestamp_and_a_positive_limit_grant
     assert overlay.apply(_CONFIGURED) == _CONFIGURED
 
 
-def test_a_learn_authoring_query_elevates_skill_manage() -> None:
+def test_a_learn_authoring_query_marks_the_turn_and_leaves_the_saved_permissions_as_they_are() -> None:
     overlay = build_security_overlay({}, _LEARN_QUERY)
+    saved: dict[str, object] = {"permissions": {"skill_manage": "deny"}}
 
     assert overlay.learn_authoring is True
-    config = overlay.apply({"permissions": {"skill_manage": "deny"}})
-    assert config == {"permissions": {"skill_manage": "ask"}}
+    assert overlay.apply(saved) is saved
 
 
-def test_a_learn_authoring_query_made_of_text_blocks_elevates_skill_manage() -> None:
+def test_a_learn_authoring_query_made_of_text_blocks_marks_the_turn() -> None:
     assert build_security_overlay({}, [{"type": "text", "text": _LEARN_QUERY}]).learn_authoring is True
 
 
 @pytest.mark.parametrize("query", ["Summarize this document", "", [{"type": "image_url", "image_url": {"url": "x"}}]])
-def test_an_ordinary_query_elevates_nothing(query: object) -> None:
+def test_an_ordinary_query_marks_nothing(query: object) -> None:
     overlay = build_security_overlay({}, query)
 
     assert overlay.learn_authoring is False

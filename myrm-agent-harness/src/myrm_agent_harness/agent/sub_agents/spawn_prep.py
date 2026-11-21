@@ -2,7 +2,7 @@
 
 [INPUT]
 - sub_agents.types::SubagentConfig, ControlScope, WorkspacePolicy
-- agent.security.engine::file_write_disabled (POS: global file_write deny probe for readonly floor)
+- agent.security.restrictions::file_write_disabled (POS: global file_write deny probe for readonly floor, the restriction layers included)
 - sub_agents.spawn_capability::parent_capability_handle (POS: the handle the running (delegating) agent is bound to, if any)
 - core.security.ocap::CapabilityAction (POS: capability vocabulary: READ, WRITE, EXECUTE)
 
@@ -69,7 +69,7 @@ def coerce_spawn_readonly(parent_agent: object, readonly: bool) -> bool:
     parent_handle = parent_capability_handle()
     if parent_handle is not None and CapabilityAction.WRITE not in parent_handle.actions:
         return True
-    from myrm_agent_harness.agent.security.engine import file_write_disabled
+    from myrm_agent_harness.agent.security.restrictions import file_write_disabled
 
     agent_config = getattr(parent_agent, "config", None)
     return file_write_disabled(getattr(agent_config, "security_config", None))

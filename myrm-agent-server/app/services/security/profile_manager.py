@@ -7,13 +7,15 @@ Builtin profiles (readonly, workspace, full_access) are seeded on first access.
 [INPUT]
 - app.database.models.security::SecurityProfile (ORM model)
 - app.platform_utils::get_session_factory
+- myrm_agent_harness.agent.security.config::read_only_permissions (POS: security config parsing; pure functions)
 
 [OUTPUT]
 - ProfileManager: async CRUD service for security profiles
 
 [POS]
 Server-layer profile persistence and lifecycle management.
-Builtin/custom profile ``config_json`` permissions are normalized on save and API read.
+Builtin/custom profile ``config_json`` permissions are normalized on save and API read. The Read Only builtin takes
+its permissions from the framework's read-only session, so the profile and the chat preset deny the same things.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import uuid
 from datetime import datetime
 from typing import cast
 
+from myrm_agent_harness.agent.security.config import read_only_permissions
 from sqlalchemy import select, update
 
 from app.database.models.security import SecurityProfile
@@ -39,24 +42,7 @@ _BUILTIN_PROFILES: list[dict[str, object]] = [
         "description": "No file writes, no shell, no browser mutations. For research and analysis.",
         "config_json": {
             "capabilities": [{"permission": "*", "pattern": "*"}],
-            "permissions": {
-                "file_write": "deny",
-                "file_edit": "deny",
-                "file_delete": "deny",
-                "shell_exec": "deny",
-                "code_interpreter": "deny",
-                "browser_evaluate": "deny",
-                "browser_fill": "deny",
-                "browser_upload": "deny",
-                "browser_download": "deny",
-                "skill_manage": "deny",
-                "cron_manage": "deny",
-                "mcp_invoke": "ask",
-                "spawn_subagent": "allow",
-                "invoke_external_agent": "deny",
-                "knowledge_read": "allow",
-                "knowledge_write": "deny",
-            },
+            "permissions": read_only_permissions(),
             "autoModeEnabled": False,
             "yoloModeEnabled": False,
         },

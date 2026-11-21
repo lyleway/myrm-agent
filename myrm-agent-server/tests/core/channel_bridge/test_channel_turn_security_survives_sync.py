@@ -27,7 +27,7 @@ from .preamble_testkit import build_live_turn, inbound_message, minimal_user_con
 _LEARN_QUERY = '[/learn] The user wants you to learn a reusable skill\n2. Save it with the `skill_manage_tool` (action="save").'
 
 # What a user who saved a security setting has stored: any one key makes the whole config a stored one.
-_SAVED_CONFIGS = {
+_SAVED_CONFIGS: dict[str, dict[str, object]] = {
     "only_an_approval_window": {"approvalTimeoutSeconds": 120},
     "hosted_onboarding": {"autoReviewEnabled": True, "autoReviewModel": "cheap-model"},
     "yolo_flag_off": {"yoloModeEnabled": False, "permissions": {"*": "ask"}},
@@ -93,7 +93,11 @@ async def test_a_session_yolo_still_expires_after_its_time_limit() -> None:
 
 
 async def test_a_session_yolo_replaces_a_stored_timer_that_has_run_out() -> None:
-    expired = {"yolo_mode_enabled": True, "yolo_mode_enabled_at": time.time() - 7200, "yolo_mode_timeout": 60}
+    expired: dict[str, object] = {
+        "yolo_mode_enabled": True,
+        "yolo_mode_enabled_at": time.time() - 7200,
+        "yolo_mode_timeout": 60,
+    }
 
     wrapper = await _reloaded_wrapper(_message(yolo_state=(time.time(), 600)), expired)
 
@@ -107,13 +111,13 @@ async def test_a_delegated_approval_window_outlasts_the_reload_of_a_saved_config
     assert _enforced(wrapper).approval_timeout_seconds == 3600
 
 
-async def test_a_learn_turn_keeps_skill_manage_askable_over_a_saved_deny() -> None:
+async def test_a_learn_turn_does_not_reopen_a_saved_denial_of_skill_manage() -> None:
     saved: dict[str, object] = {"permissions": {"skill_manage": "deny"}}
 
     wrapper = await _reloaded_wrapper(_message(), saved, query=_LEARN_QUERY)
 
     action, _reason = evaluate_tool_call("skill_manage", {"action": "save", "name": "demo"}, _enforced(wrapper))
-    assert action is PermissionAction.ASK
+    assert action is PermissionAction.DENY
 
 
 async def test_an_ordinary_turn_enforces_the_saved_config_as_it_is() -> None:

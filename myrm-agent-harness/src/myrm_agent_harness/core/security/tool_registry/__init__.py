@@ -12,6 +12,7 @@ preserving the flat-module import surface for all consumers.
 [OUTPUT]
 - BUILTIN_TOOL_NAMES / TOOL_SAFETY_METADATA — tool safety SSOT
 - PARENT_BOUND_WRITER_TOOLS — writers over the running agent's own todo file, goal and kanban board
+- PERSISTENT_STATE_MUTATOR_TOOLS — the memory, kanban-orchestrator and skill-install mutators that a read-only session denies and the untrusted ingress fence fences (``persistent_state_tools.py``)
 - TOOL_PERMISSION_MAP / AUTO_APPROVED_BUILTIN_TOOLS / EXPLICIT_MCP_FALLBACK_TOOLS / DYNAMICALLY_RESOLVED_TOOL_NAMES / RULESET_COVERAGE_WHITELIST — governance audit declarations
 - SafetyMetadata / MCPAnnotations / resolve_safety_metadata / resolve_permission_type
 - register_ptc_safety_metadata / get_ptc_safety_metadata / compute_canonical_args_hash
@@ -23,6 +24,7 @@ preserving the flat-module import surface for all consumers.
 """
 
 from .file_args import PATHS_ALIAS_KEYS, READ_RANGE_PATTERN, coerce_path_list, host_file_paths, is_url, strip_read_range
+from .persistent_state_tools import PERSISTENT_STATE_MUTATOR_TOOLS
 from .registry import (
     _PTC_SAFETY_METADATA,
     _PTC_TOOL_FLAT_INDEX,
@@ -63,6 +65,7 @@ __all__ = [
     "DYNAMICALLY_RESOLVED_TOOL_NAMES",
     "EXPLICIT_MCP_FALLBACK_TOOLS",
     "PARENT_BOUND_WRITER_TOOLS",
+    "PERSISTENT_STATE_MUTATOR_TOOLS",
     "RULESET_COVERAGE_WHITELIST",
     "TOOL_CANONICAL_PARAMS",
     "TOOL_GROUP_MAP",

@@ -72,7 +72,7 @@
 
 各文件的职责、I/O/P 契约与子目录索引见 [_ARCH.md](_ARCH.md)（SSOT，随代码同步），本文不重复维护清单。实现分布在四处：
 
-- `agent/security/`：与 agent 中间件编排绑定的部分（`engine.py`、`checks.py`、`config.py`、`approval_flow.py`、`channel_presets.py`、`session_access.py`、`workspace_trust/`、`guards/` 等）。其中 `detection/`、`redact.py`、`path_security.py`、`tool_registry.py`、`audit.py`、`types.py` 是 `core/security/` 的再导出，保持 `agent.security.*` 导入路径稳定。
+- `agent/security/`：与 agent 中间件编排绑定的部分（`engine.py`、`checks.py`、`config.py`、`restrictions.py`、`approval_flow.py`、`channel_presets.py`、`agent_overrides.py`、`session_access.py`、`workspace_trust/`、`guards/` 等）。其中 `detection/`、`redact.py`、`path_security.py`、`tool_registry.py`、`audit.py`、`types.py` 是 `core/security/` 的再导出，保持 `agent.security.*` 导入路径稳定。
 - `core/security/`：规范实现（`detection/`、`redact/`、`path/`、`tool_registry/`、`safe_exec.py`、`ephemeral_credentials/`、`http/`、`guards/ssrf.py` 等），见 [core/security/_ARCH.md](../../core/security/_ARCH.md)。
 - `toolkits/code_execution/security/`：沙箱侧验证（模块/环境变量黑名单、Shell Command Analyzer、`validator.py`、`archive_sanitizer.py`），见 [其 _ARCH.md](../../toolkits/code_execution/security/_ARCH.md)。
 - `agent/middlewares/approval/`、`agent/middlewares/security/`：审批中间件（`middleware.py`、`batch_processor/`、`helpers.py`）与安全护栏中间件（`security_guardrail_middleware.py`）。
@@ -261,7 +261,7 @@ BLOCK → DENY（硬拒绝），ESCALATE → ASK（提升审批）。保留 `|`,
 
 ### 3.2.3 用户会话亲和性凭证继承与传递机制
 
-**位置**：`core/security/types.py` (`EphemeralUserCredential`, `user_credentials_ctx`) + `core/security/safe_exec.py` (`credential_env_overrides`) + `toolkits/code_execution/executors/local/_command_env.py` (`build_command_env` / `collect_command_credentials`) + `agent/meta_tools/bash/_executor/context_mixin.py`（skill 检测 → `allowed_credential_issuers`）
+**位置**：`core/security/types/credentials.py` (`EphemeralUserCredential`, `user_credentials_ctx`) + `core/security/safe_exec.py` (`credential_env_overrides`) + `toolkits/code_execution/executors/local/_command_env.py` (`build_command_env` / `collect_command_credentials`) + `agent/meta_tools/bash/_executor/context_mixin.py`（skill 检测 → `allowed_credential_issuers`）
 
 为了实现类似阿里悟空“紧箍咒”系统的平台级用户安全权限继承，避免 Agent 使用全局默认权限对外部系统（如 Feishu, GitHub, DingTalk, Google Workspace）进行未授权的提权或越权访问，本系统实现了基于异步上下文变量的临时凭证继承传递链。
 
@@ -360,7 +360,7 @@ class TaintLabel(StrEnum):
 
 ## 三-B、Layer 2.5 — Path Policy（路径安全策略）
 
-**位置**：`core/security/types.py`（`PathPolicy` / `AccessRoot`，`agent/security/types.py` 再导出）+ `checks.py`（`check_path_policy` 检查逻辑）
+**位置**：`core/security/types/paths.py`（`PathPolicy` / `AccessRoot`，`agent/security/types.py` 再导出）+ `checks.py`（`check_path_policy` 检查逻辑）
 
 ### 设计动机
 
@@ -526,6 +526,15 @@ def evaluate(permission, target, *rulesets):
     return match or PermissionRule(permission, "*", PermissionAction.ASK)  # 无匹配则 ASK
 ```
 
+### 限制层
+
+`SecurityConfig.restrictions` 是一组只能收紧、不能放宽的规则层。会话预设（accept_edits / explore）、渠道预设、Agent 覆盖与远程准入各自把自己的规则做成一层（`restrictions.restriction_layer(rules)`：全放行的底，加上这些规则），引擎把主规则集与每一层各判一遍，**取最严格的裁决**（DENY > ASK > ALLOW）。一层只在点名某个权限的地方才有话说，它的裁决只会把 allow 抬到 ask、把 ask 抬到 deny，放不开主规则集（用户保存的规则）或别的层的任何一条；层的先后不影响结论。
+
+- 配置里写作 `restrictions: [{权限: 动作}, ...]`，每项是一张权限表，格式同 `permissions`。`parse_security_config` 逐层解析；读不出的层（不是权限表、动作不是 allow / ask / deny、`restrictions` 本身不是列表）变成「拒绝一切」的层并记 WARNING，不是丢掉——丢掉就等于解除了没人决定解除的限制。`config.with_restriction(raw, permissions)` 在配置字典的副本上追加一层，已有的层留在前面。
+- 只读分类器把 ASK 放行为 ALLOW 的条件：处在最高严重度的每一条裁决都留有余地。来自模式规则的 ASK（`command_rules.judge_command`）不留余地，不论它来自主规则集还是某一层。
+- 层只参与规则裁决；能力围栏、路径分区、URL 检查等前置阶段与层无关。
+- `restrictions.disabled_permissions(permissions, config)` 返回 config 无条件禁止的权限类型（能力围栏不授予，或主规则集、任一层以 `*` 模式 DENY）；`file_write_disabled(config)` 是「策略是否无条件禁止 `file_write`」的唯一答案，spawn 的只读下限与 CompletionGuard 的「能否保存文件」探针都读它。
+
 ### 默认规则集
 
 ```python
@@ -593,12 +602,12 @@ Step 2b1:  URL Syntax Check → 网络工具含 `://` 的网址没有规范写�
 Step 2b2:  Domain Blocklist → 网络工具任一 URL 的 hostname 命中 network_blocklist → DENY（无条件，优先于 Step 2c）
 Step 2c:   Domain HITL → 浏览器导航的域名不在 allowlist → ASK（仅 domain_hitl_enabled=True 时）
 Step 3:    Path Policy → forbidden → DENY, allowed/workspace → pass (file_read/file_write only)
-Step 4:    Permission Ruleset + Target Resolution → last-match-wins
+Step 4:    Permission Ruleset + Target Resolution → last-match-wins；主规则集与每个限制层（见「限制层」）各判一遍，最严格的裁决生效
 Step 5:    Fallback → ASK
 Step 6:    Transcript Classifier → 当 auto_mode_enabled 时，对所有 engine 返回 ASK 的操作进行 Reasoning-Blind 分类 → ALLOW / DENY / UNCERTAIN (回退到 ASK)
 ```
 
-**Step 2a.5 — Command Denylist**：用户可在 WebUI 全局安全设置或 Per-Agent 安全配置中定义 fnmatch glob 模式列表（如 `git push --force*`、`kubectl delete*`、`*DROP DATABASE*`）。匹配采用大小写不敏感的 `fnmatch`，仅对 `shell_exec` 和 `code_interpreter` 权限类型生效。命中则 **DENY**，YOLO 模式也无法绕过（因为 `batch_processor.evaluate_tool_batch` 在 YOLO 路径仍调用 `evaluate_tool_call` 并尊重 DENY）。全局和 Agent 级 denylist 通过 `channel_presets._merge_user_and_agent` 取并集合并。
+**Step 2a.5 — Command Denylist**：用户可在 WebUI 全局安全设置或 Per-Agent 安全配置中定义 fnmatch glob 模式列表（如 `git push --force*`、`kubectl delete*`、`*DROP DATABASE*`）。匹配采用大小写不敏感的 `fnmatch`，仅对 `shell_exec` 和 `code_interpreter` 权限类型生效。命中则 **DENY**，YOLO 模式也无法绕过（因为 `batch_processor.evaluate_tool_batch` 在 YOLO 路径仍调用 `evaluate_tool_call` 并尊重 DENY）。全局和 Agent 级 denylist 通过 `agent_overrides.merge_agent_overrides` 取并集合并。
 
 **Step 2b1 — URL Syntax Check**：对 `web_fetch`、`net_fetch`、`browser_navigate`，调用里任何含 `://` 的网址（参数 `url`，或 `urls` 中的每一项，也接受 JSON 数组文本）若没有规范写法（含反斜杠、制表符、换行等分歧字符，百分号编码的主机，畸形 authority 或端口，非法主机），直接 **DENY**，理由为 `URL not allowed: …`：这样的网址里，列表读出的主机与客户端拨的主机可能不是同一个，没有任何名单能可靠判定它。不含 `://` 的字符串（裸 `host:port`）不在此列，由 Step 2b2 与规则按原文处理。
 
@@ -628,9 +637,10 @@ Step 6:    Transcript Classifier → 当 auto_mode_enabled 时，对所有 engin
 
 - `merge(*rulesets)` — 按顺序拼接，后面的优先级更高
 - `from_config(raw)` — 支持两种格式：简单 `{"shell_exec": "ask"}` 和嵌套 `{"file_read": {"*.env": "ask"}}`
-- `parse_security_config(raw)` — 解析完整配置（capabilities + permissions + timeout），用户规则合并到默认规则之后
+- `parse_security_config(raw)` — 解析完整配置（capabilities + permissions + restrictions + timeout），用户规则合并到默认规则之后，`restrictions` 逐层解析成限制层
+- `with_restriction(raw, permissions)` — 在配置字典的副本上追加一层限制层
 - `normalize_delegate_permissions(raw)` — 将存储中的 `delegate_agent` 权限键 fan-out 为 `spawn_subagent` + `invoke_external_agent`；在 `parse_security_config()`、server `ProfileManager` save/read API 路径调用
-- `disabled_permissions(permissions, ruleset, capabilities)` — 返回被无条件禁止的权限类型集合，用于在 LLM 调用前剥离不可用的工具
+- `disabled_permissions(permissions, config)` — 返回被无条件禁止的权限类型集合（`restrictions.py`，主规则集与限制层都读），用于在 LLM 调用前剥离不可用的工具
 
 ---
 
@@ -1226,14 +1236,16 @@ _LOCAL_BROWSER_RELAXATION = (
 
 ```
 1. 基线：DEFAULT_RULESET；local_mode=True 时再叠加本地模式放宽规则
-2. 用户自定义规则（来自 UI SecurityPolicySection）
-3. Agent 级覆盖（每 Agent 安全策略，见十五）
-4. 渠道预设规则（最高优先级 — 渠道限制不可被用户配置绕过）
+2. 用户自定义规则（来自 UI SecurityPolicySection）——请求带来的限制层（会话预设、远程准入）随它而行
+3. Agent 级覆盖（每 Agent 安全策略，见十五）——Agent 自己的规则是一个限制层
+4. 渠道预设规则——一个限制层（渠道限制不可被用户配置绕过）
 ```
+
+主规则集与每个限制层各自独立裁决、取最严格的结论（见第四节「限制层」），所以没有哪一层放得开另一层的拒绝或询问。
 
 能力集合并策略：正向能力取交集（工具必须同时被预设和用户配置授权），否定能力从预设中始终保留（代表硬性渠道约束）。
 
-**请求级覆盖层的叠加**：服务端的会话预设与远程准入把自己的权限键叠在已保存的权限表之上，叠加用 `config.layer_permissions`。权限表的键序就是规则序（`from_config`），后者优先，所以叠加层的键排在已保存的键之后，并替换同名键的值；已保存的拒绝一律最终有效——具名键的 `deny` 既不会被叠加层的通配 allow 解开，也不会被叠加层给同一权限写的更松的值解开；叠加层没点名的、含 deny 的模式表同样排在叠加层之后；通配键（如白名单用户的 `*: deny`）保持原位。只读会话预设的权限键由 `read_only_permissions()` 给出：`SecurityConfig.readonly()` 的规则加上 `knowledge_write`、`desktop_control` 两项拒绝（`readonly()` 的通配 allow 会放开这两类写操作）。
+**请求级覆盖层的叠加**：服务端的会话预设与远程准入把自己的权限键作为一个限制层追加到已保存的配置上（`config.with_restriction`），不改写已保存的权限表。已保存的拒绝与询问因此一律最终有效：限制层既解不开具名键的 `deny`，也解不开通配键（如白名单用户的 `*: deny`），只在点名某个权限的地方把裁决抬得更严。只读会话预设的权限键由 `read_only_permissions()` 给出：`SecurityConfig.readonly()` 的规则（去掉它的通配 allow：限制层自带全放行的底，写进权限表的通配会把默认规则会询问的操作重新放开），加上 `knowledge_write`、`desktop_control` 两项拒绝，以及 `PERSISTENT_STATE_MUTATOR_TOOLS` 里的每个工具（记忆写入、看板编排改动、技能安装；它们各是自己名下的权限类型，没有 `readonly()` 的规则点名它们，不可信入口栅栏用的是同一份清单）。
 
 ---
 
@@ -1498,9 +1510,9 @@ else:
 
 ```
 用户全局 securityConfig
-        ↓ _merge_user_and_agent()
-Agent security_overrides
-        ↓ _merge_capabilities() + merge()
+        ↓ merge_agent_overrides()
+Agent security_overrides（其规则成为一个限制层）
+        ↓ _merge_capabilities() + 渠道预设规则（再一个限制层）
 渠道 Preset 硬限制
         ↓ (Cron: 声明式覆盖)
 最终 SecurityConfig
@@ -1515,7 +1527,8 @@ Agent security_overrides
 | network_blocklist | 并集（Agent 可追加封禁域名） | URL hostname 硬拒绝（DENY，先于 domain HITL） |
 | domain_hitl_enabled | OR（任一方启用则启用） | 浏览器导航域名级审批开关 |
 | injection_policy | OR-严格（任一方 `fail_closed` 则 `fail_closed`） | Prompt injection 策略只能升级不能降级 |
-| ruleset | 只把 Agent 自己新增的规则（排在基线之后的部分）merge 到用户上（Agent 优先级更高），且每条规则的动作不得比用户规则对该规则自身（权限, 模式）的评估结果更宽松（天花板：只收紧，不放宽；通配权限的规则如 `*: allow` 只与用户的通配结果比较）；Agent 配置里与用户相同的基线副本不再追加；没有用户配置时原样采用 Agent 配置 | last-match-wins |
+| ruleset | 用户的规则集原样保留；Agent 自己新增的规则（排在基线之后的部分）成为一个限制层，与用户规则集各自裁决、取最严格的结论：Agent 的规则只能把裁决从 allow 抬到 ask 再抬到 deny，不能放宽（`*: allow` 这类通配规则同样只升不降）；Agent 配置里与用户相同的基线副本不再追加；没有用户配置时原样采用 Agent 配置 | last-match-wins（层内），层间取最严 |
+| restrictions | 用户的层、Agent 配置自带的层、Agent 自己规则的那一层依次并列 | 限制只增不减 |
 | timeout | Agent 覆盖用户（如果非默认值） | Agent 特化 |
 
 ### 数据流
@@ -1526,7 +1539,7 @@ Agent security_overrides
 Web API: general_agent.py → agent.security_overrides → GeneralAgentParams.agent_security_raw
 Channel: agent_executor.py → _AgentOverrides.security_overrides → GeneralAgentParams.agent_security_raw
                                     ↓
-GeneralAgent → build_channel_security_config(agent_security_raw=...) → _merge_user_and_agent()
+GeneralAgent → build_channel_security_config(agent_security_raw=...) → merge_agent_overrides()
 ```
 
 ---

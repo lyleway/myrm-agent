@@ -1,7 +1,7 @@
 """Permission Engine — wildcard-based rule evaluation for tool-level access control.
 
 [INPUT]
-  PermissionRuleset, SecurityConfig, DEFAULT_CAPABILITIES
+  PermissionRuleset, SecurityConfig (its restrictions: the layers judged beside the ruleset)
   approval_reason::ApprovalReasonCode, CodedReason (POS: the unlisted-domain ASK carries a stable code)
   core.security.domain_match::host_matches (POS: one reading of the domain entries of a network list)
   judged_paths::judged_file_paths (POS: every file a file tool may open: the typed ones and the respelling of a read)
@@ -13,17 +13,16 @@
 - evaluate(): resolve action for a (permission, target) pair via last-match-wins
 - evaluate_tool_call(): deterministic evaluation (Layers 1–5)
   (capability → shell_command_analyzer → command_denylist → URL scheme check → URL syntax check
-   → domain blocklist → domain HITL → path_policy → target-aware ruleset → risk_classifier fallback).
+   → domain blocklist → domain HITL → path_policy → target-aware ruleset and restriction layers → risk_classifier fallback).
   A URL with no canonical form is denied before any list reads its host; the blocklist and the rule targets
   cover every URL a network tool names; a domain outside the allowlist asks only when the browser navigates there,
   with a CodedReason.
   A command-bearing tool is judged command by command (see command_rules.py) when a
   pattern rule could tell the commands of the line apart. A file is judged by the rules that name a place as typed
-  and where it lies, so no spelling of it dodges them.
+  and where it lies, so no spelling of it dodges them. The ruleset and each restriction layer are judged on their
+  own and the strictest verdict stands, so no layer can loosen another.
 - check_capability(): test (permission, target) against a CapabilitySet
 - merge(): combine multiple rulesets
-- disabled_permissions(): find unconditionally denied permission types
-- file_write_disabled(): whether a SecurityConfig unconditionally denies ``file_write``
 - extract_url_domains(): the hostnames of a browser navigation, which the person can approve per domain
 
 [POS]
@@ -51,7 +50,6 @@ from myrm_agent_harness.agent.security.path_rules import (
     check_tool_path_policy,
 )
 from myrm_agent_harness.agent.security.types import (
-    DEFAULT_CAPABILITIES,
     CapabilitySet,
     PermissionAction,
     PermissionRule,
@@ -243,6 +241,22 @@ def _rule_decision(
     return resolve(target).action, True
 
 
+def _ruleset_decisions(
+    permission: str,
+    targets: tuple[str, ...],
+    places: tuple[str, ...],
+    ruleset: PermissionRuleset,
+    tool_name: str | None,
+) -> list[tuple[PermissionAction, bool]]:
+    """What one ruleset says about every target of a call and about each canonical place of its files."""
+    decisions = [_rule_decision(permission, target, ruleset, tool_name) for target in targets]
+    for place in places:
+        rule = _governing_rule(permission, place, ruleset, tool_name)
+        if rule.pattern != "*":
+            decisions.append((rule.action, True))
+    return decisions
+
+
 def evaluate_tool_call(
     permission: str,
     tool_input: dict[str, object],
@@ -271,8 +285,8 @@ def evaluate_tool_call(
     2b2. Domain Blocklist → any URL of a network tool on the blocklist → DENY
     2c. Domain HITL → browser navigation to a domain not in the allowlist → ASK (when enabled)
     3. Path Policy → forbidden/allowed/workspace check (file_read/file_write); a shell command's write to a protected instruction file → ASK
-    4. Permission ruleset with target resolution → last-match-wins; a file is judged as typed and where it lies
-       (``canonical_forms``), the strictest verdict standing
+    4. Permission ruleset and each restriction layer with target resolution → last-match-wins within each; a file
+       is judged as typed and where it lies (``canonical_forms``), the strictest verdict standing
     5. Risk classifier fallback → SAFE shell commands → ALLOW (shell_exec/code_interpreter)
     6. Fallback → ASK
 
@@ -307,15 +321,18 @@ def evaluate_tool_call(
         return block_action, block_reason
 
     targets = _resolve_targets(permission, tool_input, tool_name=tool_name, workspace_root=workspace_root)
-    decisions = [_rule_decision(permission, target, config.ruleset, tool_name) for target in targets]
-    if permission in PATH_CHECKED_PERMISSIONS:
-        # A rule that names a place matches the text it is given, yet a call can type one file in many ways, so the
-        # rules judge where the file lies too. A blanket rule names no place and has already judged the typed text.
-        for place in canonical_forms(targets, workspace_root):
-            rule = _governing_rule(permission, place, config.ruleset, tool_name)
-            if rule.pattern != "*":
-                decisions.append((rule.action, True))
-    result_action, classifier_may_allow = max(decisions, key=lambda decision: ACTION_SEVERITY[decision[0]])
+    # A rule that names a place matches the text it is given, yet a call can type one file in many ways, so the
+    # rules judge where the file lies too. A blanket rule names no place and has already judged the typed text.
+    places = canonical_forms(targets, workspace_root) if permission in PATH_CHECKED_PERMISSIONS else ()
+    decisions = [
+        decision
+        for ruleset in (config.ruleset, *config.restrictions)
+        for decision in _ruleset_decisions(permission, targets, places, ruleset, tool_name)
+    ]
+    result_action = max((action for action, _ in decisions), key=ACTION_SEVERITY.__getitem__)
+    # The classifier may relax an ASK only when every verdict at that severity leaves it room to: an ASK from a
+    # pattern rule never does, whichever ruleset it came from.
+    classifier_may_allow = all(may_allow for action, may_allow in decisions if action == result_action)
 
     # Hardline rule: An explicit DENY from user/policy ruleset must never be weakened to ASK
     if result_action == PermissionAction.DENY:
@@ -355,41 +372,6 @@ def merge(*rulesets: PermissionRuleset) -> PermissionRuleset:
     for ruleset in rulesets:
         combined.extend(ruleset)
     return tuple(combined)
-
-
-def disabled_permissions(
-    permissions: list[str],
-    ruleset: PermissionRuleset,
-    capabilities: CapabilitySet = DEFAULT_CAPABILITIES,
-) -> frozenset[str]:
-    """Return permission types that are unconditionally denied.
-
-    A permission is disabled if:
-    - It fails the capability fence (not granted or negatively excluded), OR
-    - Its ruleset evaluation yields DENY with pattern ``"*"``
-
-    Useful for stripping denied tools from the LLM tool list before invocation.
-    Callers should pass permission types (e.g. ``shell_exec``), not tool names.
-    """
-    result: set[str] = set()
-    for perm in permissions:
-        if not check_capability(perm, "*", capabilities):
-            result.add(perm)
-            continue
-        rule = evaluate(perm, "*", ruleset)
-        if rule.action == PermissionAction.DENY:
-            result.add(perm)
-    return frozenset(result)
-
-
-def file_write_disabled(config: SecurityConfig | None) -> bool:
-    """Whether the policy unconditionally denies ``file_write``: a run under it cannot save a file however it asks.
-
-    ``None`` and any object that is not a ``SecurityConfig`` carry no policy to read, so they deny nothing.
-    """
-    if not isinstance(config, SecurityConfig):
-        return False
-    return "file_write" in disabled_permissions(["file_write"], config.ruleset, config.capabilities)
 
 
 def extract_url_domains(permission: str, tool_input: dict[str, object]) -> tuple[str, ...]:

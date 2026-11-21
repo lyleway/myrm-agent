@@ -28,10 +28,11 @@ if TYPE_CHECKING:
     from .config import from_config, parse_security_config
     from .detection.pseudonym_store import PseudonymStore, get_pseudonym_store
     from .detection.pseudonymizer import PIIItem, PseudonymRestorer, pseudonymize_text
-    from .engine import check_capability, disabled_permissions, evaluate, evaluate_tool_call, extract_url_domains, merge
+    from .engine import check_capability, evaluate, evaluate_tool_call, extract_url_domains, merge
     from .guards.privacy_tracker import get_pending_privacy_event, get_privacy_tracker, reset_privacy_tracker
     from .message_filtering import FilterConfig, FilterContext, MessageFilter, MessageFilterPipeline, SystemRoleFilter
     from .redact import RedactingFormatter, redact_sensitive_text
+    from .restrictions import disabled_permissions, restriction_layer
     from .script_operand_verifier import (
         compute_file_content_digest,
         extract_script_file_operand,
@@ -106,8 +107,10 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "evaluate_tool_call": (".engine", "evaluate_tool_call"),
     "check_capability": (".engine", "check_capability"),
     "merge": (".engine", "merge"),
-    "disabled_permissions": (".engine", "disabled_permissions"),
     "extract_url_domains": (".engine", "extract_url_domains"),
+    # restrictions.py
+    "disabled_permissions": (".restrictions", "disabled_permissions"),
+    "restriction_layer": (".restrictions", "restriction_layer"),
     # config.py
     "parse_security_config": (".config", "parse_security_config"),
     "from_config": (".config", "from_config"),
@@ -222,6 +225,7 @@ __all__ = [
     "redact_sensitive_text",
     "reset_audit_log",
     "reset_privacy_tracker",
+    "restriction_layer",
     "sanitize_identity_id",
     "user_credentials_ctx",
     "verify_script_operand_integrity",

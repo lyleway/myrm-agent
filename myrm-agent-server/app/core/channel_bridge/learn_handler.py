@@ -10,11 +10,10 @@ existing `skill_manage_tool` tool.
 [OUTPUT]
 - ChannelLearnCommandHandler: LearnCommandHandler protocol implementation
 - parse_learn_slash_args / rewrite_learn_query_if_needed: raw `/learn` detection and SSOT prompt rewrite (WebUI + channel)
-- elevate_skill_manage_permission: skill_manage ASK elevation for learn authoring (applied per turn by SecurityOverlaySpec)
 - learn_authoring_prompt_text / is_learn_skill_authoring_prompt: force_skill_manage gate helpers
 
 [POS]
-Business-layer /learn SSOT. Builds the learn authoring prompt, rewrites raw WebUI slash input before agent execution, and aligns skill_manage permissions for this turn only.
+Business-layer /learn SSOT. Builds the learn authoring prompt and rewrites raw WebUI slash input before agent execution.
 """
 
 from __future__ import annotations
@@ -192,22 +191,6 @@ def learn_authoring_prompt_text(query: object) -> str | None:
         joined = "\n".join(parts)
         return joined if is_learn_skill_authoring_prompt(joined) else None
     return None
-
-
-def elevate_skill_manage_permission(security_config: dict[str, object] | None) -> dict[str, object]:
-    """Return *security_config* with ``skill_manage`` set to ASK.
-
-    ``force_skill_manage`` mounts the write backend of a /learn authoring turn even when a session preset such as
-    ``explore`` denies ``skill_manage``; ``SecurityOverlaySpec`` applies this for that turn only.
-    """
-    merged = dict(security_config) if security_config else {}
-    raw_permissions = merged.get("permissions")
-    permissions: dict[str, object] = (
-        {str(key): value for key, value in raw_permissions.items()} if isinstance(raw_permissions, dict) else {}
-    )
-    permissions["skill_manage"] = "ask"
-    merged["permissions"] = permissions
-    return merged
 
 
 def _detect_input_type(user_args: str) -> _InputType:

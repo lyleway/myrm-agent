@@ -15,7 +15,7 @@ business surfaces that need to surface failover events (SSE, log sinks,
 telemetry pipelines). The framework stays free of any transport-specific
 concept — it only knows how to invoke a ``FailoverEmitter`` if one has been
 bound to the current async context. This mirrors ``user_credentials_ctx`` in
-``core/security/types.py`` and preserves strict harness/server boundary.
+``core/security/types/credentials.py`` and preserves strict harness/server boundary.
 """
 
 from __future__ import annotations

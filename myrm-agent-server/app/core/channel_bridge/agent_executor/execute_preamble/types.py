@@ -63,8 +63,9 @@ def build_security_overlay(metadata: Mapping[str, object], query: object) -> Sec
 
     A turn that carries ``METADATA_APPROVAL_WINDOW_SECONDS_KEY`` (a delegated run, whose requester is not watching the
     chat) waits that long for a tool approval instead of the configured window; the harness bounds the value. The
-    session YOLO state the router put on the message becomes a YOLO grant, and a ``/learn`` authoring query elevates
-    ``skill_manage``. The agent keeps the overlay so every per-turn reload of the saved config layers it back.
+    session YOLO state the router put on the message becomes a YOLO grant, and a ``/learn`` authoring query marks the
+    turn, so a read-only preset leaves ``skill_manage`` to the saved config. The agent keeps the overlay so every
+    per-turn reload of the saved config layers it back.
     """
     return SecurityOverlaySpec(
         approval_window_seconds=_whole_seconds(metadata.get(METADATA_APPROVAL_WINDOW_SECONDS_KEY)),

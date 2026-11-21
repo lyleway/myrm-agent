@@ -1,13 +1,13 @@
 """Apply remote-exposed admission overlays to agent SecurityConfig JSON.
 
 [POS]
-Lay harness remote_exposed permissions over the agent security config: a permission they name takes their
-value, and a saved denial always stays final.
+Append harness remote_exposed permissions to the agent security config as one restriction layer: the stricter
+verdict of the saved permissions and that layer stands, so a saved denial is never reopened.
 """
 
 from __future__ import annotations
 
-from myrm_agent_harness.agent.security.config import layer_permissions, remote_exposed_permissions
+from myrm_agent_harness.agent.security.config import remote_exposed_permissions, with_restriction
 from myrm_agent_harness.agent.security.trust_context import RequestTrustContext
 
 
@@ -30,11 +30,7 @@ def merge_remote_security_overlay(
     if not ctx.restrict_destructive_tools:
         return result if device_policy else raw
 
-    permissions_raw = result.get("permissions")
-    result["permissions"] = layer_permissions(
-        permissions_raw if isinstance(permissions_raw, dict) else {},
-        remote_exposed_permissions(),
-    )
+    result = with_restriction(result, remote_exposed_permissions())
     result["yoloModeEnabled"] = False
     result["yolo_mode_enabled"] = False
     result["requestTrustContext"] = {

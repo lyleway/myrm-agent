@@ -1,15 +1,15 @@
 """Explicit rules outrank the baseline ruleset.
 
-The agent ceiling judges only the rules an agent itself added, and the local-mode browser relaxation is a layer
-of the baseline, so a saved or agent rule that names the same permission always outranks it.
+The agent's restriction layer holds only the rules an agent itself added, and the local-mode browser relaxation is a
+layer of the baseline, so a saved or agent rule that names the same permission always outranks it.
 """
 
 from __future__ import annotations
 
 from myrm_agent_harness.agent.security.channel_presets import build_channel_security_config
 from myrm_agent_harness.agent.security.config import parse_security_config
-from myrm_agent_harness.agent.security.engine import evaluate
 from myrm_agent_harness.agent.security.types import PermissionAction, PermissionRule
+from tests.support.security_verdict import verdict
 
 ALLOW, ASK, DENY = PermissionAction.ALLOW, PermissionAction.ASK, PermissionAction.DENY
 
@@ -26,10 +26,10 @@ def _verdict(
     local: bool = False,
 ) -> PermissionAction:
     config = build_channel_security_config("web_chat", user, agent_security_raw=agent, local_mode=local)
-    return evaluate(permission, target, config.ruleset).action
+    return verdict(config, permission, target)
 
 
-class TestAgentCeilingJudgesOnlyTheAgentsOwnRules:
+class TestAgentLayerHoldsOnlyTheAgentsOwnRules:
     def test_an_agent_config_without_rules_keeps_every_saved_denial(self) -> None:
         user: dict[str, object] = {"permissions": {"file_edit": "deny", "shell_exec": "deny"}}
         assert _verdict("file_edit", user=user, agent=_AGENT_WITHOUT_RULES) is DENY

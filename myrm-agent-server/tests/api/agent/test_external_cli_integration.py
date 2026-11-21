@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +13,20 @@ from fastapi.testclient import TestClient
 
 from tests.api.agent.test_capability_gap_integration import _collect_agent_stream
 from tests.api.agent.utils import check_e2e_errors, get_lite_model_selection
+
+if TYPE_CHECKING:
+    from app.core.channel_bridge.config_loader import UserConfigs
+
+
+def _user_configs(security_config: dict[str, object] | None) -> UserConfigs:
+    """The canned user configs whose saved securityConfig is *security_config*."""
+    from app.core.channel_bridge.config_loader import UserConfigs
+    from tests.api.agent.conftest import _build_mock_user_configs
+
+    configs = _build_mock_user_configs()
+    assert isinstance(configs, UserConfigs)
+    configs.security_config_dict = security_config
+    return configs
 
 
 def _tools_snapshot_event(events: list[dict[str, object]]) -> dict[str, object] | None:
@@ -96,7 +111,10 @@ def test_agent_stream_external_cli_on_mounts_delegate_when_backends_exist(
 @pytest.mark.e2e
 def test_explore_security_preset_denies_invoke_external_in_merged_config() -> None:
     """Lane-C regression: explore preset must deny invoke_external_agent (readonly-class bug)."""
+    from myrm_agent_harness.agent.security.types import PermissionAction
+
     from app.core.security.session_overlay import apply_session_preset
+    from tests.support.overlay_verdict import verdict_under
 
     base: dict[str, object] = {
         "permissions": {
@@ -105,11 +123,8 @@ def test_explore_security_preset_denies_invoke_external_in_merged_config() -> No
         }
     }
     merged = apply_session_preset(base, "explore")
-    assert isinstance(merged, dict)
-    permissions = merged.get("permissions")
-    assert isinstance(permissions, dict)
-    assert permissions.get("spawn_subagent") == "allow"
-    assert permissions.get("invoke_external_agent") == "deny"
+    assert verdict_under(merged, "delegate_task_tool", {"mode": "x"}) is PermissionAction.ALLOW
+    assert verdict_under(merged, "invoke_acp_agent_tool", {"agent_name": "claude"}) is PermissionAction.DENY
 
 
 def _delegate_stream_started(events: list[dict[str, object]]) -> bool:
@@ -170,21 +185,19 @@ def test_workspace_security_config_blocks_force_external_on_ask(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Lane-C: workspace invoke_external_agent=ASK must block direct force_external routing."""
-    from tests.api.agent.conftest import _build_mock_user_configs
-
-    configs = _build_mock_user_configs()
-    configs.security_config_dict = {
-        "capabilities": [{"permission": "*", "pattern": "*"}],
-        "permissions": {
-            "spawn_subagent": "allow",
-            "invoke_external_agent": "ask",
-            "file_write": "ask",
-            "shell_exec": "ask",
-        },
-        "yoloModeEnabled": False,
-        "autoModeEnabled": False,
-    }
-    mock_load_user_configs.return_value = configs
+    mock_load_user_configs.return_value = _user_configs(
+        {
+            "capabilities": [{"permission": "*", "pattern": "*"}],
+            "permissions": {
+                "spawn_subagent": "allow",
+                "invoke_external_agent": "ask",
+                "file_write": "ask",
+                "shell_exec": "ask",
+            },
+            "yoloModeEnabled": False,
+            "autoModeEnabled": False,
+        }
+    )
 
     chat_id = f"test_workspace_ext_block_{uuid.uuid4().hex[:8]}"
     payload: dict[str, object] = {
@@ -218,21 +231,19 @@ def test_readonly_security_config_blocks_force_external_delegate_stream(
     mock_load_user_configs: AsyncMock,
 ) -> None:
     """Lane-C: builtin readonly profile must block force_external_agent direct routing."""
-    from tests.api.agent.conftest import _build_mock_user_configs
-
-    configs = _build_mock_user_configs()
-    configs.security_config_dict = {
-        "capabilities": [{"permission": "*", "pattern": "*"}],
-        "permissions": {
-            "spawn_subagent": "allow",
-            "invoke_external_agent": "deny",
-            "file_write": "deny",
-            "shell_exec": "deny",
-        },
-        "yoloModeEnabled": False,
-        "autoModeEnabled": False,
-    }
-    mock_load_user_configs.return_value = configs
+    mock_load_user_configs.return_value = _user_configs(
+        {
+            "capabilities": [{"permission": "*", "pattern": "*"}],
+            "permissions": {
+                "spawn_subagent": "allow",
+                "invoke_external_agent": "deny",
+                "file_write": "deny",
+                "shell_exec": "deny",
+            },
+            "yoloModeEnabled": False,
+            "autoModeEnabled": False,
+        }
+    )
 
     chat_id = f"test_readonly_ext_block_{uuid.uuid4().hex[:8]}"
     payload: dict[str, object] = {
@@ -296,11 +307,7 @@ def test_missing_security_config_blocks_force_external_delegate_stream(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Lane-C: missing security config must fail-closed block force_external_agent routing."""
-    from tests.api.agent.conftest import _build_mock_user_configs
-
-    configs = _build_mock_user_configs()
-    configs.security_config_dict = None
-    mock_load_user_configs.return_value = configs
+    mock_load_user_configs.return_value = _user_configs(None)
 
     chat_id = f"test_missing_sec_ext_block_{uuid.uuid4().hex[:8]}"
     payload: dict[str, object] = {
