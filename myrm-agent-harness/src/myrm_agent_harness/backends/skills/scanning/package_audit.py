@@ -11,6 +11,7 @@ Audits package.json files for supply chain attack vectors:
   look at in full (a folder it cannot list, more entries or manifests than it audits)
 
 [INPUT]
+- backends.skills.scanning.manifest_entries::collect_export_targets, resolve_artifact_file (POS: where the files a package.json declares live on disk)
 - backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
 - core.security.path::read_text_bounded, ReadRefusal (POS: text read that stops at a character limit and never waits on a FIFO or device)
 - utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
@@ -35,6 +36,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from myrm_agent_harness.backends.skills.scanning.manifest_entries import collect_export_targets, resolve_artifact_file
 from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
 from myrm_agent_harness.core.security.path import ReadRefusal, read_text_bounded
 from myrm_agent_harness.utils.text_sanitizer import encodable_text
@@ -297,57 +299,10 @@ def audit_package_entry_artifacts(
     # 3. Audit "exports" entries (supporting conditional exports and nested maps)
     exports_val = pkg.get("exports")
     if exports_val is not None:
-        for target in _collect_export_targets(exports_val):
+        for target in collect_export_targets(exports_val):
             findings.extend(_verify_entry_artifact(target, base_dir, manifest_rel_path, "exports"))
 
     return findings
-
-
-def _collect_export_targets(val: object) -> list[str]:
-    """Collect the relative file paths of a (conditional, nested) ``exports`` value, in document order.
-
-    Iterative: the manifest decides how deeply the value nests, and recursion stops at the interpreter's limit.
-    """
-    targets: list[str] = []
-    pending: list[object] = [val]
-    while pending:
-        node = pending.pop()
-        if isinstance(node, str):
-            if node.strip():
-                targets.append(node.strip())
-        elif isinstance(node, dict):
-            pending.extend(reversed(node.values()))
-        elif isinstance(node, list):
-            pending.extend(reversed(node))
-    return targets
-
-
-def _is_file(path: Path) -> bool:
-    """``Path.is_file`` that also answers False for a name the file system rejects (too long)."""
-    try:
-        return path.is_file()
-    except OSError:
-        return False
-
-
-def _resolve_artifact_file(base_dir: Path, clean_entry: str) -> Path | None:
-    """Resolve physical file respecting Node.js extension and directory index conventions."""
-    direct = base_dir / clean_entry
-    if _is_file(direct):
-        return direct
-
-    extensions = (".js", ".cjs", ".mjs", ".json")
-    for ext in extensions:
-        candidate = base_dir / f"{clean_entry}{ext}"
-        if _is_file(candidate):
-            return candidate
-
-    for ext in extensions:
-        candidate = base_dir / clean_entry / f"index{ext}"
-        if _is_file(candidate):
-            return candidate
-
-    return None
 
 
 def _verify_entry_artifact(
@@ -375,7 +330,7 @@ def _verify_entry_artifact(
         )
         return findings
 
-    resolved_file = _resolve_artifact_file(base_dir, clean_entry)
+    resolved_file = resolve_artifact_file(base_dir, clean_entry)
     if resolved_file is None:
         ts_hint = ""
         src_dir = base_dir / "src"
