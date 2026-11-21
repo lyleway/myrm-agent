@@ -214,14 +214,22 @@ export async function checkCronPrerequisite(data: PrerequisiteCheckRequest): Pro
   });
 }
 
+// A record over the status type, so a status added to the type cannot be left out of what is accepted.
+const DELIVERY_HEALTH_STATUSES: Record<DeliveryHealth['status'], true> = {
+  healthy: true,
+  degraded: true,
+  down: true,
+};
+
+// No status is the 204's empty body; a status this client does not know is no verdict it can show.
 function isDeliveryHealth(body: Partial<DeliveryHealth>): body is DeliveryHealth {
-  return body.status !== undefined;
+  return typeof body.status === 'string' && Object.hasOwn(DELIVERY_HEALTH_STATUSES, body.status);
 }
 
 /**
- * What the destination a job delivers to has done in the last day, or `null` when there is nothing to judge. The
- * server answers that with a 204, which `apiRequest` hands back as `{}`. Silent: the badge simply stays away when the
- * verdict cannot be had.
+ * What the latest delivery attempts say about the destination a job delivers to, or `null` when there is nothing to
+ * judge. The server answers that with a 204, which `apiRequest` hands back as `{}`. Silent: the badge simply stays
+ * away when the verdict cannot be had.
  */
 export async function getJobDeliveryHealth(id: string): Promise<DeliveryHealth | null> {
   const body: Partial<DeliveryHealth> = await apiRequest(`/cron/${id}/delivery-health`, { silent: true });

@@ -415,7 +415,10 @@ export interface PrerequisiteCheckResponse {
   override_allowed: boolean;
 }
 
-/** What the destination a job delivers to has done in the last day; the failure fields are empty while it is healthy. */
+/**
+ * What the latest delivery attempts say about the destination a job delivers to; the failure fields are empty while
+ * it is healthy.
+ */
 export interface DeliveryHealth {
   status: 'healthy' | 'degraded' | 'down';
   failure_streak: number;

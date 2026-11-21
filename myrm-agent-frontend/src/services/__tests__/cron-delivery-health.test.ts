@@ -38,4 +38,14 @@ describe('getJobDeliveryHealth', () => {
 
     await expect(getJobDeliveryHealth('job-1')).resolves.toBeNull();
   });
+
+  // `toString` is a property every object has, which a plain `in` check would take for a status.
+  it.each(['offline', 'toString'])(
+    'reads the status %s, which this client does not know, as no verdict',
+    async (status) => {
+      vi.mocked(apiRequest).mockResolvedValue({ status, failure_streak: 3 });
+
+      await expect(getJobDeliveryHealth('job-1')).resolves.toBeNull();
+    },
+  );
 });
