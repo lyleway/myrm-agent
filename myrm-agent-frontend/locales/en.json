@@ -7363,6 +7363,7 @@
     "connectorStatusDown": "Cannot deliver",
     "connectorFailureStreak": "{count, plural, one {# consecutive failure} other {# consecutive failures}}",
     "connectorLastFailedAt": "Last failure: {time}",
+    "connectorHealthBasis": "Status comes from real deliveries. A test does not change it; it updates after the next delivery to this address.",
     "connectorCategoryAuth": "The receiver refused access",
     "connectorCategoryAuthHint": "Check that the key, token or permission you gave is still valid, for example that the bot was not removed or disabled, then try again.",
     "connectorCategoryClient": "The receiver did not accept the message",

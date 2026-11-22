@@ -1,4 +1,5 @@
 import { apiRequest } from '@/lib/api';
+import { parseServerTimestamp } from '@/lib/utils/timeUtils';
 
 export type {
   ActiveHours,
@@ -221,9 +222,15 @@ const DELIVERY_HEALTH_STATUSES: Record<DeliveryHealth['status'], true> = {
   down: true,
 };
 
-// No status is the 204's empty body; a status this client does not know is no verdict it can show.
+// No status is the 204's empty body; a status this client does not know, or a time it cannot read, is no verdict it
+// can show: the badge dates every verdict by that time.
 function isDeliveryHealth(body: Partial<DeliveryHealth>): body is DeliveryHealth {
-  return typeof body.status === 'string' && Object.hasOwn(DELIVERY_HEALTH_STATUSES, body.status);
+  return (
+    typeof body.status === 'string' &&
+    Object.hasOwn(DELIVERY_HEALTH_STATUSES, body.status) &&
+    typeof body.last_attempt_at === 'string' &&
+    !Number.isNaN(parseServerTimestamp(body.last_attempt_at).getTime())
+  );
 }
 
 /**

@@ -7,8 +7,9 @@
 
 [OUTPUT]
 - The service is asked about the job's saved delivery (channel and address); an unknown job is a 404
-- A verdict becomes exactly four fields, status and category as plain strings and the failure time as a UTC moment; no
-  verdict is a 204 without a body, which the web client's request helper reads as "nothing" (a ``null`` body makes it throw)
+- A verdict becomes exactly four fields, status and category as plain strings and the newest attempt's time as a UTC
+  moment, healthy or not; no verdict is a 204 without a body, which the web client's request helper reads as "nothing"
+  (a ``null`` body makes it throw)
 - The route is mounted on the whole cron router, so it is served where the app mounts that router
 
 [POS]
@@ -32,7 +33,7 @@ from app.api.cron.routes import delivery_health_router, helpers
 from app.api.cron.routes import router as cron_router
 from app.services.cron.delivery_health_service import DeliveryHealth, DeliveryHealthService, DeliveryHealthStatus
 
-_FAILED_AT = datetime(2026, 1, 1, 0, 5, tzinfo=UTC)
+_ATTEMPT_AT = datetime(2026, 1, 1, 0, 5, tzinfo=UTC)
 _ADDRESS = "https://api.example.com/webhook"
 _JOB = CronJob(
     id="job-1",
@@ -45,9 +46,10 @@ _JOB = CronJob(
 _DEGRADED = DeliveryHealth(
     DeliveryHealthStatus.DEGRADED,
     failure_streak=2,
+    last_attempt_at=_ATTEMPT_AT,
     last_error_category=ConnectorErrorCategory.HTTP_SERVER_ERROR,
-    last_failed_at=_FAILED_AT,
 )
+_HEALTHY = DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0, last_attempt_at=_ATTEMPT_AT)
 
 ClientFor = Callable[[APIRouter, CronJob | None], TestClient]
 
@@ -77,8 +79,22 @@ def test_a_verdict_becomes_four_plain_fields(client_for: ClientFor) -> None:
     assert response.json() == {
         "status": "degraded",
         "failure_streak": 2,
+        "last_attempt_at": "2026-01-01T00:05:00Z",
         "last_error_category": "http_server_error",
-        "last_failed_at": "2026-01-01T00:05:00Z",
+    }
+
+
+def test_a_healthy_verdict_still_says_when_its_newest_attempt_finished(client_for: ClientFor) -> None:
+    client = client_for(delivery_health_router, _JOB)
+
+    with patch.object(DeliveryHealthService, "get_destination_health", new=AsyncMock(return_value=_HEALTHY)):
+        response = client.get("/cron/job-1/delivery-health")
+
+    assert response.json() == {
+        "status": "healthy",
+        "failure_streak": 0,
+        "last_attempt_at": "2026-01-01T00:05:00Z",
+        "last_error_category": None,
     }
 
 

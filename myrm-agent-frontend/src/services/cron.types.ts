@@ -425,7 +425,7 @@ export interface PrerequisiteCheckResponse {
 export interface DeliveryHealth {
   status: 'healthy' | 'degraded' | 'down';
   failure_streak: number;
+  /** When the run behind the newest attempt finished, whether it went through or not, as a UTC moment. */
+  last_attempt_at: string;
   last_error_category?: string | null;
-  /** When the run behind the newest failure finished, as a UTC moment. */
-  last_failed_at?: string | null;
 }

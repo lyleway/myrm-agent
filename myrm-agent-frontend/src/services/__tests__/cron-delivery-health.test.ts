@@ -24,8 +24,8 @@ describe('getJobDeliveryHealth', () => {
     const verdict = {
       status: 'degraded',
       failure_streak: 2,
+      last_attempt_at: '2026-06-17T08:30:00Z',
       last_error_category: 'timeout',
-      last_failed_at: '2026-06-17T08:30:00Z',
     };
     vi.mocked(apiRequest).mockResolvedValue(verdict);
 
@@ -43,9 +43,19 @@ describe('getJobDeliveryHealth', () => {
   it.each(['offline', 'toString'])(
     'reads the status %s, which this client does not know, as no verdict',
     async (status) => {
-      vi.mocked(apiRequest).mockResolvedValue({ status, failure_streak: 3 });
+      vi.mocked(apiRequest).mockResolvedValue({ status, failure_streak: 3, last_attempt_at: '2026-06-17T08:30:00Z' });
 
       await expect(getJobDeliveryHealth('job-1')).resolves.toBeNull();
     },
   );
+
+  // The badge dates every verdict by this time, so a verdict that cannot be dated is not shown.
+  it.each([
+    ['is missing', undefined],
+    ['cannot be read', 'yesterday'],
+  ])('reads a verdict whose time of the newest attempt %s as no verdict', async (_case, last_attempt_at) => {
+    vi.mocked(apiRequest).mockResolvedValue({ status: 'healthy', failure_streak: 0, last_attempt_at });
+
+    await expect(getJobDeliveryHealth('job-1')).resolves.toBeNull();
+  });
 });

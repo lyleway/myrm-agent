@@ -6,7 +6,7 @@
 - app.api.cron.schemas::DeliveryHealthResponse (POS: cron request/response Pydantic models)
 
 [OUTPUT]
-- GET /{job_id}/delivery-health — what the latest delivery attempts say about the destination the job delivers to (404 unknown job; 204 without a body when there is no verdict)
+- GET /{job_id}/delivery-health — what the latest delivery attempts say about the destination the job delivers to, and when the newest one finished (404 unknown job; 204 without a body when there is no verdict)
 
 [POS]
 Server REST API router behind the delivery-health badge in a job's delivery settings.
@@ -45,8 +45,8 @@ async def get_delivery_health(job_id: str) -> DeliveryHealthResponse | Response:
     return DeliveryHealthResponse(
         status=health.status.value,
         failure_streak=health.failure_streak,
+        last_attempt_at=health.last_attempt_at,
         last_error_category=health.last_error_category.value if health.last_error_category else None,
-        last_failed_at=health.last_failed_at,
     )
 
 

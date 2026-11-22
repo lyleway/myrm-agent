@@ -7363,6 +7363,7 @@
     "connectorStatusDown": "无法送达",
     "connectorFailureStreak": "连续失败 {count} 次",
     "connectorLastFailedAt": "最近失败：{time}",
+    "connectorHealthBasis": "状态依据真实投递得出。测试投递不会改变它，下次向该地址投递后才会更新。",
     "connectorCategoryAuth": "对方拒绝了访问",
     "connectorCategoryAuthHint": "检查你提供的密钥、令牌或授权是否仍然有效，例如机器人是否被移出或停用，修好后再试一次。",
     "connectorCategoryClient": "对方没有接受这条消息",
