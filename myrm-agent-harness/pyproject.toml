@@ -264,6 +264,9 @@ ignore = [
   "SIM102",
   "SIM105",
 ] # Fire-and-forget tasks are intentional in command dispatch
+# The public-surface stub re-exports every name as `name as name`, which isort splits into one three-line statement per
+# name; one statement per module keeps the file well under the line budget.
+"src/**/api/__init__.pyi" = ["I001"]
 
 [tool.mypy]
 python_version = "3.13"

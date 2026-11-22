@@ -8,11 +8,14 @@
 - sanitize_llm_output(): 移除 LLM 推理标签、工具协议标签、控制 token 和无效 Unicode
 - sanitize_text(): sanitize_llm_output 的通用名（仅限模型输出）
 - strip_control_chars(): 仅移除控制字符 / 控制 token / 无效 Unicode（第 4 层），保留全部标记，用于不可信的用户原文
+- encodable_text(): 只把孤立代理项换成 U+FFFD、其余原样保留，使文本可被 UTF-8 编码；本来就可编码的文本原对象返回
 - extract_and_strip_think_blocks(): 静态提取 reasoning 内容并剥离原文本标签，用于历史记录提纯与 LLM 响应答案提取（chat_utils.extract_answer_text 复用）
 
 [POS]
 LLM streaming output sanitizer. Four-layer filtering ensures clean, garble-free text for user display;
 layer 4 alone is exposed for user-authored text, where tags are content rather than protocol leakage.
+``encodable_text`` is the repair for text that only has to become encodable (a wire body, a JSON response, a database bind)
+and must not lose anything else.
 
 """
 
@@ -24,6 +27,8 @@ from functools import lru_cache
 from myrm_agent_harness.core.events import THINKING_TAG_NAMES
 
 _REASONING_TAG_NAMES = "|".join(THINKING_TAG_NAMES)
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
+_REPLACEMENT = "\ufffd"
 
 
 @lru_cache(maxsize=1)
@@ -96,6 +101,23 @@ def strip_control_chars(text: str) -> str:
     if not text:
         return text
     return _compiled_sanitizer().sub("", text)
+
+
+def encodable_text(text: str) -> str:
+    """*text* itself when UTF-8 can encode it, else a copy with each lone surrogate replaced by ``U+FFFD``.
+
+    Python hands back a file name or output that was not valid UTF-8 as text holding lone surrogates (``os.fsdecode``
+    maps an undecodable byte to ``U+DC80``..``U+DCFF``), and a YAML or JSON document can spell one as an escape.
+    Such a string cannot be encoded for an HTTP body, a JSON response or a SQLite bind. Nothing else is touched, and
+    an encodable text comes back as the same object, so a prompt prefix built from it stays byte-identical.
+    """
+    if text.isascii():
+        return text
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return _LONE_SURROGATE.sub(_REPLACEMENT, text)
+    return text
 
 
 def extract_and_strip_think_blocks(text: str) -> tuple[str, str]:

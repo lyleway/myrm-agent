@@ -114,20 +114,6 @@ async def _dm_from(rig: _Rig, author_id: int) -> InboundMessage:
     return rig.emitted[-1]
 
 
-async def _click_from(rig: _Rig, author_id: int) -> InboundMessage:
-    interaction = MagicMock()
-    interaction.type = discord.InteractionType.component
-    interaction.response.defer = AsyncMock()
-    interaction.data = {"custom_id": "act:approval:approve:1"}
-    interaction.user.id = author_id
-    interaction.user.display_name = "Someone"
-    interaction.channel_id = 789
-    interaction.guild_id = None
-    interaction.id = next(_ids)
-    await rig.channel._on_interaction(interaction)
-    return rig.emitted[-1]
-
-
 async def _transcript_from(rig: _Rig, author_id: int) -> InboundMessage:
     await rig.channel._on_voice_input(_ENABLED_TEXT_CHANNEL, author_id, "hello", "Someone")
     return rig.emitted[-1]
@@ -138,8 +124,8 @@ async def _turn_identity(rig: _Rig, msg: InboundMessage) -> str | None:
     return await rig.router._resolver.resolve_dm_user(msg)
 
 
-@pytest.mark.parametrize("emit", [_dm_from, _click_from, _transcript_from])
-async def test_a_stranger_gets_no_turn_from_a_dm_a_button_click_or_a_voice_transcript(
+@pytest.mark.parametrize("emit", [_dm_from, _transcript_from])
+async def test_a_stranger_gets_no_turn_from_a_dm_or_a_voice_transcript(
     rig: _Rig, emit: Callable[..., Awaitable[InboundMessage]]
 ) -> None:
     assert await _turn_identity(rig, await emit(rig, _STRANGER)) is None

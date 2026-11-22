@@ -8,6 +8,8 @@
  * 2. 处理 OAuth 回调（Sandbox 模式）
  * 3. 全局 401 拦截：API 请求返回 401 时自动重定向到 /auth/login
  * 4. Tauri Remote 模式首次 setup 自动跳转
+ * 5. 其他标签页登录、登出或换号：本页内存里的状态（配置缓存、各 store、未发出的编辑）属于加载时的账号，令牌却按
+ *    请求读取，继续运行会让旧账号的状态带着新账号的令牌发出去，所以整页重载
  *
  * 部署模式：
  * - 本地模式（Tauri/Local）：自动登录 local_user，无需 OAuth
@@ -24,7 +26,7 @@ import {
   shouldRedirectToLoginOnAuthFailure,
   isRemoteGatewayActive,
 } from '@/lib/deploy-mode';
-import { clearAuthToken } from '@/lib/guest';
+import { clearAuthToken, onAuthTokenChangedElsewhere } from '@/lib/guest';
 
 const AUTH_PATHS = ['/auth/login', '/auth/setup', '/auth/oauth/callback'];
 
@@ -136,6 +138,8 @@ export default function AuthInitializer() {
       interceptorInstalledRef.current = false;
     };
   }, []);
+
+  useEffect(() => onAuthTokenChangedElsewhere(() => window.location.reload()), []);
 
   if (localMode || isDedicatedAuthRoute(pathname)) {
     return null;

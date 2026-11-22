@@ -3,7 +3,7 @@
 [INPUT]
 - app.channels.protocols.compact::CompactHandler, CompactResult, CompactSkip
 - app.channels.types::InboundMessage
-- app.core.channel_bridge.command_session::resolve_command_session_key (POS: Session key a message's conversation is stored under)
+- app.core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on, None while /new has ended it)
 - app.database.connection::get_session
 - app.services.chat.chat_service::ChatService
 - app.services.chat.compact_service::compact_chat, CompactReason, CompactResult
@@ -14,7 +14,8 @@
 [POS]
 Maps the framework-level CompactHandler protocol to the application compact_service. A person's /compact is an
 explicit request, so the anti-thrash guard that holds back automatic compaction does not stop it; the service's
-reason code becomes the channel's ``CompactSkip`` category, which the framework words in the reader's language.
+reason code becomes the channel's ``CompactSkip`` category, which the framework words in the reader's language. After
+``/new`` and before the next turn there is no conversation to compact, which reads as nothing to compact.
 """
 
 from __future__ import annotations
@@ -53,6 +54,8 @@ class ChannelCompactHandler:
 
     async def __call__(self, msg: InboundMessage, user_id: str, *, focus_topic: str = "") -> CompactResult:
         session_key = await resolve_command_session_key(msg)
+        if session_key is None:
+            return CompactResult(compacted=False, skip=CompactSkip.NOTHING_TO_COMPACT)
 
         async with get_session() as db:
             chat = await ChatService.get_or_create_channel_chat(session_key, msg.channel)

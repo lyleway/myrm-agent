@@ -2,10 +2,8 @@
 
 [INPUT]
 - channels.types.messages::OutboundMessage, MediaAttachment (POS: core message and media types)
-- channels.types.components::ActionButton, ButtonStyle, SelectMenu (POS: interactive UI component types)
 
 [OUTPUT]
-- build_discord_components: converts Myrm components into a discord.ui.View
 - build_discord_embed: converts a Myrm message's content into a discord.Embed
 - DiscordMedia / build_discord_media: split media attachments into uploads, unfurled links and unsendable ones
 - is_forum_channel / derive_thread_name: forum-channel detection and thread titles from message text
@@ -24,91 +22,12 @@ from typing import TYPE_CHECKING, TypeGuard
 
 import discord
 
-from app.channels.types.components import (
-    ActionButton,
-    ButtonStyle,
-    SelectMenu,
-)
 from app.channels.types.messages import OutboundMessage
 
 if TYPE_CHECKING:
     from app.channels.types.messages import MediaAttachment
 
 logger = logging.getLogger(__name__)
-
-# Discord Button Style Mapping
-_BUTTON_STYLE_MAP = {
-    ButtonStyle.PRIMARY: discord.ButtonStyle.primary,
-    ButtonStyle.DANGER: discord.ButtonStyle.danger,
-    ButtonStyle.DEFAULT: discord.ButtonStyle.secondary,
-}
-
-
-def build_discord_components(msg: OutboundMessage) -> discord.ui.View | None:
-    """Convert OutboundMessage components and quick_replies to a Discord View."""
-    if not msg.components and not msg.quick_replies:
-        return None
-
-    view = discord.ui.View()
-    has_items = False
-
-    # 1. Add standard components (Buttons, SelectMenus)
-    for row_idx, row in enumerate(msg.components):
-        for item in row:
-            if isinstance(item, ActionButton):
-                if item.url:
-                    # Link button (no custom_id allowed)
-                    btn: discord.ui.Button[discord.ui.View] = discord.ui.Button(
-                        style=discord.ButtonStyle.link,
-                        label=item.label,
-                        url=item.url,
-                        row=row_idx,
-                    )
-                else:
-                    # Callback button
-                    btn = discord.ui.Button(
-                        style=_BUTTON_STYLE_MAP.get(item.style, discord.ButtonStyle.secondary),
-                        label=item.label,
-                        custom_id=f"act:{item.action_id}:{item.value}",
-                        row=row_idx,
-                    )
-                view.add_item(btn)
-                has_items = True
-            elif isinstance(item, SelectMenu):
-                options = [
-                    discord.SelectOption(label=opt.label, value=opt.value, description=opt.description) for opt in item.options
-                ]
-                select: discord.ui.Select[discord.ui.View] = discord.ui.Select(
-                    custom_id=f"sel:{item.action_id}",
-                    placeholder=item.placeholder,
-                    options=options,
-                    row=row_idx,
-                )
-                view.add_item(select)
-                has_items = True
-
-    # 2. Add quick replies as secondary buttons (if space permits)
-    # Discord allows max 5 rows, 5 buttons per row. We put quick replies in the last available row.
-    if msg.quick_replies:
-        qr_row = min(4, len(msg.components))  # Try to put in the next row, max row index is 4
-        for qr in msg.quick_replies:
-            # Only render required quick replies as buttons, or all if we want to be generous
-            # For Discord, we render all quick replies as secondary buttons
-            btn = discord.ui.Button(
-                style=discord.ButtonStyle.secondary,
-                label=qr.label,
-                custom_id=f"qr:{qr.text}",
-                row=qr_row,
-            )
-            try:
-                view.add_item(btn)
-                has_items = True
-            except ValueError:
-                # View is full (max 25 items)
-                logger.warning("Discord View is full, dropping remaining quick replies")
-                break
-
-    return view if has_items else None
 
 
 def build_discord_embed(msg: OutboundMessage) -> discord.Embed | None:

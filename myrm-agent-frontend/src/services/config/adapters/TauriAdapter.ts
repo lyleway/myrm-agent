@@ -3,16 +3,17 @@
  * - `@/lib/deploy-mode` (`getApiBaseUrl`)
  * - `@/lib/backend-health` (`markLocalBackendUnreachable`) (POS: tells the app the local backend is down)
  * - `@/lib/platform-readiness` (`whenDatabaseReady`) (POS: whether the local database is up)
- * - `./BaseAdapter` BaseConfigAdapter / BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult / isTransportFailure (POS: the failure answer both adapters share)
+ * - `./BaseAdapter` BaseConfigAdapter / BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer (POS: the failure answer and the deadline-bound request both adapters share)
  *
  * [OUTPUT]
  * - `TauriConfigAdapter`: local/Tauri 配置 HTTP 适配（含 Next 代理 5xx → offline 语义）
  *
  * [POS]
  * 本地模式配置同步适配器。WebUI 经 `/api/v1` 代理；Tauri 可直连 sidecar。与 `ConfigSyncManager` 离线队列配合。
- * 后端不可用（Next 代理 500/502/503/504、请求失败、超时、数据库未就绪）时：`getAll` / `get` 抛错，不把「不知道」
- * 答成「没有这一行」；`sync` 返回 `backendUnavailableSyncResult()` 供同步层保留重试。请求失败只在 `fetch()` 调用处
- * 判定，处理应答时的 `TypeError` 属于缺陷，照常抛出。
+ * 后端不可用（Next 代理 500/502/503/504、请求失败、超时、数据库未就绪、应答体迟迟读不完或读到一半断开）时：
+ * `getAll` / `get` 抛错，不把「不知道」答成「没有这一行」；`sync` 返回 `backendUnavailableSyncResult()` 供同步层
+ * 保留重试。请求失败只在 `fetch()` 调用处判定，应答体读不完只在读取处判定（`readBody`）；读到的应答体不是合法 JSON，
+ * 或处理应答时出现 `TypeError`，都属于缺陷，照常抛出。
  */
 
 import { markLocalBackendUnreachable } from '@/lib/backend-health';
@@ -22,10 +23,15 @@ import {
   BACKEND_NOT_AVAILABLE_ERROR,
   BaseConfigAdapter,
   backendUnavailableSyncResult,
+  fetchWithDeadlines,
+  isLostAnswer,
   isTransportFailure,
+  type DeadlineAnswer,
+  type DeadlineInit,
+  type ReadJson,
 } from './BaseAdapter';
 import type { ConfigKey, ConfigRecord, ConfigChange, SyncResult, ConfigVersion, ConfigValueMap } from '../types';
-import { ConfigConflictError, ConfigSyncError } from '../types';
+import { ConfigSyncError } from '../types';
 
 /**
  * 后端 API 响应类型
@@ -54,7 +60,7 @@ interface ApiSyncResponse {
 /** Next.js rewrite proxy and gateway errors when local backend is down. */
 const BACKEND_UNAVAILABLE_HTTP_STATUSES = new Set([500, 502, 503, 504]);
 
-/** The request did not reach the local backend: database not ready, request failed, or timed out. */
+/** The local backend could not answer: database not ready, request failed or timed out, or the answer body never arrived. */
 class BackendUnavailableError extends Error {
   constructor() {
     super(BACKEND_NOT_AVAILABLE_ERROR);
@@ -77,23 +83,19 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
   /**
    * 统一 fetch，自动携带 Cookie 以兼容 WebUI Remote 模式的 JWT 认证。
    * 非 Remote 模式下后端跳过认证，Cookie 虽携带但无影响。
-   * 内置 10s 超时防止后端卡死时前端无限等待。
+   * 响应头与应答体各有期限，到期即取消请求（`fetchWithDeadlines`），后端卡死时前端既不无限等待，也不占着连接。
    */
-  private async localFetch(url: string, init?: RequestInit): Promise<Response> {
+  private async localFetch(url: string, init?: DeadlineInit): Promise<DeadlineAnswer> {
     const ready = await whenDatabaseReady();
     if (!ready) {
       throw new BackendUnavailableError();
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
-    let response: Response;
+    let answer: DeadlineAnswer;
     try {
-      response = await fetch(url, {
+      answer = await fetchWithDeadlines(url, {
         ...init,
         credentials: 'include',
-        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           ...init?.headers,
@@ -105,18 +107,33 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
         throw new BackendUnavailableError();
       }
       throw error;
-    } finally {
-      clearTimeout(timeoutId);
     }
 
-    if (this.isBackendUnavailableStatus(response.status)) {
+    if (this.isBackendUnavailableStatus(answer.response.status)) {
       markLocalBackendUnreachable();
     }
-    return response;
+    return answer;
   }
 
   private isBackendUnavailableStatus(status: number): boolean {
     return BACKEND_UNAVAILABLE_HTTP_STATUSES.has(status);
+  }
+
+  /**
+   * The JSON body of an answer within its deadline. A body that never arrived (stalled, or the connection broke while it
+   * was read) means the backend is down, like a failed request; one that arrived but is not JSON is a defect and stays
+   * visible.
+   */
+  private async readBody<T>(readJson: ReadJson): Promise<T> {
+    try {
+      return await readJson<T>();
+    } catch (error) {
+      if (!isLostAnswer(error)) {
+        throw error;
+      }
+      markLocalBackendUnreachable();
+      throw new BackendUnavailableError();
+    }
   }
 
   /**
@@ -127,7 +144,7 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
       const url = keys?.length
         ? `${this.baseUrl}/config?keys=${encodeURIComponent(keys.join(','))}`
         : `${this.baseUrl}/config`;
-      const response = await this.localFetch(url);
+      const { response, readJson } = await this.localFetch(url);
 
       if (!response.ok) {
         if (response.status === 404) {
@@ -140,7 +157,7 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
         throw new ConfigSyncError(`Failed to get all configs: ${response.statusText}`);
       }
 
-      const data: ApiAllConfigsResponse = await response.json();
+      const data = await this.readBody<ApiAllConfigsResponse>(readJson);
       const result = new Map<ConfigKey, ConfigRecord>();
 
       for (const [key, record] of Object.entries(data.configs)) {
@@ -162,7 +179,7 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
    */
   async get<K extends ConfigKey>(key: K): Promise<ConfigRecord<K> | null> {
     try {
-      const response = await this.localFetch(`${this.baseUrl}/config/${key}`);
+      const { response, readJson } = await this.localFetch(`${this.baseUrl}/config/${key}`);
 
       if (response.status === 404) {
         return null;
@@ -176,85 +193,12 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
         throw new ConfigSyncError(`Failed to get config '${key}': ${response.statusText}`);
       }
 
-      const data: ApiConfigResponse<K> = await response.json();
+      const data = await this.readBody<ApiConfigResponse<K>>(readJson);
       return this.toConfigRecord(data);
     } catch (error) {
       if (error instanceof BackendUnavailableError) {
         console.warn(`[TauriAdapter] Backend not available, cannot read '${key}'`);
         throw new ConfigSyncError(BACKEND_NOT_AVAILABLE_ERROR);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * 设置配置（带乐观锁）
-   */
-  async set<K extends ConfigKey>(
-    key: K,
-    value: ConfigValueMap[K],
-    expectedVersion?: ConfigVersion,
-  ): Promise<ConfigRecord<K>> {
-    try {
-      const response = await this.localFetch(`${this.baseUrl}/config/${key}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          value,
-          expectedVersion,
-          deviceId: this.deviceId,
-        }),
-      });
-
-      if (response.status === 409) {
-        const errorData = await response.json();
-        throw new ConfigConflictError(key, expectedVersion ?? '0_0', errorData.serverVersion ?? '0_0');
-      }
-
-      if (!response.ok) {
-        if (this.isBackendUnavailableStatus(response.status)) {
-          console.warn(`[TauriAdapter] Backend not available, skipping set '${key}'`);
-          return this.createRecord(key, value, expectedVersion);
-        }
-        throw new ConfigSyncError(`Failed to set config '${key}': ${response.statusText}`);
-      }
-
-      const data: ApiConfigResponse<K> = await response.json();
-      return this.toConfigRecord(data);
-    } catch (error) {
-      if (error instanceof BackendUnavailableError) {
-        console.warn(`[TauriAdapter] Backend not available, skipping set '${key}'`);
-        return this.createRecord(key, value, expectedVersion);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * 删除配置
-   */
-  async delete(key: ConfigKey): Promise<boolean> {
-    try {
-      const response = await this.localFetch(`${this.baseUrl}/config/${key}`, {
-        method: 'DELETE',
-      });
-
-      if (response.status === 404) {
-        return false;
-      }
-
-      if (!response.ok) {
-        if (this.isBackendUnavailableStatus(response.status)) {
-          console.warn(`[TauriAdapter] Backend not available, skipping delete '${key}'`);
-          return false;
-        }
-        throw new ConfigSyncError(`Failed to delete config '${key}': ${response.statusText}`);
-      }
-
-      return true;
-    } catch (error) {
-      if (error instanceof BackendUnavailableError) {
-        console.warn(`[TauriAdapter] Backend not available, skipping delete '${key}'`);
-        return false;
       }
       throw error;
     }
@@ -273,7 +217,7 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
     }
 
     try {
-      const response = await this.localFetch(`${this.baseUrl}/config/sync`, {
+      const { response, readJson } = await this.localFetch(`${this.baseUrl}/config/sync`, {
         method: 'POST',
         body: JSON.stringify({
           changes,
@@ -289,7 +233,7 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
         throw new ConfigSyncError(`Failed to sync configs: ${response.statusText}`);
       }
 
-      const data: ApiSyncResponse = await response.json();
+      const data = await this.readBody<ApiSyncResponse>(readJson);
 
       return {
         success: data.success,

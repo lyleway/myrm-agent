@@ -15,7 +15,7 @@ from myrm_agent_harness.agent.security import CredentialTrack
 from app.ai_agents.agents import GeneralAgentParams
 from app.channels.types import IdentityScopeMode, InboundMessage, TopicContext
 
-from .preamble_testkit import build_agent, inbound_message, prepare, stubbed_preamble
+from .preamble_testkit import awaited_kwargs, build_agent, inbound_message, prepare, stubbed_preamble
 
 _AGENT = "app.core.channel_bridge.agent_executor.execute_preamble.agent"
 _TRACKS = [CredentialTrack.PERSONAL, CredentialTrack.SHARED]
@@ -37,14 +37,14 @@ async def test_a_group_topic_bound_to_a_shared_identity_runs_on_the_shared_track
 
     await prepare(group_message, topic)
 
-    assert agent_builder.await_args.kwargs["credential_track"] is CredentialTrack.SHARED
+    assert awaited_kwargs(agent_builder)["credential_track"] is CredentialTrack.SHARED
 
 
 @pytest.mark.asyncio
 async def test_a_direct_chat_runs_on_the_personal_track(agent_builder: AsyncMock) -> None:
     await prepare(inbound_message(), None)
 
-    assert agent_builder.await_args.kwargs["credential_track"] is CredentialTrack.PERSONAL
+    assert awaited_kwargs(agent_builder)["credential_track"] is CredentialTrack.PERSONAL
 
 
 @pytest.mark.asyncio
@@ -70,4 +70,4 @@ async def test_the_agent_and_its_credentials_are_built_for_the_turns_track(track
 
     assert outcome.result is not None
     assert created[0].credential_track is track
-    assert assembler.await_args.kwargs["credential_track"] is track
+    assert awaited_kwargs(assembler)["credential_track"] is track

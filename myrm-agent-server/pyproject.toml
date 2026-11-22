@@ -12,7 +12,7 @@ classifiers = [
 requires-python = ">=3.13,<3.14"  # Limit to 3.13 to avoid apscheduler dependency resolution issues on 3.14+
 dependencies = [
   # --- Web 框架 ---
-  "fastapi>=0.162.2",         # Web API 框架 (54 文件)；FastAPI(telemetry=...) 自 0.142 起提供，与 harness fastapi extra 同一下限
+  "fastapi>=0.162.5",         # Web API 框架 (54 文件)；FastAPI(telemetry=...) 自 0.142 起提供，与 harness fastapi extra 同一下限
   "uvicorn>=0.54.0",          # ASGI 服务器，本地单进程模式 (run.py)
   # --- 数据与配置 ---
   "pydantic>=2.14.3",          # 数据模型/Schema 校验 (48 文件)
@@ -99,7 +99,7 @@ environments = ["sys_platform == 'linux'", "sys_platform == 'darwin'", "sys_plat
 override-dependencies = [
   "click>=8.5.1",
   "patchright>=1.64.4",
-  "openai>=3.48.0",
+  "openai>=3.49.0",
   "opentelemetry-semantic-conventions>=0.66b2",
   "websockets>=17.4",             # same floor as [project] (an override replaces it); lifts lark-oapi <16 and langgraph-sdk <17
   "pynacl>=1.6.2",                # remote_access E2EE; override resolves discord-py[voice] upper bound

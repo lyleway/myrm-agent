@@ -194,7 +194,7 @@ wechat_d4e5f6   ← 额外实例 2
 
 1. **能力检测**：读取 `ChannelCapabilities`（`buttons` / `quick_replies` / `select_menus`）
 2. **按行降级**：
-   - `ActionButton` → `"• {label} → /{action_id}"` 或 `"• {label} → {url}"`
+   - `ActionButton` → 有 `url` 时为 `"• {label} → {url}"`；只有 `action_id` 的按钮没有文字等价物（没有任何处理器会解析由回调 id 推出的命令），整个按钮省略；要给文字渠道留可输入的替代，用显式的 `QuickReply(required=True)`
    - `SelectMenu` → `"• {placeholder}: option1, option2, ..."`
    - `QuickReply` (required=True) → `"1️⃣ {label}\n2️⃣ {label2}\n\n↩️ 回复数字选择"`
    - `QuickReply` (required=False) → 静默丢弃（避免杂乱）
@@ -206,11 +206,11 @@ wechat_d4e5f6   ← 额外实例 2
 
 ```
 原始消息：
-content: "请批准这个请求："
-components: [[ActionButton(label="批准", action_id="approve")]]
+content: "报告已生成："
+components: [[ActionButton(label="打开报告", action_id="report:open", url="https://example.com/r/1")]]
 
 降级后（WhatsApp）：
-content: "请批准这个请求：\n\n• 批准 → /approve"
+content: "报告已生成：\n\n• 打开报告 → https://example.com/r/1"
 components: []
 ```
 
@@ -278,8 +278,9 @@ Discord / Signal / Feishu / iMessage / **Mattermost** / **Matrix**）会把
 
 **审批按钮（ActionButton）**：审批请求以 `approval:{approve|deny}:{record_id}` 按钮发往 IM。
 目前只有 Telegram 入站解析器会把点击转成 `callback_prefix="act"` 的消息并交给
-`_handle_action_button_approval`，其他渠道的按钮点击不会进入该处理器，因此 owner 通知卡片
-只在 Telegram 附带按钮，其余渠道提示打开应用审核；被拦截的回复还会附上 `/draft approve <code>` /
+`_handle_action_button_approval`，其他渠道的按钮点击不会进入该处理器，因此审批卡只在 Telegram 且发送留在本机时附带按钮
+（云端沙箱走控制面出口，出站只带纯文本，托管渠道上的 Telegram 卡片同样没有按钮），其余路由提示打开应用审核；
+`ApprovalRegistry` 推给会话对端的是同一张卡（不带请求载荷；被拦截的回复不推，只由通知分发器发给 owner）；被拦截的回复还会附上 `/draft approve <code>` /
 `/draft reject <code>`（`<code>` 为审批 ID 前 8 位，命令接受 6 位及以上），owner 可直接在聊天里决定。
 被拦截的回复（`outbound_draft`）只有 owner
 （控制面转发或 ADMIN 配对）可批准/拒绝，详见 `routing/_ARCH.md` 的 *ActionButton Callback Approval*
@@ -519,7 +520,7 @@ StreamCoordinator
 - Discord 的语音离开要等网关确认（discord.py 每个语音连接最多等 30 秒，等待期间吞掉取消），所以 `stop()` 把离开放进单独的任务，最多等 4 秒，超时后取消它、不再等，把没离开完的语音连接直接摘除，再 `client.close()` 并结束网关会话；各公会并发离开（`VoiceManager.leave_all`），一个公会卡住不挡其余（`tests/channels/providers/discord/test_discord_stop_voice.py` 守住）
 - Discord 的语音管理器与网关客户端同寿命：同一个客户端上重复的 READY 沿用它，新建客户端时丢掉上一个，再次加入时先释放 discord.py 已摘掉的旧会话、重连中的旧会话原样保留（`test_discord_voice_manager_lifetime.py`、`voice/test_join_stale_state.py` 守住）
 - Discord 语音跟随的对账循环按 REST 补收错过的网关事件，每 10–13 秒轮询一遍各公会：跟随用户在语音频道里，就加入并像事件加入那样记录（之后错过的离开也补得上）；每个跟随用户都被确认不在（没有语音状态、没有频道、或在不允许的频道）才丢掉过期的记录，并与离开事件一样走接力或离开（公会级的「是否离开」检查照常问）；HTTP 错误、舞台频道、缓存里没有的频道这类没有确认的答案不改任何状态，轮询期间跟随用户换了频道（事件比答案新）则这一轮的答案全部作废，静音、推流这类不换频道的状态变化不算；有跟随状态（公会标志在，或记录里有这个公会）的公会里，REST 轮询答不出来（403、5xx 这类 HTTP 错误）时，每个公会和用户每 10 分钟记一条 WARNING，因为该公会的过期记录在它答复之前补不回来，其它公会与窗口内的重复只记 DEBUG；每次丢掉过期记录记一条以 `Reconciliation:` 开头的 INFO（默认日志级别是 WARNING，这条 INFO 要把级别开到 INFO 才看得到）；某个公会这一轮出错（REST 轮询遇到网络错误、加入抛错）只记 WARNING（带公会号与异常，不带堆栈）并留给下一轮，不结束循环、不跳过后面的公会，落在一轮里的取消仍会结束任务；已结束的对账任务在下次启动时重新拉起（`voice/test_follow_reconcile.py`、`voice/test_follow_presence.py` 守住）
-- Discord 适配器的入站只填 `sender_id`，不预置 `user_id`（私聊、按钮点击、语音转写因此按 DM 策略与配对解析，未配对者不进入回合，`test_discord_sender_identity.py` 守住）
+- Discord 适配器的入站只填 `sender_id`，不预置 `user_id`（私聊、语音转写因此按 DM 策略与配对解析，未配对者不进入回合，`test_discord_sender_identity.py` 守住）
 - Discord 的 `/voice` 命令不经入站管道，命令先应答（defer）再按调用者在该频道发消息时的访问策略判定（`BaseChannel.is_sender_admitted` → 总线 → 路由器的发送者准入，公会里所有者与已启用群聊的成员放行，群聊未启用或群聊策略为 DISABLED 则拒绝；拒绝时只给调用者回一条仅其可见的提示并记带频道的 WARNING，判定未接线同样拒绝；除只读的 `status` 外（`join`、`leave`，未列为只读的动作同样）准入之后还要所有者（`BaseChannel.is_sender_owner` → 总线 → 路由器的所有者判定，即系统命令用的那一个：有效的管理员配对或控制面转发，出错拒绝），被准入的非所有者收到专用提示、不加入不离开，`status` 按准入放行；`test_discord_voice_command_admission.py`、`tests/channels/core/test_sender_gate.py` 与 `routing/test_router_sender_gate.py` 守住）
 - Discord `/voice` 命令的全部回复（无权限、仅所有者、语音未启用、仅限服务器、需指定频道、加入成功与失败、离开、状态）取自渠道目录的 `voice_*`，按 Discord 报告的调用者语言渲染（`en-US` / `en-GB` 为英文，`zh-CN` 与 `zh-TW` 为中文，其余回退英文）；没有会话时 `leave` 回复不在语音频道而不调用离开；加入另一语音频道的会话时，只有 VoiceClient 事后连接在目标频道才算加入（discord.py 的移动超时只记日志、正常返回），否则回复加入失败且会话与文字频道绑定不变；`test_discord_voice_command_replies.py` 与 `voice/test_join_move_outcome.py` 守住
 - 语音说话人在转写之前先过同一判定（私聊口径，已配对者），被拒绝者的音频不进语音转写（`voice/test_speaker_gate.py` 守住）

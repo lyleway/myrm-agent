@@ -1,27 +1,27 @@
 /**
- * 配置同步系统类型定义
+ * [INPUT]
+ * - `./configValues` ConfigValueMap and the per-key value shapes (POS: what each config key stores)
+ * - `./configPolicyValues` (POS: the security, budget, backup, browser and external-agent value shapes)
  *
- * 统一的配置数据结构，支持：
- * - 版本控制（乐观锁）
- * - 字段级变更追踪
- * - 多设备同步
+ * [OUTPUT]
+ * `ConfigKey` with its key sets, the record and version types with the version helpers, the change and sync contract
+ * (`ConfigChange`, `SyncResult`, `SyncStatus`, `ConfigAdapter`), `ConfigSyncError`, the `DEFAULT_*` values, and every
+ * value shape of the two value modules, re-exported.
+ *
+ * [POS]
+ * Type entry of the config sync layer: optimistic-lock versions and multi-device sync are built on the keys and the
+ * value map defined here. The value shapes live in two files by theme; importers use this module as the single entry.
  */
 
-import type { ProviderConfig, DefaultModelConfig, CustomModelInfo } from '@/store/config/providerTypes';
-import type { MCPServiceConfig, SearchServiceConfigItem } from '@/store/config/types';
 import type {
-  ChannelsConfig,
-  DiscordCredentials,
-  DingTalkCredentials,
-  FeishuCredentials,
-  GoogleChatCredentials,
-  MatrixCredentials,
-  SlackCredentials,
-  TeamsCredentials,
-  TelegramCredentials,
-  WeComCredentials,
-  WeChatCredentials,
-} from '@/services/channels';
+  ConfigValueMap,
+  MCPServersConfigValue,
+  PersonalSettingsConfigValue,
+  SearchServicesConfigValue,
+} from './configValues';
+
+export type * from './configValues';
+export type * from './configPolicyValues';
 
 // ============================================================================
 // 配置键定义
@@ -114,400 +114,6 @@ export const ALL_CONFIG_KEYS: readonly ConfigKey[] = [
 export const CORE_CONFIG_KEYS: readonly ConfigKey[] = ['providers', 'chatSettings', 'personalSettings'] as const;
 
 // ============================================================================
-// 配置值类型映射
-// ============================================================================
-
-/**
- * Providers 配置值
- */
-export interface ProvidersConfigValue {
-  providers: ProviderConfig[];
-  defaultModelConfig: DefaultModelConfig;
-  customModelInfo: Record<string, CustomModelInfo>;
-}
-
-/**
- * ChatSettings 配置值
- */
-export interface ChatSettingsConfigValue {
-  defaultModelConfig: DefaultModelConfig;
-  customModelInfo: Record<string, CustomModelInfo>;
-}
-
-/**
- * PersonalSettings 配置值
- */
-export type WebTtsProvider = 'browser' | 'openai' | 'elevenlabs' | 'fish_audio' | 'minimax' | 'edge';
-export type ReasoningDisplayMode = 'off' | 'collapsed' | 'inline';
-
-export interface NotificationDelivery {
-  channel: string;
-  target: string;
-}
-
-export type PIIAction = 'warn' | 'redact' | 'pseudonymize' | 'block';
-
-export type PrivacyS2Strategy = 'cloud_after_redact' | 'local';
-export type PrivacyS3Strategy = 'local' | 'block';
-export type PrivacyLocalFallback = 'block' | 'force_redact_cloud';
-
-export interface PrivacyRoutingConfig {
-  localModel?: string;
-  localBaseUrl?: string;
-  s2Strategy?: PrivacyS2Strategy;
-  s3Strategy?: PrivacyS3Strategy;
-  localFallback?: PrivacyLocalFallback;
-}
-
-/** 本地模型端点的密钥：独立的加密配置行，不随偏好、审计历史或默认导出出现。 */
-export interface PrivacyRoutingSecretConfigValue {
-  localApiKey: string;
-}
-
-export type VideoGenerationProvider = 'gemini' | 'qwen' | 'minimax' | 'xai' | 'fal' | 'volcengine';
-
-export interface ImageGenerationConfig {
-  model: string;
-  fallbackModels: string[];
-  defaultSize: string;
-  timeoutSeconds: number;
-  maxRetries: number;
-}
-
-export interface VideoGenerationConfig {
-  provider: VideoGenerationProvider;
-  model: string;
-  fallbackProviders: Array<{ provider: string; model: string }>;
-  timeoutSeconds: number;
-  maxRetries: number;
-  defaultAspectRatio?: string;
-  defaultResolution?: string;
-  defaultDurationSeconds?: number;
-}
-
-export interface PersonalSettingsConfigValue {
-  systemInstructions: string;
-  fetchRawWebpage: boolean;
-  extractDocumentText: boolean;
-  generateSearchSuggestions: boolean;
-  enableCostEstimation: boolean;
-  enableCacheBreakNotification: boolean;
-  showContextUsage: boolean;
-  reasoningDisplayMode: ReasoningDisplayMode;
-  enableMemory: boolean;
-  memoryRequireConfirmation: boolean;
-  enableMemoryAutoExtraction: boolean;
-  memoryEnableConversationSearch: boolean;
-  preCompactEnabled: boolean;
-  preCompactBudgetTokens: number;
-  enableAutoTitleGeneration: boolean;
-  webTtsProvider: WebTtsProvider;
-  timezone: string;
-  locale?: string;
-  activeThemeProfileId?: string;
-  themeProfiles?: import('@/theme-engine/schema').ThemeProfileRecipe[];
-  themeFontOverride?: import('@/lib/fonts').FontId;
-  enableWebNotifications: boolean;
-  enableCompletionSound: boolean;
-  enableIdleApprovalNotification: boolean;
-  approvalNotificationSound: boolean;
-  notificationDeliveries?: NotificationDelivery[];
-  privacyEnabled?: boolean;
-  privacyS2Action?: PIIAction;
-  privacyS3Action?: PIIAction;
-  privacyDeepScan?: boolean;
-  privacyRouting?: PrivacyRoutingConfig;
-  privacyCustomKeywordsS2?: string[];
-  privacyCustomKeywordsS3?: string[];
-  privacyCustomPatternsS2?: string[];
-  privacyCustomPatternsS3?: string[];
-  privacySensitiveToolsS2?: string[];
-  privacySensitiveToolsS3?: string[];
-  imageGeneration?: ImageGenerationConfig;
-  videoGeneration?: VideoGenerationConfig;
-  codeExecutionAllowNetwork?: boolean;
-  enableEvalLab?: boolean;
-  smoothStreamEnabled?: boolean;
-  suggestWorkflowMode?: boolean;
-  autoContinueInterruptedTurns?: boolean;
-  publicIngressBaseUrl?: string;
-  enterpriseTlsCompat?: boolean;
-}
-
-/**
- * MCPServers 配置值
- */
-export interface MCPServersConfigValue {
-  mcpConfigs: MCPServiceConfig[];
-}
-
-export interface OrgMcpServersConfigValue {
-  servers: MCPServiceConfig[];
-}
-
-/**
- * SearchServices 配置值
- */
-export interface SearchServicesConfigValue {
-  searchServiceConfigs: SearchServiceConfigItem[];
-}
-
-/**
- * Commands 配置值（用户自定义命令）
- */
-export interface CommandsConfigValue {
-  commands: SlashCommand[];
-  recentCommandIds: string[];
-}
-
-// 导入命令类型
-import type { SlashCommand } from '@/types/command';
-
-/**
- * Retrieval Provider/Model 配置
- */
-export interface RetrievalProviderModelConfig {
-  provider: string;
-  model: string;
-  apiKey: string;
-  apiBase?: string;
-}
-
-/**
- * Retrieval 配置值（Embedding/Reranker，敏感）
- */
-export interface RetrievalConfigValue {
-  embeddingConfig?: RetrievalProviderModelConfig;
-  embeddingApplied?: boolean;
-  embeddingAppliedAt?: number;
-  rerankerConfig?: RetrievalProviderModelConfig;
-  rerankerApplied?: boolean;
-  rerankerAppliedAt?: number;
-  enableAdvancedRetrieval?: boolean;
-}
-
-/**
- * 通知渠道配置值
- */
-export type ChannelsConfigValue = ChannelsConfig;
-
-/**
- * 语音配置值
- */
-export interface VoiceConfigValue {
-  sttEnabled: boolean;
-  sttProvider: string;
-  sttApiKey: string;
-  sttModel: string;
-  sttLanguage: string;
-  sttLocalModel: string;
-  sttLocalDevice: string;
-  sttLocalComputeType: string;
-  sttBaseUrl: string;
-  ttsMode: string;
-  ttsProvider: string;
-  /** TTS model id for the agent tts_generate tool (server media param chain). */
-  ttsModel?: string;
-  ttsApiKey: string;
-  ttsBaseUrl: string;
-  ttsVoice: string;
-  ttsMaxLength: number;
-  ttsSummaryEnabled: boolean;
-  ttsSummaryThreshold: number;
-  ttsSummaryModel: string;
-}
-
-/**
- * Feishu 凭证配置值
- */
-export type FeishuCredentialsConfigValue = FeishuCredentials;
-
-/**
- * External Agent runtime type.
- */
-export type ExternalAgentType = 'cli' | 'acp';
-
-/**
- * External Agent permission mode.
- */
-export type ExternalAgentPermissionMode = 'allow_all' | 'ask' | 'safe';
-
-/**
- * External Agent authentication mode.
- *
- * - `subscription`: delegate runs on the user's own model plan via the CLI's
- *   own login state; the host strips provider API keys from the child env.
- * - `api_key`: the host injects provider API keys from the agent's `env`.
- */
-export type ExternalAgentAuthMode = 'subscription' | 'api_key';
-
-/**
- * Single external agent configuration.
- */
-export interface ExternalAgentConfig {
-  name: string;
-  type: ExternalAgentType;
-  command: string;
-  args?: string[];
-  enabled: boolean;
-  permissionMode: ExternalAgentPermissionMode;
-  authMode?: ExternalAgentAuthMode;
-  description?: string;
-  maxTurns?: number;
-  /** Variables set when the agent starts, such as its API key; the values are secrets. */
-  env?: Record<string, string>;
-}
-
-/**
- * ExternalAgents configuration value stored via ConfigSyncManager.
- */
-export interface ExternalAgentsConfigValue {
-  agents: ExternalAgentConfig[];
-}
-
-/**
- * Permission Engine — tool execution access control.
- */
-export type PermissionAction = 'allow' | 'ask' | 'deny';
-
-export interface PermissionRuleConfig {
-  permission: string;
-  pattern: string;
-  action: PermissionAction;
-}
-
-export interface PathPolicyConfig {
-  allowedRoots?: string[];
-}
-
-export interface SecurityConfigValue {
-  permissions: Record<string, PermissionAction | Record<string, PermissionAction>>;
-  approvalTimeoutSeconds: number;
-  approvalTimeoutBehavior?: 'deny' | 'allow';
-  capabilityMatrix?: Record<string, PermissionAction>;
-  pathPolicy?: PathPolicyConfig;
-  networkAllowlist?: string[];
-  networkBlocklist?: string[];
-  commandDenylist?: string[];
-  domainHitlEnabled?: boolean;
-  injectionPolicy?: 'log_only' | 'fail_closed';
-  planConfirmEnabled?: boolean;
-  yoloModeEnabled?: boolean;
-  yoloModeEnabledAt?: number;
-  yoloModeTimeout?: number;
-  autoReviewEnabled?: boolean;
-  autoReviewModel?: string;
-}
-
-export interface BudgetPolicyConfigValue {
-  enabled: boolean;
-  daily_limit_usd: number | null;
-  session_limit_usd: number | null;
-  per_call_limit_usd: number | null;
-  warning_threshold: number;
-  finalization_reserve_pct: number;
-  action_on_exceeded: 'warn' | 'block' | 'finalize';
-}
-
-export interface BackupSyncConfigValue {
-  enabled: boolean;
-  provider: 'webdav' | 's3';
-  autoSync: boolean;
-  syncInterval: number;
-  maxBackups: number;
-  deviceName: string;
-  webdav: {
-    host: string;
-    username: string;
-    password: string;
-    path: string;
-  };
-  s3: {
-    endpoint: string;
-    region: string;
-    bucket: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-    prefix: string;
-    forcePathStyle: boolean;
-  };
-}
-
-export interface SecurityDashboardSettingsConfigValue {
-  monitoredGithubRepos: string[];
-}
-
-export type BrowserCloudProviderType = 'browserbase' | 'browserless' | 'notte' | 'custom';
-
-export interface BrowserCloudProviderConfigValue {
-  enabled: boolean;
-  provider: BrowserCloudProviderType;
-  credential: string;
-  custom_ws_url: string;
-}
-
-export interface BrowserProxyConfigValue {
-  enabled: boolean;
-  proxies: string[];
-}
-
-export interface CaptchaSolverConfigValue {
-  enabled: boolean;
-  api_key: string;
-}
-
-export interface WebFetchFirecrawlConfigValue {
-  inheritFromSearch: boolean;
-  api_key: string | null;
-  apiBase: string | null;
-}
-
-export interface WebFetchEscalationConfigValue {
-  enabled: boolean;
-  jinaApiKey: string | null;
-  firecrawl: WebFetchFirecrawlConfigValue;
-  sessionCap: number;
-}
-
-/**
- * 配置键到值类型的映射
- */
-export interface ConfigValueMap {
-  providers: ProvidersConfigValue;
-  defaultModelConfig: DefaultModelConfig;
-  customModelInfo: Record<string, CustomModelInfo>;
-  chatSettings: ChatSettingsConfigValue;
-  personalSettings: PersonalSettingsConfigValue;
-  privacyRoutingSecret: PrivacyRoutingSecretConfigValue;
-  mcpServers: MCPServersConfigValue;
-  searchServices: SearchServicesConfigValue;
-  commands: CommandsConfigValue;
-  retrieval: RetrievalConfigValue;
-  channels: ChannelsConfigValue;
-  voice: VoiceConfigValue;
-  feishuCredentials: FeishuCredentialsConfigValue;
-  dingtalkCredentials: DingTalkCredentials;
-  slackCredentials: SlackCredentials;
-  discordCredentials: DiscordCredentials;
-  wecomCredentials: WeComCredentials;
-  wechatCredentials: WeChatCredentials;
-  teamsCredentials: TeamsCredentials;
-  matrixCredentials: MatrixCredentials;
-  telegramCredentials: TelegramCredentials;
-  googlechatCredentials: GoogleChatCredentials;
-  securityConfig: SecurityConfigValue;
-  externalAgents: ExternalAgentsConfigValue;
-  budget_policy: BudgetPolicyConfigValue;
-  backupSync: BackupSyncConfigValue;
-  securityDashboardSettings: SecurityDashboardSettingsConfigValue;
-  browserCloudProvider: BrowserCloudProviderConfigValue;
-  browserProxy: BrowserProxyConfigValue;
-  captchaSolverConfig: CaptchaSolverConfigValue;
-  webFetchEscalation: WebFetchEscalationConfigValue;
-  orgMcpServers: OrgMcpServersConfigValue;
-}
-
-// ============================================================================
 // 配置元数据
 // ============================================================================
 
@@ -573,44 +179,9 @@ export function incrementVersion(current: ConfigVersion): ConfigVersion {
   return `${now}_0`;
 }
 
-/**
- * 比较版本号
- *
- * @returns 正数表示 a > b，负数表示 a < b，0 表示相等
- */
-export function compareVersions(a: ConfigVersion, b: ConfigVersion): number {
-  const [aTs, aCtr] = a.split('_').map(Number);
-  const [bTs, bCtr] = b.split('_').map(Number);
-
-  if (aTs !== bTs) {
-    return aTs - bTs;
-  }
-  return aCtr - bCtr;
-}
-
-/**
- * 解析版本号
- */
-export function parseVersion(version: ConfigVersion): { timestamp: number; counter: number } {
-  const [timestamp, counter] = version.split('_').map(Number);
-  return { timestamp, counter };
-}
-
 // ============================================================================
 // 同步相关类型
 // ============================================================================
-
-/**
- * 字段变更记录
- */
-export interface FieldChange {
-  /** 字段路径，如 ['providers', 0, 'apiKey'] */
-  path: (string | number)[];
-  /** 变更前的值 */
-  oldValue: unknown;
-  /** 变更后的值 */
-  newValue: unknown;
-}
 
 /**
  * 配置变更记录
@@ -664,18 +235,6 @@ export interface ConfigAdapter {
   get<K extends ConfigKey>(key: K): Promise<ConfigRecord<K> | null>;
 
   /**
-   * 设置配置（带版本号）
-   *
-   * @throws ConfigConflictError 版本冲突时抛出
-   */
-  set<K extends ConfigKey>(key: K, value: ConfigValueMap[K], expectedVersion?: ConfigVersion): Promise<ConfigRecord<K>>;
-
-  /**
-   * 删除配置
-   */
-  delete(key: ConfigKey): Promise<boolean>;
-
-  /**
    * 批量同步
    */
   sync(changes: ConfigChange[]): Promise<SyncResult>;
@@ -684,20 +243,6 @@ export interface ConfigAdapter {
 // ============================================================================
 // 错误类型
 // ============================================================================
-
-/**
- * 配置版本冲突错误
- */
-export class ConfigConflictError extends Error {
-  constructor(
-    public readonly key: ConfigKey,
-    public readonly localVersion: ConfigVersion,
-    public readonly serverVersion: ConfigVersion,
-  ) {
-    super(`Config conflict for key '${key}': local=${localVersion}, server=${serverVersion}`);
-    this.name = 'ConfigConflictError';
-  }
-}
 
 /**
  * 配置同步错误
@@ -763,34 +308,4 @@ export const DEFAULT_MCP_SERVERS: MCPServersConfigValue = {
  */
 export const DEFAULT_SEARCH_SERVICES: SearchServicesConfigValue = {
   searchServiceConfigs: [],
-};
-
-/**
- * 默认的 Commands 配置
- */
-export const DEFAULT_COMMANDS: CommandsConfigValue = {
-  commands: [],
-  recentCommandIds: [],
-};
-
-/**
- * 默认的 Retrieval 配置
- */
-export const DEFAULT_RETRIEVAL: RetrievalConfigValue = {
-  embeddingConfig: {
-    provider: 'siliconflow',
-    model: 'BAAI/bge-m3',
-    apiKey: '',
-    apiBase: '',
-  },
-  embeddingApplied: false,
-  embeddingAppliedAt: undefined,
-  rerankerConfig: {
-    provider: 'siliconflow',
-    model: 'BAAI/bge-reranker-v2-m3',
-    apiKey: '',
-    apiBase: '',
-  },
-  rerankerApplied: false,
-  rerankerAppliedAt: undefined,
 };

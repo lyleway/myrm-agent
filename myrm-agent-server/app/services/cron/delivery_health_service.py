@@ -1,9 +1,9 @@
 """Delivery health of the destination a cron job delivers to.
 
 The verdict is about the destination (a channel plus the exact address), not about one job: every job that delivers
-there adds its delivery attempts in the last day, whatever its status. It is a failure streak, the category of the
-latest failure and one of three states (HEALTHY, DEGRADED, DOWN); a destination with no attempt in the window has no
-verdict.
+there adds its delivery attempts, whatever its status. It is a failure streak, the category of the latest failure, when
+the newest attempt finished and one of three states (HEALTHY, DEGRADED, DOWN); a destination nothing was delivered to
+has no verdict.
 
 [INPUT]
 - myrm_agent_harness.api (POS: public facade; the delivery failure taxonomy and the identity of a destination)
@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 from itertools import takewhile
 
@@ -41,9 +41,9 @@ from app.core.cron.adapters.sqlalchemy_mapping import as_utc
 from app.database.models.cron import CronJobModel, CronRunModel
 from app.database.repositories.uow import UnitOfWork
 
-# Delivery attempts of one destination that the verdict is read from, newest first, and how far back they may lie.
+# The newest delivery attempts of one destination, however long ago they were, are what the verdict is read from: a
+# destination that is delivered to rarely has nothing newer to say, and the cap keeps the read small.
 _MAX_ATTEMPTS = 50
-_WINDOW = timedelta(hours=24)
 # A destination is DOWN once this many deliveries in a row have failed.
 _DOWN_AFTER_FAILURES = 3
 # Failures no retry can fix, because the credential or the address itself has to change: one is enough for DOWN.
@@ -63,15 +63,16 @@ class DeliveryHealth:
     """What the delivery attempts to one destination say about it.
 
     Only runs whose delivery was attempted (delivered or failed) count: a skipped delivery says nothing about the
-    destination, and a task's own failure is not the destination's fault. The failure fields describe the streak that
-    ends at the newest attempt, so they are empty while that attempt went through; ``last_failed_at`` is when the run
-    behind the newest failure finished (before its delivery ran).
+    destination, and a task's own failure is not the destination's fault. ``last_attempt_at`` is when the run behind
+    the newest attempt finished (before its delivery ran): it tells how old the evidence is, which matters for a
+    destination that is delivered to rarely. The failure fields describe the streak that ends at that attempt, so
+    they are empty while it went through.
     """
 
     status: DeliveryHealthStatus
     failure_streak: int
+    last_attempt_at: datetime
     last_error_category: ConnectorErrorCategory | None = None
-    last_failed_at: datetime | None = None
 
 
 def _destination_key(channel: str, target: str | None) -> str:
@@ -89,20 +90,20 @@ def _summarise(attempts: Sequence[CronRunModel]) -> DeliveryHealth | None:
     """Derive the health of a destination from its delivery attempts, newest first; None when there are none."""
     if not attempts:
         return None
+    last_attempt_at = as_utc(attempts[0].finished_at)
     # The streak is the failed attempts since the last delivered one; a delivery ends it.
     streak = list(takewhile(lambda run: run.delivery_status == "failed", attempts))
     if not streak:
-        return DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0)
+        return DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0, last_attempt_at=last_attempt_at)
 
     # Only a failed delivery's own error describes the destination, a task's error does not.
-    newest_failure = streak[0]
-    category = classify_connector_error(newest_failure.delivery_error)[0]
+    category = classify_connector_error(streak[0].delivery_error)[0]
     down = len(streak) >= _DOWN_AFTER_FAILURES or category in _PERMANENT_FAILURES
     return DeliveryHealth(
         status=DeliveryHealthStatus.DOWN if down else DeliveryHealthStatus.DEGRADED,
         failure_streak=len(streak),
+        last_attempt_at=last_attempt_at,
         last_error_category=category,
-        last_failed_at=as_utc(newest_failure.finished_at),
     )
 
 
@@ -114,18 +115,17 @@ class DeliveryHealthService:
         """The health of the destination ``channel`` and ``target`` name.
 
         None when there is no verdict: the channel sends nothing outside the application, or no delivery to the
-        destination was attempted in the last day.
+        destination has been recorded.
         """
         key = _destination_key(channel, target)
         if not key:
             return None
-        since = datetime.now(UTC) - _WINDOW
 
         async with UnitOfWork() as uow:
             db = uow.session
             assert db is not None
-            # Every job is read and filtered here: its status does not matter, its delivery attempts in the window
-            # do. Only the delivery column is read, which is all the key derives from.
+            # Every job is read and filtered here: its status does not matter, its delivery attempts do. Only the
+            # delivery column is read, which is all the key derives from.
             jobs = await db.execute(select(CronJobModel.id, CronJobModel.delivery))
             job_ids = [job_id for job_id, delivery in jobs if _job_destination_key(delivery) == key]
             if not job_ids:
@@ -139,7 +139,6 @@ class DeliveryHealthService:
                 select(CronRunModel)
                 .where(
                     CronRunModel.job_id.in_(job_ids),
-                    CronRunModel.finished_at >= since,
                     CronRunModel.delivery_status.in_(("delivered", "failed")),
                     func.json_extract(CronRunModel.metadata_json, "$.delivery_key") == key,
                 )

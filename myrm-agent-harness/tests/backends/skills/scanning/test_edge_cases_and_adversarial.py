@@ -15,9 +15,7 @@ from myrm_agent_harness.backends.skills.scanning.dependency_extractor import (
 from myrm_agent_harness.backends.skills.scanning.rescan_engine import (
     InstalledSkillRescanEngine,
 )
-from myrm_agent_harness.backends.skills.scanning.scanner import (
-    SkillTrustRecommendation,
-)
+from myrm_agent_harness.backends.skills.types import SkillTrustRecommendation
 
 
 def test_dependency_extractor_adversarial_inputs() -> None:
@@ -65,28 +63,26 @@ def test_dependency_extractor_adversarial_inputs() -> None:
     assert "python" not in t_names
 
 
-def test_dependency_extractor_symlink_and_deep_recursion(tmp_path: Path) -> None:
-    """Test recursion limits and ignored paths in disk directory scanning."""
+def test_dependency_extractor_skips_only_node_modules(tmp_path: Path) -> None:
+    """A dependency tree is not the skill's own files; a folder with any other name can hold anything."""
     skill_dir = tmp_path / "deep-skill"
     skill_dir.mkdir()
 
-    # Create ignored directories
     node_modules = skill_dir / "node_modules"
     node_modules.mkdir()
     (node_modules / "package.json").write_text('{"dependencies": {"ignore-me": "1.0"}}', encoding="utf-8")
 
     git_dir = skill_dir / ".git"
     git_dir.mkdir()
-    (git_dir / "requirements.txt").write_text("ignore-git==1.0\n", encoding="utf-8")
+    (git_dir / "requirements.txt").write_text("read-git==1.0\n", encoding="utf-8")
 
-    # Create root valid manifest
     (skill_dir / "package.json").write_text('{"dependencies": {"real-dep": "2.0"}}', encoding="utf-8")
 
     deps = extract_skill_dependencies(skill_dir)
     dep_names = {d.name for d in deps}
     assert "real-dep" in dep_names
+    assert "read-git" in dep_names
     assert "ignore-me" not in dep_names
-    assert "ignore-git" not in dep_names
 
 
 @pytest.mark.asyncio

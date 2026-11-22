@@ -108,7 +108,9 @@ class ChannelGoalCommandHandler:
 
         parsed_objective, acceptance_criteria = _parse_im_goal_text(objective)
 
+        chat_id = chat_id or await resolve_chat_id(msg, create=True)
         if not chat_id:
+            # ``/new`` ended the conversation and the kickoff turn is the one to start the next: no chat holds a goal yet.
             return get_text(msg, "goal_set", goal=parsed_objective)
 
         from app.services.agent.goals.goal_branch_stash import check_and_handle_branch_stash

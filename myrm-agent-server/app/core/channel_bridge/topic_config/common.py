@@ -2,7 +2,7 @@
 - app.channels.types (POS: channel topic types)
 
 [OUTPUT]
-- Shared constants, the search-agent bind helpers and the logger.
+- Shared constants, the search-agent bind helpers, the write generation of the stored config and the logger.
 
 [POS]
 Shared primitives of the channel topic-config domain.
@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 
 
 _CACHE_TTL = 60.0
+
+# Per channel, how many times this process has written the stored topic config. Every manager caches reads for itself,
+# so a manager compares the generation it cached under with this one to learn that another manager wrote since. The
+# API handlers, the router and the commands of one process share it, which is the deployment the server supports.
+_WRITE_GENERATION: dict[str, int] = {}
+
+
+def bump_write_generation(channel: str) -> None:
+    """Record that the stored topic config of ``channel`` was written."""
+    _WRITE_GENERATION[channel] = _WRITE_GENERATION.get(channel, 0) + 1
+
+
+def write_generation(channel: str) -> int:
+    """How many times this process has written the stored topic config of ``channel``."""
+    return _WRITE_GENERATION.get(channel, 0)
 
 
 _CHANNEL_LEVEL_KEY = "__channel__"

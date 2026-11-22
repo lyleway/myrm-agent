@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
+from typing import Self
 
 import pytest
 
@@ -16,8 +17,8 @@ _NOW = datetime(2026, 10, 13, 9, 0, tzinfo=timezone.utc)
 
 class _FrozenDatetime(datetime):
     @classmethod
-    def now(cls, tz: timezone | None = None) -> datetime:
-        return _NOW if tz is None else _NOW.astimezone(tz)
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(_NOW.timestamp(), tz or timezone.utc)
 
 
 @pytest.fixture(autouse=True)
@@ -157,6 +158,17 @@ class TestDecisionButtons:
 
         assert components == ()
         assert content.endswith("Open the Myrm AI app to review and decide.")
+
+    def test_a_hosted_telegram_send_gets_a_pointer_because_control_plane_egress_is_text_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(approval_card, "should_route_via_control_plane", lambda channel: channel == "telegram")
+
+        content, components = build_approval_card(_draft(), "telegram", "en")
+
+        assert components == ()
+        assert content.endswith("Open the Myrm AI app to review and decide.")
+        assert "approval:" not in content
 
     def test_only_telegram_clicks_are_handled(self) -> None:
         assert APPROVAL_CLICK_CHANNELS == frozenset({"telegram"})

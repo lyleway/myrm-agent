@@ -2,6 +2,7 @@
 
 [INPUT]
 - capture::capture_ax_snapshot (POS: AX capture whose meta describes the foreground app)
+- scripts::_ESCAPE_HANDLERS (POS: the osascript text and its caps)
 - dref.errors::AXPermissionRequiredError, AXTreeEmptyError (POS: AX error types)
 
 [OUTPUT]
@@ -21,8 +22,18 @@ import subprocess
 from myrm_agent_harness.toolkits.computer_use.dref.errors import AXPermissionRequiredError, AXTreeEmptyError
 
 from .capture import capture_ax_snapshot
+from .scripts import _ESCAPE_HANDLERS
 
-_AX_FOREGROUND_META_SCRIPT = """
+# The script returns one `|||`-separated line, so its three text fields are escaped like those of a snapshot.
+_FOREGROUND_LINE_HANDLER = """on foregroundLine(appName, winTitle, bundleId)
+    return (my escapeText(appName)) & "|||" & (my escapeText(winTitle)) & "|||" & (my escapeText(bundleId))
+end foregroundLine"""
+
+_AX_FOREGROUND_META_SCRIPT = f"""
+{_ESCAPE_HANDLERS}
+
+{_FOREGROUND_LINE_HANDLER}
+
 tell application "System Events"
     set frontApp to first application process whose frontmost is true
     set appName to name of frontApp
@@ -34,7 +45,7 @@ tell application "System Events"
     try
         set winTitle to name of window 1 of frontApp
     end try
-    return appName & "|||" & winTitle & "|||" & bundleId
+    return my foregroundLine(appName, winTitle, bundleId)
 end tell
 """
 

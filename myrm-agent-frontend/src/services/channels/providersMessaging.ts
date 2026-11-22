@@ -158,8 +158,6 @@ export async function testSlackConnection(botToken: string, appToken: string): P
 
 export interface DiscordCredentials {
   botToken: string;
-  applicationId?: string;
-  publicKey?: string;
   enableGateway?: boolean;
   botPolicy: 'deny' | 'mention_only' | 'allow';
   autoThread?: boolean;
@@ -196,16 +194,11 @@ export async function getDiscordCredentials(): Promise<DiscordCredentials | null
 
 export async function saveDiscordCredentials(creds: DiscordCredentials): Promise<void> {
   if (isSandbox()) {
-    if (!creds.applicationId?.trim() || !creds.publicKey?.trim()) {
-      throw new Error('Application ID and public key are required for SaaS Discord');
-    }
     await cpChannelRequest('/api/channels/credentials/discord', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         bot_token: creds.botToken,
-        application_id: creds.applicationId,
-        public_key: creds.publicKey,
         enable_gateway: creds.enableGateway ?? true,
       }),
     });

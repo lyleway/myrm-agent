@@ -1,4 +1,8 @@
-"""Tests for WeCom group bot webhook cron delivery."""
+"""Tests for WeCom group bot webhook cron delivery.
+
+The delivery health names a failure from the wording of the error the adapter raises, so the tests that raise one also
+assert the category that wording is given.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from myrm_agent_harness.api import ConnectorErrorCategory, classify_connector_error
 from myrm_agent_harness.toolkits.cron.types import CronJob, DeliveryConfig, JobResult, JobType, Schedule
 
 from app.core.cron.adapters.wecom_bot_webhook import (
@@ -226,9 +231,11 @@ class TestDeliverWecomBotWebhook:
                 return_value=mock_client,
             ),
             patch("app.core.cron.adapters.wecom_bot_webhook.asyncio.sleep", new_callable=AsyncMock),
-            pytest.raises(RuntimeError, match="returned 403"),
+            pytest.raises(RuntimeError, match="returned 403") as raised,
         ):
             await deliver_wecom_bot_webhook(job, result)
+
+        assert classify_connector_error(raised.value)[0] == ConnectorErrorCategory.AUTH_FAILURE
 
     @pytest.mark.asyncio
     async def test_raises_on_wecom_errcode_nonzero(self) -> None:
@@ -250,9 +257,11 @@ class TestDeliverWecomBotWebhook:
                 return_value=mock_client,
             ),
             patch("app.core.cron.adapters.wecom_bot_webhook.asyncio.sleep", new_callable=AsyncMock),
-            pytest.raises(RuntimeError, match="errcode=93000"),
+            pytest.raises(RuntimeError, match="errcode=93000") as raised,
         ):
             await deliver_wecom_bot_webhook(job, result)
+
+        assert classify_connector_error(raised.value)[0] == ConnectorErrorCategory.HTTP_CLIENT_ERROR
 
     @pytest.mark.asyncio
     async def test_non_json_response_succeeds(self) -> None:
@@ -324,12 +333,13 @@ class TestDeliverWecomBotWebhook:
                 return_value=mock_client,
             ),
             patch("app.core.cron.adapters.wecom_bot_webhook.asyncio.sleep", new_callable=AsyncMock),
-            pytest.raises(RuntimeError, match="returned 500"),
+            pytest.raises(RuntimeError, match="returned 500") as raised,
         ):
             await deliver_wecom_bot_webhook(job, result)
 
         # 1 initial + 2 retries = 3 attempts
         assert mock_client.post.await_count == 3
+        assert classify_connector_error(raised.value)[0] == ConnectorErrorCategory.HTTP_SERVER_ERROR
 
     @pytest.mark.asyncio
     async def test_content_type_header_is_json_utf8(self) -> None:

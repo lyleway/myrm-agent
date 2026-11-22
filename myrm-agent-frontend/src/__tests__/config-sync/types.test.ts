@@ -5,12 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  createInitialVersion,
-  incrementVersion,
-  compareVersions,
-  parseVersion,
-} from '@/services/config/types';
+import { createInitialVersion, incrementVersion } from '@/services/config/types';
 
 describe('Config Sync Types', () => {
   describe('Version Functions', () => {
@@ -25,7 +20,7 @@ describe('Config Sync Types', () => {
         const version = createInitialVersion();
         const after = Date.now();
 
-        const { timestamp } = parseVersion(version);
+        const [timestamp] = version.split('_').map(Number);
         expect(timestamp).toBeGreaterThanOrEqual(before);
         expect(timestamp).toBeLessThanOrEqual(after);
       });
@@ -48,7 +43,7 @@ describe('Config Sync Types', () => {
         const current = `${oldTimestamp}_5`;
 
         const next = incrementVersion(current);
-        const { counter } = parseVersion(next);
+        const [, counter] = next.split('_').map(Number);
 
         expect(counter).toBe(0);
       });
@@ -58,39 +53,6 @@ describe('Config Sync Types', () => {
         const result = incrementVersion(invalid);
 
         expect(result).toMatch(/^\d+_0$/);
-      });
-    });
-
-    describe('compareVersions', () => {
-      it('应该正确比较不同时间戳的版本', () => {
-        const older = '1000000000000_0';
-        const newer = '1000000000001_0';
-
-        expect(compareVersions(newer, older)).toBeGreaterThan(0);
-        expect(compareVersions(older, newer)).toBeLessThan(0);
-      });
-
-      it('应该正确比较同一时间戳不同计数器的版本', () => {
-        const v1 = '1000000000000_0';
-        const v2 = '1000000000000_1';
-
-        expect(compareVersions(v2, v1)).toBeGreaterThan(0);
-        expect(compareVersions(v1, v2)).toBeLessThan(0);
-      });
-
-      it('应该对相同版本返回 0', () => {
-        const version = '1000000000000_5';
-        expect(compareVersions(version, version)).toBe(0);
-      });
-    });
-
-    describe('parseVersion', () => {
-      it('应该正确解析版本号', () => {
-        const version = '1706000000000_5';
-        const { timestamp, counter } = parseVersion(version);
-
-        expect(timestamp).toBe(1706000000000);
-        expect(counter).toBe(5);
       });
     });
   });

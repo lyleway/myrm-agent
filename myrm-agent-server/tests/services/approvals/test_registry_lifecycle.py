@@ -52,7 +52,7 @@ async def _test_get_session() -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _init_db(tmp_path_factory: pytest.TempPathFactory) -> None:
+def _init_db(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     global _engine, _session_factory
     db_path = tmp_path_factory.mktemp("registry_lifecycle") / "registry_test.db"
     _engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
@@ -63,13 +63,13 @@ def _init_db(tmp_path_factory: pytest.TempPathFactory) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _patch_session():
+def _patch_session() -> Iterator[None]:
     with patch("app.services.approvals.registry.get_session", _test_get_session):
         yield
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _create_tables():
+async def _create_tables() -> AsyncIterator[None]:
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -169,6 +169,11 @@ class TestCleanupExpiredApprovals:
         send_mock.assert_awaited_once()
 
 
+def _temp_file(attachment: MediaAttachment) -> Path:
+    assert attachment.path is not None
+    return Path(attachment.path)
+
+
 class TestOutboundDraftRelease:
     """A draft that will never be sent must not leave its temp attachments behind."""
 
@@ -187,7 +192,7 @@ class TestOutboundDraftRelease:
         record = await ApprovalRegistry.resolve_approval("od-reject", "deny")
 
         assert record is not None and record.status == "REJECTED"
-        assert not Path(shot.path).exists()
+        assert not _temp_file(shot).exists()
 
     @pytest.mark.asyncio
     async def test_approved_draft_keeps_its_temp_attachments_for_the_send(self) -> None:
@@ -199,9 +204,9 @@ class TestOutboundDraftRelease:
 
         try:
             send.assert_awaited_once()
-            assert Path(shot.path).exists()
+            assert _temp_file(shot).exists()
         finally:
-            Path(shot.path).unlink(missing_ok=True)
+            _temp_file(shot).unlink(missing_ok=True)
 
     @pytest.mark.asyncio
     async def test_expired_draft_deletes_its_temp_attachments(self) -> None:
@@ -211,7 +216,7 @@ class TestOutboundDraftRelease:
         with patch("app.services.approvals.registry.get_event_bus", return_value=MagicMock()):
             assert await ApprovalRegistry.cleanup_expired_approvals() == 1
 
-        assert not Path(shot.path).exists()
+        assert not _temp_file(shot).exists()
 
     @pytest.mark.asyncio
     async def test_auto_sent_expired_draft_keeps_its_temp_attachments(self) -> None:
@@ -227,9 +232,9 @@ class TestOutboundDraftRelease:
             assert await ApprovalRegistry.cleanup_expired_approvals() == 1
 
         try:
-            assert Path(shot.path).exists()
+            assert _temp_file(shot).exists()
         finally:
-            Path(shot.path).unlink(missing_ok=True)
+            _temp_file(shot).unlink(missing_ok=True)
 
 
 class TestHeldReplyFunnel:
@@ -270,6 +275,7 @@ class TestHeldReplyFunnel:
         with patch("app.services.approvals.outbound_draft.send_outbound_draft_payload", new=AsyncMock(return_value=True)) as send:
             await ApprovalRegistry.resolve_approval("fn-edit", "approve", edited_payload={"draft_content": "edited by reviewer"})
 
+        assert send.await_args is not None
         assert send.await_args.args[0]["draft_content"] == "edited by reviewer"
 
     @pytest.mark.asyncio
@@ -398,73 +404,6 @@ class TestListPendingGrowth:
         growth = await ApprovalRegistry.list_pending_growth(limit=50)
         ids = {rec.id for rec in growth}
         assert "lg-resolved" not in ids
-
-
-class TestChannelNativeApprovalBlock:
-    @pytest.mark.asyncio
-    async def test_channel_pending_approval_pushes_native_block(self) -> None:
-        """A PENDING approval for a non-web channel chat pushes a Native Approval Block."""
-        from app.database.models.chat import Chat
-
-        async with _get_session_factory()() as db:
-            chat = Chat(
-                id="chat-channel-1",
-                source="telegram",
-                channel_session_key="telegram:user:peer-777",
-            )
-            db.add(chat)
-            await db.commit()
-
-        gateway = AsyncMock()
-        bus = MagicMock()
-        with (
-            patch("app.services.approvals.registry.get_event_bus", return_value=bus),
-            patch("app.core.channel_bridge.get_channel_gateway", return_value=gateway),
-        ):
-            await ApprovalRegistry.create_approval(
-                agent_id="chan-agent",
-                action_type="shell_command",
-                payload={"cmd": "ls"},
-                reason="needs review",
-                chat_id="chat-channel-1",
-            )
-
-        gateway.publish.assert_awaited_once()
-        msg = gateway.publish.await_args.args[0]
-        assert msg.channel == "telegram"
-        assert msg.recipient_id == "peer-777"
-        assert msg.content is not None
-        assert "Approval Required" in msg.content
-
-    @pytest.mark.asyncio
-    async def test_web_chat_does_not_push_native_block(self) -> None:
-        """Web chats do not trigger the native approval block push."""
-        from app.database.models.chat import Chat
-
-        async with _get_session_factory()() as db:
-            chat = Chat(
-                id="chat-web-1",
-                source="web",
-                channel_session_key=None,
-            )
-            db.add(chat)
-            await db.commit()
-
-        gateway = AsyncMock()
-        bus = MagicMock()
-        with (
-            patch("app.services.approvals.registry.get_event_bus", return_value=bus),
-            patch("app.core.channel_bridge.get_channel_gateway", return_value=gateway),
-        ):
-            await ApprovalRegistry.create_approval(
-                agent_id="web-agent",
-                action_type="shell_command",
-                payload={"cmd": "ls"},
-                reason="needs review",
-                chat_id="chat-web-1",
-            )
-
-        gateway.publish.assert_not_awaited()
 
 
 class TestPublishedApprovalEvent:

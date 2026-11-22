@@ -226,7 +226,7 @@ export function DeliveryEditor({ job, onUpdated }: EditorProps) {
 
   return (
     <div className="rounded-lg border bg-card px-3 py-2.5 space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <span className="text-xs font-medium text-muted-foreground block">{t('deliveryLabel')}</span>
         {job.delivery?.target && <ConnectorHealthBadge job={job} />}
       </div>

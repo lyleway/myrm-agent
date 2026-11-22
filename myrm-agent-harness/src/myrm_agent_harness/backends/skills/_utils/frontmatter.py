@@ -1,5 +1,6 @@
 """[INPUT]
 - myrm_agent_harness.backends.skills.types::SkillContract / SkillPermission / SkillRequires (POS: Framework generic skill system. The stable public entry point stays at ``backends.skills.types``; the nine ``types_*`` implementation modules are co-located here under this facade.)
+- myrm_agent_harness.utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - SkillMetadataError: Skill metadata parsing or validation error.
@@ -25,6 +26,7 @@ from myrm_agent_harness.backends.skills.types import (
     SkillPermission,
     SkillRequires,
 )
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 _MAX_DESCRIPTION_LENGTH = 1024
 _MAX_COMPATIBILITY_LENGTH = 500
@@ -188,7 +190,7 @@ def _parse_frontmatter_yaml(content: str, skill_dir_name: str) -> dict[str, obje
     frontmatter_text = match.group(1)
 
     try:
-        parsed = yaml.safe_load(frontmatter_text)
+        parsed = load_clean_yaml(frontmatter_text)
     except yaml.YAMLError as e:
         raise SkillMetadataError(f"Invalid YAML syntax in frontmatter: {e}") from e
 

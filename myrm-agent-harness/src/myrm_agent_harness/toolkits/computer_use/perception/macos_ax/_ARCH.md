@@ -8,10 +8,10 @@ macOS Accessibility backend of Semantic Desktop Control: an AppleScript (System 
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Facade | Exports `capture_ax_snapshot`, `inspect_foreground`, `invoke_ax_element`, `read_foreground_meta` | ✅ |
-| scripts.py | Core | The osascript text and how a script finds its process: snapshot script builder (whole app, query, role filter; a password field is resolved by its **subrole** before the `value` read), invoke script builder, application selector (bundle id for known apps, exact name with a contains fallback), element cap and role filter. Nothing here executes a process | ✅ |
-| capture.py | Core | `capture_ax_snapshot` (targeted capture by app name, auto-restore of minimized windows, foreground fallback when the target is not found), `_run_ax_snapshot` (15 s timeout), `_parse_ax_output`, `MacAxSnapshot` | ✅ |
+| scripts.py | Core | The osascript text and how a script finds its process: snapshot script builder (whole app, query, role filter; a password field is resolved by its **subrole** before the `value` read), invoke script builder, application selector (bundle id for known apps, exact name with a contains fallback), element cap and role filter. A caller-supplied string (query, role, application name) enters a script only as a literal that cannot end itself early (`_applescript_literal`); a text read from the screen leaves it only as a field with neither the field delimiter nor a line break (`_ESCAPE_HANDLERS`, and `_META_LINE_HANDLER` for the application name, window title and bundle id of the first line). Nothing here executes a process | ✅ |
+| capture.py | Core | `capture_ax_snapshot` (targeted capture by app name, auto-restore of minimized windows, foreground fallback when the target is not found), `_run_ax_snapshot` (15 s timeout), `_parse_ax_output` (a row ends at a line feed alone, so a Unicode line separator inside a value stays in its row), `MacAxSnapshot` | ✅ |
 | invoke.py | Core | `invoke_ax_element`: one element action by the backend key a capture produced (10 s timeout). A failure carries its `AxFailure` class, taken from the AppleScript error number rather than the localized text (see `perception/_ARCH.md`) | ✅ |
-| foreground.py | Core | `inspect_foreground` (frontmost app identity, readable-tree estimate, recommendation text), `read_foreground_meta` (single osascript read of the app name, window title and bundle id, with no tree walk and no window touched; the fallback of `inspect_foreground` and, through the dispatcher, the light read of the vision frame check), `_native_api_hint` + `_SCRIPTABLE_APPS` (AppleScript routing hint) | ✅ |
+| foreground.py | Core | `inspect_foreground` (frontmost app identity, readable-tree estimate, recommendation text), `read_foreground_meta` (single osascript read of the app name, window title and bundle id, with no tree walk and no window touched; the fallback of `inspect_foreground` and, through the dispatcher, the light read of the vision frame check; its line is built with the escaping handlers of `scripts.py`), `_native_api_hint` + `_SCRIPTABLE_APPS` (AppleScript routing hint) | ✅ |
 
 ## Dependencies
 
@@ -25,6 +25,7 @@ macOS Accessibility backend of Semantic Desktop Control: an AppleScript (System 
 ```
 ax_dispatch ──▶ __init__ ──▶ capture.py ──▶ scripts.py
                          ├─▶ foreground.py ──▶ capture.py
+                         │                 └─▶ scripts.py
                          └─▶ invoke.py ──▶ scripts.py
 ```
 

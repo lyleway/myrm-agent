@@ -129,6 +129,7 @@ describe('DeliveryEditor 目的地健康度', () => {
   const verdict = (status: DeliveryHealth['status']): DeliveryHealth => ({
     status,
     failure_streak: status === 'healthy' ? 0 : 3,
+    last_attempt_at: '2026-06-17T08:30:00Z',
   });
 
   it.each([

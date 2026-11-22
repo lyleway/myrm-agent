@@ -71,7 +71,9 @@ def _parse_ax_output(
             raise AXPermissionRequiredError("macOS", _MACOS_DEEPLINKS["accessibility"])
         raise AXTreeEmptyError(stderr or "AppleScript AX snapshot failed")
 
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    # A row ends at a line feed and nowhere else: `splitlines()` would also break one at a vertical tab, a form feed,
+    # NEL or U+2028/U+2029, which a name or a value can carry.
+    lines = [line for line in result.stdout.split("\n") if line.strip()]
     if not lines:
         raise AXTreeEmptyError("no AX output")
 
@@ -94,9 +96,6 @@ def _parse_ax_output(
     ref_index = 0
     truncated = len(lines) - 1 >= _MAX_ELEMENTS
 
-    def _restore_text(raw: str) -> str:
-        return raw.replace("\x01", "\n")
-
     for line in lines[1:]:
         parts = line.split("|||")
         if len(parts) < 8:
@@ -115,11 +114,11 @@ def _parse_ax_output(
         refs[ref_id] = ElementRef(
             ref_id=ref_id,
             role=role,
-            name=_restore_text(name) or _restore_text(value),
+            name=name or value,
             bbox=bbox,
             backend_key=backend_index,
             actions=actions,
-            value=_restore_text(value),
+            value=value,
         )
         ref_index += 1
 

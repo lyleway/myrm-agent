@@ -16,5 +16,5 @@
 ## 依赖关系
 
 - `post_call.py` → `shared.py`
-- `post_call.py` → `toolkits/llms/adapters/chat_model/wire_encoding.py`（`encodable_text`）
+- `post_call.py` → `utils/text_sanitizer.py`（`encodable_text`）
 - `pre_call.py` → `shared.py`

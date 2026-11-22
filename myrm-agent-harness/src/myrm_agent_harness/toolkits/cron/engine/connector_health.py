@@ -13,7 +13,7 @@ credentials a target address carries.
 - classify_connector_error: Classifies raw exceptions or error strings into categories
 - delivery_target_key: Stable, address-free identity of a delivery destination
 - redact_connector_url: Masks the basic-auth password and sensitive query parameters of a target address
-- ConnectorFailureDetail: The category and masked address stored beside a failed delivery's run record
+- ConnectorFailureDetail: The category and the address (userinfo password and sensitive query values masked) stored beside a failed delivery's run record
 
 [POS]
 Harness-level failure taxonomy and destination identity for cron delivery diagnostics. Judging a destination's
@@ -66,7 +66,7 @@ def redact_connector_url(url: str | None) -> str:
     """Mask the credentials a target address carries in its userinfo and its query string.
 
     - Basic-auth password: https://user:***@host:port/path
-    - Query parameters with a sensitive name: ?access_token=***&key=***
+    - Query parameters with a sensitive name: ?access_token=%2A%2A%2A&key=%2A%2A%2A (the query is re-encoded)
     - Host, port, path and the other query parameters stay as written. A secret that sits in the path (the token of
       a Feishu, Slack or Discord hook) is not masked, so the result for an address like that is not safe to show.
     """
@@ -234,7 +234,11 @@ def classify_connector_error(error: Exception | str | None) -> tuple[ConnectorEr
 
 @dataclass(frozen=True, slots=True)
 class ConnectorFailureDetail:
-    """What a failed delivery's run record keeps about the failure: its category and the masked address."""
+    """What a failed delivery's run record keeps about the failure: its category and the address it failed to reach.
+
+    The address went through ``redact_connector_url``: a password and sensitive query values are masked, a secret in the
+    path is still there.
+    """
 
     category: ConnectorErrorCategory
     target: str

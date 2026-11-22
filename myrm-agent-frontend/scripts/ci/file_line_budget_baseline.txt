@@ -98,8 +98,6 @@ src/lib/deploy-mode.ts
 src/lib/widget-theme-bridge.ts
 src/services/channels/providersMessaging.ts
 src/services/chat.ts
-src/services/config/ConfigSyncManager.ts
-src/services/config/types.ts
 src/services/cron.types.ts
 src/services/enterprise-org.ts
 src/services/expertSummonMetrics.ts

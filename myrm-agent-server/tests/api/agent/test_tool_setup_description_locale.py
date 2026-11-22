@@ -2,17 +2,18 @@
 
 The harness exposes bilingual (en/zh) LLM tool descriptions; the host's ``_tool_description_locale`` binds the session
 and channel language, and a tool setup that does not hand it to its factory shows every session the English text.
-web_fetch_tool is checked at the factory call (the Turn1 schema-locale contract, same as web_search); the skill market
-and manage tools by the descriptions they end up with.
+web_fetch_tool and the memory tools are checked at the factory call (the Turn1 schema-locale contract, same as
+web_search); the skill market and manage tools by the descriptions they end up with.
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from myrm_agent_harness.agent.meta_tools.skills.manage.skill_manage_tool import resolve_skill_manage_tool_description
 from myrm_agent_harness.agent.meta_tools.skills.market.skill_market_tool import resolve_skill_market_tool_description
+from myrm_agent_harness.toolkits.memory.config import RecallMode
 
 from app.ai_agents.general_agent.tool_setup import ToolSetupMixin
 

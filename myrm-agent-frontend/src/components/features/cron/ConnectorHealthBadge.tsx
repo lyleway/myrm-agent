@@ -4,15 +4,18 @@
  * [INPUT]
  * - `@/services/cron` (`getJobDeliveryHealth`, `DeliveryHealth`, `CronJob`)
  * - `./cron-utils` (`connectorCategoryLabelKey`, `connectorCategoryHintKey`, `formatTime`)
- * - `next-intl` (`cron.connectorHealthStatus`, `cron.connectorStatus*`, `cron.connectorCategory*`, `cron.connectorFailureStreak`, `cron.connectorLastFailedAt`)
+ * - `@/lib/utils/relativeTime` (`formatRelativeTime`: how long ago the newest delivery attempt finished)
+ * - `next-intl` (`cron.connectorHealthStatus`, `cron.connectorStatus*`, `cron.connectorCategory*`, `cron.connectorFailureStreak`, `cron.connectorLastFailedAt`, `cron.connectorHealthBasis`)
  * - `@/components/primitives/popover` (why a destination is failing and what to do about it, reachable by tap as well as by mouse)
  *
  * [OUTPUT]
- * - `ConnectorHealthBadge`: health pill of the destination a job delivers to; while it is failing, a popover says why and what to do
+ * - `ConnectorHealthBadge`: health pill of the destination a job delivers to, with how long ago its newest delivery attempt was; while it is failing, a popover says why, what to do and that a test does not change the status
  *
  * [POS]
  * Header of the delivery editor in a job's settings. The status is the server's verdict over the destination's recent
- * deliveries, not the job's own run failures; nothing is shown until the destination has been delivered to.
+ * deliveries, not the job's own run failures; nothing is shown until the destination has been delivered to. A verdict
+ * outlives its evidence (a destination that is rarely delivered to keeps it for weeks), so the pill always says how old
+ * it is.
  */
 
 import { memo, useEffect, useState } from 'react';
@@ -20,6 +23,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Activity, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/primitives/popover';
 import { cn } from '@/lib/utils/classnameUtils';
+import { formatRelativeTime } from '@/lib/utils/relativeTime';
 import { getJobDeliveryHealth, type CronJob, type DeliveryHealth } from '@/services/cron';
 import { connectorCategoryHintKey, connectorCategoryLabelKey, formatTime } from './cron-utils';
 
@@ -87,11 +91,15 @@ const ConnectorHealthBadge = memo(function ConnectorHealthBadge({ job }: { job: 
 
   const { labelKey, tone } = STATUS_STYLE[health.status];
   // The pill sits apart from the label of its section, so the hidden prefix tells a screen reader what it is the verdict of.
+  // The age is outside the status word, which stays what names the verdict.
   const verdictText = (
     <>
       <Activity aria-hidden="true" className="h-2.5 w-2.5" />
       <span className="sr-only">{t('connectorHealthStatus')}: </span>
       <span data-testid="connector-health-badge">{t(labelKey)}</span>
+      <span className="font-normal" data-testid="connector-health-age">
+        · {formatRelativeTime(health.last_attempt_at, locale)}
+      </span>
     </>
   );
 
@@ -116,10 +124,10 @@ const ConnectorHealthBadge = memo(function ConnectorHealthBadge({ job }: { job: 
         <p className="text-muted-foreground">{t(connectorCategoryHintKey(category))}</p>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
           <span>{t('connectorFailureStreak', { count: health.failure_streak })}</span>
-          {health.last_failed_at && (
-            <span>{t('connectorLastFailedAt', { time: formatTime(health.last_failed_at, locale) })}</span>
-          )}
+          {/* A destination that is not healthy has failed on its newest attempt. */}
+          <span>{t('connectorLastFailedAt', { time: formatTime(health.last_attempt_at, locale) })}</span>
         </div>
+        <p className="border-t border-border/60 pt-2 text-[11px] text-muted-foreground">{t('connectorHealthBasis')}</p>
       </PopoverContent>
     </Popover>
   );

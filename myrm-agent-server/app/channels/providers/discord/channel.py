@@ -272,10 +272,6 @@ class DiscordChannel(DiscordInboundMixin, DiscordOutboundMixin, DiscordVoiceMixi
             await channel_self._on_message(message)
 
         @self._client.event
-        async def on_interaction(interaction: discord.Interaction) -> None:
-            await channel_self._on_interaction(interaction)
-
-        @self._client.event
         async def on_raw_reaction_add(payload: discord.RawReactionActionEvent) -> None:
             await channel_self._on_reaction_add(payload)
 
