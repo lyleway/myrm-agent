@@ -5,7 +5,7 @@
 - existing_skills: Currently active skills list
 - compute_id_fn: Stable skill id of a skill directory (the provider's `compute_local_skill_id`)
 - myrm_agent_harness.backends.skills.scanning::scan_skill_directory, compute_scan_summary (POS: the directory scan and its 0-100 score)
-- myrm_agent_harness.utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
+- myrm_agent_harness.api.skills::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - preview_skill_path: Probed skill list and validation report; each item carries `is_safe` and `security_score`, and a
@@ -25,8 +25,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-from myrm_agent_harness.api.skills import parse_skill_frontmatter
-from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
+from myrm_agent_harness.api.skills import load_clean_yaml, parse_skill_frontmatter
 
 from ..models import Skill
 

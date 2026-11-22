@@ -94,6 +94,7 @@ description: Demo skill for api.skills smoke test.
                 "SkillMetadataError",
                 "build_skill_metadata",
                 "compute_content_hash",
+                "load_clean_yaml",
                 "parse_skill_frontmatter",
                 "read_skill_md",
                 "update_frontmatter_evolution_lock",
