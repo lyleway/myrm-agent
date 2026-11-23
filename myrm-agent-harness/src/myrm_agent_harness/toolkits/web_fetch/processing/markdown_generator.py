@@ -17,8 +17,11 @@ Markdown generation stage of ContentPipeline.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -82,8 +85,9 @@ class MarkdownGenerator:
 
             try:
                 raw_markdown = h.handle(input_html)
-            except Exception as e:
-                raw_markdown = f"Error converting HTML to markdown: {e}"
+            except Exception:
+                logger.warning("HTML-to-Markdown conversion failed for base_url=%s", base_url, exc_info=True)
+                raw_markdown = ""
 
             raw_markdown = raw_markdown.replace("    ```", "```")
 
@@ -94,12 +98,14 @@ class MarkdownGenerator:
                     filtered_segments = active_filter.filter_content(input_html)
                     filtered_html = "\n".join(f"<div>{s}</div>" for s in filtered_segments)
                     fit_markdown = h.handle(filtered_html)
-                except Exception as e:
-                    fit_markdown = f"Error generating fit markdown: {e}"
+                except Exception:
+                    logger.warning("Fit Markdown generation failed for base_url=%s", base_url, exc_info=True)
+                    fit_markdown = ""
 
             return MarkdownResult(
                 raw_markdown=raw_markdown or "",
                 fit_markdown=fit_markdown or "",
             )
-        except Exception as e:
-            return MarkdownResult(raw_markdown=f"Error in markdown generation: {e}")
+        except Exception:
+            logger.warning("Markdown generation setup failed for base_url=%s", base_url, exc_info=True)
+            return MarkdownResult()
