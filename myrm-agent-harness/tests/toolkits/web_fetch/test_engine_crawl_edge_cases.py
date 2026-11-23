@@ -1,7 +1,7 @@
 """Tests for FetchEngine crawl edge cases and cache-mixin branches.
 
 Covers SSRF / domain-allowlist rejection in ``crawl``, bilibili / weixin
-fast-path degradation, ``crawl_many`` and ``prefetch_with_retry`` failure
+fast-path degradation, ``crawl_many`` failure
 paths, and cache-mixin branches (no-loop worker guard, priority calc,
 background revalidation failure / timeout / worker exception).
 """
@@ -146,17 +146,6 @@ class TestCrawlGuardsAndFastPaths:
 
         assert success == []
         assert len(failed) == 2
-        await engine.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_prefetch_with_retry_handles_exceptions(self) -> None:
-        engine = FetchEngine()
-        engine.crawl = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
-
-        success, failed = await engine.prefetch_with_retry(["http://a.example/x"], max_retries=2, initial_backoff=0.001)
-
-        assert success == []
-        assert len(failed) == 1
         await engine.shutdown()
 
 

@@ -12,7 +12,6 @@ Cache: In-memory LRU (default 1 h TTL, 500 entries, 100 MB cap)
   - GitHub blob links are fetched as their raw file, so a long source file is not cut at the page-size ceiling
   - HTTP conditional requests: sends ETag / Last-Modified on cache expiry to save bandwidth
   - Stale-While-Revalidate: returns stale cache immediately, refreshes via background priority queue (30 s timeout)
-  - Cache warm-up: concurrent pre-warming with exponential back-off retry
 Boundary: single-sandbox, single-process semantics; tier breaker state lives in memory, per process.
 
 [INPUT]

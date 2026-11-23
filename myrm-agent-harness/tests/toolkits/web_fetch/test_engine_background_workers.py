@@ -30,8 +30,6 @@ WORKERS = 3
 _ENTRY_POINTS: dict[str, Callable[[FetchEngine, list[str]], Awaitable[object]]] = {
     "crawl": lambda engine, urls: engine.crawl(urls[0]),
     "crawl_many": lambda engine, urls: engine.crawl_many(urls),
-    "prefetch": lambda engine, urls: engine.prefetch(urls),
-    "prefetch_with_retry": lambda engine, urls: engine.prefetch_with_retry(urls),
 }
 
 
