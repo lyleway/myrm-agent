@@ -30,13 +30,15 @@ import logging
 import re
 import urllib.error
 import urllib.request
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup, Tag
 from langchain_core.documents import Document
 
 if TYPE_CHECKING:
+    from http.client import HTTPMessage
+
     from myrm_agent_harness.toolkits.browser.pool.proxy import ProxyPool
 
 logger = logging.getLogger(__name__)
@@ -69,10 +71,10 @@ class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
         req: urllib.request.Request,
-        fp: object,
+        fp: IO[bytes],
         code: int,
         msg: str,
-        headers: object,
+        headers: HTTPMessage,
         newurl: str,
     ) -> urllib.request.Request | None:
         if urlparse(newurl).scheme != "https" or not is_weixin_article_url(newurl):

@@ -123,9 +123,7 @@ class TestStaticPageGateConditions:
 
 def test_pipeline_delivers_link_heavy_static_index_page_on_l1_without_reconverting() -> None:
     """man7/Gutenberg 风格静态长目录页在 L1 被剪枝剪空后，由门控复用同一次转换的 raw_markdown 交付。"""
-    links = "".join(
-        f'<li><a href="/man/section2/syscall_{i}.html">syscall_entry_{i:04d}</a></li>' for i in range(260)
-    )
+    links = "".join(f'<li><a href="/man/section2/syscall_{i}.html">syscall_entry_{i:04d}</a></li>' for i in range(260))
     html = f"<html><head><title>Man Pages Index</title></head><body><div><ul>{links}</ul></div></body></html>"
     fetch_result = FetchResult(
         html=html,
@@ -159,3 +157,33 @@ def test_pipeline_still_rejects_thin_js_shell_on_l1() -> None:
     )
 
     assert ContentPipeline(use_raw_markdown=False).process(fetch_result) is None
+
+
+@pytest.mark.asyncio
+async def test_engine_five_consecutive_static_index_fetches_do_not_trip_breaker() -> None:
+    """G9：静态长目录页连续 5 次访问都在 L1 交付，断路器误记为 0、始终从 HTTP 起步。"""
+    from unittest.mock import AsyncMock
+
+    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+
+    links = "".join(f'<li><a href="/man/section2/syscall_{i}.html">syscall_entry_{i:04d}</a></li>' for i in range(260))
+    html = (
+        "<html><head><title>Man Pages Index</title></head>"
+        f'<body><div class="index"><ul>{links}</ul></div></body></html>'
+    )
+    url = "https://man7-g9-gate.example.org/linux/man-pages/dir_section_2.html"
+
+    engine = FetchEngine(allow_private_networks=True)
+    engine._http_fetcher.fetch = AsyncMock(  # type: ignore[method-assign]
+        return_value=FetchResult(html=html, url=url, status_code=200, fetcher_type=FetcherType.HTTP)
+    )
+    engine._browser_fetcher.fetch = AsyncMock(side_effect=AssertionError("should not escalate to browser"))  # type: ignore[method-assign]
+    engine._stealth_fetcher.fetch = AsyncMock(side_effect=AssertionError("should not escalate to stealth"))  # type: ignore[method-assign]
+    try:
+        for _ in range(5):
+            doc = await engine.crawl(url, force_refresh=True)
+            assert doc is not None
+            assert "syscall_entry_0000" in doc.page_content
+            assert engine._tier_breaker.select("man7-g9-gate.example.org") == FetcherType.HTTP
+    finally:
+        await engine.shutdown()

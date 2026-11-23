@@ -24,7 +24,10 @@ _LANGS = [
 
 
 def _lang_list(entries: list[tuple[str, str]], tag: str = "ul") -> str:
-    items = "".join(f'<li><a href="https://{code}.example.org/wiki/Topic" hreflang="{code}">{name}</a></li>' for code, name in entries)
+    items = "".join(
+        f'<li><a href="https://{code}.example.org/wiki/Topic" hreflang="{code}">{name}</a></li>'
+        for code, name in entries
+    )
     return f"<{tag}>{items}</{tag}>"
 
 

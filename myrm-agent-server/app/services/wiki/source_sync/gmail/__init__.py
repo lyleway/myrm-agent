@@ -18,7 +18,6 @@ import base64
 import logging
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any
 
 import httpx
 from myrm_agent_harness.toolkits.wiki import WikiStructure
@@ -206,14 +205,14 @@ def _format_date(date_header: str) -> str:
         return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
-def _extract_bodies(payload: dict[str, Any]) -> tuple[str, str]:
+def _extract_bodies(payload: dict[str, object]) -> tuple[str, str]:
     plain_parts: list[str] = []
     html_parts: list[str] = []
     _walk_parts(payload, plain_parts, html_parts)
     return "\n\n".join(plain_parts), "\n\n".join(html_parts)
 
 
-def _walk_parts(part: dict[str, Any], plain_parts: list[str], html_parts: list[str]) -> None:
+def _walk_parts(part: dict[str, object], plain_parts: list[str], html_parts: list[str]) -> None:
     mime = str(part.get("mimeType", ""))
     body = part.get("body")
     data_b64 = body.get("data") if isinstance(body, dict) else None
