@@ -109,17 +109,25 @@ def test_a_dual_theme_code_block_keeps_the_light_copy_only() -> None:
 
 
 def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
-    """G7 等价预言机：自底向上非递归度量在 4,500 个随机 HTML 页上与原版 get_text/encode_contents 逐节点完全一致。"""
+    """G7 等价预言机：自底向上非递归度量在 4,500 个随机 HTML 页（含引号/Unicode/布尔属性）上与原版逐节点完全一致。"""
     import random
 
     from bs4 import BeautifulSoup, Tag
 
-    from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import _compute_subtree_metrics
+    from myrm_agent_harness.toolkits.web_fetch.processing.pruning_metrics import compute_subtree_metrics
 
     rng = random.Random(20261123)
     container_tags = ["div", "p", "span", "a", "section", "article", "ul", "li", "strong"]
     void_tags = ["br", "hr", "img"]
     text_pieces = ["hello", " world ", "a & b < c > d", "  \t\n  ", "中文测试", "foo\"bar'baz"]
+    attr_choices = [
+        "",
+        ' class="c1 c2" id="i1"',
+        " title='say \"hi\"'",
+        ' title="both &quot; and &apos;"',
+        ' data-u="中文 © €" disabled',
+        ' data-empty=""',
+    ]
 
     def _gen(depth: int) -> str:
         if depth >= 5 or rng.random() < 0.3:
@@ -130,7 +138,7 @@ def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
                 return f"<{vt}/>"
             return rng.choice(text_pieces)
         tag = rng.choice(container_tags)
-        attr = ' class="c1 c2" id="i1"' if rng.random() < 0.4 else ""
+        attr = rng.choice(attr_choices)
         if tag == "a":
             attr += ' href="https://example.com/?a=1&amp;b=2"'
         inner = "".join(_gen(depth + 1) for _ in range(rng.randint(0, 3)))
@@ -141,7 +149,7 @@ def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
         soup = BeautifulSoup(html, "lxml")
         body = soup.body
         assert isinstance(body, Tag)
-        text_lens, tag_lens = _compute_subtree_metrics(body)
+        text_lens, tag_lens = compute_subtree_metrics(body)
         for node in [body, *body.find_all(True)]:
             nid = id(node)
             assert text_lens[nid] == len(node.get_text(strip=True))

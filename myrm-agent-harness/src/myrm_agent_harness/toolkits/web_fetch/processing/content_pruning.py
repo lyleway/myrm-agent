@@ -5,6 +5,7 @@ threshold and removes navigation, ads and other boilerplate. A ``header`` inside
 
 [INPUT]
 - web_fetch.processing.language_switcher::strip_language_switchers (POS: Language-switcher list removal before pruning)
+- web_fetch.processing.pruning_metrics::dom_path_units, compute_subtree_metrics (POS: Iterative DOM subtree metrics for pruning)
 
 [OUTPUT]
 ContentPruningFilter: Reduces a page to its main-content HTML blocks (``filter_content``)
@@ -23,9 +24,9 @@ from collections import deque
 from typing import cast
 
 from bs4 import BeautifulSoup, Comment, Tag
-from bs4.element import NavigableString
 
 from .language_switcher import strip_language_switchers
+from .pruning_metrics import compute_subtree_metrics, dom_path_units
 
 logger = logging.getLogger(__name__)
 
@@ -64,77 +65,6 @@ _BREAKPOINT_HIDDEN = frozenset(f"{breakpoint}:hidden" for breakpoint in ("sm", "
 # ancestor-descendant pairs (the sum of all element depths), not the page size. Real pages stay well below this limit;
 # a page far above it is a nesting bomb that would hold the conversion thread for minutes.
 _MAX_SCORING_PATH_UNITS = 600_000
-
-
-def _dom_path_units(root: Tag, limit: int) -> int:
-    """Count the ancestor-descendant element pairs below *root* (the sum of every element's depth).
-
-    Counts iteratively and stops once above *limit*, so measuring a pathologically deep page is cheap itself.
-    """
-    total = 0
-    stack: list[tuple[Tag, int]] = [(root, 0)]
-    while stack:
-        node, depth = stack.pop()
-        for child in node.children:
-            if isinstance(child, Tag):
-                total += depth + 1
-                if total > limit:
-                    return total
-                stack.append((child, depth + 1))
-    return total
-
-
-def _compute_subtree_metrics(root: Tag) -> tuple[dict[int, int], dict[int, int]]:
-    """Compute ``(text_len, tag_len)`` for every Tag below *root* in one iterative bottom-up pass.
-
-    Matches ``len(node.get_text(strip=True))`` and ``len(node.encode_contents().decode("utf-8"))``
-    without re-walking or re-encoding subtrees at every ancestor.
-    """
-    order: list[Tag] = []
-    stack: list[Tag] = [root]
-    while stack:
-        current = stack.pop()
-        order.append(current)
-        for child in current.children:
-            if isinstance(child, Tag):
-                stack.append(child)
-
-    text_lens: dict[int, int] = {}
-    tag_lens: dict[int, int] = {}
-    outer_lens: dict[int, int] = {}
-
-    for node in reversed(order):
-        t_len = 0
-        inner_html_len = 0
-        has_children = False
-        for child in node.children:
-            has_children = True
-            if isinstance(child, Tag):
-                cid = id(child)
-                t_len += text_lens[cid]
-                inner_html_len += outer_lens[cid]
-            elif type(child) is NavigableString:
-                t_len += len(str(child).strip())
-                inner_html_len += len(child.output_ready())
-            elif isinstance(child, NavigableString):
-                # Comments are stripped before pruning; any other NavigableString subclass (e.g. CData)
-                # serializes via output_ready().
-                inner_html_len += len(child.output_ready())
-
-        nid = id(node)
-        text_lens[nid] = t_len
-        tag_lens[nid] = inner_html_len
-
-        if not has_children:
-            outer_lens[nid] = len(node.decode())
-        else:
-            # Measure only the start + end wrapper tags by decoding an empty shell with a non-empty placeholder
-            # so void/self-closing tags with children (if any) still render explicit open+close tags.
-            shell = Tag(name=node.name, attrs=dict(node.attrs))
-            shell.append("x")
-            outer_lens[nid] = len(shell.decode()) - 1 + inner_html_len
-
-    return text_lens, tag_lens
 
 
 class ContentPruningFilter:
@@ -200,7 +130,7 @@ class ContentPruningFilter:
                 element.decompose()
 
     def _prune_tree(self, root: Tag) -> None:
-        text_lens, tag_lens = _compute_subtree_metrics(root)
+        text_lens, tag_lens = compute_subtree_metrics(root)
         stack: list[Tag] = [root]
         while stack:
             node = stack.pop()
@@ -333,7 +263,7 @@ class ContentPruningFilter:
         strip_language_switchers(body)
 
         # Over the limit only the scoring is skipped: comments, excluded tags and block extraction still run.
-        within_scoring_limit = _dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS
+        within_scoring_limit = dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS
         scored_elements = list(body.find_all(True)) if within_scoring_limit else []
 
         for el in scored_elements:

@@ -171,7 +171,7 @@ class TestNestedTableOracleAndPerformance:
 
         from bs4 import BeautifulSoup, Tag
 
-        from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import _tables_with_rows
+        from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown_helpers import tables_with_rows
 
         rng = random.Random(20261123)
         tags = ["div", "table", "tr", "td", "p", "span", "tbody"]
@@ -189,7 +189,7 @@ class TestNestedTableOracleAndPerformance:
             soup = BeautifulSoup(html, "html.parser")
             root = soup.find("body")
             assert isinstance(root, Tag)
-            got = _tables_with_rows(root)
+            got = tables_with_rows(root)
             expected = {id(t) for t in root.find_all("table") if t.find("tr") is not None}
             assert got == expected
 
