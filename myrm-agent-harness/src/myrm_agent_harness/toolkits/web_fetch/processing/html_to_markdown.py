@@ -107,9 +107,32 @@ def _resolve_url(base: str, url: str) -> str:
     return urllib.parse.urljoin(base, url)
 
 
-def _is_lifted_table_part(node: Tag) -> bool:
-    """Whether *node*, met inside a table cell, is a row or a table of rows that the enclosing table already lists."""
-    return node.name == "tr" or (node.name == "table" and node.find("tr") is not None)
+def _tables_with_rows(root: Tag) -> set[int]:
+    """Return ``id(table)`` for every ``<table>`` below *root* that has a ``<tr>`` descendant.
+
+    Single iterative bottom-up pass: avoids O(depth^2) repeated subtree scans on nested tables.
+    """
+    order: list[Tag] = []
+    stack: list[Tag] = [root]
+    while stack:
+        current = stack.pop()
+        order.append(current)
+        for child in current.children:
+            if isinstance(child, Tag):
+                stack.append(child)
+
+    has_tr: set[int] = set()
+    tables_with_tr: set[int] = set()
+    for node in reversed(order):
+        node_has_tr = node.name == "tr" or any(
+            isinstance(child, Tag) and id(child) in has_tr for child in node.children
+        )
+        if node_has_tr:
+            node_id = id(node)
+            has_tr.add(node_id)
+            if node.name == "table":
+                tables_with_tr.add(node_id)
+    return tables_with_tr
 
 
 class HTML2Markdown:
@@ -127,6 +150,7 @@ class HTML2Markdown:
         self._current_depth: int = 0
         # Number of table cells being converted: inside one, the rows of the enclosing table are already listed.
         self._cell_depth: int = 0
+        self._tables_with_tr: set[int] = set()
         if kwargs:
             self.update_params(**kwargs)
 
@@ -152,7 +176,11 @@ class HTML2Markdown:
         body = soup.find("body")
         root = body if body else soup
 
-        result = self._convert_node(root)
+        self._tables_with_tr = _tables_with_rows(root)
+        try:
+            result = self._convert_node(root)
+        finally:
+            self._tables_with_tr = set()
         result = _TRAILING_SPACES_RE.sub("\n", result)
         result = _MULTI_NEWLINE_RE.sub("\n\n", result)
         return result.strip() + "\n" if result.strip() else ""
@@ -179,7 +207,7 @@ class HTML2Markdown:
             if tag_name in self._opts.preserve_tags:
                 return str(node)
 
-            if self._cell_depth and _is_lifted_table_part(node):
+            if self._cell_depth and (tag_name == "tr" or (tag_name == "table" and id(node) in self._tables_with_tr)):
                 return ""
 
             handler = _TAG_HANDLERS.get(tag_name)

@@ -162,3 +162,48 @@ class TestConverterReuse:
             converter.handle("<table><tr><td><ol><li>x</li></ol></td></tr></table>")
 
         assert converter.handle("<table><tr><td>a</td></tr></table>") == "|  |\n| --- |\n| a |\n"
+
+
+class TestNestedTableOracleAndPerformance:
+    def test_bottom_up_table_set_matches_subtree_find_on_3000_random_pages(self) -> None:
+        """G7 等价预言机：自底向上预计算的含行表格集合在 3,000 个随机页面上与逐节点 node.find('tr') 完全等价。"""
+        import random
+
+        from bs4 import BeautifulSoup, Tag
+
+        from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import _tables_with_rows
+
+        rng = random.Random(20261123)
+        tags = ["div", "table", "tr", "td", "p", "span", "tbody"]
+
+        def _gen_node(depth: int) -> str:
+            if depth >= 6 or rng.random() < 0.25:
+                return f"t{rng.randint(0, 99)}"
+            tag = rng.choice(tags)
+            n_children = rng.randint(0, 3)
+            inner = "".join(_gen_node(depth + 1) for _ in range(n_children))
+            return f"<{tag}>{inner}</{tag}>"
+
+        for _ in range(3000):
+            html = "<body><table><tr><td>" + _gen_node(0) + "</td></tr></table></body>"
+            soup = BeautifulSoup(html, "html.parser")
+            root = soup.find("body")
+            assert isinstance(root, Tag)
+            got = _tables_with_rows(root)
+            expected = {id(t) for t in root.find_all("table") if t.find("tr") is not None}
+            assert got == expected
+
+    @pytest.mark.timeout(10)
+    def test_deeply_nested_tables_convert_in_linear_time(self) -> None:
+        """G10：4,000 层嵌套表格不再触发 O(N^2) 停摆。"""
+        import time
+
+        depth = 4000
+        html = "<table><tr><td>c" * depth + "x" + "</td></tr></table>" * depth
+        t0 = time.perf_counter()
+        converted = _convert(html)
+        elapsed = time.perf_counter() - t0
+
+        assert converted.count("| c |") == depth - 1
+        assert "| cx |" in converted
+        assert elapsed < 3.0, f"deep nested table took too long: {elapsed:.2f}s"
