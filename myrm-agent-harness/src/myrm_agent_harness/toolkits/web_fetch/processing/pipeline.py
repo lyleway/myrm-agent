@@ -9,6 +9,7 @@ web_fetch.processing.content_pruning::ContentPruningFilter (POS: Boilerplate / n
 web_fetch.processing.html_scan::extract_title (POS: Linear-time scans of raw HTML text)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
 web_fetch.processing.markdown_generator::MarkdownGenerator (POS: HTML-to-Markdown conversion)
+web_fetch.processing.static_page_gate::should_fallback_to_raw_markdown (POS: L1 static long-page fallback gate)
 utils.content_sniff::PayloadKind (POS: Tells text responses from web pages)
 utils.text_cleaner::clean_text (POS: Generic text cleaning utility)
 
@@ -46,6 +47,7 @@ from ..fetchers.protocols import FetcherType, FetchResult
 from .content_pruning import ContentPruningFilter
 from .html_scan import extract_title
 from .markdown_generator import MarkdownGenerator
+from .static_page_gate import should_fallback_to_raw_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -109,22 +111,35 @@ class ContentPipeline:
         h.update_params(body_width=0)
         return h.handle(html).strip()
 
-    def _extract_with_generator(self, html: str, base_url: str, is_stealth: bool) -> str:
+    def _extract_with_generator(self, fetch_result: FetchResult) -> str:
         assert self._md_generator is not None
+        html = fetch_result.html
         result = self._md_generator.generate_markdown(
             input_html=html,
-            base_url=base_url,
+            base_url=fetch_result.url,
             content_filter=self._md_generator.content_filter,
         )
 
         fit = result.fit_markdown.strip()
-        if is_stealth:
+        if fetch_result.fetcher_type == FetcherType.STEALTH:
             if not fit or len(fit) < _FIT_MARKDOWN_THRESHOLD:
                 logger.warning("fit_markdown too short for stealth page, falling back to raw_markdown")
                 return clean_text(result.raw_markdown)
             return clean_text(fit)
 
-        return fit if len(fit) > _FIT_MARKDOWN_THRESHOLD else ""
+        if len(fit) > _FIT_MARKDOWN_THRESHOLD:
+            return fit
+
+        if should_fallback_to_raw_markdown(
+            fetcher_type=fetch_result.fetcher_type,
+            status_code=fetch_result.status_code,
+            raw_markdown=result.raw_markdown,
+            html_length=len(html),
+        ):
+            logger.info("L1 static long-page gate accepted raw_markdown fallback for %s", fetch_result.url)
+            return clean_text(result.raw_markdown)
+
+        return ""
 
     def _try_structured_data_bypass(self, fetch_result: FetchResult) -> Document | None:
         content_type = (
@@ -198,8 +213,7 @@ class ContentPipeline:
         if self._md_generator is None:
             content = self._extract_raw_markdown(fetch_result.html, fetch_result.url)
         else:
-            is_stealth = fetch_result.fetcher_type == FetcherType.STEALTH
-            content = self._extract_with_generator(fetch_result.html, fetch_result.url, is_stealth)
+            content = self._extract_with_generator(fetch_result)
 
         if not content or len(content.strip()) < _MIN_CONTENT_LENGTH:
             return None
