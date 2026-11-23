@@ -88,6 +88,15 @@ _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 # The lookbehind pins a match to the start of a run of spaces. Without it every later space of a run that no newline
 # follows starts another scan to the end of the run: quadratic in the run length.
 _TRAILING_SPACES_RE = re.compile(r"(?<! ) +\n")
+# HTML spec rules for parsing signed integers on <ol start>: optional whitespace, optional sign, contiguous ASCII digits.
+_OL_START_RE = re.compile(r"^\s*([+-]?[0-9]+)")
+
+
+def _parse_ol_start(raw: object) -> int:
+    if raw is None:
+        return 1
+    match = _OL_START_RE.match(str(raw))
+    return int(match.group(1)) if match else 1
 
 
 def _resolve_url(base: str, url: str) -> str:
@@ -338,7 +347,7 @@ class HTML2Markdown:
 
     def _handle_ol(self, tag: Tag) -> str:
         items: list[str] = []
-        start = int(str(tag.get("start") or 1))
+        start = _parse_ol_start(tag.get("start"))
         idx = start
         for child in tag.children:
             if isinstance(child, Tag) and child.name == "li":
