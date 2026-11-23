@@ -7,7 +7,7 @@ produces the filtered ("fit") variant that keeps only the main content.
 - processing.html_to_markdown::HTML2Markdown (POS: HTML-to-Markdown converter) [lazy]
 
 [OUTPUT]
-- MarkdownResult: raw / fit Markdown plus the filtered HTML
+- MarkdownResult: raw and fit Markdown variants
 - ContentFilter: content filter protocol
 - MarkdownGenerator: HTML → Markdown generator with an optional content filter
 
@@ -27,7 +27,6 @@ class MarkdownResult:
 
     raw_markdown: str = ""
     fit_markdown: str = ""
-    fit_html: str = ""
 
 
 @runtime_checkable
@@ -89,7 +88,6 @@ class MarkdownGenerator:
             raw_markdown = raw_markdown.replace("    ```", "```")
 
             fit_markdown: str = ""
-            filtered_html: str = ""
             active_filter = content_filter or self.content_filter
             if active_filter:
                 try:
@@ -98,12 +96,10 @@ class MarkdownGenerator:
                     fit_markdown = h.handle(filtered_html)
                 except Exception as e:
                     fit_markdown = f"Error generating fit markdown: {e}"
-                    filtered_html = ""
 
             return MarkdownResult(
                 raw_markdown=raw_markdown or "",
                 fit_markdown=fit_markdown or "",
-                fit_html=filtered_html or "",
             )
         except Exception as e:
             return MarkdownResult(raw_markdown=f"Error in markdown generation: {e}")

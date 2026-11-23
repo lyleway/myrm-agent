@@ -90,21 +90,11 @@ class ContentPruningFilter:
         self,
         *,
         threshold: float = 0.48,
-        min_word_threshold: int = 0,
         metric_weights: dict[str, float] | None = None,
     ):
         self.threshold = threshold
-        self.min_word_threshold = min_word_threshold
 
         self.excluded_tags: set[str] = set(_EXCLUDED_TAGS)
-
-        self.metric_config = {
-            "text_density": True,
-            "link_density": True,
-            "tag_weight": True,
-            "class_id_weight": True,
-            "text_length": True,
-        }
 
         self.metric_weights: dict[str, float] = {
             "text_density": 0.4,
@@ -365,63 +355,52 @@ class ContentPruningFilter:
         link_text_len: int,
     ) -> float:
         node = cast(Tag, metrics["node"])
-        if self.min_word_threshold:
-            text = node.get_text(strip=True)
-            word_count = text.count(" ") + 1
-            if word_count < self.min_word_threshold:
-                return -1.0
-
         score = 0.0
         total_weight = 0.0
 
-        if self.metric_config["text_density"]:
-            density = text_len / tag_len if tag_len > 0 else 0
-            score += self.metric_weights["text_density"] * density
-            total_weight += self.metric_weights["text_density"]
+        density = text_len / tag_len if tag_len > 0 else 0
+        score += self.metric_weights["text_density"] * density
+        total_weight += self.metric_weights["text_density"]
 
-        if self.metric_config["link_density"]:
-            link_ratio = link_text_len / text_len if text_len > 0 else 0
-            if link_ratio > 0.5:
-                is_pure_list = self._is_pure_link_list(node)
-                if is_pure_list:
-                    if link_ratio > 0.8:
-                        density = 0.3
-                    elif link_ratio > 0.6:
-                        density = 0.5
-                    else:
-                        density = 1.0
+        link_ratio = link_text_len / text_len if text_len > 0 else 0
+        if link_ratio > 0.5:
+            is_pure_list = self._is_pure_link_list(node)
+            if is_pure_list:
+                if link_ratio > 0.8:
+                    density = 0.3
+                elif link_ratio > 0.6:
+                    density = 0.5
                 else:
                     density = 1.0
             else:
                 density = 1.0
-            score += self.metric_weights["link_density"] * density
-            total_weight += self.metric_weights["link_density"]
+        else:
+            density = 1.0
+        score += self.metric_weights["link_density"] * density
+        total_weight += self.metric_weights["link_density"]
 
-        if self.metric_config["tag_weight"]:
-            tag_name = str(metrics["tag_name"])
-            if tag_name == "header":
-                tag_score = 0.7 if self._check_in_content_area(node) else 0.1
-            else:
-                tag_score = self.tag_weights.get(tag_name, 0.5)
-            score += self.metric_weights["tag_weight"] * tag_score
-            total_weight += self.metric_weights["tag_weight"]
+        tag_name = str(metrics["tag_name"])
+        if tag_name == "header":
+            tag_score = 0.7 if self._check_in_content_area(node) else 0.1
+        else:
+            tag_score = self.tag_weights.get(tag_name, 0.5)
+        score += self.metric_weights["tag_weight"] * tag_score
+        total_weight += self.metric_weights["tag_weight"]
 
-        if self.metric_config["class_id_weight"]:
-            class_score = self._compute_class_id_weight(node)
-            score += self.metric_weights["class_id_weight"] * max(0.0, class_score)
-            total_weight += self.metric_weights["class_id_weight"]
+        class_score = self._compute_class_id_weight(node)
+        score += self.metric_weights["class_id_weight"] * max(0.0, class_score)
+        total_weight += self.metric_weights["class_id_weight"]
 
-        if self.metric_config["text_length"]:
-            if text_len < 10:
-                length_score = 0.8
-            elif text_len < 50:
-                length_score = 1.0
-            elif text_len < 200:
-                length_score = 0.9
-            else:
-                length_score = min(1.0, math.log(text_len) / math.log(200))
-            score += self.metric_weights["text_length"] * length_score
-            total_weight += self.metric_weights["text_length"]
+        if text_len < 10:
+            length_score = 0.8
+        elif text_len < 50:
+            length_score = 1.0
+        elif text_len < 200:
+            length_score = 0.9
+        else:
+            length_score = min(1.0, math.log(text_len) / math.log(200))
+        score += self.metric_weights["text_length"] * length_score
+        total_weight += self.metric_weights["text_length"]
 
         final_score = score / total_weight if total_weight > 0 else 0.0
 

@@ -20,7 +20,6 @@ def test_markdown_result_dataclass():
 
     assert result.raw_markdown == "# Title"
     assert result.fit_markdown == "## Fit"
-    assert result.fit_html == ""
 
 
 def test_generate_markdown_keeps_links_inline_and_adds_no_reference_section():
@@ -35,14 +34,13 @@ def test_generate_markdown_keeps_links_inline_and_adds_no_reference_section():
 
 
 def test_generate_markdown_with_filter_fills_fit_variant():
-    """配置内容过滤器后产出 fit 变体及过滤后的 HTML"""
+    """配置内容过滤器后产出 fit 变体"""
     html = "<html><body><article><p>" + ("lorem ipsum " * 60) + "</p></article></body></html>"
 
     result = MarkdownGenerator(content_filter=ContentPruningFilter()).generate_markdown(html)
 
     assert "lorem ipsum" in result.raw_markdown
     assert "lorem ipsum" in result.fit_markdown
-    assert result.fit_html.startswith("<div>")
 
 
 def test_html_deep_nesting_depth_limit_protection():

@@ -10,7 +10,6 @@ def test_filter_initialization():
     filter = ContentPruningFilter()
 
     assert filter.threshold > 0
-    assert filter.min_word_threshold >= 0
     assert "text_density" in filter.metric_weights
 
 
@@ -28,13 +27,6 @@ def test_filter_with_threshold():
     filter_loose = ContentPruningFilter(threshold=0.3)
 
     assert filter_strict.threshold > filter_loose.threshold
-
-
-def test_filter_with_min_words():
-    """测试最小字数阈值"""
-    filter = ContentPruningFilter(min_word_threshold=10)
-
-    assert filter.min_word_threshold == 10
 
 
 def test_filter_content_keeps_the_article_and_drops_navigation_and_footer():
