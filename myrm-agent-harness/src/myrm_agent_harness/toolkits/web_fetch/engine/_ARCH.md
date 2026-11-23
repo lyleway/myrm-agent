@@ -23,5 +23,5 @@ FetchEngine 执行引擎子包：L1 HTTP / L2 Browser / L3 Stealth 分层抓取�
 - `..fetchers` (L1/L2/L3 fetcher 实现)
 - `..router` (TierBreaker 按域名选起始层级、域名学习数据 DomainMetrics)
 - `..escalation` (L4 远程抓取 hook)
-- `..pipeline` (HTML → Markdown 内容管道)
+- `..processing` (HTML → Markdown 内容管道与转换线程调度)
 - `..*_extractor` (YouTube / Bilibili / WeChat / X fast-path)

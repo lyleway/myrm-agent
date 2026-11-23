@@ -1,5 +1,19 @@
 """FetchEngine network fetch, platform fast-path, degradation, and tier-breaker feedback helpers.
 
+[INPUT]
+web_fetch.extractors.bilibili_extractor::extract_bilibili_subtitle, is_bilibili_url (POS: Bilibili subtitle fast-path)
+web_fetch.extractors.weixin_extractor::extract_weixin_article, is_weixin_article_url (POS: WeChat article fast-path)
+web_fetch.extractors.x_extractor::extract_x_post, is_x_url (POS: X post fast-path)
+web_fetch.extractors.youtube_extractor::extract_youtube_transcript, is_youtube_url (POS: YouTube transcript fast-path)
+web_fetch.fetchers.protocols::Fetcher, FetcherType, FetchResult (POS: Fetcher protocol types)
+web_fetch.processing.antibot_detector::is_blocked (POS: Anti-bot detection)
+web_fetch.processing.pipeline::run_on_conversion_thread (POS: Dedicated conversion thread runner)
+web_fetch.router::domain_key (POS: Domain normalization key)
+web_fetch.engine.types::DEGRADABLE_4XX (POS: Shared engine types and constants)
+
+[OUTPUT]
+FetchEngineFetchMixin: Network fetch, platform fast-path, L1/L2/L3 tier degradation, and tier-breaker feedback mixin
+
 [POS]
 Mixin: platform fast-paths (YouTube, Bilibili, WeChat, X) ahead of the L1/L2/L3 tier ladder, L1/L2/L3
 fetch+pipeline, tier degradation, tier-breaker and failure-history feedback.
