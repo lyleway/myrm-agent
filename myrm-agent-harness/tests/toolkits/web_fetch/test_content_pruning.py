@@ -108,5 +108,62 @@ def test_a_dual_theme_code_block_keeps_the_light_copy_only() -> None:
     assert "dark theme copy" not in kept
 
 
+def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
+    """G7 等价预言机：自底向上非递归度量在 4,500 个随机 HTML 页上与原版 get_text/encode_contents 逐节点完全一致。"""
+    import random
+
+    from bs4 import BeautifulSoup, Tag
+
+    from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import _compute_subtree_metrics
+
+    rng = random.Random(20261123)
+    container_tags = ["div", "p", "span", "a", "section", "article", "ul", "li", "strong"]
+    void_tags = ["br", "hr", "img"]
+    text_pieces = ["hello", " world ", "a & b < c > d", "  \t\n  ", "中文测试", "foo\"bar'baz"]
+
+    def _gen(depth: int) -> str:
+        if depth >= 5 or rng.random() < 0.3:
+            if rng.random() < 0.2:
+                vt = rng.choice(void_tags)
+                if vt == "img":
+                    return '<img alt="a &amp; b" src="https://example.com/x.png"/>'
+                return f"<{vt}/>"
+            return rng.choice(text_pieces)
+        tag = rng.choice(container_tags)
+        attr = ' class="c1 c2" id="i1"' if rng.random() < 0.4 else ""
+        if tag == "a":
+            attr += ' href="https://example.com/?a=1&amp;b=2"'
+        inner = "".join(_gen(depth + 1) for _ in range(rng.randint(0, 3)))
+        return f"<{tag}{attr}>{inner}</{tag}>"
+
+    for _ in range(4500):
+        html = f"<html><body>{_gen(0)}</body></html>"
+        soup = BeautifulSoup(html, "lxml")
+        body = soup.body
+        assert isinstance(body, Tag)
+        text_lens, tag_lens = _compute_subtree_metrics(body)
+        for node in [body, *body.find_all(True)]:
+            nid = id(node)
+            assert text_lens[nid] == len(node.get_text(strip=True))
+            assert tag_lens[nid] == len(node.encode_contents().decode("utf-8"))
+
+
+def test_pruning_survives_depth_1050_without_recursion_error() -> None:
+    """R15：深度超过 1,000 层的页面不再因递归撞栈而整页丢失。"""
+    depth = 1050
+    article_text = "Important paragraph deep inside a nested document. " * 200
+    html = (
+        "<html><body><article>"
+        + ("<div>" * depth)
+        + f"<p>{article_text}</p>"
+        + ("</div>" * depth)
+        + "</article></body></html>"
+    )
+
+    kept = "".join(ContentPruningFilter().filter_content(html))
+
+    assert "Important paragraph deep inside" in kept
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

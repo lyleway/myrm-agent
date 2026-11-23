@@ -20,6 +20,7 @@ from collections import deque
 from typing import cast
 
 from bs4 import BeautifulSoup, Comment, Tag
+from bs4.element import NavigableString
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,59 @@ def _dom_path_units(root: Tag, limit: int) -> int:
                     return total
                 stack.append((child, depth + 1))
     return total
+
+
+def _compute_subtree_metrics(root: Tag) -> tuple[dict[int, int], dict[int, int]]:
+    """Compute ``(text_len, tag_len)`` for every Tag below *root* in one iterative bottom-up pass.
+
+    Matches ``len(node.get_text(strip=True))`` and ``len(node.encode_contents().decode("utf-8"))``
+    without re-walking or re-encoding subtrees at every ancestor.
+    """
+    order: list[Tag] = []
+    stack: list[Tag] = [root]
+    while stack:
+        current = stack.pop()
+        order.append(current)
+        for child in current.children:
+            if isinstance(child, Tag):
+                stack.append(child)
+
+    text_lens: dict[int, int] = {}
+    tag_lens: dict[int, int] = {}
+    outer_lens: dict[int, int] = {}
+
+    for node in reversed(order):
+        t_len = 0
+        inner_html_len = 0
+        has_children = False
+        for child in node.children:
+            has_children = True
+            if isinstance(child, Tag):
+                cid = id(child)
+                t_len += text_lens[cid]
+                inner_html_len += outer_lens[cid]
+            elif type(child) is NavigableString:
+                t_len += len(str(child).strip())
+                inner_html_len += len(child.output_ready())
+            elif isinstance(child, NavigableString):
+                # Comments are stripped before pruning; any other NavigableString subclass (e.g. CData)
+                # serializes via output_ready().
+                inner_html_len += len(child.output_ready())
+
+        nid = id(node)
+        text_lens[nid] = t_len
+        tag_lens[nid] = inner_html_len
+
+        if not has_children:
+            outer_lens[nid] = len(node.decode())
+        else:
+            # Measure only the start + end wrapper tags by decoding an empty shell with a non-empty placeholder
+            # so void/self-closing tags with children (if any) still render explicit open+close tags.
+            shell = Tag(name=node.name, attrs=dict(node.attrs))
+            shell.append("x")
+            outer_lens[nid] = len(shell.decode()) - 1 + inner_html_len
+
+    return text_lens, tag_lens
 
 
 class ContentPruningFilter:
@@ -140,26 +194,36 @@ class ContentPruningFilter:
             for element in soup.find_all(tag):
                 element.decompose()
 
-    def _prune_tree(self, node: Tag) -> None:
-        text_len = len(node.get_text(strip=True))
-        tag_len = len(node.encode_contents().decode("utf-8"))
-        link_text_len = sum(len(s.strip()) for s in (a.string for a in node.find_all("a", recursive=False)) if s)
+    def _prune_tree(self, root: Tag) -> None:
+        text_lens, tag_lens = _compute_subtree_metrics(root)
+        stack: list[Tag] = [root]
+        while stack:
+            node = stack.pop()
+            nid = id(node)
+            text_len = text_lens[nid]
+            tag_len = tag_lens[nid]
+            link_text_len = sum(
+                len(str(child.string).strip())
+                for child in node.children
+                if isinstance(child, Tag) and child.name == "a" and child.string
+            )
 
-        metrics = {
-            "node": node,
-            "tag_name": node.name,
-            "text_len": text_len,
-            "tag_len": tag_len,
-            "link_text_len": link_text_len,
-        }
+            metrics = {
+                "node": node,
+                "tag_name": node.name,
+                "text_len": text_len,
+                "tag_len": tag_len,
+                "link_text_len": link_text_len,
+            }
 
-        score = self._compute_composite_score(metrics, text_len, tag_len, link_text_len)
+            score = self._compute_composite_score(metrics, text_len, tag_len, link_text_len)
 
-        if score < self.threshold:
-            node.decompose()
-        else:
-            for child in [child for child in node.children if isinstance(child, Tag)]:
-                self._prune_tree(child)
+            if score < self.threshold:
+                node.decompose()
+            else:
+                tag_children = [child for child in node.children if isinstance(child, Tag)]
+                for child in reversed(tag_children):
+                    stack.append(child)
 
     def _compute_class_id_weight(self, node: Tag) -> float:
         class_id_score = 0.0
