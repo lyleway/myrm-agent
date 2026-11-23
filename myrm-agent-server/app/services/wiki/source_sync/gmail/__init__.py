@@ -13,6 +13,7 @@ Deterministic Gmail ingest path for wiki source sync; zero LLM.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from datetime import UTC, datetime
@@ -174,7 +175,7 @@ async def _fetch_message_markdown(token: str, message_id: str) -> tuple[str, str
     date_header = _header(headers, "Date") or ""
     received = _format_date(date_header)
     plain, html = _extract_bodies(payload)
-    body = plain.strip() if plain.strip() else html_body_to_markdown(html)
+    body = plain.strip() if plain.strip() else await asyncio.to_thread(html_body_to_markdown, html)
     if not body.strip():
         snippet = data.get("snippet")
         body = str(snippet) if snippet else ""

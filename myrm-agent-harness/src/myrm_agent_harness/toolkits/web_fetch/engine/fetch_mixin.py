@@ -97,9 +97,10 @@ class FetchEngineFetchMixin:
             return None, True, None
 
         from ..extractors.weixin_extractor import has_weixin_js_content, parse_weixin_article_html
+        from ..processing.pipeline import run_on_conversion_thread
 
         if is_weixin_article_url(url):
-            weixin_doc = parse_weixin_article_html(fetch_result.html, url=url)
+            weixin_doc = await run_on_conversion_thread(parse_weixin_article_html, fetch_result.html, url=url)
             if weixin_doc is not None:
                 return weixin_doc, False, fetch_result
             if not has_weixin_js_content(fetch_result.html):

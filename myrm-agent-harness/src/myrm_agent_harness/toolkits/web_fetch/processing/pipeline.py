@@ -16,6 +16,7 @@ utils.text_cleaner::clean_text (POS: Generic text cleaning utility)
 ContentPipeline: Transforms raw FetchResult HTML into cleaned, Markdown-formatted Documents; text responses
 (plain, markdown, csv, feeds) become Documents verbatim
 (``process`` synchronously, ``aprocess`` on a dedicated conversion thread)
+run_on_conversion_thread: Runs a CPU-bound conversion callable on the dedicated conversion thread while preserving contextvars
 SOURCE_TRUNCATED_KEY: Document metadata flag: the source was cut short (``process`` sets it when the fetcher cut the
 source at its size ceiling; the binary router sets it when it cuts a parsed text)
 
@@ -32,6 +33,7 @@ import atexit
 import contextvars
 import json
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Final
 
@@ -58,6 +60,23 @@ SOURCE_TRUNCATED_KEY: Final = "source_truncated"
 # after its awaiting task was cancelled is the only orphan there can be; futures still queued are dropped unstarted.
 _CONVERSION_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-fetch-convert")
 atexit.register(_CONVERSION_EXECUTOR.shutdown, wait=False, cancel_futures=True)
+
+
+async def run_on_conversion_thread[**P, R](
+    fn: Callable[P, R],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
+    """Run a CPU-bound HTML conversion callable on the dedicated conversion thread.
+
+    Preserves the caller's ``contextvars`` snapshot and keeps conversions off the event loop.
+    """
+    context = contextvars.copy_context()
+
+    def _invoke() -> R:
+        return context.run(fn, *args, **kwargs)
+
+    return await asyncio.get_running_loop().run_in_executor(_CONVERSION_EXECUTOR, _invoke)
 
 
 class ContentPipeline:
@@ -197,9 +216,4 @@ class ContentPipeline:
         Conversion is CPU-bound Python. On the event loop it would freeze every other request (streams, parallel
         fetches) for as long as it runs, and the fetch timeout cannot interrupt it there.
         """
-        context = contextvars.copy_context()
-
-        def convert() -> Document | None:
-            return context.run(self.process, fetch_result)
-
-        return await asyncio.get_running_loop().run_in_executor(_CONVERSION_EXECUTOR, convert)
+        return await run_on_conversion_thread(self.process, fetch_result)
