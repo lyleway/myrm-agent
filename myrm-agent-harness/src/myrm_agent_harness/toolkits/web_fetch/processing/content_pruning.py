@@ -3,6 +3,9 @@
 Scores every node by text density, link density, tag weight, class/id hints and text length, drops the nodes below a
 threshold and removes navigation, ads and other boilerplate. A ``header`` inside a content region is kept.
 
+[INPUT]
+- web_fetch.processing.language_switcher::strip_language_switchers (POS: Language-switcher list removal before pruning)
+
 [OUTPUT]
 ContentPruningFilter: Reduces a page to its main-content HTML blocks (``filter_content``)
 
@@ -21,6 +24,8 @@ from typing import cast
 
 from bs4 import BeautifulSoup, Comment, Tag
 from bs4.element import NavigableString
+
+from .language_switcher import strip_language_switchers
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +329,8 @@ class ContentPruningFilter:
         body = soup.body
         if not body:
             return []
+
+        strip_language_switchers(body)
 
         # Over the limit only the scoring is skipped: comments, excluded tags and block extraction still run.
         within_scoring_limit = _dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS
