@@ -47,13 +47,13 @@ def test_generate_markdown_with_filter_fills_fit_variant():
 
 def test_html_deep_nesting_depth_limit_protection():
     """测试极深嵌套 DOM (如 600 层 div) 时熔断保护，防止 RecursionError 栈溢出"""
-    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import CustomHTML2Text
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
 
     depth = 600
     inner_text = "Core content deep inside 600 nested layers"
     html_content = ("<div>" * depth) + inner_text + ("</div>" * depth)
 
-    converter = CustomHTML2Text()
+    converter = HTML2Markdown()
     # 转换必须在合理时间内顺利返回，且不得抛出 RecursionError
     result = converter.handle(html_content)
 
@@ -63,7 +63,7 @@ def test_html_deep_nesting_depth_limit_protection():
 
 def test_html_standard_conversion_fidelity():
     """测试正常多级格式的转换保真度"""
-    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import CustomHTML2Text
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
 
     html_content = """
     <html>
@@ -77,7 +77,7 @@ def test_html_standard_conversion_fidelity():
         </body>
     </html>
     """
-    converter = CustomHTML2Text()
+    converter = HTML2Markdown()
     result = converter.handle(html_content)
 
     assert "# Section Title" in result

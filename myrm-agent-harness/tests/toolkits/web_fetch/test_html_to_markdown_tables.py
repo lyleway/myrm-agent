@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import CustomHTML2Text
+from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
 from myrm_agent_harness.toolkits.web_fetch.processing.markdown_table import render_markdown_table
 
 
 def _convert(html: str) -> str:
-    return CustomHTML2Text().handle(html)
+    return HTML2Markdown().handle(html)
 
 
 class TestRenderMarkdownTable:
@@ -132,7 +132,7 @@ class TestUnclosedRows:
 
 class TestConverterReuse:
     def test_converter_still_renders_tables_after_a_cell_failed(self) -> None:
-        converter = CustomHTML2Text()
+        converter = HTML2Markdown()
         with pytest.raises(ValueError, match="invalid literal"):
             converter.handle('<table><tr><td><ol start="abc"><li>x</li></ol></td></tr></table>')
 

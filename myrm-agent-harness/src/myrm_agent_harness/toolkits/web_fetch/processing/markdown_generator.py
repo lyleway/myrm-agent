@@ -4,7 +4,7 @@ Converts HTML to Markdown and, when a content filter is configured, also
 produces the filtered ("fit") variant that keeps only the main content.
 
 [INPUT]
-- processing.html_to_markdown::CustomHTML2Text (POS: HTML-to-Markdown converter) [lazy]
+- processing.html_to_markdown::HTML2Markdown (POS: HTML-to-Markdown converter) [lazy]
 
 [OUTPUT]
 - MarkdownResult: raw / fit Markdown plus the filtered HTML
@@ -55,10 +55,10 @@ class MarkdownGenerator:
         html2text_options: dict[str, object] | None = None,
         content_filter: ContentFilter | None = None,
     ) -> MarkdownResult:
-        from .html_to_markdown import CustomHTML2Text
+        from .html_to_markdown import HTML2Markdown
 
         try:
-            h = CustomHTML2Text(baseurl=base_url)
+            h = HTML2Markdown(baseurl=base_url)
             default_options: dict[str, object] = {
                 "body_width": 0,
                 "ignore_emphasis": False,

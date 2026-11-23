@@ -200,11 +200,11 @@ def _collect_image_urls(content_div: Tag) -> list[str]:
 
 
 def _content_div_to_markdown(content_div: Tag) -> str:
-    from ..processing.html_to_markdown import CustomHTML2Text
+    from ..processing.html_to_markdown import HTML2Markdown
 
     _normalize_lazy_images(content_div)
     fragment = str(content_div)
-    converter = CustomHTML2Text(baseurl=_REFERER.rstrip("/"))
+    converter = HTML2Markdown(baseurl=_REFERER.rstrip("/"))
     converter.update_params(body_width=0, ignore_images=False)
     markdown = converter.handle(fragment).strip()
     markdown = re.sub(r"\n{3,}", "\n\n", markdown)

@@ -4,7 +4,7 @@
 - web_fetch.processing.markdown_table::render_markdown_table (POS: Markdown table layout for converted HTML tables)
 
 [OUTPUT]
-- CustomHTML2Text: HTML-to-Markdown converter for fetched page content; a table becomes one Markdown table that also lists the rows of its nested tables
+- HTML2Markdown: HTML-to-Markdown converter for fetched page content; a table becomes one Markdown table that also lists the rows of its nested tables
 
 [POS]
 HTML to Markdown conversion utilities for the web fetch processing pipeline.
@@ -84,53 +84,10 @@ _BLOCK_TAGS: set[str] = {
     "ul",
 }
 
-_INLINE_TAGS: set[str] = {
-    "a",
-    "abbr",
-    "b",
-    "bdi",
-    "bdo",
-    "br",
-    "cite",
-    "code",
-    "data",
-    "dfn",
-    "em",
-    "i",
-    "kbd",
-    "mark",
-    "q",
-    "rp",
-    "rt",
-    "ruby",
-    "s",
-    "samp",
-    "small",
-    "span",
-    "strong",
-    "sub",
-    "sup",
-    "time",
-    "u",
-    "var",
-    "wbr",
-    "del",
-    "ins",
-    "strike",
-}
-
-_HEADING_TAGS: set[str] = {"h1", "h2", "h3", "h4", "h5", "h6"}
-
-_MD_SPECIAL_RE = re.compile(r"([\\`*_\[\]()#+\-!|>~{}])")
-
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 # The lookbehind pins a match to the start of a run of spaces. Without it every later space of a run that no newline
 # follows starts another scan to the end of the run: quadratic in the run length.
 _TRAILING_SPACES_RE = re.compile(r"(?<! ) +\n")
-
-
-def _escape_md(text: str) -> str:
-    return _MD_SPECIAL_RE.sub(r"\\\1", text)
 
 
 def _resolve_url(base: str, url: str) -> str:
@@ -486,13 +443,3 @@ _TAG_HANDLERS: dict[str, Callable[[HTML2Markdown, Tag], str]] = {
     "q": HTML2Markdown._handle_q,
     "abbr": HTML2Markdown._handle_abbr,
 }
-
-
-class CustomHTML2Text(HTML2Markdown):
-    """API-compatible wrapper preserving the exact interface used by callers.
-
-    Matches the ``CustomHTML2Text(baseurl=...)`` / ``update_params(...)`` /
-    ``handle(html)`` call pattern from pipeline.py and markdown_generator.py.
-    """
-
-    pass

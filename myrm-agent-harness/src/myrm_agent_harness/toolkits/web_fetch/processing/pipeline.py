@@ -84,9 +84,9 @@ class ContentPipeline:
         )
 
     def _extract_raw_markdown(self, html: str, base_url: str) -> str:
-        from .html_to_markdown import CustomHTML2Text
+        from .html_to_markdown import HTML2Markdown
 
-        h = CustomHTML2Text(baseurl=base_url)
+        h = HTML2Markdown(baseurl=base_url)
         h.update_params(body_width=0)
         return h.handle(html).strip()
 
