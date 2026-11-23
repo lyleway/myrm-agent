@@ -1,6 +1,6 @@
 """Tests for FetchEngine crawl edge cases and cache-mixin branches.
 
-Covers SSRF / domain-allowlist rejection in ``crawl``, bilibili / weixin
+Covers SSRF rejection in ``crawl``, bilibili / weixin
 fast-path degradation, ``crawl_many`` failure
 paths, and cache-mixin branches (no-loop worker guard, priority calc,
 background revalidation failure / timeout / worker exception).
@@ -9,7 +9,6 @@ background revalidation failure / timeout / worker exception).
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,16 +41,6 @@ class TestCrawlGuardsAndFastPaths:
         engine = FetchEngine()
 
         doc = await engine.crawl("http://192.168.1.1/admin")
-
-        assert doc is None
-        await engine.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_crawl_domain_allowlist_blocked(self) -> None:
-        engine = FetchEngine(domain_allowlist=SimpleNamespace(is_allowed=lambda host: False))
-        engine._allow_private_networks = True
-
-        doc = await engine.crawl(PLAIN_URL)
 
         assert doc is None
         await engine.shutdown()

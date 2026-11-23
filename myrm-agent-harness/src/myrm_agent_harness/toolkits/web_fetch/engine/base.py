@@ -23,7 +23,6 @@ web_fetch.processing.antibot_detector::is_blocked (POS: Anti-bot detection)
 web_fetch.router.tier_breaker::get_global_tier_breaker (POS: Per-domain start-tier policy)
 web_fetch.router.domain_metrics::get_global_domain_metrics_manager (POS: Per-domain failure history behind the staleness hint)
 browser.pool.proxy::ProxyPool (POS: Proxy pool for browser fetchers)
-browser.domain_filter::DomainAllowlist (POS: Domain allowlist filter)
 utils.lru_cache::LRUCache (POS: Generic TTL-based LRU cache)
 
 [OUTPUT]
@@ -44,14 +43,12 @@ import logging
 import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 from langchain_core.documents import Document
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from myrm_agent_harness.toolkits.browser.domain_filter import DomainAllowlist
     from myrm_agent_harness.toolkits.browser.pool.proxy import ProxyPool
     from myrm_agent_harness.toolkits.browser.session_vault import SessionVault
 
@@ -120,12 +117,10 @@ class FetchEngine(
         coalescing_timeout: float = 30.0,
         max_background_tasks: int = 10,
         crawl_timeout: float = _DEFAULT_CRAWL_TIMEOUT,
-        domain_allowlist: DomainAllowlist | None = None,
         allow_private_networks: bool = False,
         network_blocklist: tuple[str, ...] = (),
         youtube_languages: list[str] | None = None,
     ):
-        self._domain_allowlist = domain_allowlist
         self._allow_private_networks = allow_private_networks
         self._network_blocklist = network_blocklist
         self._youtube_languages = youtube_languages
@@ -227,12 +222,6 @@ class FetchEngine(
             ssrf_check = validate_url_for_ssrf(url)
             if not ssrf_check.safe:
                 logger.warning(f"URL blocked (SSRF): {url} — {ssrf_check.error}")
-                return None
-
-        if self._domain_allowlist:
-            hostname = urlparse(url).hostname or ""
-            if not self._domain_allowlist.is_allowed(hostname):
-                logger.warning("URL blocked by domain allowlist: %s (host=%s)", url, hostname)
                 return None
 
         # The policy checks above judged the URL as given; the rewrite stays on the same host, and the redirect it
