@@ -196,8 +196,20 @@ async def _fetch_full_content(
         )
 
     failed_urls = [url for url, _ in failed_results]
+    failure_reasons: dict[str, tuple[str, str]] = {}
+    if hasattr(engine, "get_failure_reason"):
+        for failed_url in failed_urls:
+            reason = engine.get_failure_reason(failed_url)
+            if reason is not None:
+                failure_reasons[failed_url] = reason
+
     if not success_results:
-        return _full_content_result(all_failed_content(failed_urls), sources=[], truncated=False, raw_chars=0)
+        return _full_content_result(
+            all_failed_content(failed_urls, failure_reasons=failure_reasons or None),
+            sources=[],
+            truncated=False,
+            raw_chars=0,
+        )
 
     sources: list[dict[str, object]] = []
     pages: list[FetchedPage] = []
@@ -218,6 +230,7 @@ async def _fetch_full_content(
         pages,
         failed_urls,
         indices=[index_for(source) for source in sources] if index_for is not None else None,
+        failure_reasons=failure_reasons or None,
     )
 
     stored = None
@@ -234,7 +247,7 @@ async def _fetch_full_content(
             total_lines=stored.total_lines,
             storage_truncated=stored.storage_truncated,
         )
-    content += delivery.source_notice
+    content += delivery.source_notice + delivery.blocked_notice
     return _full_content_result(
         content,
         sources=sources,

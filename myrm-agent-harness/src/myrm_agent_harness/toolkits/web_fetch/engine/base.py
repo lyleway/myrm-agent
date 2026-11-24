@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
         FetchEscalationProvider,
     )
+    from myrm_agent_harness.toolkits.web_fetch.processing.antibot_detector import BlockKind
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,9 @@ class FetchEngine(
             size_fn=_doc_size,
         )
         self._fail_cache: LRUCache[bool] = LRUCache(maxsize=200, ttl=300, id="fetch_engine_fail_cache")
+        self._failure_reasons: LRUCache[tuple[BlockKind, str]] = LRUCache(
+            maxsize=200, ttl=300, id="fetch_engine_failure_reasons"
+        )
         self._pending_requests: dict[str, InFlightFetch] = {}
         # Fetches a batch call stopped waiting for: the engine owns them until they end (the loop holds tasks weakly).
         self._detached_fetches: set[asyncio.Task[Document | None]] = set()
@@ -172,6 +176,19 @@ class FetchEngine(
     def set_escalation_providers(self, providers: list[FetchEscalationProvider] | None) -> None:
         """Inject optional L4 remote fetch providers (server layer implements httpx vendors)."""
         self._escalation_providers = providers
+
+    def get_failure_reason(self, url: str) -> tuple[BlockKind, str] | None:
+        """Return the last recorded ``(kind, reason)`` for a failed URL, if any."""
+        from ..processing.github_blob_url import github_blob_to_raw
+        from ..processing.url_normalizer import normalize_url
+
+        return self._failure_reasons.get(normalize_url(github_blob_to_raw(url)))
+
+    def _record_failure_reason(self, url: str, kind: BlockKind, reason: str) -> None:
+        from ..processing.github_blob_url import github_blob_to_raw
+        from ..processing.url_normalizer import normalize_url
+
+        self._failure_reasons.set(normalize_url(github_blob_to_raw(url)), (kind, reason))
 
     async def crawl(
         self,
@@ -228,6 +245,7 @@ class FetchEngine(
         if force_refresh:
             self._crawl_cache.delete(cache_key)
             self._fail_cache.delete(cache_key)
+            self._failure_reasons.delete(cache_key)
 
         cached_item, is_expired = self._crawl_cache.get_with_expiry(cache_key)
         if cached_item is not None and not force_refresh:

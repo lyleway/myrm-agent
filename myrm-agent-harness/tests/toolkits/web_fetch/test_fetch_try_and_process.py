@@ -142,8 +142,8 @@ class TestTryFetchAndProcess:
         http = stub_fetchers(engine)
         http.fetch.return_value = http_result(RICH_HTML, status=503)
         with patch(
-            "myrm_agent_harness.toolkits.web_fetch.engine.fetch_mixin.detect_antibot",
-            new=lambda status, html: (True, "challenge"),
+            "myrm_agent_harness.toolkits.web_fetch.engine.fetch_mixin.classify_block",
+            new=lambda status, html, **kwargs: ("blocked", "challenge"),
         ):
             doc, degradable, result = await engine._try_fetch_and_process("http://example.com/page", FetcherType.HTTP)
 

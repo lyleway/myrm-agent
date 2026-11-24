@@ -6,7 +6,7 @@ web_fetch.extractors.weixin_extractor::extract_weixin_article, is_weixin_article
 web_fetch.extractors.x_extractor::extract_x_post, is_x_url (POS: X post fast-path)
 web_fetch.extractors.youtube_extractor::extract_youtube_transcript, is_youtube_url (POS: YouTube transcript fast-path)
 web_fetch.fetchers.protocols::Fetcher, FetcherType, FetchResult (POS: Fetcher protocol types)
-web_fetch.processing.antibot_detector::is_blocked (POS: Anti-bot detection)
+web_fetch.processing.antibot_detector::classify_block (POS: Anti-bot & JS-shell classification)
 web_fetch.processing.pipeline::run_on_conversion_thread (POS: Dedicated conversion thread runner)
 web_fetch.router::domain_key (POS: Domain normalization key)
 web_fetch.engine.types::DEGRADABLE_4XX (POS: Shared engine types and constants)
@@ -34,7 +34,7 @@ from ..extractors.weixin_extractor import extract_weixin_article, is_weixin_arti
 from ..extractors.x_extractor import extract_x_post, is_x_url
 from ..extractors.youtube_extractor import extract_youtube_transcript, is_youtube_url
 from ..fetchers.protocols import FetcherType, FetchResult
-from ..processing.antibot_detector import is_blocked as detect_antibot
+from ..processing.antibot_detector import classify_block
 from ..router import domain_key
 from .types import DEGRADABLE_4XX
 
@@ -87,7 +87,15 @@ class FetchEngineFetchMixin:
             return await self._pipeline.aprocess(fetch_result), True, fetch_result
 
         if not fetch_result.has_content:
-            logger.warning(f"L1 HTTP returned empty shell: {url}")
+            kind, reason = classify_block(
+                fetch_result.status_code, fetch_result.html, headers=fetch_result.headers
+            )
+            if kind is not None:
+                self._record_failure_reason(url, kind, reason)
+                logger.warning("Fetch %s (%s): %s", kind, reason, url)
+            else:
+                self._record_failure_reason(url, "needs_javascript", "L1 HTTP returned empty shell")
+                logger.warning("L1 HTTP returned empty shell: %s", url)
             return None, True, None
 
         from ..extractors.weixin_extractor import has_weixin_js_content, parse_weixin_article_html
@@ -104,9 +112,10 @@ class FetchEngineFetchMixin:
                 )
                 return None, True, fetch_result
 
-        blocked, reason = detect_antibot(fetch_result.status_code, fetch_result.html)
-        if blocked:
-            logger.warning(f"Anti-bot detected ({reason}): {url}")
+        kind, reason = classify_block(fetch_result.status_code, fetch_result.html, headers=fetch_result.headers)
+        if kind is not None:
+            self._record_failure_reason(url, kind, reason)
+            logger.warning("Anti-bot detected [%s] (%s): %s", kind, reason, url)
             return None, True, None
 
         return await self._pipeline.aprocess(fetch_result), True, fetch_result

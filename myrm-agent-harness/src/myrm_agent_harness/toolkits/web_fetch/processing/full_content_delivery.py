@@ -24,7 +24,7 @@ the model. The text to persist uses the same layout, which makes the line ranges
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import NamedTuple
 
@@ -44,6 +44,19 @@ _SOURCE_CUT_NOTICE = (
     "\n\n[web_fetch]: Size limit reached for {pages}: each of these pages was cut off, so only its beginning was "
     "fetched and everything after that point is missing. Do not conclude that something is absent from a page just "
     "because it is not in the fetched text; look for a narrower source if you need the rest."
+)
+_BLOCKED_STOP_GUIDANCE = (
+    "Access was explicitly blocked by the target site (e.g. HTTP 403/429 or WAF challenge). "
+    "Do NOT retry fetching these URLs via terminal tools (such as curl), alternate user-agents, proxies, or reader mirrors. "
+    "Inform the user that the page could not be read due to site access restrictions, and answer using available search snippets or suggest an alternative."
+)
+_NEEDS_JS_GUIDANCE = (
+    "The target page(s) require client-side JavaScript rendering and could not be read via HTTP. "
+    "Please synthesize the answer from available search snippets or ask the user whether to open the page in a browser."
+)
+_DEFAULT_FAILED_GUIDANCE = (
+    "The target page(s) may be unavailable (HTTP 404/403/timeout). "
+    "Please synthesize the final answer using search snippets or other available information."
 )
 
 
@@ -75,6 +88,8 @@ class FullContentDelivery:
     raw_chars: int
     # Trusted guidance naming the pages whose source was cut short; empty when none was.
     source_notice: str = ""
+    # Trusted stop-escalation guidance when any failed URL was explicitly blocked by the target site.
+    blocked_notice: str = ""
 
     @property
     def truncated(self) -> bool:
@@ -86,6 +101,7 @@ def plan_full_content(
     failed_urls: Sequence[str] = (),
     *,
     indices: Sequence[int] | None = None,
+    failure_reasons: Mapping[str, tuple[str, str]] | None = None,
 ) -> FullContentDelivery:
     """Lay out ``pages`` within one budget; ``stored_text`` is set only when some page had to be cut.
 
@@ -94,7 +110,12 @@ def plan_full_content(
     """
     numbers = list(range(1, len(pages) + 1)) if indices is None else list(indices)
     delivery = _layout(pages, failed_urls, numbers)
-    return replace(delivery, source_notice=_source_cut_notice(pages, numbers))
+    blocked_notice = (
+        f"\n\n[web_fetch]: {_BLOCKED_STOP_GUIDANCE}"
+        if failure_reasons and any(failure_reasons.get(u, ("", ""))[0] == "blocked" for u in failed_urls)
+        else ""
+    )
+    return replace(delivery, source_notice=_source_cut_notice(pages, numbers), blocked_notice=blocked_notice)
 
 
 def _layout(pages: Sequence[FetchedPage], failed_urls: Sequence[str], numbers: Sequence[int]) -> FullContentDelivery:
@@ -155,15 +176,26 @@ def clamp_read_ranges(ranges: Sequence[ReadRange], total_lines: int) -> list[Rea
     return [r._replace(last_line=min(r.last_line, total_lines)) for r in ranges if r.first_line <= total_lines]
 
 
-def all_failed_content(failed_urls: Sequence[str]) -> str:
+def all_failed_content(
+    failed_urls: Sequence[str],
+    *,
+    failure_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> str:
     """Tool result when no URL could be read; the URL list sits inside the untrusted boundary, the guidance outside."""
     from myrm_agent_harness.core.security.detection.content_boundary import wrap_untrusted
+
+    kinds = {failure_reasons[u][0] for u in failed_urls if failure_reasons and u in failure_reasons}
+    if "blocked" in kinds:
+        guidance = _BLOCKED_STOP_GUIDANCE
+    elif "needs_javascript" in kinds:
+        guidance = _NEEDS_JS_GUIDANCE
+    else:
+        guidance = _DEFAULT_FAILED_GUIDANCE
 
     return (
         "[web_fetch]: Could not retrieve content from the requested URL(s):\n"
         f"{wrap_untrusted(_failure_listing(failed_urls), source='web_fetch')}\n"
-        "The target page(s) may be unavailable (HTTP 404/403/timeout). "
-        "Please synthesize the final answer using search snippets or other available information."
+        f"{guidance}"
     )
 
 

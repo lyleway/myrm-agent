@@ -158,7 +158,7 @@ Myrm Agent Harness 是一个**GUI-first 通用 AI 工作助手运行时框架**�
 
 ### 可选依赖（extras）
 
-- **`[web]`**: scrapling[fetchers]（L1 HTTP / L3 stealth 爬取）, youtube-transcript-api（YouTube 字幕快路径；缺失时 fallback HTML）
+- **`[web]`**: curl_cffi（L1 HTTP 抓取与连接固定）, youtube-transcript-api（YouTube 字幕快路径；缺失时 fallback HTML）
 - **`[file-parsers]`**: python-docx, openpyxl, python-pptx（Office；pdfplumber + pypdfium2 由 core / pdfplumber 传递依赖）
 - **`[retrieval]`**: langchain-text-splitters, numpy, jieba, rank-bm25, tenacity（代码分块 + 云 embedding 重试）
 - **`[acp]`**: agent-client-protocol（外部 Agent 委托 + ACP Server）

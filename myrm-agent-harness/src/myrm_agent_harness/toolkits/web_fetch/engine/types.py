@@ -24,7 +24,7 @@ NO_SHARED_RESULT = NoSharedResult()
 # What callers coalesced on one URL wait for: the leader's page, its miss, or ``NO_SHARED_RESULT``.
 InFlightFetch = asyncio.Future[Document | NoSharedResult | None]
 
-# 403 anti-crawl / 429 rate-limit can be bypassed via browser layer, allow degradation
+# 403 anti-crawl / 429 rate-limit: stop local retries and allow optional L4 remote escalation when configured.
 DEGRADABLE_4XX = frozenset({403, 429})
 
 
