@@ -149,6 +149,7 @@ export interface WebFetchFirecrawlConfigValue {
   inheritFromSearch: boolean;
   api_key: string | null;
   apiBase: string | null;
+  networkIsolationConfirmed?: boolean;
 }
 
 export interface WebFetchEscalationConfigValue {

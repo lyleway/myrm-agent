@@ -22,6 +22,7 @@ const DEFAULT_CONFIG: WebFetchEscalationConfigValue = {
     inheritFromSearch: true,
     api_key: null,
     apiBase: null,
+    networkIsolationConfirmed: false,
   },
   sessionCap: 5,
 };
@@ -80,6 +81,7 @@ const WebFetchEscalationCard = memo(() => {
             inheritFromSearch: newConfig.firecrawl.inheritFromSearch,
             api_key: newConfig.firecrawl.api_key,
             apiBase: newConfig.firecrawl.apiBase,
+            networkIsolationConfirmed: Boolean(newConfig.firecrawl.networkIsolationConfirmed),
           },
           sessionCap: newConfig.sessionCap,
         });
@@ -114,7 +116,9 @@ const WebFetchEscalationCard = memo(() => {
           provider,
           api_key: apiKey,
           inherit_from_search: provider === 'firecrawl' && config.firecrawl.inheritFromSearch,
-          api_base: provider === 'firecrawl' ? config.firecrawl.apiBase : null,
+          api_base: provider === 'firecrawl' ? firecrawlBaseText.trim() || null : null,
+          network_isolation_confirmed:
+            provider === 'firecrawl' && Boolean(config.firecrawl.networkIsolationConfirmed),
         }),
       });
       toast({ title: t('verifySuccess', { provider: provider.toUpperCase() }) });
@@ -218,15 +222,48 @@ const WebFetchEscalationCard = memo(() => {
                 placeholder="https://api.firecrawl.dev"
                 value={firecrawlBaseText}
                 onChange={(e) => {
-                  setFirecrawlBaseText(e.target.value);
+                  const nextBase = e.target.value;
+                  setFirecrawlBaseText(nextBase);
                   clearTimeout(debounceRef.current);
                   debounceRef.current = setTimeout(() => {
-                    persist({ firecrawl: { ...config.firecrawl, apiBase: e.target.value.trim() || null } });
+                    const trimmed = nextBase.trim() || null;
+                    persist({
+                      firecrawl: {
+                        ...config.firecrawl,
+                        apiBase: trimmed,
+                        networkIsolationConfirmed: trimmed ? Boolean(config.firecrawl.networkIsolationConfirmed) : false,
+                      },
+                    });
                   }, 500);
                 }}
                 className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
               />
               <p className="text-[10px] text-muted-foreground">{t('firecrawlApiBaseHint')}</p>
+              {firecrawlBaseText.trim().length > 0 && (
+                <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.firecrawl.networkIsolationConfirmed)}
+                    onChange={(e) =>
+                      persist({
+                        firecrawl: {
+                          ...config.firecrawl,
+                          networkIsolationConfirmed: e.target.checked,
+                        },
+                      })
+                    }
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-indigo-500"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-xs font-medium text-foreground">
+                      {t('firecrawlNetworkIsolation')}
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      {t('firecrawlNetworkIsolationHint')}
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
             <Button
               type="button"
