@@ -23,7 +23,7 @@
 - count_content_chars: Length of page text without the parser's ``[Page N]`` marker lines
 
 [POS]
-pdfplumber-based PDF parser orchestrator: page parsing (sequential/parallel),
+pdfplumber-based PDF parser orchestrator: sequential page parsing,
 heading composition, cross-page stitching and text/table merging, with an
 optional physical ``max_pages`` slice. Owns the page-marker format and the
 matching helper that tells real content from markers.
@@ -121,14 +121,10 @@ def _page_numbers(text: str) -> list[int]:
 
 
 class PDFPlumberParser(FileParser):
-    """PDF file parser using pdfplumber
-
-    Performance:
-    - Small/medium files (< 50 pages): Excellent
-    - Large files (> 100 pages): Recommend enabling parallel processing
+    """PDF file parser using pdfplumber.
 
     Features:
-    - Text extraction with layout preservation
+    - Sequential page-by-page text extraction with layout preservation and immediate page release
     - Table extraction with Markdown formatting
     - Bookmark/outline extraction with nested hierarchy
     - Numbering/font heading fallback when bookmarks are absent or generic
@@ -141,8 +137,6 @@ class PDFPlumberParser(FileParser):
         extract_bookmarks: bool = True,
         table_settings: dict[str, str | int] | None = None,
         table_format: Literal["inline", "placeholder"] = "inline",
-        parallel: bool = False,
-        max_workers: int = 4,
         heading_detection: Literal["bookmarks", "font", "auto"] = "auto",
         max_pages: int | None = None,
         stitch_tables: bool = True,
@@ -150,8 +144,6 @@ class PDFPlumberParser(FileParser):
         self._extract_tables = extract_tables
         self._should_extract_bookmarks = extract_bookmarks
         self._table_format = table_format
-        self._parallel = parallel
-        self._max_workers = max_workers
         self._heading_detection = heading_detection
         self._max_pages = max_pages
         self._stitch_tables = stitch_tables
@@ -216,10 +208,7 @@ class PDFPlumberParser(FileParser):
             bookmark_headings = self._resolve_bookmark_headings(pdf)
             font_headings = self._resolve_font_headings(pdf, bookmark_headings)
 
-            if self._parallel and process_count > 10:
-                page_results = self._parse_parallel(pages_to_process)
-            else:
-                page_results = self._parse_sequential(pages_to_process)
+            page_results = self._parse_sequential(pages_to_process)
 
             for page_num, (text, tables, error) in enumerate(page_results, start=1):
                 if error:
@@ -325,53 +314,6 @@ class PDFPlumberParser(FileParser):
             finally:
                 if hasattr(page, "close"):
                     page.close()  # Free cached page data immediately to prevent OOM on large PDFs
-
-    def _parse_parallel(
-        self,
-        pages: list[pdfplumber.page.Page],
-    ) -> typing.Iterator[tuple[str, list[PDFTable], str | None]]:
-        """Parallel parsing (multi-threaded) with streaming ordered output"""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            future_to_idx = {executor.submit(self._parse_single_page, page): idx for idx, page in enumerate(pages)}
-
-            next_expected_idx = 0
-            buffer: dict[int, tuple[str, list[PDFTable], str | None]] = {}
-
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    result = future.result()
-                except Exception as e:
-                    result = ("", [], f"{type(e).__name__}: {e}")
-
-                if idx == next_expected_idx:
-                    yield result
-                    next_expected_idx += 1
-                    # Yield any sequential results that have already completed and are waiting in buffer
-                    while next_expected_idx in buffer:
-                        yield buffer.pop(next_expected_idx)
-                        next_expected_idx += 1
-                else:
-                    buffer[idx] = result
-
-    def _parse_single_page(
-        self,
-        page: pdfplumber.page.Page,
-    ) -> tuple[str, list[PDFTable], str | None]:
-        """Parse single page (for parallel calls)"""
-        try:
-            text = page.extract_text() or ""
-            tables: list[PDFTable] = []
-            if self._extract_tables:
-                tables = extract_page_tables(page, self._table_settings)
-            return (text, tables, None)
-        except Exception as e:
-            return ("", [], f"{type(e).__name__}: {e}")
-        finally:
-            if hasattr(page, "close"):
-                page.close()  # Free cached page data immediately to prevent OOM on large PDFs
 
     def _merge_text_and_tables(
         self,

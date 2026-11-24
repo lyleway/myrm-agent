@@ -288,12 +288,12 @@ class TestTableSummaryL0:
         assert "..." in result
 
 
-class TestParallelParsing:
-    """Test parallel page parsing."""
+class TestMultiPageSequentialParsing:
+    """Test sequential multi-page parsing."""
 
-    def test_parallel_mode_activated(self, tmp_path):
-        """Parallel mode triggers for >10 pages."""
-        parser = PDFPlumberParser(parallel=True, extract_tables=False, extract_bookmarks=False)
+    def test_multi_page_sequential_parsing(self, tmp_path):
+        """Documents with >10 pages are parsed sequentially in order."""
+        parser = PDFPlumberParser(extract_tables=False, extract_bookmarks=False)
         test_pdf = tmp_path / "test.pdf"
         test_pdf.write_text("dummy")
 

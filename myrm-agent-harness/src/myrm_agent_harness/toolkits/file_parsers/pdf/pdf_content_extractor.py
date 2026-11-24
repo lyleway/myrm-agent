@@ -102,7 +102,6 @@ def _extract_text_sync(
 
     parser = PDFPlumberParser(
         extract_tables=True,
-        parallel=True,
         table_format=table_format,
         max_pages=max_pages,
         stitch_tables=stitch_tables,

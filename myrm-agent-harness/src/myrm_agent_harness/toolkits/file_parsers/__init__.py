@@ -29,7 +29,7 @@ Provides parsers for various file formats:
 - PDFParseResult, PDFTable, PDFHeading: PDF-specific result models
 - PDFExtractConfig, PDFExtractResult, PDFImageContent, extract_pdf_content: PDF extraction utilities
 - SmartPDFParser: PDF parser with text/table extraction + OCR fallback (default for get_parser(".pdf"))
-- get_parser, get_pdf_parser: parser lookup by file extension (content sniff as fallback) and the configurable PDF parser
+- get_parser: parser lookup by file extension (content sniff as fallback)
 - get_file_type, is_supported: file type of a path and whether a parser exists for it
 
 [POS]
@@ -101,7 +101,6 @@ __all__ = [
     "extract_pdf_content",
     "get_file_type",
     "get_parser",
-    "get_pdf_parser",
     "is_supported",
     "read_text_file",
 ]
@@ -217,12 +216,6 @@ class LegacyFormatParser(FileParser):
 
 _DEFAULT_PDF_PARSER = SmartPDFParser()
 
-_FAST_PDF_PARSER = PDFPlumberParser(
-    extract_tables=False,
-    parallel=True,
-    max_workers=4,
-)
-
 _OCR_PARSER = OCRParser()
 
 _PARSERS: dict[str, FileParser] = {
@@ -289,28 +282,6 @@ def get_parser(file_path: str) -> FileParser:
         raise ValueError(f"Unsupported file type: {ext}. Supported: {supported}")
 
     return parser
-
-
-def get_pdf_parser(
-    mode: str = "default",
-    extract_tables: bool = True,
-    parallel: bool = False,
-) -> PDFPlumberParser:
-    """Get PDF parser with custom configuration
-
-    Args:
-        mode: Preset mode ("default", "fast", "table")
-        extract_tables: Whether to extract tables
-        parallel: Whether to use parallel processing
-
-    Returns:
-        Configured PDF parser
-    """
-    if mode == "fast":
-        return _FAST_PDF_PARSER
-    if mode == "table":
-        return PDFPlumberParser(extract_tables=True, parallel=False)
-    return PDFPlumberParser(extract_tables=extract_tables, parallel=parallel)
 
 
 def get_file_type(file_path: str) -> str:
