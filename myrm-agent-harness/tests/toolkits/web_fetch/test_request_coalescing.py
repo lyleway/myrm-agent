@@ -40,7 +40,7 @@ async def test_coalescing_with_different_urls():
     mock_doc2 = Document(page_content="content2", metadata={})
 
     with patch.object(engine, "_crawl_with_degradation", new_callable=AsyncMock) as mock_crawl:
-        mock_crawl.side_effect = [(mock_doc1, None), (mock_doc2, None)]
+        mock_crawl.side_effect = lambda url, **_kw: (mock_doc1, None) if "example1" in url else (mock_doc2, None)
 
         # 2 个不同 URL 并发请求
         results = await asyncio.gather(
