@@ -12,7 +12,8 @@ Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness 
 |------------|------|-------------|-------|
 | binding.py | Core | Per agent-run ContextVar bind via `open_web_fetch_escalation_context` | ✅ |
 | providers/jina.py | Core | Jina Reader httpx provider | ✅ |
-| providers/firecrawl.py | Core | Firecrawl v2 scrape httpx provider (keyless free tier or API key, custom api_base) | ✅ |
+| providers/firecrawl.py | Core | Firecrawl v2 scrape httpx provider (keyless free tier or API key, endpoint-policy gated custom api_base) | ✅ |
+| providers/endpoint_policy.py | Core | External L4 endpoint validation, metadata/userinfo/key-inheritance guard, DNS-pinned IP validation, hosted disable env | ✅ |
 | escalation/registry.py | Core | Build provider chain from config + searchServices inherit | ✅ |
 | escalation/session_counter.py | Core | Per chat session L4 attempt cap | ✅ |
 | escalation/_ARCH.md | Doc | Submodule index | ✅ |
@@ -24,6 +25,7 @@ Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness 
 - **Verify API**: `app/api/integrations/web_fetch.py` POST `/integrations/web-fetch/verify`.
 - **Config**: `app/schemas/config.py` → key `webFetchEscalation` (encrypted at rest).
 - **Plane deny**: env `MYRM_WEB_FETCH_ESCALATION=denied` → registry returns no providers.
+- **Hosted custom endpoint disable**: env `MYRM_WEB_FETCH_CUSTOM_API_BASE_DISABLED=1` → custom `api_base` rejected across registry and verify API.
 
 ## Boundaries
 

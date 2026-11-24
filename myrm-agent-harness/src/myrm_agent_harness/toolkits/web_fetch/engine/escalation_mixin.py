@@ -16,6 +16,7 @@ from langchain_core.documents import Document
 
 from myrm_agent_harness.core.security.guards.ssrf import SSRFSecurityError
 
+from ..escalation.content_validator import is_valid_escalation_content
 from ..fetchers.protocols import FetcherType, FetchResult
 from ..fetchers.target_guard import assert_not_blocklisted
 
@@ -64,6 +65,19 @@ class FetchEngineEscalationMixin:
                 continue
 
             if escalation_result is None or not escalation_result.content.strip():
+                continue
+
+            valid_content, reject_reason = is_valid_escalation_content(
+                escalation_result.content,
+                title=escalation_result.title,
+            )
+            if not valid_content:
+                logger.info(
+                    "Escalation provider %s content rejected for %s (%s)",
+                    provider.provider_id,
+                    url,
+                    reject_reason,
+                )
                 continue
 
             try:

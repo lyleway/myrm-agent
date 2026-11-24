@@ -23,6 +23,10 @@ from pydantic import BaseModel, Field
 from app.core.utils.errors import external_service_error, validation_error
 from app.core.utils.response_utils import success_response
 from app.schemas.responses import StandardSuccessResponse
+from app.services.web_fetch.providers.endpoint_policy import (
+    EndpointPolicyError,
+    validate_firecrawl_endpoint,
+)
 from app.services.web_fetch.providers.firecrawl import FirecrawlEscalationProvider
 from app.services.web_fetch.providers.jina import JinaEscalationProvider
 
@@ -41,7 +45,15 @@ class WebFetchEscalationVerifyRequest(BaseModel):
         description="When true for Firecrawl, resolve API key from enabled searchServices entry",
     )
     api_base: str | None = Field(None, description="Custom Firecrawl API base URL for self-hosted instances")
+    network_isolation_confirmed: bool = Field(
+        default=False,
+        alias="networkIsolationConfirmed",
+        description="Confirm custom self-hosted endpoint outbound network is isolated from internal/metadata networks",
+    )
     test_url: str | None = Field(None, description="URL to fetch for verification")
+
+    class Config:
+        populate_by_name = True
 
 
 async def _resolve_firecrawl_verify_key(api_key: str | None, inherit_from_search: bool) -> str | None:
@@ -84,12 +96,30 @@ async def verify_web_fetch_escalation(request: WebFetchEscalationVerifyRequest) 
         if request.provider == "jina":
             provider: JinaEscalationProvider | FirecrawlEscalationProvider = JinaEscalationProvider(api_key=request.api_key)
         else:
-            firecrawl_key = await _resolve_firecrawl_verify_key(
-                request.api_key,
-                request.inherit_from_search,
-            )
             firecrawl_base = (request.api_base or "").strip() or None
-            provider = FirecrawlEscalationProvider(api_key=firecrawl_key, api_base=firecrawl_base)
+            try:
+                validate_firecrawl_endpoint(
+                    firecrawl_base,
+                    network_isolation_confirmed=request.network_isolation_confirmed,
+                    inherit_from_search=request.inherit_from_search,
+                    api_key=request.api_key,
+                )
+            except EndpointPolicyError as exc:
+                raise validation_error(str(exc)) from exc
+
+            firecrawl_key = (
+                (request.api_key or "").strip() or None
+                if firecrawl_base
+                else await _resolve_firecrawl_verify_key(
+                    request.api_key,
+                    request.inherit_from_search,
+                )
+            )
+            provider = FirecrawlEscalationProvider(
+                api_key=firecrawl_key,
+                api_base=firecrawl_base,
+                network_isolation_confirmed=request.network_isolation_confirmed,
+            )
 
         result = await provider.fetch_url(test_url, max_chars=4000)
         if result is None or not result.content.strip():

@@ -24,6 +24,10 @@ from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
 
 from app.schemas.config import SearchServicesConfigValue, WebFetchEscalationConfigValue
 from app.services.web_fetch.escalation.session_counter import session_escalation_counter
+from app.services.web_fetch.providers.endpoint_policy import (
+    EndpointPolicyError,
+    validate_firecrawl_endpoint,
+)
 from app.services.web_fetch.providers.firecrawl import FirecrawlEscalationProvider
 from app.services.web_fetch.providers.jina import JinaEscalationProvider
 
@@ -41,6 +45,9 @@ def resolve_firecrawl_api_key(
     explicit = (cfg.firecrawl.api_key or "").strip()
     if explicit:
         return explicit
+    # Custom api_base must never inherit the search-service Firecrawl key.
+    if (cfg.firecrawl.api_base or "").strip():
+        return None
     if not cfg.firecrawl.inherit_from_search or search_services is None:
         return None
     for item in search_services.searchServiceConfigs:
@@ -114,7 +121,20 @@ async def build_escalation_providers(session_id: str) -> list[FetchEscalationPro
 
     firecrawl_key = resolve_firecrawl_api_key(cfg, search_services)
     firecrawl_api_base = (cfg.firecrawl.api_base or "").strip() or None
-    firecrawl = FirecrawlEscalationProvider(api_key=firecrawl_key, api_base=firecrawl_api_base)
-    providers.append(SessionCappedEscalationProvider(firecrawl, session_id=session_id, session_cap=cfg.session_cap))
+    try:
+        validate_firecrawl_endpoint(
+            firecrawl_api_base,
+            network_isolation_confirmed=cfg.firecrawl.network_isolation_confirmed,
+            inherit_from_search=cfg.firecrawl.inherit_from_search,
+            api_key=cfg.firecrawl.api_key,
+        )
+        firecrawl = FirecrawlEscalationProvider(
+            api_key=firecrawl_key,
+            api_base=firecrawl_api_base,
+            network_isolation_confirmed=cfg.firecrawl.network_isolation_confirmed,
+        )
+        providers.append(SessionCappedEscalationProvider(firecrawl, session_id=session_id, session_cap=cfg.session_cap))
+    except EndpointPolicyError as exc:
+        logger.warning("Skipping Firecrawl escalation provider due to endpoint policy: %s", exc)
 
     return providers
