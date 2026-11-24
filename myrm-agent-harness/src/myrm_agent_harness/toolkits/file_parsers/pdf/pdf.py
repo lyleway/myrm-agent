@@ -304,7 +304,7 @@ class PDFPlumberParser(FileParser):
         """Sequential parsing (page by page) with streaming output"""
         for page in pages:
             try:
-                text = page.extract_text() or ""
+                text = page.extract_text(x_tolerance_ratio=0.15) or ""
                 tables: list[PDFTable] = []
                 if self._extract_tables:
                     tables = extract_page_tables(page, self._table_settings)

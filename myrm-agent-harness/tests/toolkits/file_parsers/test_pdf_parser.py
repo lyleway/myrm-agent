@@ -523,3 +523,35 @@ class TestCrossPageStitchingIntegration:
 
         assert len(result.tables) == 2
         assert result.metadata["table_count"] == 2
+
+
+class TestRelativeWordTolerance:
+    """Tightly typeset PDFs with <3pt word gaps preserve word boundaries via x_tolerance_ratio."""
+
+    def test_tight_kerning_words_are_not_glued(self, tmp_path):
+        # 9pt font with 2.0pt inter-word spacing: default 3pt x_tolerance glues these words,
+        # while x_tolerance_ratio=0.15 (1.35pt at 9pt) separates them cleanly.
+        stream = b"BT /F1 9 Tf 72 720 Td [(We) -222 (introduce) -222 (Kimi) -222 (K2)] TJ ET"
+        objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        ]
+        body = b"%PDF-1.4\n"
+        offsets: list[int] = []
+        for number, obj in enumerate(objects, start=1):
+            offsets.append(len(body))
+            body += b"%d 0 obj\n%s\nendobj\n" % (number, obj)
+        xref_offset = len(body)
+        body += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+        body += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+        body += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref_offset)
+
+        pdf_path = tmp_path / "tight_kerning.pdf"
+        pdf_path.write_bytes(body)
+
+        result = PDFPlumberParser(extract_tables=False, extract_bookmarks=False).parse_sync(str(pdf_path))
+        assert "We introduce Kimi K2" in result.text
+
