@@ -75,8 +75,11 @@ class TestLocalMode:
 @pytest.mark.asyncio
 class TestCloudMode:
     async def test_blocked_redirect_hop_terminates_fetch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def _allow(_url: str) -> SSRFResult:
+            return SSRFResult(safe=True)
+
         monkeypatch.setattr(
-            "myrm_agent_harness.core.security.guards.ssrf.validate_url_for_ssrf", lambda _url: SSRFResult(safe=True)
+            "myrm_agent_harness.core.security.guards.ssrf.async_validate_url_for_ssrf", _allow
         )
         monkeypatch.setenv("MYRM_ALLOWED_INTERNAL_HOSTS", "127.0.0.1")
         engine = _engine(allow_private_networks=False)

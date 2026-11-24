@@ -3,7 +3,7 @@
 [INPUT]
 - utils.url_syntax::parse_outbound_url (POS: the one canonical spelling of an outbound URL)
 - toolkits.browser.domain_filter::DomainBlocklist (POS: hostname blocklist for benchmark decontamination) [lazy]
-- core.security.guards.ssrf::validate_url_for_ssrf (POS: SSRF classification of a URL) [lazy]
+- core.security.guards.ssrf::async_validate_url_for_ssrf (POS: Async SSRF classification of a URL without blocking the event loop) [lazy]
 - utils.url_utils::check_url_exfiltration, sanitize_url_for_error (POS: secret-in-URL detection) [lazy]
 - utils.errors::ToolError, ToolErrorCategory
 
@@ -21,7 +21,7 @@ from myrm_agent_harness.utils.errors import ToolError, ToolErrorCategory
 from myrm_agent_harness.utils.url_syntax import parse_outbound_url
 
 
-def validate_urls(
+async def validate_urls(
     urls: list[str],
     *,
     blocked_hostnames: tuple[str, ...] | None,
@@ -61,12 +61,12 @@ def validate_urls(
     if allow_private_networks:
         return canonical_urls
 
-    from myrm_agent_harness.core.security.guards.ssrf import validate_url_for_ssrf
+    from myrm_agent_harness.core.security.guards.ssrf import async_validate_url_for_ssrf
     from myrm_agent_harness.utils.logger_utils import get_agent_logger
     from myrm_agent_harness.utils.url_utils import check_url_exfiltration, sanitize_url_for_error
 
     for url in canonical_urls:
-        verdict = validate_url_for_ssrf(url)
+        verdict = await async_validate_url_for_ssrf(url)
         if not verdict.safe:
             raise ToolError(
                 f"URL blocked (SSRF protection): {verdict.error} — {url}",

@@ -103,8 +103,10 @@ def create_web_fetch_tool(
         reranker_config is not None and embedding_config is not None, description_locale
     )
 
-    def check_urls(urls: list[str]) -> list[str]:
-        return validate_urls(urls, blocked_hostnames=blocked_hostnames, allow_private_networks=allow_private_networks)
+    async def check_urls(urls: list[str]) -> list[str]:
+        return await validate_urls(
+            urls, blocked_hostnames=blocked_hostnames, allow_private_networks=allow_private_networks
+        )
 
     def current_network_blocklist() -> tuple[str, ...]:
         return network_blocklist_provider() if network_blocklist_provider is not None else ()
@@ -122,7 +124,7 @@ def create_web_fetch_tool(
         @tool("web_fetch_tool", description=tool_description, args_schema=_FullContentInput)
         async def full_content_tool(urls: list[str], reason: str = "") -> dict[str, object]:
             """Read the pages in full."""
-            return await read_in_full(check_urls(urls))
+            return await read_in_full(await check_urls(urls))
 
         return full_content_tool
 
@@ -134,7 +136,7 @@ def create_web_fetch_tool(
         reason: str = "",
     ) -> dict[str, object]:
         """Read the pages in full, or retrieve the snippets that answer ``questions``."""
-        urls = check_urls(urls)
+        urls = await check_urls(urls)
         if operation == "fetch_full_content":
             return await read_in_full(urls)
 

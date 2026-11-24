@@ -209,9 +209,9 @@ class FetchEngine(
             return None
 
         if not self._allow_private_networks:
-            from myrm_agent_harness.core.security.guards.ssrf import validate_url_for_ssrf
+            from myrm_agent_harness.core.security.guards.ssrf import async_validate_url_for_ssrf
 
-            ssrf_check = validate_url_for_ssrf(url)
+            ssrf_check = await async_validate_url_for_ssrf(url)
             if not ssrf_check.safe:
                 logger.warning(f"URL blocked (SSRF): {url} — {ssrf_check.error}")
                 return None
