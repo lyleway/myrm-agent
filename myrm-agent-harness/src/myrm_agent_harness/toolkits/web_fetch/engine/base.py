@@ -4,12 +4,12 @@ Architecture:
   L1 HttpFetcher (curl_cffi, ~100 ms)
   Optional L4 remote escalation providers (Jina / Firecrawl / self-hosted compatible service)
 
-Cache: In-memory LRU (default 1 h TTL, 500 entries, 100 MB cap)
+Cache: In-memory LRU (default 15 min TTL, 500 entries, 100 MB cap)
   - Request coalescing: concurrent requests for the same URL trigger only one network call (30 s timeout guard; waiters take over a cancelled leader's fetch)
   - URL normalisation: strips known tracking params for better hit rate
   - GitHub blob links are fetched as their raw file, so a long source file is not cut at the page-size ceiling
-  - HTTP conditional requests: sends ETag / Last-Modified on cache expiry to save bandwidth
-  - Stale-While-Revalidate: returns stale cache immediately, refreshes via background priority queue (30 s timeout)
+  - HTTP conditional requests: sends ETag / Last-Modified on cache expiry (304 refreshes freshness; never serves stale)
+  - Cache-Control: responses carrying ``no-store`` are never cached
 Boundary: single-sandbox, single-process semantics.
 
 [INPUT]
@@ -37,7 +37,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
@@ -61,8 +60,6 @@ from .escalation_mixin import FetchEngineEscalationMixin
 from .fetch_mixin import FetchEngineFetchMixin
 from .types import (
     NO_SHARED_RESULT,
-    AccessStats,
-    BackgroundTask,
     CachedDocument,
     FailedResult,
     InFlightFetch,
@@ -74,18 +71,29 @@ if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
         FetchEscalationProvider,
     )
+    from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetchResult
     from myrm_agent_harness.toolkits.web_fetch.processing.antibot_detector import BlockKind
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "AccessStats",
-    "BackgroundTask",
     "CachedDocument",
     "FailedResult",
     "FetchEngine",
     "SuccessResult",
 ]
+
+
+def _has_no_store(fetch_result: FetchResult | None) -> bool:
+    """Return True when the response carries a ``Cache-Control: no-store`` directive."""
+    if fetch_result is None or not fetch_result.headers:
+        return False
+    for key, value in fetch_result.headers.items():
+        if key.lower() == "cache-control":
+            directives = {part.strip().lower() for part in value.split(",")}
+            if "no-store" in directives:
+                return True
+    return False
 
 
 class FetchEngine(
@@ -104,12 +112,10 @@ class FetchEngine(
         use_raw_markdown: bool = False,
         proxy_pool: ProxyPool | None = None,
         session_vault: SessionVault | None = None,
-        cache_ttl: int = 3600,
+        cache_ttl: int = 900,
         cache_maxsize: int = 500,
         cache_max_bytes: int = 100 * 1024 * 1024,
-        stale_while_revalidate: bool = True,
         coalescing_timeout: float = 30.0,
-        max_background_tasks: int = 10,
         crawl_timeout: float = _DEFAULT_CRAWL_TIMEOUT,
         allow_private_networks: bool = False,
         network_blocklist: tuple[str, ...] = (),
@@ -150,22 +156,8 @@ class FetchEngine(
         # Fetches a batch call stopped waiting for: the engine owns them until they end (the loop holds tasks weakly).
         self._detached_fetches: set[asyncio.Task[Document | None]] = set()
         self._enable_http_validation = True
-        self._stale_while_revalidate = stale_while_revalidate
         self._coalescing_timeout = coalescing_timeout
-        self._max_background_tasks = max_background_tasks
         self._crawl_timeout = crawl_timeout
-        self._background_queue: asyncio.PriorityQueue[BackgroundTask] = asyncio.PriorityQueue()
-        self._background_workers: list[asyncio.Task[None]] = []
-        self._url_access_stats: OrderedDict[str, AccessStats] = OrderedDict()
-        self._max_access_stats_size = 10_000
-
-        self._bg_revalidations_success = 0
-        self._bg_revalidations_failed = 0
-        self._bg_revalidations_timeout = 0
-        self._bg_revalidations_total_ms = 0.0
-        self._bg_revalidations_skipped = 0
-
-        self._workers_started = False
 
         self._escalation_providers: list[FetchEscalationProvider] | None = None
 
@@ -221,16 +213,6 @@ class FetchEngine(
         url = github_blob_to_raw(url)
         cache_key = normalize_url(url)
 
-        if cache_key in self._url_access_stats:
-            self._url_access_stats[cache_key].count += 1
-        else:
-            self._url_access_stats[cache_key] = AccessStats(count=1, last_access=time.time())
-
-        self._url_access_stats.move_to_end(cache_key)
-
-        if len(self._url_access_stats) > self._max_access_stats_size:
-            self._url_access_stats.popitem(last=False)
-
         # A leader that ended without a result (cancelled) sends its waiters round again: the first becomes the
         # new leader and the rest coalesce on it, so one fetch still serves them all.
         while not force_refresh and cache_key in self._pending_requests:
@@ -273,27 +255,33 @@ class FetchEngine(
 
             if fetch_result and fetch_result.status_code == 304 and cached_item:
                 logger.info(f"HTTP 304: cache still valid: {url}")
-                cached_item.cached_at = time.time()
-                self._crawl_cache.set(cache_key, cached_item)
+                if _has_no_store(fetch_result):
+                    self._crawl_cache.delete(cache_key)
+                else:
+                    cached_item.cached_at = time.time()
+                    self._crawl_cache.set(cache_key, cached_item)
                 doc = cached_item.doc
             elif doc is not None:
-                new_etag = fetch_result.etag if fetch_result else None
-                new_last_modified = fetch_result.last_modified if fetch_result else None
-                cached = CachedDocument(
-                    doc=doc,
-                    etag=new_etag,
-                    last_modified=new_last_modified,
-                    cached_at=time.time(),
-                )
-                self._crawl_cache.set(cache_key, cached)
+                if _has_no_store(fetch_result):
+                    self._crawl_cache.delete(cache_key)
+                else:
+                    new_etag = fetch_result.etag if fetch_result else None
+                    new_last_modified = fetch_result.last_modified if fetch_result else None
+                    cached = CachedDocument(
+                        doc=doc,
+                        etag=new_etag,
+                        last_modified=new_last_modified,
+                        cached_at=time.time(),
+                    )
+                    self._crawl_cache.set(cache_key, cached)
             else:
+                if cached_item is not None:
+                    logger.warning("Cache revalidation failed; not serving stale entry: %s", url)
+                    self._crawl_cache.delete(cache_key)
                 self._fail_cache.set(cache_key, True)
 
             if not future.done():
                 future.set_result(doc)
-
-            if doc is not None and cache_key in self._url_access_stats:
-                self._url_access_stats[cache_key].last_access = time.time()
 
             return doc
         except Exception as e:
@@ -306,13 +294,6 @@ class FetchEngine(
     async def shutdown(self) -> None:
         await cancel_fetches(list(self._detached_fetches))
 
-        if self._background_workers:
-            logger.info(f"Stopping {len(self._background_workers)} background workers")
-            for _ in self._background_workers:
-                self._background_queue.put_nowait(BackgroundTask(priority=0, url="", cache_key="", cached_item=None))
-            await asyncio.gather(*self._background_workers, return_exceptions=True)
-            self._background_workers.clear()
-
         await self._http_fetcher.shutdown()
         await self._domain_metrics.shutdown_async()
 
@@ -322,22 +303,7 @@ class FetchEngine(
 
     def get_cache_metrics(self) -> dict[str, Mapping[str, object]]:
         """Get cache metrics (for monitoring and tuning)."""
-        total_bg = self._bg_revalidations_success + self._bg_revalidations_failed + self._bg_revalidations_timeout
-        avg_latency = self._bg_revalidations_total_ms / total_bg if total_bg > 0 else 0.0
-
         return {
             "crawl_cache": self._crawl_cache.get_metrics(),
             "fail_cache": self._fail_cache.get_metrics(),
-            "background_revalidation": {
-                "success": self._bg_revalidations_success,
-                "failed": self._bg_revalidations_failed,
-                "timeout": self._bg_revalidations_timeout,
-                "skipped": self._bg_revalidations_skipped,
-                "total": total_bg,
-                "success_rate": (self._bg_revalidations_success / total_bg if total_bg > 0 else 0.0),
-                "avg_latency_ms": avg_latency,
-                "queue_size": self._background_queue.qsize(),
-                "active_workers": len(self._background_workers),
-                "max_tasks": self._max_background_tasks,
-            },
         }

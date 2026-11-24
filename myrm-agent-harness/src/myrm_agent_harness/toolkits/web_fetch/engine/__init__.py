@@ -1,6 +1,4 @@
 from .base import (
-    AccessStats,
-    BackgroundTask,
     CachedDocument,
     FailedResult,
     FetchEngine,
@@ -8,8 +6,6 @@ from .base import (
 )
 
 __all__ = [
-    "AccessStats",
-    "BackgroundTask",
     "CachedDocument",
     "FailedResult",
     "FetchEngine",

@@ -36,21 +36,3 @@ class CachedDocument:
     etag: str | None = None
     last_modified: str | None = None
     cached_at: float = 0.0
-
-
-@dataclass(slots=True)
-class AccessStats:
-    """URL access statistics (for priority calculation)."""
-
-    count: int
-    last_access: float
-
-
-@dataclass(slots=True, order=True)
-class BackgroundTask:
-    """Background refresh task (supports priority sorting)."""
-
-    priority: int
-    url: str = ""
-    cache_key: str = ""
-    cached_item: CachedDocument | None = None
