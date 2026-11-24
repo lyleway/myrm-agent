@@ -248,6 +248,173 @@ class TestBookmarkQualityGate:
 
         assert bookmarks_are_degenerate(headings) is False
 
+
+def _assemble_pdf(objects: list[bytes]) -> bytes:
+    body = b"%PDF-1.4\n"
+    offsets: list[int] = []
+    for number, obj in enumerate(objects, start=1):
+        offsets.append(len(body))
+        body += b"%d 0 obj\n%s\nendobj\n" % (number, obj)
+    xref_offset = len(body)
+    body += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    body += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    body += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref_offset)
+    return body
+
+
+def _two_page_pdf_with_outlines(
+    outline_items: list[bytes],
+    *,
+    dests_dict: bytes | None = None,
+) -> bytes:
+    """Build a valid 2-page PDF with real outline items (page 1 = obj 3, page 2 = obj 4)."""
+    s1 = b"BT /F1 12 Tf 72 720 Td (Introduction body text) Tj ET"
+    s2 = b"BT /F1 12 Tf 72 720 Td (Methods body text) Tj ET"
+    dests_ref = b" /Dests 8 0 R" if dests_dict is not None else b""
+    first_item = 9 if dests_dict is not None else 8
+    last_item = first_item + len(outline_items) - 1
+    objects: list[bytes] = [
+        b"<< /Type /Catalog /Pages 2 0 R /Outlines 7 0 R" + dests_ref + b" >>",
+        b"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 6 0 R >> >> >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 100 0 R /Resources << /Font << /F1 6 0 R >> >> >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(s1), s1),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>"
+        % (first_item, last_item, len(outline_items)),
+    ]
+    # Place page-2 stream right after outline items and fix obj 4 reference.
+    stream2_num = last_item + 1
+    objects[3] = (
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R /Resources << /Font << /F1 6 0 R >> >> >>"
+        % stream2_num
+    )
+    if dests_dict is not None:
+        objects.append(dests_dict)
+    for idx, item in enumerate(outline_items):
+        obj_num = first_item + idx
+        links = b""
+        if idx > 0:
+            links += b" /Prev %d 0 R" % (obj_num - 1)
+        if idx + 1 < len(outline_items):
+            links += b" /Next %d 0 R" % (obj_num + 1)
+        objects.append(b"<< /Parent 7 0 R" + links + b" " + item + b" >>")
+    objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(s2), s2))
+    return _assemble_pdf(objects)
+
+
+class TestRealPdfOutlines:
+    """Real pdfplumber/pdfminer outline fixtures covering GoTo actions, named dests, and no-outline PDFs."""
+
+    def test_goto_action_outlines_resolve_and_skip_non_goto_actions(self, tmp_path):
+        import pdfplumber
+
+        pdf_path = tmp_path / "goto_outlines.pdf"
+        pdf_path.write_bytes(
+            _two_page_pdf_with_outlines(
+                [
+                    b"/Title (1. Introduction) /A << /S /GoTo /D [3 0 R /Fit] >>",
+                    b"/Title (External Link) /A << /S /URI /URI (https://example.com) >>",
+                    b"/Title (2. Methods) /A << /S /GoTo /D [4 0 R /Fit] >>",
+                ]
+            )
+        )
+
+        with pdfplumber.open(pdf_path) as pdf:
+            headings = extract_bookmarks(pdf)
+
+        assert headings == [
+            PDFHeading(level=1, title="1. Introduction", page_num=1),
+            PDFHeading(level=1, title="2. Methods", page_num=2),
+        ]
+
+    def test_goto_action_with_named_destination_resolves(self, tmp_path):
+        import pdfplumber
+
+        pdf_path = tmp_path / "named_dest.pdf"
+        pdf_path.write_bytes(
+            _two_page_pdf_with_outlines(
+                [
+                    b"/Title (Intro) /A << /S /GoTo /D /intro >>",
+                    b"/Title (Methods) /A << /S /GoTo /D /methods >>",
+                ],
+                dests_dict=b"<< /intro [3 0 R /Fit] /methods [4 0 R /Fit] >>",
+            )
+        )
+
+        with pdfplumber.open(pdf_path) as pdf:
+            headings = extract_bookmarks(pdf)
+
+        assert headings == [
+            PDFHeading(level=1, title="Intro", page_num=1),
+            PDFHeading(level=1, title="Methods", page_num=2),
+        ]
+
+    def test_direct_dest_array_outlines_resolve(self, tmp_path):
+        import pdfplumber
+
+        pdf_path = tmp_path / "direct_dest.pdf"
+        pdf_path.write_bytes(
+            _two_page_pdf_with_outlines(
+                [
+                    b"/Title (Chapter One) /Dest [3 0 R /Fit]",
+                    b"/Title (Chapter Two) /Dest [4 0 R /Fit]",
+                ]
+            )
+        )
+
+        with pdfplumber.open(pdf_path) as pdf:
+            headings = extract_bookmarks(pdf)
+
+        assert headings == [
+            PDFHeading(level=1, title="Chapter One", page_num=1),
+            PDFHeading(level=1, title="Chapter Two", page_num=2),
+        ]
+
+    def test_no_outline_pdf_returns_empty_without_warning(self, tmp_path, caplog):
+        import logging
+
+        import pdfplumber
+
+        from tests.support.minimal_pdf import minimal_pdf_bytes
+
+        pdf_path = tmp_path / "no_outlines.pdf"
+        pdf_path.write_bytes(minimal_pdf_bytes("Plain document without outlines"))
+
+        with (
+            caplog.at_level(logging.WARNING, logger="myrm_agent_harness.toolkits.file_parsers.pdf.pdf_bookmarks"),
+            pdfplumber.open(pdf_path) as pdf,
+        ):
+            headings = extract_bookmarks(pdf)
+
+        assert headings == []
+        assert caplog.records == []
+
+    def test_goto_outlines_suppress_font_heading_prescan_end_to_end(self, tmp_path):
+        from unittest.mock import patch
+
+        from myrm_agent_harness.toolkits.file_parsers.pdf import PDFPlumberParser
+
+        pdf_path = tmp_path / "e2e_goto.pdf"
+        pdf_path.write_bytes(
+            _two_page_pdf_with_outlines(
+                [
+                    b"/Title (1. Introduction) /A << /S /GoTo /D [3 0 R /Fit] >>",
+                    b"/Title (2. Methods) /A << /S /GoTo /D [4 0 R /Fit] >>",
+                ]
+            )
+        )
+
+        with patch(
+            "myrm_agent_harness.toolkits.file_parsers.pdf.pdf_font_heading.detect_headings_by_font"
+        ) as mock_font:
+            result = PDFPlumberParser(extract_tables=False).parse_sync(str(pdf_path))
+
+        mock_font.assert_not_called()
+        assert "# 1. Introduction" in result.text
+        assert "# 2. Methods" in result.text
+
+
     def test_few_bookmarks_are_never_degenerate(self):
         headings = [PDFHeading(level=1, title="幻灯片 1", page_num=1)]
 
