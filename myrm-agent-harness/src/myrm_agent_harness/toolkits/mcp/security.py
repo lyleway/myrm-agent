@@ -10,6 +10,7 @@ via constructor parameters, not environment checks.
 
 [INPUT]
 - myrm_agent_harness.core.security.guards.ssrf::async_validate_url_for_ssrf (POS: SSRF validation with DNS pinning)
+- myrm_agent_harness.toolkits.mcp.osv_package_extract::extract_osv_package_info (POS: CLI package extraction for OSV)
 - myrm_agent_harness.utils.url_utils::validate_scheme_and_hostname (POS: URL scheme validation)
 
 [OUTPUT]
@@ -53,6 +54,7 @@ from myrm_agent_harness.toolkits.mcp.config_scan import (
     scan_mcp_config,
     scan_mcp_runtime_surface,
 )
+from myrm_agent_harness.toolkits.mcp.osv_package_extract import extract_osv_package_info
 from myrm_agent_harness.utils.url_utils import validate_scheme_and_hostname
 
 logger = logging.getLogger(__name__)
@@ -231,46 +233,7 @@ def clear_osv_malware_cache() -> None:
     _osv_advisory_cache.clear()
 
 
-_OSV_ECOSYSTEM_MAP: dict[str, str] = {
-    "npx": "npm",
-    "npm": "npm",
-    "yarn": "npm",
-    "pnpm": "npm",
-    "uvx": "PyPI",
-    "pipx": "PyPI",
-    "pip": "PyPI",
-    "python": "PyPI",
-    "python3": "PyPI",
-}
-
-
-def _extract_package_info(
-    command: str,
-    args: list[str] | None,
-) -> tuple[str, str] | None:
-    """Extract package name and ecosystem from MCP command and args.
-
-    Returns (package_name, ecosystem) or None if extraction fails.
-    """
-    cmd_lower = command.strip().lower()
-    cmd_base = cmd_lower.rsplit("/", 1)[-1]
-
-    ecosystem = _OSV_ECOSYSTEM_MAP.get(cmd_base)
-    if ecosystem is None:
-        return None
-
-    for arg in args or []:
-        stripped = arg.strip()
-        if not stripped or stripped.startswith("-"):
-            continue
-        if ecosystem == "npm" and stripped.startswith("@"):
-            scope_end = stripped.find("/", 1)
-            if scope_end > 1:
-                return stripped[: scope_end + 1], ecosystem
-            return stripped, ecosystem
-        return stripped, ecosystem
-
-    return None
+_extract_package_info = extract_osv_package_info
 
 
 async def check_osv_malware(

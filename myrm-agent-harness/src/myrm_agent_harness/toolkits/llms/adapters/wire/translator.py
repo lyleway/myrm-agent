@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 ResponsesRole = str
@@ -108,35 +109,33 @@ def _normalize_tool_arguments(raw_arguments: object) -> str:
     return str(raw_arguments or "{}")
 
 
-def _append_responses_reasoning_items(result: list[dict[str, Any]], msg: dict[str, Any]) -> None:
+def _collect_responses_reasoning_items(msg: Mapping[str, object]) -> list[dict[str, Any]]:
     items = msg.get("responses_reasoning_items")
     if not isinstance(items, list):
-        return
+        return []
+    replayed: list[dict[str, Any]] = []
     for item in items:
         if isinstance(item, dict) and item.get("type") == "reasoning":
             entry = dict(item)
             if "summary" not in entry:
                 entry["summary"] = []
-            result.append(entry)
+            replayed.append(entry)
+    return replayed
 
 
-def _append_assistant_message(
-    result: list[dict[str, Any]],
-    msg: dict[str, Any],
-    *,
-    content: object,
-) -> None:
-    _append_responses_reasoning_items(result, msg)
-    role = "assistant"
-    parts, text = _content_to_parts(content, role)
-    if parts:
-        result.append({"role": role, "content": parts})
-    elif text.strip():
-        result.append({"role": role, "content": text})
+def _assistant_content_parts(content: object) -> list[dict[str, str]]:
+    """Return non-empty assistant content parts, omitting None and blank text."""
+    if content is None:
+        return []
+    parts, _ = _content_to_parts(content, "assistant")
+    return [part for part in parts if part.get("type") != "output_text" or part.get("text", "").strip()]
 
+
+def _collect_function_calls(msg: Mapping[str, object], *, index_offset: int) -> list[dict[str, str]]:
     tool_calls = msg.get("tool_calls")
     if not isinstance(tool_calls, list):
-        return
+        return []
+    calls: list[dict[str, str]] = []
     for index, tc in enumerate(tool_calls):
         if not isinstance(tc, dict):
             continue
@@ -146,12 +145,11 @@ def _append_assistant_message(
         fn_name = fn.get("name")
         if not isinstance(fn_name, str) or not fn_name.strip():
             continue
+        arguments = _normalize_tool_arguments(fn.get("arguments", "{}"))
         call_id = tc.get("id")
         if not isinstance(call_id, str) or not call_id.strip():
-            arguments = _normalize_tool_arguments(fn.get("arguments", "{}"))
-            call_id = _deterministic_call_id(fn_name, arguments, len(result) + index)
-        arguments = _normalize_tool_arguments(fn.get("arguments", "{}"))
-        result.append(
+            call_id = _deterministic_call_id(fn_name, arguments, index_offset + index)
+        calls.append(
             {
                 "type": "function_call",
                 "call_id": _clamp_responses_call_id(call_id),
@@ -159,9 +157,28 @@ def _append_assistant_message(
                 "arguments": arguments,
             }
         )
+    return calls
 
 
-def _append_tool_output(result: list[dict[str, Any]], msg: dict[str, Any]) -> None:
+def _append_assistant_message(
+    result: list[dict[str, Any]],
+    msg: Mapping[str, object],
+    *,
+    content: object,
+) -> None:
+    assistant_parts = _assistant_content_parts(content)
+    reasoning_items = _collect_responses_reasoning_items(msg)
+    offset = len(result) + len(reasoning_items) + (1 if assistant_parts else 0)
+    function_calls = _collect_function_calls(msg, index_offset=offset)
+    if not assistant_parts and not function_calls:
+        return
+    result.extend(reasoning_items)
+    if assistant_parts:
+        result.append({"role": "assistant", "content": assistant_parts})
+    result.extend(function_calls)
+
+
+def _append_tool_output(result: list[dict[str, Any]], msg: Mapping[str, object]) -> None:
     raw_tool_call_id = msg.get("tool_call_id")
     if not isinstance(raw_tool_call_id, str) or not raw_tool_call_id.strip():
         return
@@ -180,7 +197,7 @@ def _append_tool_output(result: list[dict[str, Any]], msg: dict[str, Any]) -> No
     )
 
 
-def chat_messages_to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def chat_messages_to_responses_input(messages: Sequence[Mapping[str, object]]) -> list[dict[str, Any]]:
     """Convert OpenAI-style chat message dicts to Responses API input items.
 
     The leading system message is promoted to ``instructions`` by ``extract_responses_instructions``. A system
@@ -189,7 +206,7 @@ def chat_messages_to_responses_input(messages: list[dict[str, Any]]) -> list[dic
     """
     result: list[dict[str, Any]] = []
     for msg in messages:
-        if not isinstance(msg, dict):
+        if not isinstance(msg, Mapping):
             continue
         role = str(msg.get("role") or "user")
         if role == "tool":
@@ -200,7 +217,8 @@ def chat_messages_to_responses_input(messages: list[dict[str, Any]]) -> list[dic
             continue
 
         normalized_role = _normalize_role(role)
-        parts, text = _content_to_parts(msg.get("content", ""), normalized_role)
+        raw_content = msg.get("content")
+        parts, text = _content_to_parts("" if raw_content is None else raw_content, normalized_role)
         if normalized_role == "system" and not text.strip():
             continue
         if parts:
@@ -210,13 +228,15 @@ def chat_messages_to_responses_input(messages: list[dict[str, Any]]) -> list[dic
     return result
 
 
-def extract_responses_instructions(messages: list[dict[str, Any]]) -> tuple[str | None, list[dict[str, Any]]]:
+def extract_responses_instructions(
+    messages: Sequence[Mapping[str, object]],
+) -> tuple[str | None, list[Mapping[str, object]]]:
     """Promote leading system message to Responses ``instructions`` when present."""
     if not messages:
         return None, []
     first = messages[0]
     if str(first.get("role")) not in {"system", "developer"}:
-        return None, messages
+        return None, list(messages)
     content = first.get("content")
     if isinstance(content, str):
         instructions = content
@@ -230,4 +250,4 @@ def extract_responses_instructions(messages: list[dict[str, Any]]) -> tuple[str 
         instructions = "\n".join(texts)
     else:
         instructions = json.dumps(content, ensure_ascii=False)
-    return instructions, messages[1:]
+    return instructions, list(messages[1:])

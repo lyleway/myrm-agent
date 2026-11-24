@@ -43,8 +43,9 @@ FUNCTION_INDEX_RULES: tuple[str, ...] = (
     "cover the request, skip skill_select_tool and call them from bash_code_execute_tool; this overrides any other "
     "rule to select a skill first. Below, <name> is the entry's name.",
     *(f" {line}" for line in CALL_SYNTAX.format(skill_name="<name>").splitlines()),
-    " Docs: `/mcp/<name>/<function_name>.md` — read it with `file_read_tool` for the arguments and return shape of "
-    "the one or two functions you will call; select the skill instead when you need every signature at once.",
+    " Docs: `/mcp/<name>/<function_name>.md` (arguments and return shape) — read it with `file_read_tool` only when "
+    "a function's arguments are not obvious from its name, not before every call; select the skill instead when you "
+    "need every signature at once.",
     *(f" {line}" for line in CALL_WORKFLOW.splitlines()),
     " </function_index_rules>",
 )

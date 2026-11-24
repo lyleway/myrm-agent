@@ -28,6 +28,7 @@ PTC 子进程注入的 IPC 客户端代码生成器。负责构造 ``tools.*`` /
 """
 
 import json
+from collections.abc import Mapping, Sequence
 
 TRACE_PREVIEW_CHARS = 2000
 
@@ -161,11 +162,16 @@ class _SkillModule(types.ModuleType):
         super().__init__(f"skills.{name}")
         self._skill_name = name
         self._functions: dict[str, _SkillFunction] = {}
+        declared = list(_SKILL_FUNCTIONS.get(name, ()))
+        self._declared: frozenset[str] = frozenset(declared)
+        self.__all__: list[str] = declared
         self.__package__ = "skills"
         self.__path__: list[str] = []
 
     def __getattr__(self, name: str):
-        if name.startswith("_"):
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        if name.startswith("_") and name not in self._declared:
             raise AttributeError(name)
         if name not in self._functions:
             self._functions[name] = _SkillFunction(self._skill_name, name)
@@ -236,6 +242,7 @@ def generate_ipc_client_code(
     auth_token: str,
     trace_nonce: str,
     tcp_port: int = 0,
+    skill_functions: Mapping[str, Sequence[str]] | None = None,
 ) -> str:
     """生成 Unix Socket IPC 客户端代码。
 
@@ -246,12 +253,15 @@ def generate_ipc_client_code(
             因此工具返回的文本无法伪造引用或截断真实标记。
         tcp_port: 服务端以 loopback TCP 监听时的端口（Windows 走这条路径）。为 0
             时客户端连接 Unix socket。
+        skill_functions: 每个 MCP 技能导出的 Python 函数名表，供星号导入通过模块
+            ``__all__`` 绑定代理函数；未提供时导出空表。
     """
     base = _generate_base_code()
     module_system = _generate_module_system()
     tools_module_system = _generate_tools_module_system()
 
     tcp_port_literal = str(tcp_port) if tcp_port else "0"
+    declared_functions = {skill: list(funcs) for skill, funcs in (skill_functions or {}).items() if funcs}
 
     return f'''
 import sys, types, json, asyncio, uuid, base64
@@ -262,6 +272,7 @@ _TRACE_ID = uuid.uuid4().hex
 _AUTH_TOKEN = {json.dumps(auth_token)}
 _TRACE_NONCE = {json.dumps(trace_nonce)}
 _TCP_PORT = {tcp_port_literal}
+_SKILL_FUNCTIONS = {json.dumps(declared_functions)}
 
 {base}
 {module_system}

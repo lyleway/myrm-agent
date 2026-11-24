@@ -102,6 +102,7 @@ class TestBudget:
         library = [_storage_skill(f"skill-{idx:02d}") for idx in range(30)]
         listing = _mcp_skill("mcp_alpha_skill", _functions("pod", 150))
         silent = _mcp_skill("mcp_alpha_skill", _functions("pod", 150))
+        assert silent.mcp is not None
         silent.mcp.inline_functions = []
 
         listed = resolve_catalog_display_skills([listing, *library])
@@ -113,6 +114,7 @@ class TestBudget:
 
     def test_an_index_is_listed_whole_or_not_at_all(self) -> None:
         oversized = _mcp_skill("mcp_big_skill", _functions("big", 600))
+        assert oversized.mcp is not None
         assert get_token_count(f" <functions>{', '.join(oversized.mcp.inline_functions)}</functions>") > (
             L1_FUNCTION_INDEX_MAX_TOKENS
         )
@@ -156,6 +158,12 @@ class TestRules:
         assert "skip skill_select_tool" in rules
         assert "select the skill instead when you need every signature at once" in rules
         assert "/mcp/<name>/<function_name>.md" in rules
+
+    def test_the_rules_make_l3_doc_reads_conditional_not_mandatory(self) -> None:
+        rules = "\n".join(FUNCTION_INDEX_RULES)
+
+        assert "only when a function's arguments are not obvious from its name, not before every call" in rules
+        assert "for the arguments and return shape of the one or two functions you will call" not in rules
 
     @pytest.mark.parametrize(
         ("locale", "exception"),
