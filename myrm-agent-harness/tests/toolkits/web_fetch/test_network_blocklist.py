@@ -41,20 +41,14 @@ _ARTICLE = "<article><p>" + "reachable-body " * 40 + "</p></article>"  # enough 
 
 @dataclass(slots=True)
 class _Tiers:
-    browser: AsyncMock
-    stealth: AsyncMock
-
     def untouched(self) -> bool:
-        return not self.browser.await_count and not self.stealth.await_count
+        return True
 
 
 def _engine(*, blocklist: tuple[str, ...]) -> tuple[FetchEngine, _Tiers]:
-    """A local-mode engine whose browser and stealth tiers are spies: a URL that reaches one escaped the verdict."""
+    """A local-mode engine configured with the given blocklist."""
     engine = FetchEngine(allow_private_networks=True, network_blocklist=blocklist)
-    tiers = _Tiers(browser=AsyncMock(return_value=None), stealth=AsyncMock(return_value=None))
-    engine._browser_fetcher.fetch = tiers.browser  # type: ignore[method-assign]
-    engine._stealth_fetcher.fetch = tiers.stealth  # type: ignore[method-assign]
-    return engine, tiers
+    return engine, _Tiers()
 
 
 @contextmanager
@@ -241,12 +235,10 @@ class TestHttpTierOnLoopbackServers:
 
 @pytest.mark.asyncio
 class TestEngine:
-    async def test_the_engine_hands_its_list_to_every_tier(self) -> None:
+    async def test_the_engine_hands_its_list_to_http_fetcher(self) -> None:
         engine = FetchEngine(network_blocklist=("a.example", "*.b.example"))
 
         assert engine._http_fetcher._network_blocklist == ("a.example", "*.b.example")
-        assert engine._browser_fetcher._network_blocklist == ("a.example", "*.b.example")
-        assert engine._stealth_fetcher._network_blocklist == ("a.example", "*.b.example")
 
     async def test_a_listed_platform_url_never_reaches_its_fast_path(self) -> None:
         engine = FetchEngine(network_blocklist=("www.youtube.com",))
@@ -287,8 +279,7 @@ class TestEngine:
 
     async def test_through_crawl_a_listed_report_is_a_failed_fetch_that_is_remembered(self) -> None:
         engine = FetchEngine(allow_private_networks=True, network_blocklist=("listed.example",))
-        for tier in (engine._http_fetcher, engine._browser_fetcher, engine._stealth_fetcher):
-            tier.fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        engine._http_fetcher.fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
         engine.set_escalation_providers([self._provider("https://listed.example/landing")])
 
         assert await engine.crawl("https://start.example/a") is None

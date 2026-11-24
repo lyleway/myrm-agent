@@ -6,7 +6,8 @@ import pytest
 from bs4 import BeautifulSoup, Tag
 
 from myrm_agent_harness.toolkits.web_fetch.processing import content_pruning
-from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import ContentPruningFilter, _dom_path_units
+from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import ContentPruningFilter
+from myrm_agent_harness.toolkits.web_fetch.processing.pruning_metrics import dom_path_units as _dom_path_units
 
 _ARTICLE_SENTENCE = "The article body is long enough to be kept as the main content of the page. "
 _PAGE = (

@@ -285,15 +285,15 @@ class TestCrossValidation:
         _, stale = tmp_store.get("x.com", domain_metrics_manager=metrics_manager)
         assert stale
 
-    def test_stale_when_failures_are_spread_over_tiers(
+    def test_stale_when_failures_reach_threshold(
         self,
         tmp_store: SiteExperienceStore,
         metrics_manager: DomainMetricsManager,
     ) -> None:
         tmp_store.save_experience("x.com", known_traps=["t1"])
 
-        for tier in FetcherType:
-            metrics_manager.record_failure("x.com", tier)
+        for _ in range(3):
+            metrics_manager.record_failure("x.com", FetcherType.HTTP)
 
         _, stale = tmp_store.get("x.com", domain_metrics_manager=metrics_manager)
         assert stale

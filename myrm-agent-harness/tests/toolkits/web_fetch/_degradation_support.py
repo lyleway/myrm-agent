@@ -1,4 +1,4 @@
-"""Shared builders for the FetchEngine tier-degradation test modules."""
+"""Shared builders for the FetchEngine HTTP/L4 test modules."""
 
 from __future__ import annotations
 
@@ -7,11 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain_core.documents import Document
 
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
-from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import (
-    FetcherType,
-    FetchResult,
-)
-from myrm_agent_harness.toolkits.web_fetch.router import TierBreaker
+from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetchResult
 
 
 def http_result(html: str, status: int = 200) -> FetchResult:
@@ -25,26 +21,11 @@ def mock_pipeline() -> MagicMock:
     return pipeline
 
 
-def start_on(engine: FetchEngine, tier: FetcherType) -> MagicMock:
-    """Pin the tier crawls start on, whatever the breaker would pick; the returned mock records its reports."""
-    breaker = MagicMock(spec=TierBreaker)
-    breaker.select.return_value = tier
-    engine._tier_breaker = breaker  # type: ignore[assignment]
-    return breaker
-
-
-def stub_fetchers(engine: FetchEngine) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+def stub_fetchers(engine: FetchEngine) -> AsyncMock:
     http = AsyncMock()
-    browser = AsyncMock()
-    stealth = AsyncMock()
-    browser.set_launch_mode_preference = MagicMock()
-    stealth.set_launch_mode_preference = MagicMock()
     engine._http_fetcher = http  # type: ignore[assignment]
-    engine._browser_fetcher = browser  # type: ignore[assignment]
-    engine._stealth_fetcher = stealth  # type: ignore[assignment]
     engine._pipeline = mock_pipeline()  # type: ignore[assignment]
-    start_on(engine, FetcherType.HTTP)
-    return http, browser, stealth
+    return http
 
 
 def make_document(text: str = "content") -> Document:

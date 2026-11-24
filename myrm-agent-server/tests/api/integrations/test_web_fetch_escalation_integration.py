@@ -256,7 +256,6 @@ class TestWebFetchEscalationBindingIntegration:
 
         async with open_web_fetch_escalation_context(
             session_id="integration-session-2",
-            browser_source="extension",
         ):
             bound = get_bound_escalation_providers()
             assert bound is not None

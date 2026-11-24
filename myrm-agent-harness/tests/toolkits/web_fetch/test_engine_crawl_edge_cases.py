@@ -114,16 +114,6 @@ class TestCrawlGuardsAndFastPaths:
         engine.set_session_vault(vault)
 
         assert engine._http_fetcher._session_vault is vault
-        assert engine._browser_fetcher._session_vault is vault
-        await engine.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_set_browser_launch_mode(self) -> None:
-        engine = FetchEngine()
-
-        engine.set_browser_launch_mode("EXTENSION")
-
-        assert engine._browser_launch_mode == "EXTENSION"
         await engine.shutdown()
 
     @pytest.mark.asyncio

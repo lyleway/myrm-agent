@@ -32,19 +32,6 @@ class TestStaticPageGateConditions:
             is True
         )
 
-    @pytest.mark.parametrize("fetcher_type", [FetcherType.BROWSER, FetcherType.STEALTH])
-    def test_rejects_non_l1_tiers(self, fetcher_type: FetcherType) -> None:
-        raw = _long_raw_markdown(3600)
-        assert (
-            should_fallback_to_raw_markdown(
-                fetcher_type=fetcher_type,
-                status_code=200,
-                raw_markdown=raw,
-                html_length=10_000,
-            )
-            is False
-        )
-
     @pytest.mark.parametrize("status_code", [199, 301, 403, 404, 500, 503])
     def test_rejects_non_2xx_status_codes(self, status_code: int) -> None:
         raw = _long_raw_markdown(3600)
@@ -160,8 +147,8 @@ def test_pipeline_still_rejects_thin_js_shell_on_l1() -> None:
 
 
 @pytest.mark.asyncio
-async def test_engine_five_consecutive_static_index_fetches_do_not_trip_breaker() -> None:
-    """G9：静态长目录页连续 5 次访问都在 L1 交付，断路器误记为 0、始终从 HTTP 起步。"""
+async def test_engine_five_consecutive_static_index_fetches_deliver_on_l1() -> None:
+    """G9：静态长目录页连续 5 次访问都在 L1 交付，不记录失败。"""
     from unittest.mock import AsyncMock
 
     from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
@@ -177,13 +164,10 @@ async def test_engine_five_consecutive_static_index_fetches_do_not_trip_breaker(
     engine._http_fetcher.fetch = AsyncMock(  # type: ignore[method-assign]
         return_value=FetchResult(html=html, url=url, status_code=200, fetcher_type=FetcherType.HTTP)
     )
-    engine._browser_fetcher.fetch = AsyncMock(side_effect=AssertionError("should not escalate to browser"))  # type: ignore[method-assign]
-    engine._stealth_fetcher.fetch = AsyncMock(side_effect=AssertionError("should not escalate to stealth"))  # type: ignore[method-assign]
     try:
         for _ in range(5):
             doc = await engine.crawl(url, force_refresh=True)
             assert doc is not None
             assert "syscall_entry_0000" in doc.page_content
-            assert engine._tier_breaker.select("man7-g9-gate.example.org") == FetcherType.HTTP
     finally:
         await engine.shutdown()

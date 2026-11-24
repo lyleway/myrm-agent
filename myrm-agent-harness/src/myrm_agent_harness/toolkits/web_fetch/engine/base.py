@@ -1,35 +1,31 @@
-"""FetchEngine — Layered fetch engine.
+"""FetchEngine — HTTP fetch engine with optional L4 remote escalation.
 
-Three-tier architecture:
+Architecture:
   L1 HttpFetcher (curl_cffi, ~100 ms)
-  L2 BrowserFetcher (Patchright + GlobalBrowserPool, ~1-3 s)
-  L3 StealthFetcher (Patchright + BrowserForge, ~3-5 s)
+  Optional L4 remote escalation providers (Jina / Firecrawl / self-hosted compatible service)
 
-Tier breaker: a domain's L1/L2 tier that a higher tier keeps making up for is skipped, and probed again now and then
 Cache: In-memory LRU (default 1 h TTL, 500 entries, 100 MB cap)
   - Request coalescing: concurrent requests for the same URL trigger only one network call (30 s timeout guard; waiters take over a cancelled leader's fetch)
   - URL normalisation: strips known tracking params for better hit rate
   - GitHub blob links are fetched as their raw file, so a long source file is not cut at the page-size ceiling
   - HTTP conditional requests: sends ETag / Last-Modified on cache expiry to save bandwidth
   - Stale-While-Revalidate: returns stale cache immediately, refreshes via background priority queue (30 s timeout)
-Boundary: single-sandbox, single-process semantics; tier breaker state lives in memory, per process.
+Boundary: single-sandbox, single-process semantics.
 
 [INPUT]
 web_fetch.fetchers.http_fetcher::HttpFetcher (POS: L1 HTTP fetcher)
-web_fetch.fetchers.browser_fetcher::BrowserFetcher (POS: L2 browser-based fetcher)
 web_fetch.fetchers.target_guard::assert_not_blocklisted (POS: network blocklist verdict for one URL)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
 web_fetch.processing.antibot_detector::is_blocked (POS: Anti-bot detection)
-web_fetch.router.tier_breaker::get_global_tier_breaker (POS: Per-domain start-tier policy)
 web_fetch.router.domain_metrics::get_global_domain_metrics_manager (POS: Per-domain failure history behind the staleness hint)
-browser.pool.proxy::ProxyPool (POS: Proxy pool for browser fetchers)
+browser.pool.proxy::ProxyPool (POS: Proxy pool for HTTP fetcher)
 utils.lru_cache::LRUCache (POS: Generic TTL-based LRU cache)
 
 [OUTPUT]
-FetchEngine: Layered fetch engine with a tier breaker, caching, and request coalescing
+FetchEngine: HTTP fetch engine with optional L4 remote escalation, caching, and request coalescing
 
 [POS]
-Core fetch engine. Orchestrates L1/L2/L3 fetchers behind a per-domain tier breaker with
+Core fetch engine. Orchestrates L1 HTTP fetching and optional L4 remote escalation with
 in-memory caching, request coalescing, and stale-while-revalidate semantics.
 The network blocklist is fixed for the life of an engine, so its caches never hold a page fetched under another
 list; a caller whose list can change builds a new engine for each call.
@@ -55,12 +51,10 @@ if TYPE_CHECKING:
 from myrm_agent_harness.core.security.guards.ssrf import SSRFSecurityError
 from myrm_agent_harness.utils.lru_cache import LRUCache
 
-from ..fetchers.browser_fetcher import BrowserFetcher
 from ..fetchers.http_fetcher import HttpFetcher
-from ..fetchers.stealth_fetcher import StealthFetcher
 from ..fetchers.target_guard import assert_not_blocklisted
 from ..processing.pipeline import ContentPipeline
-from ..router import get_global_domain_metrics_manager, get_global_tier_breaker
+from ..router import get_global_domain_metrics_manager
 from .batch_mixin import FetchEngineBatchMixin, cancel_fetches
 from .cache_mixin import FetchEngineCacheMixin, await_shared_result
 from .escalation_mixin import FetchEngineEscalationMixin
@@ -77,7 +71,6 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.browser.pool.config import LaunchMode
     from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
         FetchEscalationProvider,
     )
@@ -100,7 +93,7 @@ class FetchEngine(
     FetchEngineFetchMixin,
     FetchEngineCacheMixin,
 ):
-    """Tiered fetch engine: L1 HTTP -> L2 Browser -> L3 Stealth."""
+    """HTTP fetch engine with optional L4 remote escalation."""
 
     _DEFAULT_CRAWL_TIMEOUT: float = 45.0
 
@@ -130,19 +123,8 @@ class FetchEngine(
             allow_private_networks=allow_private_networks,
             network_blocklist=network_blocklist,
         )
-        self._browser_fetcher = BrowserFetcher(
-            allow_private_networks=allow_private_networks,
-            session_vault=session_vault,
-            network_blocklist=network_blocklist,
-        )
-        self._stealth_fetcher = StealthFetcher(
-            proxy_pool=proxy_pool,
-            allow_private_networks=allow_private_networks,
-            network_blocklist=network_blocklist,
-        )
         self._pipeline = ContentPipeline(use_raw_markdown=use_raw_markdown)
 
-        self._tier_breaker = get_global_tier_breaker()
         self._domain_metrics = get_global_domain_metrics_manager()
 
         def _doc_size(cached: CachedDocument) -> int:
@@ -182,21 +164,14 @@ class FetchEngine(
         self._workers_started = False
 
         self._escalation_providers: list[FetchEscalationProvider] | None = None
-        self._browser_launch_mode: LaunchMode | None = None
 
     def set_session_vault(self, session_vault: SessionVault) -> None:
         """Inject SessionVault dynamically (e.g. from server layer)."""
         self._http_fetcher._session_vault = session_vault
-        self._browser_fetcher._session_vault = session_vault
 
     def set_escalation_providers(self, providers: list[FetchEscalationProvider] | None) -> None:
         """Inject optional L4 remote fetch providers (server layer implements httpx vendors)."""
         self._escalation_providers = providers
-
-    def set_browser_launch_mode(self, launch_mode: LaunchMode | None) -> None:
-        """Set browser launch mode for L2 fetches (e.g. EXTENSION for logged-in pages)."""
-        self._browser_launch_mode = launch_mode
-        self._browser_fetcher.set_launch_mode_preference(launch_mode)
 
     async def crawl(
         self,
@@ -321,8 +296,6 @@ class FetchEngine(
             self._background_workers.clear()
 
         await self._http_fetcher.shutdown()
-        await self._browser_fetcher.shutdown()
-        await self._stealth_fetcher.shutdown()
         await self._domain_metrics.shutdown_async()
 
         from ..router.site_experience import get_global_site_experience_store

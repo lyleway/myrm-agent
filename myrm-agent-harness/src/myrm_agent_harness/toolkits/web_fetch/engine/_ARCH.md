@@ -2,7 +2,7 @@
 
 ## Overview
 
-FetchEngine 执行引擎子包：L1 HTTP / L2 Browser / L3 Stealth 分层抓取入口，
+FetchEngine 执行引擎子包：L1 HTTP + 可选 L4 远程兜底抓取入口，
 职责按文件拆分（主引擎 + 批量 / 缓存 / 抓取 / 升级四组 mixin + 共享类型），
 `__init__.py` 聚合导出对外符号（保持 `toolkits.web_fetch.engine` 模块语义兼容）。
 
@@ -20,8 +20,8 @@ FetchEngine 执行引擎子包：L1 HTTP / L2 Browser / L3 Stealth 分层抓取�
 
 ## Key Dependencies
 
-- `..fetchers` (L1/L2/L3 fetcher 实现)
-- `..router` (TierBreaker 按域名选起始层级、域名学习数据 DomainMetrics)
+- `..fetchers` (L1 HTTP fetcher 实现与出站目标守卫)
+- `..router` (域名学习数据 DomainMetrics 与站点经验)
 - `..escalation` (L4 远程抓取 hook)
 - `..processing` (HTML → Markdown 内容管道与转换线程调度)
 - `..*_extractor` (YouTube / Bilibili / WeChat / X fast-path)

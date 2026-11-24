@@ -26,7 +26,7 @@ async def test_storage_provider_async_load_save(tmp_path: Path):
 
     # 记录一些数据
     metrics = manager.get_or_create("example.com")
-    metrics.record_failure(FetcherType.BROWSER)
+    metrics.record_failure(FetcherType.HTTP)
     metrics.record_wait_strategy("networkidle", 120)
 
     # 异步保存
@@ -47,8 +47,7 @@ async def test_storage_provider_async_load_save(tmp_path: Path):
     assert "example.com" in manager2._metrics
     loaded_metrics = manager2.get("example.com")
     assert loaded_metrics is not None
-    assert loaded_metrics.get_recent_failures_count(FetcherType.BROWSER) == 1
-    assert loaded_metrics.get_recent_failures_count(FetcherType.HTTP) == 0
+    assert loaded_metrics.get_recent_failures_count(FetcherType.HTTP) == 1
     assert list(loaded_metrics.wait_strategy_latencies["networkidle"]) == [120.0]
 
 
@@ -92,7 +91,7 @@ async def test_storage_provider_shutdown_async(tmp_path: Path):
 
     # 记录数据
     metrics = manager.get_or_create("shutdown-test.com")
-    metrics.record_failure(FetcherType.STEALTH)
+    metrics.record_failure(FetcherType.HTTP)
 
     # 异步关闭（应该保存数据）
     await manager.shutdown_async()

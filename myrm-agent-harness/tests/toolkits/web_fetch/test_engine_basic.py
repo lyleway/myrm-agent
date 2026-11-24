@@ -11,9 +11,6 @@ async def test_engine_initialization_defaults():
     engine = FetchEngine()
 
     assert engine._http_fetcher is not None
-    assert engine._browser_fetcher is not None
-    assert engine._stealth_fetcher is not None
-    assert engine._tier_breaker is not None
     assert engine._domain_metrics is not None
     assert engine._pipeline is not None
     assert engine._crawl_cache is not None
@@ -39,11 +36,10 @@ async def test_engine_custom_config():
 
 
 @pytest.mark.asyncio
-async def test_engines_share_the_process_wide_tier_breaker():
-    """每次调用新建的引擎共用同一个熔断器，域名学到的层级不随引擎消失"""
+async def test_engines_share_the_process_wide_domain_metrics():
+    """每次调用新建的引擎共用同一个域名指标管理器"""
     first, second = FetchEngine(), FetchEngine()
 
-    assert first._tier_breaker is second._tier_breaker
     assert first._domain_metrics is second._domain_metrics
 
     await first.shutdown()

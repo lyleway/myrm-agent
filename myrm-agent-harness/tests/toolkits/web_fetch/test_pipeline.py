@@ -71,15 +71,15 @@ def test_pipeline_with_empty_html():
     assert doc is None
 
 
-def test_pipeline_stealth_short_content():
-    """测试 stealth 模式下内容过短的回退逻辑"""
+def test_pipeline_http_article_content():
+    """测试 HTTP 模式下正文提取逻辑"""
     pipeline = ContentPipeline(use_raw_markdown=False)
 
     fetch_result = FetchResult(
         html="<html><body><article><p>" + ("This is test content. " * 20) + "</p></article></body></html>",
         url="https://example.com",
         status_code=200,
-        fetcher_type=FetcherType.STEALTH,
+        fetcher_type=FetcherType.HTTP,
     )
 
     doc = pipeline.process(fetch_result)

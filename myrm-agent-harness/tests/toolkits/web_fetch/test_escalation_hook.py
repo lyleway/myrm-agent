@@ -67,7 +67,7 @@ async def test_escalation_prefers_context_over_instance_providers() -> None:
     engine = FetchEngine()
     engine.set_escalation_providers([instance_provider])
 
-    with bind_web_fetch_escalation_context(providers=[context_provider], launch_mode=None):
+    with bind_web_fetch_escalation_context(providers=[context_provider]):
         doc, _ = await engine._try_escalation("https://example.com")
 
     assert doc is not None
@@ -99,10 +99,7 @@ async def test_crawl_with_degradation_calls_escalation_after_l3_failure() -> Non
     )
     engine.set_escalation_providers([provider])
 
-    with (
-        patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))),
-        patch.object(engine._tier_breaker, "select", return_value=FetcherType.HTTP),
-    ):
+    with patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))):
         doc, _ = await engine._crawl_with_degradation("https://example.com", allow_escalation=True)
 
     assert doc is not None

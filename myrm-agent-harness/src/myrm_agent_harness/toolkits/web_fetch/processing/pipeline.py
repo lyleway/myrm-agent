@@ -43,7 +43,7 @@ from langchain_core.documents import Document
 from myrm_agent_harness.utils.content_sniff import PayloadKind
 from myrm_agent_harness.utils.text_cleaner import clean_text
 
-from ..fetchers.protocols import FetcherType, FetchResult
+from ..fetchers.protocols import FetchResult
 from .content_pruning import ContentPruningFilter
 from .html_scan import extract_title
 from .markdown_generator import MarkdownGenerator
@@ -121,12 +121,6 @@ class ContentPipeline:
         )
 
         fit = result.fit_markdown.strip()
-        if fetch_result.fetcher_type == FetcherType.STEALTH:
-            if not fit or len(fit) < _FIT_MARKDOWN_THRESHOLD:
-                logger.warning("fit_markdown too short for stealth page, falling back to raw_markdown")
-                return clean_text(result.raw_markdown)
-            return clean_text(fit)
-
         if len(fit) > _FIT_MARKDOWN_THRESHOLD:
             return fit
 

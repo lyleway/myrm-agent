@@ -2,7 +2,7 @@
 
 ## Overview
 
-Layered single-page web fetch engine with L1 HTTP / L2 Browser / L3 Stealth fallback, per-domain start-tier breaker, optional L4 remote escalation, and full-content delivery that shortens long pages to one shared budget while saving the complete text for `file_read_tool`.
+Layered single-page web fetch engine with L1 HTTP fetching, optional L4 remote escalation, and full-content delivery that shortens long pages to one shared budget while saving the complete text for `file_read_tool`.
 
 ## Submodule Index
 
@@ -11,8 +11,8 @@ Layered single-page web fetch engine with L1 HTTP / L2 Browser / L3 Stealth fall
 | [engine/](engine/_ARCH.md) | Core | FetchEngine tiered fetcher pool |
 | [processing/](processing/_ARCH.md) | Core | Post-fetch pipeline, markdown, charset detection, full-content delivery, anti-bot |
 | [extractors/](extractors/_ARCH.md) | Core | WeChat / Bilibili / YouTube / X fast-paths |
-| [fetchers/](fetchers/_ARCH.md) | Core | L1/L2/L3 fetcher implementations |
-| [router/](router/_ARCH.md) | Core | Per-domain tier breaker and domain learning data |
+| [fetchers/](fetchers/_ARCH.md) | Core | L1 HTTP fetcher implementation and outbound target guard |
+| [router/](router/_ARCH.md) | Core | Per-domain learning metrics and site experience |
 | [escalation/](escalation/_ARCH.md) | Core | L4 remote fetch hook |
 
 ## Package Root Files (facade only)
@@ -26,11 +26,9 @@ Layered single-page web fetch engine with L1 HTTP / L2 Browser / L3 Stealth fall
 
 ## L4 Escalation (WFEL)
 
-After local L1-L3 failure, `FetchEngine._try_escalation` tries injected `FetchEscalationProvider`
+After local L1 HTTP failure, `FetchEngine._try_escalation` tries injected `FetchEscalationProvider`
 chain (Jina then Firecrawl when enabled in server config). Providers bind per agent run via
 `escalation/context.py` ContextVar — **not** global singleton mutation.
-
-- L2 Browser respects `get_bound_browser_launch_mode()` for extension CDP pages.
 
 ## Tool routing (web_fetch vs browser)
 

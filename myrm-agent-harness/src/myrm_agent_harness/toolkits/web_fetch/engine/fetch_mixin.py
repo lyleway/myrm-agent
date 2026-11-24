@@ -33,7 +33,7 @@ from ..extractors.bilibili_extractor import extract_bilibili_subtitle, is_bilibi
 from ..extractors.weixin_extractor import extract_weixin_article, is_weixin_article_url
 from ..extractors.x_extractor import extract_x_post, is_x_url
 from ..extractors.youtube_extractor import extract_youtube_transcript, is_youtube_url
-from ..fetchers.protocols import Fetcher, FetcherType, FetchResult
+from ..fetchers.protocols import FetcherType, FetchResult
 from ..processing.antibot_detector import is_blocked as detect_antibot
 from ..router import domain_key
 from .types import DEGRADABLE_4XX
@@ -48,33 +48,18 @@ class FetchEngineFetchMixin:
     async def _try_fetch_and_process(
         self: FetchEngine,
         url: str,
-        fetcher_type: FetcherType,
+        fetcher_type: FetcherType = FetcherType.HTTP,
         *,
         etag: str | None = None,
         last_modified: str | None = None,
     ) -> tuple[Document | None, bool, FetchResult | None]:
-        """Fetch with a specified fetcher and process through the pipeline."""
-        fetcher_map: dict[FetcherType, Fetcher] = {
-            FetcherType.HTTP: self._http_fetcher,
-            FetcherType.BROWSER: self._browser_fetcher,
-            FetcherType.STEALTH: self._stealth_fetcher,
-        }
-        fetcher = fetcher_map[fetcher_type]
-
-        if fetcher_type == FetcherType.BROWSER:
-            from ..escalation.context import get_bound_browser_launch_mode
-
-            launch_mode = get_bound_browser_launch_mode()
-            if launch_mode is None:
-                launch_mode = self._browser_launch_mode
-            self._browser_fetcher.set_launch_mode_preference(launch_mode)
-
-        if fetcher_type == FetcherType.HTTP and (etag or last_modified):
+        """Fetch with HTTP fetcher and process through the pipeline."""
+        if etag or last_modified:
             fetch_result: FetchResult | None = await self._http_fetcher.fetch(
                 url, etag=etag, last_modified=last_modified
             )
         else:
-            fetch_result = await fetcher.fetch(url)
+            fetch_result = await self._http_fetcher.fetch(url)
 
         if fetch_result is None:
             return None, True, None
@@ -83,17 +68,12 @@ class FetchEngineFetchMixin:
             logger.info(f"HTTP 304 Not Modified: {url}")
             return None, False, fetch_result
 
-        if (
-            fetcher_type == FetcherType.HTTP
-            and 400 <= fetch_result.status_code < 500
-            and fetch_result.status_code not in DEGRADABLE_4XX
-        ):
+        if 400 <= fetch_result.status_code < 500 and fetch_result.status_code not in DEGRADABLE_4XX:
             logger.warning(f"HTTP {fetch_result.status_code} not degradable, abort: {url}")
             return None, False, None
 
         # Files (PDF, Office, images) reach here as raw bytes with empty html, so they are routed to a file parser
-        # before the empty-shell check. A file no parser reads is just as unreadable in a browser, so it ends the
-        # fetch; an error status instead means the server refused the request, which a browser may get past.
+        # before the empty-shell check.
         if fetch_result.raw_body is not None:
             from ..processing.binary_router import route_binary_content
 
@@ -106,8 +86,8 @@ class FetchEngineFetchMixin:
         if fetch_result.kind is PayloadKind.TEXT and fetch_result.status_code < 400:
             return await self._pipeline.aprocess(fetch_result), True, fetch_result
 
-        if fetcher_type == FetcherType.HTTP and not fetch_result.has_content:
-            logger.warning(f"L1 HTTP returned empty shell, will degrade: {url}")
+        if not fetch_result.has_content:
+            logger.warning(f"L1 HTTP returned empty shell: {url}")
             return None, True, None
 
         from ..extractors.weixin_extractor import has_weixin_js_content, parse_weixin_article_html
@@ -134,20 +114,18 @@ class FetchEngineFetchMixin:
     async def _try_and_report(
         self: FetchEngine,
         url: str,
-        fetcher_type: FetcherType,
+        fetcher_type: FetcherType = FetcherType.HTTP,
         *,
         etag: str | None = None,
         last_modified: str | None = None,
     ) -> tuple[Document | None, bool, FetchResult | None]:
-        """Attempt fetch and report the outcome to the tier breaker."""
+        """Attempt HTTP fetch and record failures in domain metrics."""
         doc, degradable, fetch_result = await self._try_fetch_and_process(
             url,
             fetcher_type,
             etag=etag,
             last_modified=last_modified,
         )
-        # A miss that is final (404, 304, a file no parser reads) says nothing about whether this tier can fetch the
-        # site, so it must not count against the tier.
         if doc is not None or degradable:
             self._report_feedback(url, fetcher_type, success=(doc is not None))
         return doc, degradable, fetch_result
@@ -160,39 +138,7 @@ class FetchEngineFetchMixin:
         last_modified: str | None = None,
         allow_escalation: bool = True,
     ) -> tuple[Document | None, FetchResult | None]:
-        """Smart degradation: start on the tier the breaker selects for the domain, degrade tier by tier."""
-        start_type = self._tier_breaker.select(domain_key(url))
-
-        if start_type == FetcherType.STEALTH:
-            doc, _, result = await self._try_and_report(url, FetcherType.STEALTH)
-            if doc:
-                return doc, result
-
-            logger.warning(f"Stealth failed, trying browser: {url}")
-            doc, _, result = await self._try_and_report(url, FetcherType.BROWSER)
-            if doc:
-                return doc, result
-            if allow_escalation:
-                esc_doc, esc_result = await self._try_escalation(url)
-                if esc_doc:
-                    return esc_doc, esc_result
-            return doc, result
-
-        if start_type == FetcherType.BROWSER:
-            doc, _, result = await self._try_and_report(url, FetcherType.BROWSER)
-            if doc:
-                return doc, result
-
-            logger.warning(f"Browser failed, trying stealth: {url}")
-            doc, _, result = await self._try_and_report(url, FetcherType.STEALTH)
-            if doc:
-                return doc, result
-            if allow_escalation:
-                esc_doc, esc_result = await self._try_escalation(url)
-                if esc_doc:
-                    return esc_doc, esc_result
-            return doc, result
-
+        """Fetch via L1 HTTP, escalating to optional L4 remote providers when configured."""
         doc, degradable, result = await self._try_and_report(
             url,
             FetcherType.HTTP,
@@ -202,21 +148,10 @@ class FetchEngineFetchMixin:
         if doc:
             return doc, result
         if not degradable:
-            # A browser cannot read a file the parsers could not, but a remote provider can still try.
             if allow_escalation and result is not None and result.kind is PayloadKind.BINARY:
                 esc_doc, esc_result = await self._try_escalation(url)
                 if esc_doc:
                     return esc_doc, esc_result
-            return doc, result
-
-        logger.warning(f"HTTP insufficient, degrading to browser: {url}")
-        doc, _, result = await self._try_and_report(url, FetcherType.BROWSER)
-        if doc:
-            return doc, result
-
-        logger.warning(f"Browser failed, degrading to stealth: {url}")
-        doc, _, result = await self._try_and_report(url, FetcherType.STEALTH)
-        if doc:
             return doc, result
 
         if allow_escalation:
@@ -227,11 +162,9 @@ class FetchEngineFetchMixin:
         return doc, result
 
     def _report_feedback(self: FetchEngine, url: str, fetcher_type: FetcherType, *, success: bool) -> None:
-        """Report a tier's outcome to the breaker; a failure also feeds the site-experience staleness hint."""
-        domain = domain_key(url)
-        self._tier_breaker.report(domain, fetcher_type, success=success)
+        """Record fetch failures in domain metrics for the site-experience staleness hint."""
         if not success:
-            self._domain_metrics.record_failure(domain, fetcher_type)
+            self._domain_metrics.record_failure(domain_key(url), fetcher_type)
 
     async def _fetch_from_network(
         self: FetchEngine,
@@ -275,10 +208,10 @@ class FetchEngineFetchMixin:
             if doc is not None:
                 logger.info("Weixin article fast-path succeeded: %s", url)
                 return doc, None
-            logger.info("Weixin article fast-path missed, degrading to browser: %s", url)
+            logger.info("Weixin article fast-path missed, falling back to HTTP/L4: %s", url)
             doc, fetch_result = await degrade()
             if doc is not None:
-                logger.info("Weixin article browser degradation succeeded: %s", url)
+                logger.info("Weixin article fallback fetch succeeded: %s", url)
             else:
                 logger.warning("Weixin article fetch failed after degradation: %s", url)
             return doc, fetch_result
