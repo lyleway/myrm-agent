@@ -3,11 +3,14 @@
 Covers:
 - get_venv_path: default path resolution from MYRM_DATA_DIR
 - get_python_executable: venv creation and fallback behavior
-- rewrite_pip_command: pip command rewriting
+- get_python_executable: concurrent callers share one creation
+- rewrite_pip_command: pip command rewriting (including shell-quoted paths)
+- the pip bootstrap that follows a creation: test_venv_pip_bootstrap.py
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -22,19 +25,20 @@ from myrm_agent_harness.toolkits.code_execution.executors.common.venv_manager im
     VenvManager,
     _get_default_venv_path,
 )
+from tests.toolkits.code_execution._venv_spawn import VENV_SPAWN, FakeVenvSpawn
 
 
 class TestGetDefaultVenvPath:
     """Tests for _get_default_venv_path helper."""
 
-    def test_returns_myrm_data_dir_venvs(self):
+    def test_returns_myrm_data_dir_venvs(self) -> None:
         """Verify venv path is MYRM_DATA_DIR/venvs when env var is set."""
         with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"MYRM_DATA_DIR": str(tmpdir)}):
             result = _get_default_venv_path()
             # Path is resolved, so compare resolved paths
             assert result == Path(tmpdir).resolve() / "venvs"
 
-    def test_returns_home_myrm_venvs_default(self):
+    def test_returns_home_myrm_venvs_default(self) -> None:
         """Verify default venv path is ~/.myrm/venvs when MYRM_DATA_DIR is not set."""
         env_copy = os.environ.copy()
         env_copy.pop("MYRM_DATA_DIR", None)
@@ -42,7 +46,7 @@ class TestGetDefaultVenvPath:
             result = _get_default_venv_path()
             assert result == Path.home() / ".myrm" / "venvs"
 
-    def test_strips_whitespace_from_env(self):
+    def test_strips_whitespace_from_env(self) -> None:
         """Verify whitespace is stripped from MYRM_DATA_DIR."""
         env_copy = os.environ.copy()
         env_copy["MYRM_DATA_DIR"] = "  "
@@ -54,14 +58,14 @@ class TestGetDefaultVenvPath:
 class TestVenvManagerGetVenvPath:
     """Tests for VenvManager.get_venv_path."""
 
-    def test_uses_config_path(self):
+    def test_uses_config_path(self) -> None:
         """Verify custom venv path from config is used."""
         config = MagicMock()
         config.local.shared_venv_path = "/custom/venv"
         manager = VenvManager(config)
         assert manager.get_venv_path() == Path("/custom/venv")
 
-    def test_uses_default_path_when_no_config(self):
+    def test_uses_default_path_when_no_config(self) -> None:
         """Verify default path when config has no shared_venv_path."""
         config = MagicMock()
         config.local.shared_venv_path = None
@@ -74,7 +78,7 @@ class TestVenvManagerRewritePipCommand:
     """Tests for VenvManager.rewrite_pip_command."""
 
     @pytest.mark.asyncio
-    async def test_rewrites_pip_install(self):
+    async def test_rewrites_pip_install(self) -> None:
         """Verify pip install is rewritten to use venv pip."""
         config = MagicMock()
         config.local.shared_venv_path = None
@@ -94,7 +98,7 @@ class TestVenvManagerRewritePipCommand:
                 assert "install requests" in result
 
     @pytest.mark.asyncio
-    async def test_rewrites_pip3_install(self):
+    async def test_rewrites_pip3_install(self) -> None:
         """Verify pip3 install is rewritten to use venv pip."""
         config = MagicMock()
         config.local.shared_venv_path = None
@@ -115,7 +119,7 @@ class TestVenvManagerRewritePipCommand:
     @pytest.mark.skipif(sys.platform == "win32" or shutil.which("bash") is None, reason="runs the command in bash")
     @pytest.mark.asyncio
     @pytest.mark.parametrize("data_dir", ["My Data", "O'Brien"])
-    async def test_a_venv_path_the_shell_would_split_stays_one_command(self, tmp_path: Path, data_dir: str):
+    async def test_a_venv_path_the_shell_would_split_stays_one_command(self, tmp_path: Path, data_dir: str) -> None:
         """Verify the rewritten command still runs the venv pip when its path holds a space or an apostrophe."""
         config = MagicMock()
         config.local.shared_venv_path = None
@@ -134,18 +138,22 @@ class TestVenvManagerRewritePipCommand:
         assert (done.returncode, done.stdout) == (0, "ran install requests\n")
 
     @pytest.mark.asyncio
-    async def test_ignores_non_pip_command(self):
+    async def test_ignores_non_pip_command(self, tmp_path: Path) -> None:
         """Verify non-pip commands are returned unchanged."""
         config = MagicMock()
+        config.local.shared_venv_path = str(tmp_path / "venvs")
+        config.local.auto_create_venv = False
         manager = VenvManager(config)
 
         result = await manager.rewrite_pip_command("python -m pip install requests")
         assert result == "python -m pip install requests"
 
     @pytest.mark.asyncio
-    async def test_ignores_pip_other_subcommand(self):
+    async def test_ignores_pip_other_subcommand(self, tmp_path: Path) -> None:
         """Verify pip subcommands other than install are returned unchanged."""
         config = MagicMock()
+        config.local.shared_venv_path = str(tmp_path / "venvs")
+        config.local.auto_create_venv = False
         manager = VenvManager(config)
 
         result = await manager.rewrite_pip_command("pip list")
@@ -156,7 +164,7 @@ class TestVenvManagerCreation:
     """Verify venv creation behavior without redundant external network upgrade."""
 
     @pytest.mark.asyncio
-    async def test_creation_falls_back_cleanly(self):
+    async def test_creation_falls_back_cleanly(self) -> None:
         config = MagicMock()
         config.local.shared_venv_path = "/nonexistent/read-only/path"
         config.local.auto_create_venv = True
@@ -164,3 +172,38 @@ class TestVenvManagerCreation:
         # Should gracefully fall back to sys.executable on permission error
         py_exec = await manager.get_python_executable()
         assert Path(py_exec).exists()
+
+
+class TestVenvManagerSingleFlight:
+    """Callers that arrive during a creation wait for it instead of starting another."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_share_one_creation(self, tmp_path: Path) -> None:
+        config = MagicMock()
+        config.local.shared_venv_path = str(tmp_path / "venvs")
+        config.local.auto_create_venv = True
+        manager = VenvManager(config)
+        spawn = FakeVenvSpawn()
+
+        with patch(VENV_SPAWN, side_effect=spawn):
+            results = await asyncio.gather(*(manager.get_python_executable() for _ in range(4)))
+            await manager.ensure_pip_ready_for("pip --version")
+
+        assert len(spawn.creations) == 1
+        assert set(results) == {str(tmp_path / "venvs" / "bin" / "python")}
+
+    @pytest.mark.asyncio
+    async def test_a_resolved_manager_does_not_spawn_again(self, tmp_path: Path) -> None:
+        config = MagicMock()
+        config.local.shared_venv_path = str(tmp_path / "venvs")
+        config.local.auto_create_venv = True
+        manager = VenvManager(config)
+        spawn = FakeVenvSpawn()
+
+        with patch(VENV_SPAWN, side_effect=spawn):
+            first = await manager.get_python_executable()
+            second = await manager.get_python_executable()
+            await manager.ensure_pip_ready_for("pip --version")
+
+        assert first == second
+        assert len(spawn.creations) == 1
