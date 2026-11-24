@@ -181,7 +181,7 @@ Does your code need to import anything from agent/?
 | tasks/ | Async job queue — models, SQLite store, executor protocol. See [TASK_QUEUE_SYSTEM.md](tasks/TASK_QUEUE_SYSTEM.md). |
 | vector/ | Vector Store — unified async vector storage and retrieval. |
 | vnc/ | VNC visual desktop streaming — x11vnc + websockify + human takeover coordination. |
-| web_fetch/ | Web content crawling — layered engine with HTTP/Browser/Stealth fallback; `[web]` extra for scrapling + YouTube transcripts. |
+| web_fetch/ | Web content crawling — L1 curl_cffi HTTP engine with optional L4 remote escalation; `[web]` extra for `curl_cffi` + YouTube transcripts. |
 | web_search/ | Web search — multi-engine search tools with result aggregation. |
 | wiki/ | Self-evolving knowledge base — LLM-powered wiki article generation, management, and proactive knowledge-gap analysis. |
 | filesystem_suggest/ | Local path suggestion — bounded file enumeration and GUI-friendly fuzzy ranking for `@` mentions. |

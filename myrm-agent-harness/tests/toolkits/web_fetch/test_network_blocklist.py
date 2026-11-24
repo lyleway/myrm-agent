@@ -31,9 +31,6 @@ from myrm_agent_harness.toolkits.web_fetch.fetchers.target_guard import (
 from myrm_agent_harness.toolkits.web_fetch.processing.url_normalizer import normalize_url
 from tests.toolkits.browser._redirect_servers import Site, page, redirect, serve
 
-# Scrapling builds its lxml parser with an option lxml now warns about; the project turns warnings into errors.
-pytestmark = pytest.mark.filterwarnings("ignore:The 'strip_cdata' option")
-
 _GUARD = "myrm_agent_harness.toolkits.web_fetch.fetchers.target_guard"
 _DISPATCH = "myrm_agent_harness.toolkits.web_fetch.engine.fetch_mixin"
 _ARTICLE = "<article><p>" + "reachable-body " * 40 + "</p></article>"  # enough markup to not read as an empty shell

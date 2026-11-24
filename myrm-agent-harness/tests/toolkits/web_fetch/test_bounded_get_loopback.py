@@ -1,7 +1,7 @@
-"""The real Scrapling and curl_cffi end a transfer at the bound, against a loopback origin.
+"""Real curl_cffi ends a transfer at the bound, against a loopback origin.
 
 The origin declares bodies far beyond the bound and notes how much of each it sent, so a transfer that ended early
-shows as a short send. Library behaviour this relies on: Scrapling forwards the write callback to curl_cffi, libcurl
+shows as a short send. Library behaviour this relies on: curl_cffi forwards the write callback to libcurl, libcurl
 hands that callback decoded bytes, and the write error it raises on the abort carries the response already received.
 """
 
@@ -25,7 +25,7 @@ pytestmark = pytest.mark.integration
 curl_requests = pytest.importorskip("curl_cffi.requests")
 
 _MIB = 1 << 20
-_REQUEST = {"timeout": 10, "follow_redirects": False}
+_REQUEST = {"timeout": 10, "allow_redirects": False}
 _HTML_BLOCK = (b"<p>" + b"x" * 1000 + b"</p>\n") * 64
 _FILE_BLOCK = b"0123456789" * 6400
 _SMALL_PAGE = b"<html><body><article><p>" + b"hello world " * 40 + b"</p></article></body></html>"

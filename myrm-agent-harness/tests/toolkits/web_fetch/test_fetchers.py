@@ -16,7 +16,7 @@ from myrm_agent_harness.toolkits.web_fetch.fetchers.http_fetcher import (
 
 
 @pytest.mark.asyncio
-async def test_http_fetcher_cookiejar_injection(install_fake_scrapling: AsyncMock):
+async def test_http_fetcher_cookiejar_injection(install_fake_curl_session: AsyncMock):
     """Test that HttpFetcher correctly injects cookies from SessionVault as a CookieJar"""
 
     # Setup mock SessionVault
@@ -68,10 +68,10 @@ async def test_http_fetcher_cookiejar_injection(install_fake_scrapling: AsyncMoc
     fetcher = HttpFetcher(session_vault=mock_vault)
 
     # Mock AsyncFetcher.get to intercept the call and check kwargs
-    mock_get = install_fake_scrapling
+    mock_get = install_fake_curl_session
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         mock_response = MagicMock()
-        mock_response.status = 200
+        mock_response.status_code = 200
         mock_response.body = b"<html><body><p>" + (b"Test content. " * 20) + b"</p></body></html>"
         mock_response.encoding = "utf-8"
         mock_response.url = "https://example.com/test"
@@ -126,7 +126,7 @@ async def test_http_fetcher_cookiejar_injection(install_fake_scrapling: AsyncMoc
 
 def _mock_response(url: str, content_type: str, body: bytes) -> MagicMock:
     response = MagicMock()
-    response.status = 200
+    response.status_code = 200
     response.body = body
     response.encoding = "utf-8"
     response.url = url
@@ -135,10 +135,10 @@ def _mock_response(url: str, content_type: str, body: bytes) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_http_fetcher_keeps_non_text_body_whole(install_fake_scrapling: AsyncMock) -> None:
+async def test_http_fetcher_keeps_non_text_body_whole(install_fake_curl_session: AsyncMock) -> None:
     """A truncated PDF or Office file cannot be parsed, so no text size ceiling applies to it."""
     document = b"%PDF-1.7\n" + b"x" * (MAX_PLAIN_TEXT_BODY_BYTES + 1_000)
-    install_fake_scrapling.return_value = _mock_response("https://example.com/paper.pdf", "application/pdf", document)
+    install_fake_curl_session.return_value = _mock_response("https://example.com/paper.pdf", "application/pdf", document)
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         result = await HttpFetcher().fetch("https://example.com/paper.pdf")
@@ -149,10 +149,10 @@ async def test_http_fetcher_keeps_non_text_body_whole(install_fake_scrapling: As
 
 
 @pytest.mark.asyncio
-async def test_http_fetcher_truncates_text_body_above_cap(install_fake_scrapling: AsyncMock) -> None:
+async def test_http_fetcher_truncates_text_body_above_cap(install_fake_curl_session: AsyncMock) -> None:
     """Web pages stay capped at the lower ceiling: the HTML pipeline's worst-case input size is bounded by it."""
     page = b"<html><body>" + b"a" * (MAX_HTML_BODY_BYTES + 1_000) + b"</body></html>"
-    install_fake_scrapling.return_value = _mock_response("https://example.com/long", "text/html", page)
+    install_fake_curl_session.return_value = _mock_response("https://example.com/long", "text/html", page)
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         result = await HttpFetcher().fetch("https://example.com/long")

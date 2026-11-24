@@ -1,17 +1,17 @@
-"""L1 HTTP fetcher via Scrapling curl_cffi.
+"""L1 HTTP fetcher via direct curl_cffi.
 
 [INPUT]
-- .bounded_get::bounded_get (POS: a GET through Scrapling whose body is held to a size bound while it is received, connecting only to the addresses it is given)
-- .target_guard::FetchTargetGuard (POS: per-fetch SSRF policy and network blocklist for the web_fetch tiers)
+- .bounded_get::bounded_get, RequestParams (POS: direct curl_cffi bounded GET with CURLOPT_RESOLVE connection pinning)
+- .target_guard::FetchTargetGuard (POS: per-fetch SSRF policy and network blocklist for web_fetch)
 - toolkits.web_fetch.processing.charset_detector::detect_and_decode_html (POS: Multi-tier charset detection)
 - toolkits.browser.pool.proxy::ProxyPool (POS: Proxy rotation pool for FetchEngine)
-- utils.content_sniff::classify_payload (POS: web page, text or binary file, decided once for every fetch tier)
+- utils.content_sniff::classify_payload (POS: web page, text or binary file, decided once for every fetch)
 
 [OUTPUT]
-- HttpFetcher: L1 tier fetcher; every hop (the requested URL and each redirect ``Location``) is judged and dialed in its canonical spelling, at the addresses the judgment looked at, and a hop the SSRF policy or the network blocklist rejects raises SSRFSecurityError instead of degrading to the next tier
+- HttpFetcher: L1 HTTP fetcher; every hop (the requested URL and each redirect ``Location``) is judged and dialed in its canonical spelling, at the addresses the judgment looked at, and a hop the SSRF policy or the network blocklist rejects raises SSRFSecurityError
 
 [POS]
-L1 lightweight HTTP fetcher. Delegates TLS impersonation to Scrapling defaults.
+L1 lightweight HTTP fetcher using curl_cffi directly with Chrome TLS impersonation.
 Every body is received through ``bounded_get``, so one response never holds more than the transfer bound.
 """
 
@@ -31,13 +31,11 @@ from myrm_agent_harness.core.security.http.secure_fetch import (
 from myrm_agent_harness.toolkits.web_fetch.processing.charset_detector import detect_and_decode_html
 from myrm_agent_harness.utils.content_sniff import PayloadKind, classify_payload
 
-from .bounded_get import FetchedResponse, bounded_get
+from .bounded_get import FetchedResponse, RequestParams, bounded_get
 from .protocols import FetcherType, FetchResult
 from .target_guard import FetchTargetGuard
 
 if TYPE_CHECKING:
-    from scrapling.engines._browsers._types import GetRequestParams  # type: ignore[import-untyped, unused-ignore]
-
     from myrm_agent_harness.toolkits.browser.pool.proxy import ProxyPool
     from myrm_agent_harness.toolkits.browser.session_vault import SessionVault
 
@@ -210,10 +208,10 @@ class HttpFetcher:
         self,
         headers: dict[str, str],
         cookie_jar: http.cookiejar.CookieJar | None,
-    ) -> GetRequestParams:
-        kwargs: GetRequestParams = {
+    ) -> RequestParams:
+        kwargs: RequestParams = {
             "timeout": self._timeout,
-            "follow_redirects": False,
+            "allow_redirects": False,
         }
 
         if headers:

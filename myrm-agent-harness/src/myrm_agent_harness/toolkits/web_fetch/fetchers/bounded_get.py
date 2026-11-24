@@ -1,40 +1,45 @@
-"""A GET through Scrapling whose body is held to a size bound while it is received.
+"""A bounded GET through curl_cffi whose body is held to a size bound while it is received.
 
 [INPUT]
-- .connection_pin::pinned_connection (POS: limits the connection to the addresses a fetch vetted, with the host name kept in the URL)
+- .connection_pin::build_pin_curl_options (POS: builds session-level CURLOPT_RESOLVE options for vetted addresses)
 - toolkits.web_fetch.processing.binary_router::MAX_BINARY_SIZE (POS: the largest file body the router parses)
-- scrapling.fetchers::AsyncFetcher (POS: curl_cffi request with TLS impersonation; imported on first use)
 - curl_cffi.curl::CURL_WRITEFUNC_ERROR (POS: the write-callback result that ends a transfer)
-- curl_cffi.requests::RequestsError (POS: what a transfer ended by the callback raises, carrying its response)
+- curl_cffi.requests::AsyncSession, RequestsError (POS: direct curl_cffi HTTP client with TLS impersonation)
 
 [OUTPUT]
 - MAX_TRANSFER_BYTES: the most decoded body bytes a fetch holds without being over the bound
+- RequestParams: typed request parameter dictionary for bounded_get
 - FetchedResponse: status, headers, final URL, encoding hint and the kept body of one GET
-- bounded_get: AsyncFetcher.get that keeps at most MAX_TRANSFER_BYTES + 1 body bytes and ends the transfer there, optionally connecting only to given addresses
+- bounded_get: direct curl_cffi AsyncSession.get keeping at most MAX_TRANSFER_BYTES + 1 body bytes
 
 [POS]
-L1 transfer bound. Scrapling buffers a whole response and parses it as a document before any size check can run, so
-a hostile or mistaken URL (a gzip bomb, a multi-gigabyte file) costs memory and event-loop time in proportion to what
-the server sends. Here libcurl hands each decoded chunk to a sink that keeps the first MAX_TRANSFER_BYTES + 1 bytes
-and ends the transfer, so the cost stops at that size.
+L1 transfer bound. libcurl hands each decoded chunk to a sink that keeps the first MAX_TRANSFER_BYTES + 1 bytes
+and ends the transfer, preventing memory and event-loop exhaustion on oversized or hostile responses.
 """
 
 from __future__ import annotations
 
+import http.cookiejar
 import io
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TypedDict
 
-from myrm_agent_harness.toolkits.web_fetch.fetchers.connection_pin import pinned_connection
+from myrm_agent_harness.toolkits.web_fetch.fetchers.connection_pin import build_pin_curl_options
 from myrm_agent_harness.toolkits.web_fetch.processing.binary_router import MAX_BINARY_SIZE
 
-if TYPE_CHECKING:
-    from scrapling.engines._browsers._types import GetRequestParams  # type: ignore[import-untyped, unused-ignore]
-
-# A file is the payload with the largest ceiling, so a transfer is bounded by the size the binary router parses. One
-# byte more is kept so that a body over the bound can be told from a body exactly at it.
 MAX_TRANSFER_BYTES = MAX_BINARY_SIZE
 _KEPT_BYTES = MAX_TRANSFER_BYTES + 1
+_DEFAULT_IMPERSONATE = "chrome"
+_DEFAULT_REFERER = "https://www.google.com/"
+
+
+class RequestParams(TypedDict, total=False):
+    timeout: int | float
+    allow_redirects: bool
+    headers: dict[str, str]
+    proxy: str
+    cookies: http.cookiejar.CookieJar | dict[str, str]
+    verify: bool | str
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,38 +73,60 @@ class _BodySink:
 
     @property
     def body(self) -> bytes:
-        # ``getvalue`` shares the buffer instead of copying it, so a full body is held once; ``bytes(bytearray)``
-        # would hold it twice at this point, and every concurrent capped transfer pays that.
         return self._buffer.getvalue()
 
 
-async def bounded_get(url: str, request: GetRequestParams, addresses: tuple[str, ...] = ()) -> FetchedResponse:
-    """GET ``url`` with Scrapling's request parameters, keeping at most ``MAX_TRANSFER_BYTES + 1`` body bytes.
+async def bounded_get(url: str, request: RequestParams, addresses: tuple[str, ...] = ()) -> FetchedResponse:
+    """GET ``url`` directly via curl_cffi ``AsyncSession``, keeping at most ``MAX_TRANSFER_BYTES + 1`` body bytes.
 
-    Scrapling forwards the ``content_callback`` argument to curl_cffi unchanged. The request is attempted once
-    (``retries=1``): a transfer the sink ended on purpose must not be repeated.
-
-    With ``addresses`` the connection goes only to them while ``url`` keeps its host name, so the certificate is
-    checked against the name. A request through a proxy is not pinned: the proxy resolves the host itself.
+    With ``addresses`` the session is created with ``CURLOPT_RESOLVE`` so libcurl connects only to them while
+    ``url`` keeps its host name for TLS SNI/certificate verification. Requests through an explicit proxy are not
+    pinned because the proxy resolves the host itself.
     """
-    # Imported here, like Scrapling, so that the module loads without the ``web`` extra installed.
     from curl_cffi.curl import CURL_WRITEFUNC_ERROR
-    from curl_cffi.requests import RequestsError
-    from scrapling.fetchers import AsyncFetcher  # type: ignore[import-untyped, unused-ignore]
+    from curl_cffi.requests import AsyncSession, RequestsError
 
     sink = _BodySink(CURL_WRITEFUNC_ERROR)
-    single_attempt: GetRequestParams = {**request, "retries": 1}
     pinned = () if request.get("proxy") else addresses
+    curl_options = build_pin_curl_options(url, pinned)
+
+    headers = dict(request.get("headers") or {})
+    if not any(k.lower() == "referer" for k in headers):
+        headers["Referer"] = _DEFAULT_REFERER
+
+    get_kwargs: dict[str, object] = {
+        "content_callback": sink,
+        "timeout": request.get("timeout", 10),
+        "allow_redirects": request.get("allow_redirects", False),
+        "headers": headers,
+        "verify": request.get("verify", True),
+    }
+    if request.get("proxy") is not None:
+        get_kwargs["proxy"] = request["proxy"]
+    if request.get("cookies") is not None:
+        get_kwargs["cookies"] = request["cookies"]
+
     try:
-        async with pinned_connection(url, pinned):
-            response = await AsyncFetcher.get(url, content_callback=sink, **single_attempt)  # type: ignore[call-arg]
+        async with AsyncSession(
+            impersonate=_DEFAULT_IMPERSONATE,
+            curl_options=curl_options or None,
+        ) as session:
+            response = await session.get(url, **get_kwargs)
     except RequestsError as exc:
-        # The sink ending the transfer surfaces as a write error that carries the response whose status and headers
-        # had already arrived. Any other failure is the caller's to handle. Scrapling logs the write error once.
         interrupted = exc.response
         if not sink.capped or interrupted is None:
             raise
         return FetchedResponse(
-            interrupted.status_code, dict(interrupted.headers), interrupted.url, interrupted.encoding, sink.body
+            interrupted.status_code,
+            dict(interrupted.headers),
+            interrupted.url,
+            interrupted.encoding,
+            sink.body,
         )
-    return FetchedResponse(response.status, dict(response.headers), response.url, response.encoding, sink.body)
+    return FetchedResponse(
+        response.status_code,
+        dict(response.headers),
+        response.url,
+        response.encoding,
+        sink.body,
+    )

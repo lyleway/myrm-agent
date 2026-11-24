@@ -1,7 +1,7 @@
 """ContentPipeline — Converts HTML into LLM-friendly Documents.
 
 Unified content processing pipeline, decoupled from the Fetcher layer:
-regardless of whether HTML comes from curl_cffi, Patchright, or Scrapling,
+regardless of whether HTML comes from curl_cffi or escalation providers,
 it passes through the same processing pipeline.
 
 [INPUT]

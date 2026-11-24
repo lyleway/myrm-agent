@@ -28,15 +28,15 @@ def success_result() -> FetchResult:
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_text_response(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_text_response(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     mock_response = MagicMock()
-    mock_response.status = 200
+    mock_response.status_code = 200
     mock_response.body = success_result().html.encode()
     mock_response.encoding = "utf-8"
     mock_response.url = "https://blocked.example/article"
     mock_response.headers = {"content-type": "text/html"}
-    install_fake_scrapling.return_value = mock_response
+    install_fake_curl_session.return_value = mock_response
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         result = await fetcher._fetch_with_redirects(
@@ -53,15 +53,15 @@ async def test_fetch_with_redirects_text_response(install_fake_scrapling: AsyncM
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_304(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_304(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     mock_response = MagicMock()
-    mock_response.status = 304
+    mock_response.status_code = 304
     mock_response.body = b""
     mock_response.encoding = "utf-8"
     mock_response.url = "https://blocked.example/article"
     mock_response.headers = {"etag": "abc"}
-    install_fake_scrapling.return_value = mock_response
+    install_fake_curl_session.return_value = mock_response
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/article",
@@ -76,15 +76,15 @@ async def test_fetch_with_redirects_304(install_fake_scrapling: AsyncMock) -> No
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_binary_body(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_binary_body(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     mock_response = MagicMock()
-    mock_response.status = 200
+    mock_response.status_code = 200
     mock_response.body = b"%PDF-1.4"
     mock_response.encoding = "utf-8"
     mock_response.url = "https://blocked.example/doc.pdf"
     mock_response.headers = {"content-type": "application/pdf"}
-    install_fake_scrapling.return_value = mock_response
+    install_fake_curl_session.return_value = mock_response
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/doc.pdf",
@@ -125,23 +125,23 @@ async def test_fetch_forwards_cache_headers() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_follows_location(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_follows_location(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     redirect_response = MagicMock()
-    redirect_response.status = 302
+    redirect_response.status_code = 302
     redirect_response.body = b""
     redirect_response.encoding = "utf-8"
     redirect_response.url = "https://blocked.example/old"
     redirect_response.headers = {"Location": "/article"}
 
     final_response = MagicMock()
-    final_response.status = 200
+    final_response.status_code = 200
     final_response.body = success_result().html.encode()
     final_response.encoding = "utf-8"
     final_response.url = "https://blocked.example/article"
     final_response.headers = {"content-type": "text/html"}
 
-    install_fake_scrapling.side_effect = [redirect_response, final_response]
+    install_fake_curl_session.side_effect = [redirect_response, final_response]
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/old",
@@ -153,11 +153,11 @@ async def test_fetch_with_redirects_follows_location(install_fake_scrapling: Asy
 
     assert result is not None
     assert result.status_code == 200
-    assert install_fake_scrapling.call_count == 2
+    assert install_fake_curl_session.call_count == 2
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_ssrf_blocked(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_ssrf_blocked(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
 
     with (
@@ -175,19 +175,19 @@ async def test_fetch_with_redirects_ssrf_blocked(install_fake_scrapling: AsyncMo
             allowed_hosts=[],
         )
 
-    install_fake_scrapling.assert_not_called()
+    install_fake_curl_session.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_redirect_missing_location(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_redirect_missing_location(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     redirect_response = MagicMock()
-    redirect_response.status = 302
+    redirect_response.status_code = 302
     redirect_response.body = b""
     redirect_response.encoding = "utf-8"
     redirect_response.url = "https://blocked.example/old"
     redirect_response.headers = {}
-    install_fake_scrapling.return_value = redirect_response
+    install_fake_curl_session.return_value = redirect_response
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/old",
@@ -201,15 +201,15 @@ async def test_fetch_with_redirects_redirect_missing_location(install_fake_scrap
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_too_many_redirects(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_too_many_redirects(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
     redirect_response = MagicMock()
-    redirect_response.status = 302
+    redirect_response.status_code = 302
     redirect_response.body = b""
     redirect_response.encoding = "utf-8"
     redirect_response.url = "https://blocked.example/loop"
     redirect_response.headers = {"Location": "/loop"}
-    install_fake_scrapling.return_value = redirect_response
+    install_fake_curl_session.return_value = redirect_response
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/loop",
@@ -220,13 +220,13 @@ async def test_fetch_with_redirects_too_many_redirects(install_fake_scrapling: A
     )
 
     assert result is None
-    assert install_fake_scrapling.call_count == 6
+    assert install_fake_curl_session.call_count == 6
 
 
 @pytest.mark.asyncio
-async def test_fetch_with_redirects_async_fetcher_exception(install_fake_scrapling: AsyncMock) -> None:
+async def test_fetch_with_redirects_async_fetcher_exception(install_fake_curl_session: AsyncMock) -> None:
     fetcher = HttpFetcher()
-    install_fake_scrapling.side_effect = RuntimeError("network down")
+    install_fake_curl_session.side_effect = RuntimeError("network down")
 
     result = await fetcher._fetch_with_redirects(
         "https://blocked.example/article",
@@ -240,23 +240,23 @@ async def test_fetch_with_redirects_async_fetcher_exception(install_fake_scrapli
 
 
 @pytest.mark.asyncio
-async def test_proxy_pool_injects_proxy_kwarg(install_fake_scrapling: AsyncMock) -> None:
+async def test_proxy_pool_injects_proxy_kwarg(install_fake_curl_session: AsyncMock) -> None:
     proxy_pool = MagicMock()
     proxy_pool.get_next.return_value = MagicMock(to_url=lambda: "http://proxy.local:8080")
     fetcher = HttpFetcher(proxy_pool=proxy_pool)
 
     mock_response = MagicMock()
-    mock_response.status = 200
+    mock_response.status_code = 200
     mock_response.body = success_result().html.encode()
     mock_response.encoding = "utf-8"
     mock_response.url = "https://blocked.example/article"
     mock_response.headers = {"content-type": "text/html"}
-    install_fake_scrapling.return_value = mock_response
+    install_fake_curl_session.return_value = mock_response
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         await fetcher.fetch("https://blocked.example/article")
 
-    assert install_fake_scrapling.call_args.kwargs["proxy"] == "http://proxy.local:8080"
+    assert install_fake_curl_session.call_args.kwargs["proxy"] == "http://proxy.local:8080"
 
 
 @pytest.mark.asyncio
@@ -275,23 +275,23 @@ async def test_session_vault_load_failure_returns_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_vault_empty_entry_skips_cookies(install_fake_scrapling: AsyncMock) -> None:
+async def test_session_vault_empty_entry_skips_cookies(install_fake_curl_session: AsyncMock) -> None:
     mock_vault = MagicMock()
     mock_vault.load = AsyncMock(return_value=None)
     fetcher = HttpFetcher(session_vault=mock_vault)
 
     mock_response = MagicMock()
-    mock_response.status = 200
+    mock_response.status_code = 200
     mock_response.body = success_result().html.encode()
     mock_response.encoding = "utf-8"
     mock_response.url = "https://blocked.example/article"
     mock_response.headers = {"content-type": "text/html"}
-    install_fake_scrapling.return_value = mock_response
+    install_fake_curl_session.return_value = mock_response
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         await fetcher.fetch("https://blocked.example/article")
 
-    assert "cookies" not in install_fake_scrapling.call_args.kwargs
+    assert "cookies" not in install_fake_curl_session.call_args.kwargs
 
 
 def test_extract_domain_strips_www() -> None:

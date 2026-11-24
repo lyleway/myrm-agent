@@ -2,44 +2,45 @@
 
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable, Iterator
-from types import ModuleType
+from collections.abc import Callable
+from typing import Self
 from unittest.mock import AsyncMock
 
+import curl_cffi.requests
 import pytest
-
-from myrm_agent_harness.toolkits.web_fetch.fetchers import connection_pin
 
 
 @pytest.fixture
-def install_fake_scrapling(monkeypatch: pytest.MonkeyPatch) -> Iterator[AsyncMock]:
-    """Install a minimal scrapling.fetchers module for HttpFetcher tests.
+def install_fake_curl_session(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Install a minimal curl_cffi.requests.AsyncSession stand-in for HttpFetcher tests.
 
-    The yielded mock stands in for the request: it receives the request parameters and returns the response. The body
-    of that response reaches the fetcher the way libcurl delivers it, through the write callback. The stand-in opens
-    no curl session, so the connection-pin probe, which sends a real request through Scrapling, has nothing to check
-    here and counts as passed; ``test_connection_pin.py`` exercises the real request path.
+    The returned mock stands in for ``session.get``: it receives the request URL and kwargs and returns the response.
+    The body of that response reaches ``bounded_get`` the way libcurl delivers it, through ``content_callback``.
     """
-    monkeypatch.setattr(connection_pin, "_probe_passed", True)
     mock_get = AsyncMock()
 
-    async def get(url: str, *, content_callback: Callable[[bytes], int] | None = None, **kwargs: object) -> object:
-        response = await mock_get(url, **kwargs)
-        if content_callback is not None and isinstance(response.body, bytes):
-            content_callback(response.body)
-        return response
+    class _FakeAsyncSession:
+        def __init__(self, **_init_kwargs: object) -> None:
+            pass
 
-    fetchers_mod = ModuleType("scrapling.fetchers")
-    fetchers_mod.AsyncFetcher = type("AsyncFetcher", (), {"get": staticmethod(get)})
+        async def __aenter__(self) -> Self:
+            return self
 
-    scrapling_mod = ModuleType("scrapling")
-    scrapling_mod.fetchers = fetchers_mod
+        async def __aexit__(self, *_exc: object) -> None:
+            return None
 
-    sys.modules["scrapling"] = scrapling_mod
-    sys.modules["scrapling.fetchers"] = fetchers_mod
-    try:
-        yield mock_get
-    finally:
-        sys.modules.pop("scrapling.fetchers", None)
-        sys.modules.pop("scrapling", None)
+        async def get(
+            self,
+            url: str,
+            *,
+            content_callback: Callable[[bytes], int] | None = None,
+            **kwargs: object,
+        ) -> object:
+            response = await mock_get(url, **kwargs)
+            body = getattr(response, "body", None)
+            if content_callback is not None and isinstance(body, bytes):
+                content_callback(body)
+            return response
+
+    monkeypatch.setattr(curl_cffi.requests, "AsyncSession", _FakeAsyncSession)
+    return mock_get
