@@ -4,6 +4,7 @@ Scores every node by text density, link density, tag weight, class/id hints and 
 threshold and removes navigation, ads and other boilerplate. A ``header`` inside a content region is kept.
 
 [INPUT]
+- web_fetch.processing.html_to_markdown_helpers::strip_non_visible_elements (POS: Non-visible DOM removal before scoring)
 - web_fetch.processing.language_switcher::strip_language_switchers (POS: Language-switcher list removal before pruning)
 - web_fetch.processing.pruning_metrics::dom_path_units, compute_subtree_metrics (POS: Iterative DOM subtree metrics for pruning)
 
@@ -25,6 +26,7 @@ from typing import cast
 
 from bs4 import BeautifulSoup, Comment, Tag
 
+from .html_to_markdown_helpers import strip_non_visible_elements
 from .language_switcher import strip_language_switchers
 from .pruning_metrics import compute_subtree_metrics, dom_path_units
 
@@ -261,6 +263,7 @@ class ContentPruningFilter:
             return []
 
         strip_language_switchers(body)
+        strip_non_visible_elements(body)
 
         # Over the limit only the scoring is skipped: comments, excluded tags and block extraction still run.
         within_scoring_limit = dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS

@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT = 10
 _MAX_CONCURRENT = 20
 _MAX_REDIRECTS = 5
+# Prefer Markdown when the origin supports content negotiation (e.g. Markdown-for-Agents doc hosts),
+# falling back cleanly to HTML or any other payload type.
+_DEFAULT_ACCEPT_HEADER = "text/markdown, text/html;q=0.9, */*;q=0.1"
 
 
 # A readable body is cut where reading further stops paying off. A web page is converted to Markdown on one CPU-bound
@@ -80,7 +83,7 @@ class HttpFetcher:
         enable_ssrf_shield = is_ssrf_shield_enabled()
         allowed_hosts = parse_allowed_internal_hosts()
 
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"Accept": _DEFAULT_ACCEPT_HEADER}
         domain = self._extract_domain(url)
         from ..extractors.weixin_extractor import get_weixin_request_headers
 

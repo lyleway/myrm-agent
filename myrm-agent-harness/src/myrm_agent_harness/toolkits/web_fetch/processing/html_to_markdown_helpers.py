@@ -9,6 +9,8 @@
 - parse_ol_start: parses ``<ol start>`` per HTML signed integer rules
 - resolve_url: resolves relative URLs against a base URL
 - tables_with_rows: iterative bottom-up set of ``<table>`` ids containing a ``<tr>`` descendant
+- is_hidden_dom_element: detects non-visible DOM elements (hidden/aria-hidden/input[hidden]/inline display:none or visibility:hidden)
+- strip_non_visible_elements: iteratively removes non-visible elements and their subtrees from a DOM tree
 
 [POS]
 Shared configuration and pure helper functions for ``HTML2Markdown``.
@@ -131,3 +133,62 @@ def tables_with_rows(root: Tag) -> set[int]:
             if node.name == "table":
                 tables_with_tr.add(node_id)
     return tables_with_tr
+
+
+_NON_VISIBLE_TAGS: frozenset[str] = frozenset({"template", "iframe", "object", "embed", "noscript"})
+_IMPORTANT_SUFFIX_RE = re.compile(r"\s*!important\s*$", re.IGNORECASE)
+
+
+def _has_hidden_inline_style(style: str) -> bool:
+    """Return True when an inline ``style`` attribute explicitly hides the element."""
+    for declaration in style.split(";"):
+        colon = declaration.find(":")
+        if colon == -1:
+            continue
+        prop = declaration[:colon].strip().lower()
+        if prop not in ("display", "visibility"):
+            continue
+        value = _IMPORTANT_SUFFIX_RE.sub("", declaration[colon + 1 :].strip().lower())
+        if (prop == "display" and value == "none") or (prop == "visibility" and value in ("hidden", "collapse")):
+            return True
+    return False
+
+
+def is_hidden_dom_element(node: Tag) -> bool:
+    """Return True when *node* is non-visible markup whose text should never enter LLM context.
+
+    Targets non-rendered containers (``template``, ``iframe``, ``object``, ``embed``, ``noscript``),
+    HTML ``hidden`` (excluding ``hidden="until-found"``), ``aria-hidden="true"``, ``<input type="hidden">``,
+    and inline ``display:none`` / ``visibility:hidden|collapse`` styles to neutralize hidden DOM prompt injection.
+    """
+    if node.name in _NON_VISIBLE_TAGS:
+        return True
+    attrs = node.attrs
+    if not attrs:
+        return False
+    if "hidden" in attrs:
+        hidden_val = attrs.get("hidden")
+        if not isinstance(hidden_val, str) or hidden_val.strip().lower() != "until-found":
+            return True
+    aria_hidden = attrs.get("aria-hidden")
+    if isinstance(aria_hidden, str) and aria_hidden.strip().lower() == "true":
+        return True
+    if node.name == "input":
+        input_type = attrs.get("type")
+        if isinstance(input_type, str) and input_type.strip().lower() == "hidden":
+            return True
+    style = attrs.get("style")
+    return isinstance(style, str) and bool(style) and _has_hidden_inline_style(style)
+
+
+def strip_non_visible_elements(root: Tag) -> None:
+    """Iteratively remove non-visible elements and their subtrees under *root*."""
+    stack: list[Tag] = [root]
+    while stack:
+        node = stack.pop()
+        if node is not root and is_hidden_dom_element(node):
+            node.decompose()
+            continue
+        for child in node.children:
+            if isinstance(child, Tag):
+                stack.append(child)

@@ -16,7 +16,7 @@ Boundary: single-sandbox, single-process semantics.
 web_fetch.fetchers.http_fetcher::HttpFetcher (POS: L1 HTTP fetcher)
 web_fetch.fetchers.target_guard::assert_not_blocklisted (POS: network blocklist verdict for one URL)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
-web_fetch.processing.antibot_detector::BlockKind (POS: Anti-bot, JS-shell, and error-page classification)
+web_fetch.engine.types::FailureKind (POS: Fetch failure outcome classification literal)
 web_fetch.router.domain_metrics::get_global_domain_metrics_manager (POS: Per-domain failure history behind the staleness hint)
 browser.pool.proxy::ProxyPool (POS: Proxy pool for HTTP fetcher)
 utils.lru_cache::LRUCache (POS: Generic TTL-based LRU cache)
@@ -72,7 +72,8 @@ if TYPE_CHECKING:
         FetchEscalationProvider,
     )
     from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetchResult
-    from myrm_agent_harness.toolkits.web_fetch.processing.antibot_detector import BlockKind
+
+    from .types import FailureKind
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class FetchEngine(
             size_fn=_doc_size,
         )
         self._fail_cache: LRUCache[bool] = LRUCache(maxsize=200, ttl=300, id="fetch_engine_fail_cache")
-        self._failure_reasons: LRUCache[tuple[BlockKind, str]] = LRUCache(
+        self._failure_reasons: LRUCache[tuple[FailureKind, str]] = LRUCache(
             maxsize=200, ttl=300, id="fetch_engine_failure_reasons"
         )
         self._pending_requests: dict[str, InFlightFetch] = {}
@@ -169,14 +170,14 @@ class FetchEngine(
         """Inject optional L4 remote fetch providers (server layer implements httpx vendors)."""
         self._escalation_providers = providers
 
-    def get_failure_reason(self, url: str) -> tuple[BlockKind, str] | None:
+    def get_failure_reason(self, url: str) -> tuple[FailureKind, str] | None:
         """Return the last recorded ``(kind, reason)`` for a failed URL, if any."""
         from ..processing.github_blob_url import github_blob_to_raw
         from ..processing.url_normalizer import normalize_url
 
         return self._failure_reasons.get(normalize_url(github_blob_to_raw(url)))
 
-    def _record_failure_reason(self, url: str, kind: BlockKind, reason: str) -> None:
+    def _record_failure_reason(self, url: str, kind: FailureKind, reason: str) -> None:
         from ..processing.github_blob_url import github_blob_to_raw
         from ..processing.url_normalizer import normalize_url
 

@@ -39,9 +39,9 @@ from .types import DEGRADABLE_4XX
 
 if TYPE_CHECKING:
     from ..fetchers.http_fetcher import HttpFetcher
-    from ..processing.antibot_detector import BlockKind
     from ..processing.pipeline import ContentPipeline
     from ..router.domain_metrics import DomainMetricsManager
+    from .types import FailureKind
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class FetchEngineFetchMixin:
         _crawl_timeout: float
         _youtube_languages: list[str] | None
 
-        def _record_failure_reason(self, url: str, kind: BlockKind, reason: str) -> None: ...
+        def _record_failure_reason(self, url: str, kind: FailureKind, reason: str) -> None: ...
 
         async def _try_escalation(self, url: str) -> tuple[Document | None, FetchResult | None]: ...
 
@@ -84,6 +84,8 @@ class FetchEngineFetchMixin:
             return None, False, fetch_result
 
         if 400 <= fetch_result.status_code < 500 and fetch_result.status_code not in DEGRADABLE_4XX:
+            failure_kind: FailureKind = "not_found" if fetch_result.status_code in (404, 410) else "error_page"
+            self._record_failure_reason(url, failure_kind, f"HTTP {fetch_result.status_code}")
             logger.warning(f"HTTP {fetch_result.status_code} not degradable, abort: {url}")
             return None, False, None
 

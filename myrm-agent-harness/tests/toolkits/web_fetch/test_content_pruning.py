@@ -173,5 +173,106 @@ def test_pruning_survives_depth_1050_without_recursion_error() -> None:
     assert "Important paragraph deep inside" in kept
 
 
+@pytest.mark.parametrize(
+    "hidden_markup",
+    [
+        '<div style="display:none">HIDDEN_TOKEN</div>',
+        '<div style="color: red; display: none !important; margin: 0">HIDDEN_TOKEN</div>',
+        '<span style="visibility: hidden">HIDDEN_TOKEN</span>',
+        '<span style="visibility: collapse !important">HIDDEN_TOKEN</span>',
+        "<p hidden>HIDDEN_TOKEN</p>",
+        '<p hidden="hidden">HIDDEN_TOKEN</p>',
+        '<div aria-hidden="true">HIDDEN_TOKEN</div>',
+        "<template><p>HIDDEN_TOKEN</p></template>",
+        "<iframe>HIDDEN_TOKEN</iframe>",
+        "<noscript>HIDDEN_TOKEN</noscript>",
+        "<object>HIDDEN_TOKEN</object>",
+    ],
+)
+def test_non_visible_dom_elements_are_stripped_in_both_pruning_and_raw_markdown(hidden_markup: str) -> None:
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
+
+    html = (
+        "<html><body><article>"
+        "<p>Visible authoritative documentation paragraph with enough prose to survive pruning.</p>"
+        f"{hidden_markup}"
+        "</article></body></html>"
+    )
+
+    pruned = "".join(ContentPruningFilter().filter_content(html))
+    raw_md = HTML2Markdown().handle(html)
+
+    assert "Visible authoritative documentation paragraph" in pruned
+    assert "HIDDEN_TOKEN" not in pruned
+    assert "Visible authoritative documentation paragraph" in raw_md
+    assert "HIDDEN_TOKEN" not in raw_md
+
+
+@pytest.mark.parametrize(
+    ("void_markup", "tag_name"),
+    [
+        ('<input type="hidden" value="SECRET_VALUE">', "input"),
+        ('<embed src="https://evil.test/payload.swf">', "embed"),
+    ],
+)
+def test_hidden_void_elements_are_decomposed_from_dom(void_markup: str, tag_name: str) -> None:
+    from bs4 import BeautifulSoup, Tag
+
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown_helpers import (
+        is_hidden_dom_element,
+        strip_non_visible_elements,
+    )
+
+    soup = BeautifulSoup(f"<html><body><article><p>Visible prose.</p>{void_markup}</article></body></html>", "lxml")
+    assert isinstance(soup.body, Tag)
+    target = soup.body.find(tag_name)
+    assert isinstance(target, Tag)
+    assert is_hidden_dom_element(target) is True
+
+    strip_non_visible_elements(soup.body)
+    assert soup.body.find(tag_name) is None
+    assert "Visible prose." in soup.body.get_text()
+
+
+def test_visible_styles_and_until_found_hidden_remain_intact() -> None:
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
+
+    html = (
+        "<html><body><article>"
+        '<p style="display: block; visibility: visible">VISIBLE_BLOCK_TEXT</p>'
+        '<div hidden="until-found"><p>EXPANDABLE_SECTION_TEXT</p></div>'
+        '<div aria-hidden="false"><p>ACCESSIBLE_TEXT</p></div>'
+        '<input type="text" value="ok">'
+        "</article></body></html>"
+    )
+
+    raw_md = HTML2Markdown().handle(html)
+
+    assert "VISIBLE_BLOCK_TEXT" in raw_md
+    assert "EXPANDABLE_SECTION_TEXT" in raw_md
+    assert "ACCESSIBLE_TEXT" in raw_md
+
+
+def test_hidden_dom_stripping_survives_deep_nesting_without_recursion_error() -> None:
+    from bs4 import BeautifulSoup, Tag
+
+    from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown_helpers import strip_non_visible_elements
+
+    depth = 1150
+    html = (
+        "<html><body>"
+        + ("<div>" * depth)
+        + '<span style="display:none">DEEP_HIDDEN</span><p>DEEP_VISIBLE</p>'
+        + ("</div>" * depth)
+        + "</body></html>"
+    )
+    soup = BeautifulSoup(html, "lxml")
+    assert isinstance(soup.body, Tag)
+    strip_non_visible_elements(soup.body)
+    text = soup.body.get_text()
+    assert "DEEP_VISIBLE" in text
+    assert "DEEP_HIDDEN" not in text
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

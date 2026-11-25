@@ -296,3 +296,52 @@ async def test_session_vault_empty_entry_skips_cookies(install_fake_curl_session
 
 def test_extract_domain_strips_www() -> None:
     assert HttpFetcher._extract_domain("https://www.blocked.example/path") == "blocked.example"
+
+
+@pytest.mark.asyncio
+async def test_fetch_sends_markdown_accept_negotiation_header() -> None:
+    fetcher = HttpFetcher()
+    captured_headers: list[dict[str, str]] = []
+
+    async def fake_fetch_with_redirects(
+        _url: str,
+        *,
+        headers: dict[str, str],
+        **_kwargs: object,
+    ) -> FetchResult | None:
+        captured_headers.append(headers.copy())
+        return success_result()
+
+    with patch.object(fetcher, "_fetch_with_redirects", side_effect=fake_fetch_with_redirects):
+        await fetcher.fetch("https://docs.example/guide")
+        await fetcher.fetch("https://mp.weixin.qq.com/s/test-article")
+
+    assert captured_headers[0]["Accept"].startswith("text/markdown")
+    assert "text/html" in captured_headers[0]["Accept"]
+    assert captured_headers[1]["Accept"].startswith("text/html")
+
+
+@pytest.mark.asyncio
+async def test_fetch_markdown_content_type_returns_text_payload(install_fake_curl_session: AsyncMock) -> None:
+    from myrm_agent_harness.utils.content_sniff import PayloadKind
+
+    fetcher = HttpFetcher()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.body = b"# Negotiated Guide\n\nClean markdown directly from origin.\n"
+    mock_response.encoding = "utf-8"
+    mock_response.url = "https://docs.example/guide"
+    mock_response.headers = {"content-type": "text/markdown; charset=utf-8"}
+    install_fake_curl_session.return_value = mock_response
+
+    result = await fetcher._fetch_with_redirects(
+        "https://docs.example/guide",
+        headers={"Accept": "text/markdown, text/html;q=0.9, */*;q=0.1"},
+        cookie_jar=None,
+        enable_ssrf_shield=False,
+        allowed_hosts=[],
+    )
+
+    assert result is not None
+    assert result.kind is PayloadKind.TEXT
+    assert result.html.startswith("# Negotiated Guide")

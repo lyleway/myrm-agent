@@ -50,6 +50,7 @@ _MICROMESSENGER_UA = (
     "MicroMessenger/8.0.38(0x18002633) NetType/WIFI Language/zh_CN"
 )
 _REFERER = "https://mp.weixin.qq.com/"
+_WEIXIN_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 _BLOCK_MARKERS = ("环境异常", "完成验证后即可继续访问")
 _REQUEST_TIMEOUT = 15
 _MIN_BODY_CHARS = 80
@@ -98,7 +99,7 @@ def get_weixin_request_headers(hostname: str) -> dict[str, str]:
     """Return extra HTTP headers for mp.weixin.qq.com L1 requests."""
     host = hostname.lower()
     if host == _ALLOWED_HOST or host.endswith(f".{_ALLOWED_HOST}"):
-        return {"User-Agent": _MICROMESSENGER_UA, "Referer": _REFERER}
+        return {"User-Agent": _MICROMESSENGER_UA, "Referer": _REFERER, "Accept": _WEIXIN_ACCEPT}
     return {}
 
 
@@ -285,7 +286,7 @@ def _fetch_html(url: str, opener: urllib.request.OpenerDirector) -> str | None:
         headers={
             "User-Agent": _MICROMESSENGER_UA,
             "Referer": _REFERER,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept": _WEIXIN_ACCEPT,
             "Accept-Language": "zh-CN,zh;q=0.9",
         },
     )

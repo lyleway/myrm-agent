@@ -1,7 +1,7 @@
 """HTML to Markdown converter built on BeautifulSoup.
 
 [INPUT]
-- web_fetch.processing.html_to_markdown_helpers::ConvertOptions, BLOCK_TAGS, parse_ol_start, resolve_url, tables_with_rows (POS: Shared configuration and pure helper functions for HTML2Markdown)
+- web_fetch.processing.html_to_markdown_helpers::ConvertOptions, BLOCK_TAGS, parse_ol_start, resolve_url, strip_non_visible_elements, tables_with_rows (POS: Shared configuration and pure helper functions for HTML2Markdown)
 - web_fetch.processing.markdown_table::render_markdown_table (POS: Markdown table layout for converted HTML tables)
 
 [OUTPUT]
@@ -27,6 +27,7 @@ from .html_to_markdown_helpers import (
     ConvertOptions,
     parse_ol_start,
     resolve_url,
+    strip_non_visible_elements,
     tables_with_rows,
 )
 from .markdown_table import render_markdown_table
@@ -78,6 +79,7 @@ class HTML2Markdown:
         body = soup.find("body")
         root = body if body else soup
 
+        strip_non_visible_elements(root)
         self._tables_with_tr = tables_with_rows(root)
         try:
             result = self._convert_node(root)

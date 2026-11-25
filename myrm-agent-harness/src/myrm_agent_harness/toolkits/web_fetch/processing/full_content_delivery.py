@@ -50,6 +50,10 @@ _BLOCKED_STOP_GUIDANCE = (
     "Do NOT retry fetching these URLs via terminal tools (such as curl), alternate user-agents, proxies, or reader mirrors. "
     "Inform the user that the page could not be read due to site access restrictions, and answer using available search snippets or suggest an alternative."
 )
+_NOT_FOUND_GUIDANCE = (
+    "The target page(s) do not exist (HTTP 404/410). "
+    "Do NOT retry these URLs; find a different source or synthesize the final answer from available information."
+)
 _NEEDS_JS_GUIDANCE = (
     "The target page(s) require client-side JavaScript rendering and could not be read via HTTP. "
     "Please synthesize the answer from available search snippets or ask the user whether to open the page in a browser."
@@ -58,6 +62,13 @@ _DEFAULT_FAILED_GUIDANCE = (
     "The target page(s) may be unavailable (HTTP 404/403/timeout). "
     "Please synthesize the final answer using search snippets or other available information."
 )
+# Fixed trusted labels appended per URL when a failure classification is available (never raw server text).
+_FAILURE_KIND_LABELS: dict[str, str] = {
+    "blocked": "blocked by site",
+    "not_found": "HTTP 404/410 — not found",
+    "needs_javascript": "requires JavaScript",
+    "error_page": "server error",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,23 +120,30 @@ def plan_full_content(
     the pages are numbered from 1. ``source_notice`` names, by those numbers, the pages whose source was cut short.
     """
     numbers = list(range(1, len(pages) + 1)) if indices is None else list(indices)
-    delivery = _layout(pages, failed_urls, numbers)
-    blocked_notice = (
-        f"\n\n[web_fetch]: {_BLOCKED_STOP_GUIDANCE}"
-        if failure_reasons and any(failure_reasons.get(u, ("", ""))[0] == "blocked" for u in failed_urls)
-        else ""
-    )
-    return replace(delivery, source_notice=_source_cut_notice(pages, numbers), blocked_notice=blocked_notice)
+    delivery = _layout(pages, failed_urls, numbers, failure_reasons=failure_reasons)
+    kinds = {failure_reasons[u][0] for u in failed_urls if failure_reasons and u in failure_reasons}
+    notices: list[str] = []
+    if "blocked" in kinds:
+        notices.append(f"\n\n[web_fetch]: {_BLOCKED_STOP_GUIDANCE}")
+    if "not_found" in kinds:
+        notices.append(f"\n\n[web_fetch]: {_NOT_FOUND_GUIDANCE}")
+    return replace(delivery, source_notice=_source_cut_notice(pages, numbers), blocked_notice="".join(notices))
 
 
-def _layout(pages: Sequence[FetchedPage], failed_urls: Sequence[str], numbers: Sequence[int]) -> FullContentDelivery:
+def _layout(
+    pages: Sequence[FetchedPage],
+    failed_urls: Sequence[str],
+    numbers: Sequence[int],
+    *,
+    failure_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> FullContentDelivery:
     headers = [
         format_document_header(number, page.url, page.title, include_title=True, include_date=False)
         for number, page in zip(numbers, pages, strict=True)
     ]
     bodies = [page.body for page in pages]
     budget = max(MIN_BUDGET_CHARS, PER_PAGE_BUDGET_CHARS * min(len(pages), MAX_BUDGETED_PAGES))
-    failures = _failure_block(failed_urls)
+    failures = _failure_block(failed_urls, failure_reasons=failure_reasons)
 
     sizes = _block_sizes(headers, bodies)
     if sum(sizes) <= budget:
@@ -185,17 +203,18 @@ def all_failed_content(
     from myrm_agent_harness.core.security.detection.content_boundary import wrap_untrusted
 
     kinds = {failure_reasons[u][0] for u in failed_urls if failure_reasons and u in failure_reasons}
+    guidance_parts: list[str] = []
     if "blocked" in kinds:
-        guidance = _BLOCKED_STOP_GUIDANCE
-    elif "needs_javascript" in kinds:
-        guidance = _NEEDS_JS_GUIDANCE
-    else:
-        guidance = _DEFAULT_FAILED_GUIDANCE
+        guidance_parts.append(_BLOCKED_STOP_GUIDANCE)
+    if "not_found" in kinds:
+        guidance_parts.append(_NOT_FOUND_GUIDANCE)
+    if not guidance_parts:
+        guidance_parts.append(_NEEDS_JS_GUIDANCE if "needs_javascript" in kinds else _DEFAULT_FAILED_GUIDANCE)
 
     return (
         "[web_fetch]: Could not retrieve content from the requested URL(s):\n"
-        f"{wrap_untrusted(_failure_listing(failed_urls), source='web_fetch')}\n"
-        f"{guidance}"
+        f"{wrap_untrusted(_failure_listing(failed_urls, failure_reasons=failure_reasons), source='web_fetch')}\n"
+        f"{'\n'.join(guidance_parts)}"
     )
 
 
@@ -281,14 +300,29 @@ def _wrap_line(line: str) -> str:
     return "\n".join(pieces)
 
 
-def _failure_listing(urls: Sequence[str]) -> str:
+def _failure_listing(
+    urls: Sequence[str],
+    *,
+    failure_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> str:
     """One ``- <url>`` line per distinct URL; they come from the model or a page, so drop control characters and cap."""
-    cleaned = (("".join(ch for ch in url if ch.isprintable()))[:_MAX_FAILED_URL_CHARS] for url in urls)
-    return "\n".join(f"- {url}" for url in dict.fromkeys(url for url in cleaned if url))
+    entries: dict[str, str] = {}
+    for raw_url in urls:
+        cleaned = ("".join(ch for ch in raw_url if ch.isprintable()))[:_MAX_FAILED_URL_CHARS]
+        if not cleaned or cleaned in entries:
+            continue
+        reason = failure_reasons.get(raw_url) if failure_reasons else None
+        label = _FAILURE_KIND_LABELS.get(reason[0]) if reason else None
+        entries[cleaned] = f"- {cleaned} ({label})" if label else f"- {cleaned}"
+    return "\n".join(entries.values())
 
 
-def _failure_block(failed_urls: Sequence[str]) -> str:
-    listing = _failure_listing(failed_urls)
+def _failure_block(
+    failed_urls: Sequence[str],
+    *,
+    failure_reasons: Mapping[str, tuple[str, str]] | None = None,
+) -> str:
+    listing = _failure_listing(failed_urls, failure_reasons=failure_reasons)
     return f"{_FAILED_LEAD}\n{listing}\n\n" if listing else ""
 
 

@@ -1,5 +1,12 @@
 """FetchEngine shared types and constants.
 
+[INPUT]
+- web_fetch.processing.antibot_detector::BlockKind (POS: Anti-bot/JS/error-page classification literal)
+
+[OUTPUT]
+- FailureKind: Fetch outcome failure literal ("blocked" | "needs_javascript" | "error_page" | "not_found")
+- SuccessResult, FailedResult, NoSharedResult, NO_SHARED_RESULT, InFlightFetch, DEGRADABLE_4XX, CachedDocument
+
 [POS]
 Dataclasses and result aliases shared by FetchEngine and its internal mixins.
 """
@@ -8,8 +15,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from typing import Literal
 
 from langchain_core.documents import Document
+
+from ..processing.antibot_detector import BlockKind
+
+FailureKind = BlockKind | Literal["not_found"]
 
 SuccessResult = list[tuple[str, Document]]
 FailedResult = list[tuple[str, None]]
