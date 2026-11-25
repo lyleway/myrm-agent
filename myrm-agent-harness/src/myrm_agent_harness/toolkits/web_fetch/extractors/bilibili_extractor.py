@@ -23,7 +23,7 @@ Design pattern: analogous to youtube_extractor.py — special content source rou
 [POS]
 Bilibili subtitle fast-path extractor. Returns timestamped Markdown Documents
 with video metadata (title, author, duration) via Bilibili public API; returns
-None for Browser fallback when subtitle unavailable.
+None for HTTP/L4 fallback when subtitle unavailable.
 """
 
 from __future__ import annotations
@@ -100,7 +100,9 @@ def _build_opener(proxy_pool: ProxyPool | None = None) -> urllib.request.OpenerD
     return urllib.request.build_opener()
 
 
-def _api_request(url: str, opener: urllib.request.OpenerDirector, cookies: dict[str, str] | None = None) -> dict:
+def _api_request(
+    url: str, opener: urllib.request.OpenerDirector, cookies: dict[str, str] | None = None
+) -> dict[str, object]:
     """Make an API request to Bilibili and return parsed JSON."""
     headers = dict(_DEFAULT_HEADERS)
     if cookies:
@@ -109,7 +111,8 @@ def _api_request(url: str, opener: urllib.request.OpenerDirector, cookies: dict[
 
     req = urllib.request.Request(url, headers=headers)  # noqa: S310
     with opener.open(req, timeout=_REQUEST_TIMEOUT) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        parsed = json.loads(resp.read().decode("utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
 
 
 async def _fetch_video_metadata(
@@ -124,12 +127,18 @@ async def _fetch_video_metadata(
             if data.get("code") != 0:
                 logger.info("Bilibili view API returned code %s for %s", data.get("code"), bvid)
                 return None
-            video_data = data["data"]
+            video_data = data.get("data")
+            if not isinstance(video_data, dict):
+                return None
+            owner = video_data.get("owner")
+            author_name = str(owner.get("name", "")) if isinstance(owner, dict) else ""
+            cid_raw = video_data.get("cid", 0)
+            duration_raw = video_data.get("duration", 0)
             return {
-                "title": video_data.get("title", ""),
-                "author_name": video_data.get("owner", {}).get("name", ""),
-                "cid": video_data.get("cid", 0),
-                "duration": video_data.get("duration", 0),
+                "title": str(video_data.get("title", "")),
+                "author_name": author_name,
+                "cid": int(cid_raw) if isinstance(cid_raw, (int, float, str)) else 0,
+                "duration": int(duration_raw) if isinstance(duration_raw, (int, float, str)) else 0,
                 "bvid": bvid,
             }
         except Exception as exc:
@@ -162,11 +171,15 @@ async def _fetch_subtitle(
                 logger.debug("Bilibili player API returned code %s for %s", data.get("code"), bvid)
                 return None
 
-            subtitles = data.get("data", {}).get("subtitle", {}).get("subtitles", [])
-            if not subtitles:
+            raw_data = data.get("data")
+            subtitle_obj = raw_data.get("subtitle") if isinstance(raw_data, dict) else None
+            subtitles = subtitle_obj.get("subtitles") if isinstance(subtitle_obj, dict) else None
+            if not isinstance(subtitles, list) or not subtitles:
                 return None
 
-            subtitle_url = subtitles[0].get("subtitle_url", "")
+            first_sub = subtitles[0]
+            subtitle_url_raw = first_sub.get("subtitle_url", "") if isinstance(first_sub, dict) else ""
+            subtitle_url = str(subtitle_url_raw) if subtitle_url_raw else ""
             if not subtitle_url:
                 return None
 
@@ -174,11 +187,23 @@ async def _fetch_subtitle(
                 subtitle_url = "https:" + subtitle_url
 
             subtitle_data = _api_request(subtitle_url, opener, cookies=cookies)
-            body = subtitle_data.get("body", [])
-            if not body:
+            body = subtitle_data.get("body")
+            if not isinstance(body, list) or not body:
                 return None
 
-            return body
+            segments: list[dict[str, float | str]] = []
+            for item in body:
+                if not isinstance(item, dict):
+                    continue
+                seg: dict[str, float | str] = {}
+                for k, v in item.items():
+                    if isinstance(v, (int, float)):
+                        seg[str(k)] = float(v)
+                    elif isinstance(v, str):
+                        seg[str(k)] = v
+                if seg:
+                    segments.append(seg)
+            return segments or None
         except Exception as exc:
             logger.debug("Bilibili subtitle fetch failed for %s: %s", bvid, exc)
             return None
@@ -201,7 +226,7 @@ async def extract_bilibili_subtitle(
 
     Returns:
         Document with timestamped subtitle as page_content and video metadata,
-        or None if subtitle is unavailable (triggers Browser fallback).
+        or None if subtitle is unavailable (falls back to HTTP/L4 fetch).
     """
     bvid = _extract_bvid(url)
     if not bvid:
@@ -222,7 +247,7 @@ async def extract_bilibili_subtitle(
     if not segments:
         return None
 
-    timestamped_lines = [f"{_format_timestamp(seg.get('from', 0))} {seg.get('content', '')}" for seg in segments]
+    timestamped_lines = [f"{_format_timestamp(float(seg.get('from', 0)))} {seg.get('content', '')}" for seg in segments]
     full_text = "\n".join(timestamped_lines)
 
     duration = int(metadata_result.get("duration", 0))

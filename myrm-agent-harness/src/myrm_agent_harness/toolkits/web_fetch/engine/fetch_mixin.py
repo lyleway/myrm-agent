@@ -1,22 +1,21 @@
-"""FetchEngine network fetch, platform fast-path, degradation, and tier-breaker feedback helpers.
+"""FetchEngine network fetch, platform fast-path, L1 HTTP / L4 escalation, and failure-history helpers.
 
 [INPUT]
 web_fetch.extractors.bilibili_extractor::extract_bilibili_subtitle, is_bilibili_url (POS: Bilibili subtitle fast-path)
 web_fetch.extractors.weixin_extractor::extract_weixin_article, is_weixin_article_url (POS: WeChat article fast-path)
 web_fetch.extractors.x_extractor::extract_x_post, is_x_url (POS: X post fast-path)
 web_fetch.extractors.youtube_extractor::extract_youtube_transcript, is_youtube_url (POS: YouTube transcript fast-path)
-web_fetch.fetchers.protocols::Fetcher, FetcherType, FetchResult (POS: Fetcher protocol types)
-web_fetch.processing.antibot_detector::classify_block (POS: Anti-bot & JS-shell classification)
+web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
+web_fetch.processing.antibot_detector::classify_block (POS: Anti-bot, JS-shell, and error-page classification)
 web_fetch.processing.pipeline::run_on_conversion_thread (POS: Dedicated conversion thread runner)
 web_fetch.router::domain_key (POS: Domain normalization key)
 web_fetch.engine.types::DEGRADABLE_4XX (POS: Shared engine types and constants)
 
 [OUTPUT]
-FetchEngineFetchMixin: Network fetch, platform fast-path, L1/L2/L3 tier degradation, and tier-breaker feedback mixin
+FetchEngineFetchMixin: Network fetch, platform fast-path, L1 HTTP with optional L4 escalation, and failure-history feedback mixin
 
 [POS]
-Mixin: platform fast-paths (YouTube, Bilibili, WeChat, X) ahead of the L1/L2/L3 tier ladder, L1/L2/L3
-fetch+pipeline, tier degradation, tier-breaker and failure-history feedback.
+Mixin: platform fast-paths (YouTube, Bilibili, WeChat, X) ahead of L1 HTTP fetch + pipeline, optional L4 remote escalation, and failure-history feedback.
 """
 
 from __future__ import annotations
@@ -39,14 +38,30 @@ from ..router import domain_key
 from .types import DEGRADABLE_4XX
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+    from ..fetchers.http_fetcher import HttpFetcher
+    from ..processing.antibot_detector import BlockKind
+    from ..processing.pipeline import ContentPipeline
+    from ..router.domain_metrics import DomainMetricsManager
 
 logger = logging.getLogger(__name__)
 
 
 class FetchEngineFetchMixin:
+    if TYPE_CHECKING:
+        _http_fetcher: HttpFetcher
+        _pipeline: ContentPipeline
+        _domain_metrics: DomainMetricsManager
+        _crawl_timeout: float
+        _youtube_languages: list[str] | None
+
+        def _record_failure_reason(self, url: str, kind: BlockKind, reason: str) -> None: ...
+
+        async def _try_escalation(self, url: str) -> tuple[Document | None, FetchResult | None]: ...
+
+        async def _load_bilibili_cookies(self) -> dict[str, str] | None: ...
+
     async def _try_fetch_and_process(
-        self: FetchEngine,
+        self,
         url: str,
         fetcher_type: FetcherType = FetcherType.HTTP,
         *,
@@ -87,9 +102,7 @@ class FetchEngineFetchMixin:
             return await self._pipeline.aprocess(fetch_result), True, fetch_result
 
         if not fetch_result.has_content:
-            kind, reason = classify_block(
-                fetch_result.status_code, fetch_result.html, headers=fetch_result.headers
-            )
+            kind, reason = classify_block(fetch_result.status_code, fetch_result.html, headers=fetch_result.headers)
             if kind is not None:
                 self._record_failure_reason(url, kind, reason)
                 logger.warning("Fetch %s (%s): %s", kind, reason, url)
@@ -121,7 +134,7 @@ class FetchEngineFetchMixin:
         return await self._pipeline.aprocess(fetch_result), True, fetch_result
 
     async def _try_and_report(
-        self: FetchEngine,
+        self,
         url: str,
         fetcher_type: FetcherType = FetcherType.HTTP,
         *,
@@ -140,7 +153,7 @@ class FetchEngineFetchMixin:
         return doc, degradable, fetch_result
 
     async def _crawl_with_degradation(
-        self: FetchEngine,
+        self,
         url: str,
         *,
         etag: str | None = None,
@@ -170,20 +183,20 @@ class FetchEngineFetchMixin:
 
         return doc, result
 
-    def _report_feedback(self: FetchEngine, url: str, fetcher_type: FetcherType, *, success: bool) -> None:
+    def _report_feedback(self, url: str, fetcher_type: FetcherType, *, success: bool) -> None:
         """Record fetch failures in domain metrics for the site-experience staleness hint."""
         if not success:
             self._domain_metrics.record_failure(domain_key(url), fetcher_type)
 
     async def _fetch_from_network(
-        self: FetchEngine,
+        self,
         url: str,
         *,
         etag: str | None,
         last_modified: str | None,
         allow_escalation: bool,
     ) -> tuple[Document | None, FetchResult | None]:
-        """Fetch ``url`` over the network: the platform fast-path when it has one, then the tier ladder.
+        """Fetch ``url`` over the network: the platform fast-path when it has one, then L1 HTTP / optional L4.
 
         Each stage runs under its own crawl timeout, so a URL whose fast-path misses can take twice the cap.
         """

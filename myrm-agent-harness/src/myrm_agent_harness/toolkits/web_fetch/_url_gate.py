@@ -12,7 +12,7 @@
 
 [POS]
 Runs before any request of the web fetch tool. A URL is judged in the spelling it is fetched in, so the
-blocklist, the SSRF guard and the HTTP, stealth and browser tiers all read the same host.
+blocklist, the SSRF guard, and the HTTP fetcher all read the same host.
 """
 
 from __future__ import annotations

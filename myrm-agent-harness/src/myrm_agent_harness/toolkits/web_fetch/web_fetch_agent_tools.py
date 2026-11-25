@@ -93,8 +93,8 @@ def create_web_fetch_tool(
 
     ``network_blocklist_provider`` returns the user's current network blocklist (exact or ``*.``
     wildcard hosts) and is called on every tool call. A listed host is never read: the requested
-    URL is refused, and so is a redirect that leads to one (the HTTP tier judges every hop before
-    requesting it, the browser tiers the URL they were given and the page they ended on).
+    URL is refused, and so is a redirect that leads to one (L1 HTTP judges every hop before
+    requesting it, and L4 remote escalation judges the final URL reported by the provider).
 
     ``description_locale`` selects the LLM-facing tool description locale
     (default English).

@@ -35,9 +35,7 @@ class TestClassifyBlockProtocolSignals:
             ({"x-amzn-waf-action": "challenge"}, "x-amzn-waf-action"),
         ],
     )
-    def test_waf_challenge_headers_classify_as_blocked(
-        self, headers: dict[str, str], expected_substr: str
-    ) -> None:
+    def test_waf_challenge_headers_classify_as_blocked(self, headers: dict[str, str], expected_substr: str) -> None:
         kind, reason = classify_block(200, RICH_HTML, headers=headers)
         assert kind == "blocked"
         assert expected_substr in reason
@@ -51,6 +49,17 @@ class TestClassifyBlockProtocolSignals:
     def test_200_with_empty_or_script_shell_classifies_as_needs_javascript(self) -> None:
         assert classify_block(200, _UNTITLED_SCRIPT_SHELL)[0] == "needs_javascript"
         assert classify_block(200, "<html></html>")[0] == "needs_javascript"
+
+    @pytest.mark.parametrize("status_code", [500, 502, 503, 504])
+    def test_plain_5xx_outage_classifies_as_error_page_not_explicit_block(self, status_code: int) -> None:
+        html = f"<html><body><h1>{status_code} Upstream Error</h1></body></html>"
+        kind, _ = classify_block(status_code, html)
+        assert kind == "error_page"
+        assert is_blocked(status_code, html)[0] is True
+
+    def test_503_with_waf_marker_still_classifies_as_blocked(self) -> None:
+        html = "<html><head><title>Just a moment</title></head><body>Checking your browser</body></html>"
+        assert classify_block(503, html)[0] == "blocked"
 
 
 class TestFetchEngineFailureReasonPropagation:
@@ -122,6 +131,14 @@ class TestStopTextGuidance:
         assert "JavaScript" in text
         assert "Do NOT retry" not in text
 
+    def test_all_failed_content_emits_default_guidance_for_error_page(self) -> None:
+        text = all_failed_content(
+            ["https://down.example/page"],
+            failure_reasons={"https://down.example/page": ("error_page", "HTTP 502 with HTML content")},
+        )
+        assert "Do NOT retry" not in text
+        assert "unavailable" in text
+
     def test_partial_failure_with_blocked_url_appends_blocked_notice(self) -> None:
         delivery = plan_full_content(
             [FetchedPage(url="https://ok.example/a", title="OK", body="hello world")],
@@ -130,3 +147,61 @@ class TestStopTextGuidance:
         )
         assert "Do NOT retry" in delivery.blocked_notice
         assert "curl" in delivery.blocked_notice
+
+
+@pytest.mark.integration
+class TestR29LiveLoopbackEndToEnd:
+    """Real loopback HTTP server + real web_fetch_tool (zero fetcher/detector mocks)."""
+
+    @pytest.mark.asyncio
+    async def test_live_web_fetch_tool_distinguishes_502_outage_from_503_waf_and_403(self) -> None:
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from myrm_agent_harness.toolkits.web_fetch.web_fetch_agent_tools import create_web_fetch_tool
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if self.path == "/outage-502":
+                    body = b"<html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1><p>nginx</p></body></html>"
+                    self.send_response(502)
+                elif self.path == "/waf-503":
+                    body = b"<html><head><title>Just a moment</title></head><body>Checking your browser</body></html>"
+                    self.send_response(503)
+                else:
+                    body = b"<html><head><title>403 Forbidden</title></head><body>Access Denied</body></html>"
+                    self.send_response(403)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, format: str, *args: object) -> None:
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            tool = create_web_fetch_tool(allow_private_networks=True)
+
+            outage_result = str(
+                await tool.ainvoke({"urls": [f"http://127.0.0.1:{port}/outage-502"], "reason": "check 502 outage"})
+            )
+            assert "502 Bad Gateway" not in outage_result
+            assert "Do NOT retry" not in outage_result
+            assert "Could not retrieve content" in outage_result
+
+            waf_503_result = str(
+                await tool.ainvoke({"urls": [f"http://127.0.0.1:{port}/waf-503"], "reason": "check 503 waf"})
+            )
+            assert "Do NOT retry" in waf_503_result
+
+            blocked_403_result = str(
+                await tool.ainvoke({"urls": [f"http://127.0.0.1:{port}/blocked-403"], "reason": "check 403 block"})
+            )
+            assert "Do NOT retry" in blocked_403_result
+        finally:
+            server.shutdown()
+            server.server_close()

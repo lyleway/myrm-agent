@@ -22,8 +22,8 @@ content rules judge them.
 - web_fetch.processing.html_scan::body_content, extract_title, strip_script_and_style, strip_tags (POS: Linear-time scans of raw HTML text)
 
 [OUTPUT]
-- BlockKind: Failure classification literal ("blocked" | "needs_javascript")
-- classify_block: Classifies a response as explicit site block ("blocked"), JS-required shell ("needs_javascript"), or OK (None)
+- BlockKind: Failure classification literal ("blocked" | "needs_javascript" | "error_page")
+- classify_block: Classifies a response as explicit site block ("blocked"), JS-required shell ("needs_javascript"), generic HTTP/error page ("error_page"), or OK (None)
 - is_blocked: Tells whether a crawl result was blocked by anti-bot protection or is an error page, with the reason
 
 [POS]
@@ -38,7 +38,7 @@ from typing import Literal
 
 from .html_scan import body_content, extract_title, strip_script_and_style, strip_tags
 
-BlockKind = Literal["blocked", "needs_javascript"]
+BlockKind = Literal["blocked", "needs_javascript", "error_page"]
 
 # ---------------------------------------------------------------------------
 # Tier 1: High-confidence structural markers (any page size)
@@ -230,14 +230,16 @@ def classify_block(
     title: str | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> tuple[BlockKind | None, str]:
-    """Classify a fetch response as explicit site block, JS-required empty shell, or normal content.
+    """Classify a fetch response as explicit site block, JS-required empty shell, generic error page, or normal content.
 
     Protocol-level signals (HTTP 403/429, ``cf-mitigated: challenge``, ``x-amzn-waf-action: challenge``,
-    HTTP 202 + script shell, WAF markers, 5xx) classify as ``"blocked"``.
+    HTTP 202 + script shell, WAF markers) classify as ``"blocked"``.
     HTTP 200 structural empty shells / near-empty non-data pages classify as ``"needs_javascript"``.
+    Plain HTTP 5xx server outages without WAF markers and generic non-access-denied error pages
+    classify as ``"error_page"``.
 
     Returns:
-        ``(kind, reason)`` where ``kind`` is ``"blocked"``, ``"needs_javascript"``, or ``None``.
+        ``(kind, reason)`` where ``kind`` is ``"blocked"``, ``"needs_javascript"``, ``"error_page"``, or ``None``.
     """
     html = html or ""
     html_len = len(html)
@@ -263,15 +265,16 @@ def classify_block(
             if pattern.search(deep_snippet):
                 return "blocked", reason
 
-    # --- HTTP 403 and 5xx: always blocked for non-data HTML ---
+    # --- HTTP 403 and 5xx: reject non-data HTML; only 403 or WAF-marked 5xx classify as explicit "blocked" ---
     if _is_refusal_status(status_code) and not _looks_like_data(html):
-        if html_len < _EMPTY_CONTENT_THRESHOLD:
-            return "blocked", f"HTTP {status_code} with near-empty response ({html_len} bytes)"
+        default_kind: BlockKind = "blocked" if status_code == 403 else "error_page"
         check_snippet = _scriptless_head(html) if html_len > _TIER2_MAX_SIZE else snippet
         for pattern, reason in _TIER2_PATTERNS:
             if pattern.search(check_snippet):
                 return "blocked", f"{reason} (HTTP {status_code}, {html_len} bytes)"
-        return "blocked", f"HTTP {status_code} with HTML content ({html_len} bytes)"
+        if html_len < _EMPTY_CONTENT_THRESHOLD:
+            return default_kind, f"HTTP {status_code} with near-empty response ({html_len} bytes)"
+        return default_kind, f"HTTP {status_code} with HTML content ({html_len} bytes)"
 
     # --- Tier 2: medium-confidence on other 4xx/5xx + short page ---
     if status_code and status_code >= 400 and html_len < _TIER2_MAX_SIZE:
@@ -296,7 +299,8 @@ def classify_block(
     # --- Error page detection ---
     blocked, reason = _check_error_page(title, html if html_len < 200 else None)
     if blocked:
-        return "blocked", reason
+        access_denied = any(tok in reason.lower() for tok in ("access denied", "forbidden", "unauthorized"))
+        return ("blocked" if access_denied else "error_page"), reason
 
     return None, ""
 

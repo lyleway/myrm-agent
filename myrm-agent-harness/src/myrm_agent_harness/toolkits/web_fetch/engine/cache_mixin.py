@@ -19,7 +19,7 @@ from myrm_agent_harness.core.security.guards.ssrf import SSRFSecurityError
 from .types import NO_SHARED_RESULT, CachedDocument, InFlightFetch, NoSharedResult
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+    from myrm_agent_harness.utils.lru_cache import LRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,12 @@ async def await_shared_result(
 
 
 class FetchEngineCacheMixin:
+    if TYPE_CHECKING:
+        _enable_http_validation: bool
+        _fail_cache: LRUCache[bool]
+
     def _handle_cache_hit(
-        self: FetchEngine,
+        self,
         cached_item: CachedDocument,
         is_expired: bool,
         url: str,
@@ -63,7 +67,7 @@ class FetchEngineCacheMixin:
         return None
 
     async def _handle_fetch_error(
-        self: FetchEngine,
+        self,
         url: str,
         cache_key: str,
         future: InFlightFetch,

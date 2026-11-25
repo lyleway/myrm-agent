@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from myrm_agent_harness.toolkits.file_parsers.base import PDFHeading
 
@@ -25,6 +25,14 @@ if TYPE_CHECKING:
     from pdfplumber.pdf import PDF
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _Resolvable(Protocol):
+    """Minimal protocol for pdfminer lazy object references."""
+
+    def resolve(self) -> object: ...
+
 
 # Titles emitted by generic exporters (slide decks, scans) that carry no
 # document structure. A bookmark set dominated by these must not suppress
@@ -39,7 +47,7 @@ _DEGENERATE_MIN_BOOKMARKS = 3
 
 def _resolve_obj(obj: object) -> object:
     """Dereference a pdfminer PDFObjRef if present."""
-    if hasattr(obj, "resolve"):
+    if isinstance(obj, _Resolvable):
         return obj.resolve()
     return obj
 
@@ -77,6 +85,8 @@ def _resolve_dest_array(pdf: PDF, raw_dest: object) -> list[object] | tuple[obje
         if not hasattr(pdf.doc, "get_dest"):
             return None
         lookup_key: object = getattr(target, "name", target)
+        if not isinstance(lookup_key, (str, bytes)):
+            return None
         try:
             target = _resolve_obj(pdf.doc.get_dest(lookup_key))
         except Exception:
@@ -200,7 +210,7 @@ def _resolve_bookmark_page(
             return candidate
         return None
 
-    if hasattr(page_ref, "resolve"):
+    if isinstance(page_ref, _Resolvable):
         try:
             resolved = page_ref.resolve()
             for attr in ("pageid", "objid"):

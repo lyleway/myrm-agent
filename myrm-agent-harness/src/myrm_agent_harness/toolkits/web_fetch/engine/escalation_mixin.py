@@ -1,7 +1,7 @@
 """FetchEngine L4 escalation and platform fast-path helpers.
 
 [POS]
-Mixin: remote fetch escalation after local L1-L3 exhaustion; bilibili cookie loader.
+Mixin: remote fetch escalation after local L1 HTTP failure; bilibili cookie loader.
 A remote provider follows redirects on its own servers, so the network blocklist can only be judged on the URL it
 reports back; a provider that reports a listed host ends the fetch for every provider, since the redirect chain
 belongs to the URL, not to the provider.
@@ -21,13 +21,21 @@ from ..fetchers.protocols import FetcherType, FetchResult
 from ..fetchers.target_guard import assert_not_blocklisted
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+    from ..escalation.protocols import FetchEscalationProvider
+    from ..fetchers.http_fetcher import HttpFetcher
+    from ..processing.pipeline import ContentPipeline
 
 logger = logging.getLogger(__name__)
 
 
 class FetchEngineEscalationMixin:
-    async def _load_bilibili_cookies(self: FetchEngine) -> dict[str, str] | None:
+    if TYPE_CHECKING:
+        _http_fetcher: HttpFetcher
+        _escalation_providers: list[FetchEscalationProvider] | None
+        _network_blocklist: tuple[str, ...]
+        _pipeline: ContentPipeline
+
+    async def _load_bilibili_cookies(self) -> dict[str, str] | None:
         """Load bilibili.com cookies from SessionVault for subtitle API access."""
         vault = self._http_fetcher._session_vault
         if not vault:
@@ -40,8 +48,8 @@ class FetchEngineEscalationMixin:
         except Exception:
             return None
 
-    async def _try_escalation(self: FetchEngine, url: str) -> tuple[Document | None, FetchResult | None]:
-        """Try injected remote providers after local L1-L3 exhaustion."""
+    async def _try_escalation(self, url: str) -> tuple[Document | None, FetchResult | None]:
+        """Try injected remote providers after local L1 HTTP failure."""
         from ..escalation.context import get_bound_escalation_providers
 
         providers = get_bound_escalation_providers() or self._escalation_providers

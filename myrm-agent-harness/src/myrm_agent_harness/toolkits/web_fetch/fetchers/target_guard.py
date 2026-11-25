@@ -14,10 +14,10 @@
 - assert_not_blocklisted(): the blocklist verdict for one URL, for the callers that judge a single URL
 
 [POS]
-Per-fetch URL policy for the web_fetch tiers. The network blocklist is the user's list of hosts the agent
+Per-fetch URL policy for web_fetch. The network blocklist is the user's list of hosts the agent
 must not read; it holds for every page a fetch returns, so a listed host cannot be read by being the target
-of a redirect: the HTTP tier judges each hop before requesting it, the browser tiers the URL they were given and
-the page they ended on. It is judged first and needs no DNS, and it applies whether or not
+of a redirect: the HTTP fetcher judges each hop before requesting it, and L4 escalation judges the URL
+reported back by the remote provider. It is judged first and needs no DNS, and it applies whether or not
 the SSRF shield is on.
 
 The SSRF policy of the tiers that follow redirects: cloud policy resolves the host and requires every

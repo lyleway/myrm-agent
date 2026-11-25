@@ -16,7 +16,7 @@ Boundary: single-sandbox, single-process semantics.
 web_fetch.fetchers.http_fetcher::HttpFetcher (POS: L1 HTTP fetcher)
 web_fetch.fetchers.target_guard::assert_not_blocklisted (POS: network blocklist verdict for one URL)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
-web_fetch.processing.antibot_detector::is_blocked (POS: Anti-bot detection)
+web_fetch.processing.antibot_detector::BlockKind (POS: Anti-bot, JS-shell, and error-page classification)
 web_fetch.router.domain_metrics::get_global_domain_metrics_manager (POS: Per-domain failure history behind the staleness hint)
 browser.pool.proxy::ProxyPool (POS: Proxy pool for HTTP fetcher)
 utils.lru_cache::LRUCache (POS: Generic TTL-based LRU cache)
@@ -26,7 +26,7 @@ FetchEngine: HTTP fetch engine with optional L4 remote escalation, caching, and 
 
 [POS]
 Core fetch engine. Orchestrates L1 HTTP fetching and optional L4 remote escalation with
-in-memory caching, request coalescing, and stale-while-revalidate semantics.
+freshness-only in-memory caching, conditional revalidation, and request coalescing.
 The network blocklist is fixed for the life of an engine, so its caches never hold a page fetched under another
 list; a caller whose list can change builds a new engine for each call.
 

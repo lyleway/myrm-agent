@@ -25,15 +25,13 @@ if TYPE_CHECKING:
 
     from langchain_core.documents import Document
 
-    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
-
 logger = logging.getLogger(__name__)
 
 # Once any page is in hand, a URL whose fetch has run this long is no longer waited for.
 _STRAGGLER_AFTER_S = 25.0
-# With no page in hand, a URL is waited for this long past its crawl timeout (time to close its browser page).
+# With no page in hand, a URL is waited for this long past its crawl timeout to unwind cleanly.
 _UNWIND_GRACE_S = 3.0
-# When a call is torn down, its cancelled fetches get this long to release their browser pages.
+# When a call is torn down, its cancelled fetches get this long to settle.
 _CANCEL_SETTLE_S = 2.0
 
 
@@ -44,9 +42,9 @@ def _consume_outcome(task: asyncio.Task[Document | None]) -> None:
 
 
 async def cancel_fetches(fetches: Iterable[asyncio.Task[Document | None]]) -> None:
-    """Cancel the fetches of a call that is torn down (or of an engine shutting down) and let them release their pages.
+    """Cancel the fetches of a call that is torn down (or of an engine shutting down) and let them settle.
 
-    A fetch the engine's crawl timeout has already cancelled is unwinding (closing its browser page); a second cancel
+    A fetch the engine's crawl timeout has already cancelled is already unwinding; a second cancel
     would cut that cleanup short, so it is left to finish on its own.
     """
     cancelled: list[asyncio.Task[Document | None]] = []
@@ -60,8 +58,20 @@ async def cancel_fetches(fetches: Iterable[asyncio.Task[Document | None]]) -> No
 
 
 class FetchEngineBatchMixin:
+    if TYPE_CHECKING:
+        _crawl_timeout: float
+        _detached_fetches: set[asyncio.Task[Document | None]]
+
+        async def crawl(
+            self,
+            url: str,
+            *,
+            force_refresh: bool = False,
+            allow_escalation: bool = True,
+        ) -> Document | None: ...
+
     async def crawl_many(
-        self: FetchEngine,
+        self,
         urls: list[str],
         *,
         max_concurrency: int = 10,

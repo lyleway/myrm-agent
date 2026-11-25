@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -40,6 +41,14 @@ class RequestParams(TypedDict, total=False):
     proxy: str
     cookies: http.cookiejar.CookieJar | dict[str, str]
     verify: bool | str
+
+
+class _SessionGetKwargs(TypedDict, total=False):
+    timeout: int | float
+    allow_redirects: bool
+    headers: dict[str, str]
+    proxy: str
+    cookies: http.cookiejar.CookieJar | dict[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +85,11 @@ class _BodySink:
         return self._buffer.getvalue()
 
 
+def _normalize_headers(raw_headers: Mapping[str, str | None]) -> dict[str, str]:
+    """Convert curl_cffi response headers into a plain ``dict[str, str]``."""
+    return {str(key): value for key, value in raw_headers.items() if value is not None}
+
+
 async def bounded_get(url: str, request: RequestParams, addresses: tuple[str, ...] = ()) -> FetchedResponse:
     """GET ``url`` directly via curl_cffi ``AsyncSession``, keeping at most ``MAX_TRANSFER_BYTES + 1`` body bytes.
 
@@ -87,45 +101,55 @@ async def bounded_get(url: str, request: RequestParams, addresses: tuple[str, ..
     from curl_cffi.requests import AsyncSession, RequestsError
 
     sink = _BodySink(CURL_WRITEFUNC_ERROR)
-    pinned = () if request.get("proxy") else addresses
+    proxy = request.get("proxy")
+    cookies = request.get("cookies")
+    timeout = request.get("timeout", 10)
+    allow_redirects = request.get("allow_redirects", False)
+    verify = request.get("verify", True)
+
+    pinned = () if proxy else addresses
     curl_options = build_pin_curl_options(url, pinned)
 
     headers = dict(request.get("headers") or {})
     if not any(k.lower() == "referer" for k in headers):
         headers["Referer"] = _DEFAULT_REFERER
 
-    get_kwargs: dict[str, object] = {
-        "content_callback": sink,
-        "timeout": request.get("timeout", 10),
-        "allow_redirects": request.get("allow_redirects", False),
+    call_kwargs: _SessionGetKwargs = {
+        "timeout": timeout,
+        "allow_redirects": allow_redirects,
         "headers": headers,
-        "verify": request.get("verify", True),
     }
-    if request.get("proxy") is not None:
-        get_kwargs["proxy"] = request["proxy"]
-    if request.get("cookies") is not None:
-        get_kwargs["cookies"] = request["cookies"]
+    if proxy is not None:
+        call_kwargs["proxy"] = proxy
+    if cookies is not None:
+        call_kwargs["cookies"] = cookies
 
     try:
         async with AsyncSession(
             impersonate=_DEFAULT_IMPERSONATE,
             curl_options=curl_options or None,
         ) as session:
-            response = await session.get(url, **get_kwargs)
+            # curl_cffi accepts str CA-bundle paths at runtime; its stub narrows verify to bool | None.
+            response = await session.get(
+                url,
+                content_callback=sink,
+                verify=verify,  # pyright: ignore[reportArgumentType]
+                **call_kwargs,
+            )
     except RequestsError as exc:
         interrupted = exc.response
         if not sink.capped or interrupted is None:
             raise
         return FetchedResponse(
             interrupted.status_code,
-            dict(interrupted.headers),
+            _normalize_headers(interrupted.headers),
             interrupted.url,
             interrupted.encoding,
             sink.body,
         )
     return FetchedResponse(
         response.status_code,
-        dict(response.headers),
+        _normalize_headers(response.headers),
         response.url,
         response.encoding,
         sink.body,

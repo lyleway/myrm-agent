@@ -280,8 +280,7 @@ def _two_page_pdf_with_outlines(
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 100 0 R /Resources << /Font << /F1 6 0 R >> >> >>",
         b"<< /Length %d >>\nstream\n%s\nendstream" % (len(s1), s1),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>"
-        % (first_item, last_item, len(outline_items)),
+        b"<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>" % (first_item, last_item, len(outline_items)),
     ]
     # Place page-2 stream right after outline items and fix obj 4 reference.
     stream2_num = last_item + 1
@@ -414,8 +413,74 @@ class TestRealPdfOutlines:
         assert "# 1. Introduction" in result.text
         assert "# 2. Methods" in result.text
 
-
     def test_few_bookmarks_are_never_degenerate(self):
         headings = [PDFHeading(level=1, title="幻灯片 1", page_num=1)]
 
         assert bookmarks_are_degenerate(headings) is False
+
+
+class TestPdfBookmarkEdgeCases:
+    """Edge cases for lazy object refs, named destination fallbacks, and per-item fault isolation."""
+
+    def test_resolvable_dest_and_named_dest_fallbacks(self):
+        class _LazyRef:
+            def __init__(self, value: object) -> None:
+                self._value = value
+
+            def resolve(self) -> object:
+                return self._value
+
+        class _NamedObj:
+            def __init__(self, name: object) -> None:
+                self.name = name
+
+        class _ExplodingRef:
+            def resolve(self) -> object:
+                raise RuntimeError("corrupt xref")
+
+        def _get_dest(key: object) -> object:
+            if key == "str_fallback":
+                raise KeyError("str key missing")
+            if key == b"str_fallback":
+                return {"D": [0]}
+            if key == "broken_str":
+                raise KeyError("missing str")
+            if key == b"broken_str":
+                raise KeyError("missing bytes")
+            if key == b"broken_bytes":
+                raise KeyError("missing raw bytes")
+            return None
+
+        mock_pdf = Mock()
+        mock_pdf.pages = [Mock(page_obj=Mock(pageid=10)), Mock(page_obj=Mock(pageid=20))]
+        mock_pdf.doc = Mock()
+        mock_pdf.doc.get_dest = _get_dest
+        mock_pdf.doc.get_outlines = Mock(
+            return_value=[
+                (1, "Bytes Subtype GoTo", None, _LazyRef({"S": b"GoTo", "D": _LazyRef([0])}), None),
+                (1, "Invalid Subtype", None, {"S": 12345, "D": [0]}, None),
+                (1, "Null Lazy Dest", _LazyRef(None), None, None),
+                (1, "Non-Str Named Key", _NamedObj(12345), None, None),
+                (1, "Latin1 Fallback Dict", "str_fallback", None, None),
+                (1, "Broken Str Named", "broken_str", None, None),
+                (1, "Broken Bytes Named", b"broken_bytes", None, None),
+                (1, "Exploding Entry", _ExplodingRef(), None, None),
+            ]
+        )
+
+        headings = extract_bookmarks(mock_pdf)
+        assert [(h.title, h.page_num) for h in headings] == [
+            ("Bytes Subtype GoTo", 1),
+            ("Latin1 Fallback Dict", 1),
+        ]
+
+    def test_named_dest_without_get_dest_returns_empty(self):
+        class _DocWithoutGetDest:
+            def get_outlines(self) -> list[tuple[int, str, object, object, object]]:
+                return [(1, "Named Only", "intro", None, None)]
+
+        mock_pdf = Mock()
+        mock_pdf.pages = [Mock(page_obj=Mock(pageid=1))]
+        mock_pdf.doc = _DocWithoutGetDest()
+
+        assert extract_bookmarks(mock_pdf) == []

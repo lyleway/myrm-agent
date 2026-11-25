@@ -175,8 +175,8 @@ class HttpFetcher:
         while redirect_count <= _MAX_REDIRECTS:
             addresses: tuple[str, ...] = ()
             if guard is not None:
-                # A rejected hop raises SSRFSecurityError: returning None would let the browser tiers
-                # fetch the same URL. The hop is judged and dialed in its canonical spelling, because
+                # A rejected hop raises SSRFSecurityError so the fetch ends terminally without escalating
+                # to remote L4 providers. The hop is judged and dialed in its canonical spelling, because
                 # libcurl may read another spelling as a different host than the one the policy classified,
                 # and it connects only to the addresses the judgment looked at: it does not resolve the
                 # name again, and the URL keeps the name so the certificate is checked against it.

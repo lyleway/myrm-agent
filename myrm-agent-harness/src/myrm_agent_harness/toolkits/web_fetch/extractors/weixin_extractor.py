@@ -8,7 +8,7 @@ The article URL bounces once to ``?nwr_flag=1``; redirects are followed only whe
 they stay on an ``mp.weixin.qq.com`` article URL over https.
 
 When extraction fails or the page is blocked, FetchEngine falls back to the
-standard L1/L2/L3 degradation pipeline (Browser handles verification pages).
+standard L1 HTTP fetch and optional L4 remote escalation pipeline.
 
 [INPUT]
 - mp.weixin.qq.com 文章 URL
@@ -17,7 +17,7 @@ standard L1/L2/L3 degradation pipeline (Browser handles verification pages).
 - is_weixin_article_url: Detect mp.weixin.qq.com article links
 - get_weixin_request_headers: Optional L1 headers for mp.weixin.qq.com
 - extract_weixin_article: Fetch + parse article as Document, or None
-- parse_weixin_article_html: Parse HTML into Document (shared by L1 fast path and L2)
+- parse_weixin_article_html: Parse HTML into Document
 - WEIXIN_BODY_TRUNCATED_MARKER: Suffix appended when the article body is cut at the size cap
 """
 
@@ -121,13 +121,12 @@ def _first_meta(soup: BeautifulSoup, *, property_name: str | None = None, name: 
 
 
 def _extract_title(soup: BeautifulSoup) -> str:
-    for selector in (
-        lambda: soup.find(id="activity-name"),
-        lambda: soup.find("meta", property="og:title"),
-        lambda: soup.find("title"),
+    for node in (
+        soup.find(id="activity-name"),
+        soup.find("meta", property="og:title"),
+        soup.find("title"),
     ):
-        node = selector()
-        if node is None:
+        if not isinstance(node, Tag):
             continue
         if node.name == "meta":
             content = node.get("content")
@@ -140,13 +139,12 @@ def _extract_title(soup: BeautifulSoup) -> str:
 
 
 def _extract_author(soup: BeautifulSoup) -> str:
-    for selector in (
-        lambda: soup.find(id="js_name"),
-        lambda: soup.find(id="js_author_name"),
-        lambda: soup.find("a", id="js_name"),
+    for node in (
+        soup.find(id="js_name"),
+        soup.find(id="js_author_name"),
+        soup.find("a", id="js_name"),
     ):
-        node = selector()
-        if node is not None:
+        if isinstance(node, Tag):
             text = node.get_text(" ", strip=True)
             if text:
                 return html.unescape(text)
@@ -154,12 +152,11 @@ def _extract_author(soup: BeautifulSoup) -> str:
 
 
 def _extract_publish_time(soup: BeautifulSoup) -> str:
-    for selector in (
-        lambda: soup.find(id="publish_time"),
-        lambda: soup.find("em", id="publish_time"),
+    for node in (
+        soup.find(id="publish_time"),
+        soup.find("em", id="publish_time"),
     ):
-        node = selector()
-        if node is not None:
+        if isinstance(node, Tag):
             text = node.get_text(" ", strip=True)
             if text:
                 return html.unescape(text)
@@ -293,11 +290,11 @@ def _fetch_html(url: str, opener: urllib.request.OpenerDirector) -> str | None:
         },
     )
     with opener.open(req, timeout=_REQUEST_TIMEOUT) as resp:
-        raw = resp.read(_MAX_RESPONSE_BYTES + 1)
+        raw: bytes = bytes(resp.read(_MAX_RESPONSE_BYTES + 1))
         if len(raw) > _MAX_RESPONSE_BYTES:
             logger.debug("Weixin article response truncated at size cap for %s", url)
             raw = raw[:_MAX_RESPONSE_BYTES]
-        charset = resp.headers.get_content_charset() or "utf-8"
+        charset: str = str(resp.headers.get_content_charset() or "utf-8")
         return raw.decode(charset, errors="replace")
 
 
