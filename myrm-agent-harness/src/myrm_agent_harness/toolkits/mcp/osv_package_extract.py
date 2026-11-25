@@ -80,11 +80,11 @@ def _normalize_command_name(command: str) -> str:
     return base
 
 
-def _is_local_target(token: str) -> bool:
+def _is_local_target(arg: str) -> bool:
     return (
-        token in {".", ".."}
-        or "\\" in token
-        or token.startswith(("/", "./", "../", "~", "file:", "http://", "https://", "git+"))
+        arg in {".", ".."}
+        or "\\" in arg
+        or arg.startswith(("/", "./", "../", "~", "file:", "http://", "https://", "git+"))
     )
 
 
@@ -119,24 +119,24 @@ def _extract_python_module(args: Sequence[str]) -> str | None:
     skip_next = False
     take_module = False
     for raw in args:
-        token = raw.strip()
-        if not token:
+        arg = raw.strip()
+        if not arg:
             continue
         if take_module:
-            return _normalize_python_module_package(token)
+            return _normalize_python_module_package(arg)
         if skip_next:
             skip_next = False
             continue
-        if token in {"--", "-"}:
+        if arg in {"--", "-"}:
             return None
-        if token.startswith("--"):
-            if token == "--check-hash-based-pycs":
+        if arg.startswith("--"):
+            if arg == "--check-hash-based-pycs":
                 skip_next = True
             continue
-        if not token.startswith("-"):
+        if not arg.startswith("-"):
             # Positional arg is a local script path; stop scanning so script flags like `-m` are ignored.
             return None
-        flags = token[1:]
+        flags = arg[1:]
         for idx, flag in enumerate(flags):
             if flag == "m":
                 attached = flags[idx + 1 :]
@@ -165,34 +165,34 @@ def _scan_package_arg(
     after_dashdash = False
     subcommand_pending = bool(subcommands)
     for raw in args:
-        token = raw.strip()
-        if not token:
+        arg = raw.strip()
+        if not arg:
             continue
         if take_next:
-            return token
+            return arg
         if skip_next:
             skip_next = False
             continue
         if not after_dashdash:
-            if token == "--":
+            if arg == "--":
                 after_dashdash = True
                 subcommand_pending = False
                 continue
-            if token in pkg_flags:
+            if arg in pkg_flags:
                 take_next = True
                 continue
-            flag, sep, value = token.partition("=")
+            flag, sep, value = arg.partition("=")
             if sep and flag in pkg_flags:
                 return value.strip() or None
-            if token in value_flags:
+            if arg in value_flags:
                 skip_next = True
                 continue
-            if token.startswith("-"):
+            if arg.startswith("-"):
                 continue
-        if subcommand_pending and token.lower() in subcommands:
+        if subcommand_pending and arg.lower() in subcommands:
             subcommand_pending = False
             continue
-        return token
+        return arg
     return None
 
 
