@@ -145,6 +145,28 @@ class TestFetchEngineFailureReasonPropagation:
         assert engine.get_failure_reason(url) == ("error_page", "HTTP 400")
         await engine.shutdown()
 
+    async def test_text_payload_with_waf_challenge_header_is_blocked_not_delivered(self) -> None:
+        from myrm_agent_harness.utils.content_sniff import PayloadKind
+
+        engine = FetchEngine()
+        http = stub_fetchers(engine)
+        url = "https://waf-text.example/doc"
+        http.fetch.return_value = FetchResult(
+            html="# Challenge\nPlease verify you are human.",
+            url=url,
+            status_code=200,
+            headers={"content-type": "text/markdown", "cf-mitigated": "challenge"},
+            fetcher_type=FetcherType.HTTP,
+            kind=PayloadKind.TEXT,
+        )
+
+        assert await engine.crawl(url, allow_escalation=False) is None
+        reason = engine.get_failure_reason(url)
+        assert reason is not None
+        assert reason[0] == "blocked"
+        assert "cf-mitigated" in reason[1]
+        await engine.shutdown()
+
 
 class TestStopTextGuidance:
     def test_all_failed_content_emits_stop_guidance_when_blocked(self) -> None:
@@ -169,16 +191,19 @@ class TestStopTextGuidance:
 
     def test_all_failed_content_combines_blocked_and_not_found_guidances(self) -> None:
         text = all_failed_content(
-            ["https://blocked.example/a", "https://dead.example/b"],
+            ["https://blocked.example/a", "https://dead.example/b", "https://spa.example/c"],
             failure_reasons={
                 "https://blocked.example/a": ("blocked", "HTTP 403"),
                 "https://dead.example/b": ("not_found", "HTTP 404"),
+                "https://spa.example/c": ("needs_javascript", "empty shell"),
             },
         )
         assert "(blocked by site)" in text
         assert "(HTTP 404/410 — not found)" in text
-        assert "site access restrictions" in text
-        assert "do not exist (HTTP 404/410)" in text
+        assert "(requires JavaScript)" in text
+        assert "marked (blocked by site)" in text
+        assert "marked (HTTP 404/410 — not found)" in text
+        assert "JavaScript" in text
 
     def test_all_failed_content_emits_js_guidance_when_needs_javascript(self) -> None:
         text = all_failed_content(
@@ -241,6 +266,15 @@ class TestR29LiveLoopbackEndToEnd:
                 elif self.path == "/dead-404":
                     body = b"<html><head><title>404 Not Found</title></head><body><h1>Not Found</h1></body></html>"
                     self.send_response(404)
+                elif self.path == "/markdown-waf":
+                    body = b"# Verify\nPlease complete challenge.\n"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                    self.send_header("CF-Mitigated", "challenge")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 elif self.path == "/markdown-doc" and "text/markdown" in (self.headers.get("Accept") or ""):
                     body = b"# Negotiated Doc\n\nServed directly as Markdown via Accept header.\n"
                     self.send_response(200)
@@ -301,6 +335,14 @@ class TestR29LiveLoopbackEndToEnd:
             )
             assert "HTTP 404/410" in dead_404_result
             assert "Do NOT retry" in dead_404_result
+
+            md_waf_result = str(
+                await tool.ainvoke(
+                    {"urls": [f"http://127.0.0.1:{port}/markdown-waf"], "reason": "check text/markdown waf header"}
+                )
+            )
+            assert "Do NOT retry" in md_waf_result
+            assert "Please complete challenge" not in md_waf_result
 
             md_result = str(
                 await tool.ainvoke(

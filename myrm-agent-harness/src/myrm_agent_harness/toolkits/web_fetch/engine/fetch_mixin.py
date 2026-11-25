@@ -6,7 +6,7 @@ web_fetch.extractors.weixin_extractor::extract_weixin_article, is_weixin_article
 web_fetch.extractors.x_extractor::extract_x_post, is_x_url (POS: X post fast-path)
 web_fetch.extractors.youtube_extractor::extract_youtube_transcript, is_youtube_url (POS: YouTube transcript fast-path)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
-web_fetch.processing.antibot_detector::classify_block (POS: Anti-bot, JS-shell, and error-page classification)
+web_fetch.processing.antibot_detector::check_challenge_headers, classify_block (POS: Anti-bot, JS-shell, and error-page classification)
 web_fetch.processing.pipeline::run_on_conversion_thread (POS: Dedicated conversion thread runner)
 web_fetch.router::domain_key (POS: Domain normalization key)
 web_fetch.engine.types::DEGRADABLE_4XX (POS: Shared engine types and constants)
@@ -33,7 +33,7 @@ from ..extractors.weixin_extractor import extract_weixin_article, is_weixin_arti
 from ..extractors.x_extractor import extract_x_post, is_x_url
 from ..extractors.youtube_extractor import extract_youtube_transcript, is_youtube_url
 from ..fetchers.protocols import FetcherType, FetchResult
-from ..processing.antibot_detector import classify_block
+from ..processing.antibot_detector import check_challenge_headers, classify_block
 from ..router import domain_key
 from .types import DEGRADABLE_4XX
 
@@ -99,8 +99,13 @@ class FetchEngineFetchMixin:
                 return doc, False, fetch_result
 
         # Text (plain, markdown, csv, feeds, source files) is already the content; the HTML-only checks below
-        # (empty shell, anti-bot) would reject it for lacking markup.
+        # (empty shell, body heuristics) would reject it for lacking markup, but protocol WAF headers still apply.
         if fetch_result.kind is PayloadKind.TEXT and fetch_result.status_code < 400:
+            challenge_reason = check_challenge_headers(fetch_result.headers)
+            if challenge_reason is not None:
+                self._record_failure_reason(url, "blocked", challenge_reason)
+                logger.warning("Anti-bot detected [blocked] (%s): %s", challenge_reason, url)
+                return None, True, None
             return await self._pipeline.aprocess(fetch_result), True, fetch_result
 
         if not fetch_result.has_content:

@@ -47,12 +47,12 @@ _SOURCE_CUT_NOTICE = (
 )
 _BLOCKED_STOP_GUIDANCE = (
     "Access was explicitly blocked by the target site (e.g. HTTP 403/429 or WAF challenge). "
-    "Do NOT retry fetching these URLs via terminal tools (such as curl), alternate user-agents, proxies, or reader mirrors. "
-    "Inform the user that the page could not be read due to site access restrictions, and answer using available search snippets or suggest an alternative."
+    "Do NOT retry fetching URLs marked (blocked by site) via terminal tools (such as curl), alternate user-agents, proxies, or reader mirrors. "
+    "Inform the user that those pages could not be read due to site access restrictions, and answer using available search snippets or suggest an alternative."
 )
 _NOT_FOUND_GUIDANCE = (
-    "The target page(s) do not exist (HTTP 404/410). "
-    "Do NOT retry these URLs; find a different source or synthesize the final answer from available information."
+    "Pages marked (HTTP 404/410 — not found) do not exist (HTTP 404/410). "
+    "Do NOT retry those URLs; find a different source or synthesize the final answer from available information."
 )
 _NEEDS_JS_GUIDANCE = (
     "The target page(s) require client-side JavaScript rendering and could not be read via HTTP. "
@@ -208,8 +208,10 @@ def all_failed_content(
         guidance_parts.append(_BLOCKED_STOP_GUIDANCE)
     if "not_found" in kinds:
         guidance_parts.append(_NOT_FOUND_GUIDANCE)
+    if "needs_javascript" in kinds:
+        guidance_parts.append(_NEEDS_JS_GUIDANCE)
     if not guidance_parts:
-        guidance_parts.append(_NEEDS_JS_GUIDANCE if "needs_javascript" in kinds else _DEFAULT_FAILED_GUIDANCE)
+        guidance_parts.append(_DEFAULT_FAILED_GUIDANCE)
 
     return (
         "[web_fetch]: Could not retrieve content from the requested URL(s):\n"

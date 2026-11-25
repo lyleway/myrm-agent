@@ -23,6 +23,7 @@ content rules judge them.
 
 [OUTPUT]
 - BlockKind: Failure classification literal ("blocked" | "needs_javascript" | "error_page")
+- check_challenge_headers: Checks protocol-level WAF challenge response headers (Cloudflare / AWS WAF)
 - classify_block: Classifies a response as explicit site block ("blocked"), JS-required shell ("needs_javascript"), generic HTTP/error page ("error_page"), or OK (None)
 - is_blocked: Tells whether a crawl result was blocked by anti-bot protection or is an error page, with the reason
 
@@ -209,7 +210,7 @@ def _check_error_page(title: str | None, content: str | None) -> tuple[bool, str
     return False, ""
 
 
-def _check_challenge_headers(headers: Mapping[str, str] | None) -> str | None:
+def check_challenge_headers(headers: Mapping[str, str] | None) -> str | None:
     """Protocol-level WAF challenge headers (Cloudflare / AWS WAF)."""
     if not headers:
         return None
@@ -247,7 +248,7 @@ def classify_block(
     if status_code == 429:
         return "blocked", "HTTP 429 Too Many Requests"
 
-    header_reason = _check_challenge_headers(headers)
+    header_reason = check_challenge_headers(headers)
     if header_reason is not None:
         return "blocked", header_reason
 

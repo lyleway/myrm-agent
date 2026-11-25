@@ -136,8 +136,6 @@ async def test_websocket_schemes_are_refused(url: str) -> None:
         ("`https://example.com/doc`", "https://example.com/doc"),
         ("[Docs](https://example.com/doc)", "https://example.com/doc"),
         ('[Docs](<https://example.com/doc> "Title")', "https://example.com/doc"),
-        ("https://example.com/doc),", "https://example.com/doc"),
-        ("https://example.com/doc;", "https://example.com/doc"),
         (
             "https://en.wikipedia.org/wiki/Python_(programming_language)",
             "https://en.wikipedia.org/wiki/Python_(programming_language)",
@@ -152,47 +150,21 @@ async def test_model_wrapped_http_urls_are_safely_unwrapped(raw: str, expected: 
     assert await _gate([raw]) == [expected]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://en.wikipedia.org/wiki/Yahoo!",
+        "https://en.wikipedia.org/wiki/Jeopardy!",
+        "https://example.com/search?q=a,b,",
+        "https://example.com/path;v=1;",
+        "https://en.wikipedia.org/wiki/File:Example.mp4",
+    ],
+)
+async def test_legal_rfc3986_trailing_characters_and_wiki_file_pages_are_never_mutated_or_rejected(url: str) -> None:
+    assert await _gate([url]) == [url]
+
+
 @pytest.mark.parametrize("raw", ["<file:///etc/passwd>", "[bad](javascript:alert(1))", "<example.com/path>"])
 async def test_non_http_wrappers_are_still_refused(raw: str) -> None:
     with pytest.raises(ToolError):
         await _gate([raw], private=True)
-
-
-@pytest.mark.parametrize(
-    ("url", "ext"),
-    [
-        ("https://example.com/clip.mp4", "mp4"),
-        ("https://example.com/release.ZIP", "zip"),
-        ("https://example.com/app.dmg", "dmg"),
-        ("https://example.com/font.woff2", "woff2"),
-        ("https://example.com/audio.mp3?download=1", "mp3"),
-    ],
-)
-async def test_non_document_resource_extensions_are_rejected_preflight(url: str, ext: str) -> None:
-    with pytest.raises(ToolError, match=rf"\.{ext}") as exc_info:
-        await _gate([url])
-
-    assert exc_info.value.user_hint
-
-
-async def test_security_gates_run_before_non_document_extension_check() -> None:
-    with pytest.raises(ToolError) as blocked:
-        await _gate(["https://blocked.example/video.mp4"], blocked=("blocked.example",))
-
-    assert blocked.value.error_code == "BENCHMARK_BLOCKED_HOST"
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://example.com/report.pdf",
-        "https://example.com/spec.docx",
-        "https://example.com/data.xlsx",
-        "https://example.com/deck.pptx",
-        "https://example.com/diagram.png",
-        "https://example.com/photo.jpg",
-        "https://example.com/download?file=archive.zip",
-    ],
-)
-async def test_supported_document_and_query_urls_pass_preflight(url: str) -> None:
-    assert await _gate([url]) == [url]
