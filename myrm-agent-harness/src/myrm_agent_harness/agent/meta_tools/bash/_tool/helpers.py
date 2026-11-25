@@ -9,7 +9,7 @@
 - toolkits.storage::storage_config (POS: Absolute storage root that skill storage keys resolve against)
 
 [OUTPUT]
-- BashInput: Pydantic args schema for bash_code_execute_tool; refuses a reason under 10 characters and a blank command
+- BashInput: Pydantic args schema for bash_code_execute_tool; refuses an empty or symbol-only reason and a blank command
 - get_os_hint, track_context_access_in_command
 - resolve_skill_storage_paths: Absolute host directories of the skills the tool may stage
 
@@ -111,7 +111,7 @@ class BashInput(BaseModel):
 
     reason: str = Field(
         description=(
-            "Short intent for this execution (≥10 chars). ALWAYS provide this parameter first — "
+            "Short intent for this execution. ALWAYS provide this parameter first — "
             "shown in approval UI and audit logs."
         ),
         max_length=500,
@@ -122,8 +122,10 @@ class BashInput(BaseModel):
     @classmethod
     def _normalize_reason(cls, value: object) -> str:
         text = str(value or "").strip()
-        if len(text) < 10:
-            raise ValueError("reason must be at least 10 characters explaining why this command runs")
+        # Require at least one letter, digit, or ideograph instead of an ASCII length floor so
+        # concise CJK/mixed intents pass while empty strings and punctuation placeholders fail.
+        if not text or not any(ch.isalnum() for ch in text):
+            raise ValueError("reason must describe why this command runs")
         return text
 
     # An empty command still reaches the executor behind the shell init header, and the security scan then blocks

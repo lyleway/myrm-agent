@@ -47,7 +47,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 
 The `gep-strategy-recipe` skill implements the **Genetic Evolution Protocol (GEP)** for AI Agents. It decouples *tactical problem-solving intelligence* from static prompts, representing successful agent behaviors as modular, reusable **Strategy Recipes**.

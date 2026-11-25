@@ -48,7 +48,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 `xurl` is the X developer platform's official CLI for the X API v2. It supports shortcut commands for common actions and raw curl-style access to any v2 endpoint. All commands return JSON.
 

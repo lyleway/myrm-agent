@@ -63,7 +63,7 @@ Systematic operations workflow for diagnosing host health, resource saturation, 
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: explaining why this inspection runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (explaining why this inspection runs) and **`command`**. Put `reason` first.
 
 ## Operating Principles
 
