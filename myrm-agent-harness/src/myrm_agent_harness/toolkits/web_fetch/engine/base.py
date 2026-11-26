@@ -68,9 +68,6 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
-        FetchEscalationProvider,
-    )
     from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetchResult
 
     from .types import FailureKind
@@ -160,15 +157,9 @@ class FetchEngine(
         self._coalescing_timeout = coalescing_timeout
         self._crawl_timeout = crawl_timeout
 
-        self._escalation_providers: list[FetchEscalationProvider] | None = None
-
     def set_session_vault(self, session_vault: SessionVault) -> None:
         """Inject SessionVault dynamically (e.g. from server layer)."""
         self._http_fetcher._session_vault = session_vault
-
-    def set_escalation_providers(self, providers: list[FetchEscalationProvider] | None) -> None:
-        """Inject optional L4 remote fetch providers (server layer implements httpx vendors)."""
-        self._escalation_providers = providers
 
     def get_failure_reason(self, url: str) -> tuple[FailureKind, str] | None:
         """Return the last recorded ``(kind, reason)`` for a failed URL, if any."""
