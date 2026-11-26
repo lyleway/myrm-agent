@@ -31,7 +31,7 @@ Protocol (JSON text frames + binary audio frames):
 - app.core.infra.ws_origin_guard::verify_ws_origin (POS: WebSocket Origin guard)
 - app.core.channel_bridge.config_loader (POS: user config loader)
 - app.channels.voice.tts::synthesize_stream (POS: streaming TTS)
-- app.channels.voice.stt::transcribe (POS: batch STT fallback)
+- app.channels.voice.stt::transcribe / deepgram_stream_url (POS: batch STT fallback; Deepgram stream URL)
 - app.core.utils.session_id::is_safe_session_id (POS: safe chat_id whitelist guard)
 
 [OUTPUT]
@@ -48,7 +48,6 @@ import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -57,6 +56,8 @@ from app.core.infra.ws_origin_guard import verify_ws_origin
 from app.core.utils.session_id import is_safe_session_id
 
 if TYPE_CHECKING:
+    from websockets import ClientConnection
+
     from app.api.voice.agent_bridge import VoiceAgentBridge
     from app.channels.types import VoiceConfig
 
@@ -64,7 +65,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(verify_voice_enabled)])
 
-_DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
 _STREAMING_PROVIDERS = frozenset({"deepgram"})
 
 _WS_CLOSE_NORMAL = 1000
@@ -184,23 +184,9 @@ class _VoiceSession:
     # ── STT: Streaming via Deepgram ──────────────────────────────────────
 
     async def _run_streaming_stt(self) -> None:
-        params = [
-            ("model", self._voice_config.stt_model or "nova-3"),
-            ("smart_format", "true"),
-            ("interim_results", "true"),
-            ("endpointing", "300"),
-            ("encoding", "opus"),
-            ("sample_rate", "48000"),
-        ]
-        if self._voice_config.stt_language:
-            params.append(("language", self._voice_config.stt_language))
-        for term in self._keyterms:
-            stripped = term.strip()
-            if stripped:
-                params.append(("keywords", f"{stripped}:2"))
+        from app.channels.voice.stt import deepgram_stream_url
 
-        query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params)
-        dg_url = f"{_DEEPGRAM_WS_URL}?{query}"
+        dg_url = deepgram_stream_url(self._voice_config.stt_model, self._voice_config.stt_language, self._keyterms)
 
         try:
             import websockets
@@ -232,7 +218,7 @@ class _VoiceSession:
             logger.exception("Deepgram WebSocket connection failed")
             await self._send_json({"type": "error", "message": "STT connection failed"})
 
-    async def _relay_client_audio(self, dg_ws: object) -> None:
+    async def _relay_client_audio(self, dg_ws: ClientConnection) -> None:
         """Forward audio from browser to Deepgram, handle control messages."""
         try:
             while not self._closed:
@@ -283,7 +269,7 @@ class _VoiceSession:
             if self._agent_bridge:
                 self._agent_bridge.cancel_tts()
 
-    async def _relay_deepgram_transcripts(self, dg_ws: object) -> None:
+    async def _relay_deepgram_transcripts(self, dg_ws: ClientConnection) -> None:
         """Relay Deepgram transcription results to the browser."""
         try:
             async for raw in dg_ws:

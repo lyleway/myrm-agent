@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
-from app.channels.voice.stt import default_stt_model
+from app.channels.voice.stt import deepgram_stream_url, default_stt_model
 from app.channels.voice.stt.models import language_fields
 
 
@@ -37,3 +39,30 @@ class TestLanguageFields:
     @pytest.mark.parametrize("language", [None, ""])
     def test_no_language_sends_no_field(self, model: str, language: str | None) -> None:
         assert language_fields(model, language) == {}
+
+
+def _query(url: str) -> dict[str, list[str]]:
+    return parse_qs(urlsplit(url).query)
+
+
+class TestDeepgramStreamUrl:
+    def test_the_full_address_for_browser_audio(self) -> None:
+        assert deepgram_stream_url("nova-2", "en", [" Myrm ", "  ", "a&b"]) == (
+            "wss://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&interim_results=true&endpointing=300"
+            "&encoding=opus&sample_rate=48000&language=en&keywords=Myrm%3A2&keywords=a%26b%3A2"
+        )
+
+    def test_an_empty_model_runs_the_deepgram_default(self) -> None:
+        assert _query(deepgram_stream_url("", None, []))["model"] == [default_stt_model("deepgram")]
+
+    def test_a_typed_model_is_kept(self) -> None:
+        assert _query(deepgram_stream_url("nova-2", None, []))["model"] == ["nova-2"]
+
+    @pytest.mark.parametrize("language", [None, ""])
+    def test_no_language_sends_no_language(self, language: str | None) -> None:
+        assert "language" not in _query(deepgram_stream_url("", language, []))
+
+    def test_key_terms_are_trimmed_and_blank_ones_skipped(self) -> None:
+        url = deepgram_stream_url("", None, ["  alpha ", "", "   ", "beta gamma"])
+
+        assert _query(url)["keywords"] == ["alpha:2", "beta gamma:2"]

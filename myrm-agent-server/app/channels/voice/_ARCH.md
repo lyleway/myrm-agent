@@ -25,5 +25,5 @@ Video attachments (.mp4/.webm) are transcribed via the same STT pipeline.
 - **Streaming STT**: Deepgram WebSocket (server layer), local uses batch mode only.
 - **xAI Grok STT**: dedicated `_transcribe_xai()` for the non-OpenAI-compatible `/v1/stt` endpoint with ITN support.
 - **stt_base_url**: `VoiceConfig.stt_base_url` enables any OpenAI-compatible STT endpoint (Mistral, Azure, self-hosted Whisper).
-- **STT model default**: `VoiceConfig.stt_model` is empty unless the user typed one; an empty value resolves in `stt/models.py` (OpenAI `gpt-transcribe`, Groq `whisper-large-v3`, Deepgram `nova-3`, custom endpoint `whisper-1`), so no model name is pinned in stored settings.
+- **STT model default**: `VoiceConfig.stt_model` is empty unless the user typed one; an empty value resolves in `stt/models.py` (OpenAI `gpt-transcribe`, Groq `whisper-large-v3`, Deepgram `nova-3`, custom endpoint `whisper-1`), so no model name is pinned in stored settings; the two Deepgram streaming endpoints (`/ws/stt/stream`, `/ws/voice/session`) build their URL with `deepgram_stream_url` in the same file.
 - **Video Transcription**: `handler.transcribe_video_inbound()` downloads video and reuses the STT pipeline; `.mp4`/`.webm` are natively supported by STT providers.

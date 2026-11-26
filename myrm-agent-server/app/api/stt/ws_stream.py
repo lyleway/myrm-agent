@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -31,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(verify_voice_enabled)])
 
-_DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
 _STREAMING_PROVIDERS = frozenset({"deepgram"})
 
 _WS_CLOSE_NORMAL = 1000
@@ -83,25 +81,9 @@ async def _stream_via_deepgram(
     keyterms: list[str],
 ) -> None:
     """Proxy audio to Deepgram WebSocket and relay transcripts back."""
-    from app.channels.voice.stt import default_stt_model
+    from app.channels.voice.stt import deepgram_stream_url
 
-    params = [
-        ("model", config.stt_model or default_stt_model("deepgram")),
-        ("smart_format", "true"),
-        ("interim_results", "true"),
-        ("endpointing", "300"),
-        ("encoding", "opus"),
-        ("sample_rate", "48000"),
-    ]
-    if config.stt_language:
-        params.append(("language", config.stt_language))
-    for term in keyterms:
-        stripped = term.strip()
-        if stripped:
-            params.append(("keywords", f"{stripped}:2"))
-
-    query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params)
-    dg_url = f"{_DEEPGRAM_WS_URL}?{query}"
+    dg_url = deepgram_stream_url(config.stt_model, config.stt_language, keyterms)
 
     try:
         import websockets
