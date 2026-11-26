@@ -6,7 +6,9 @@
 
 [OUTPUT]
 - DOM probes and click drivers for the Add Service modal (connection type, stdio fields, save, scan acknowledgement,
-  description picker) and ``confirm_reload_dialog_after_save``, which settles a save up to the reload confirm
+  description picker, live scan findings, blocked-save message), ``open_stdio_add_service_editor`` and
+  ``fill_editor_fields`` to prepare a stdio service, and ``confirm_reload_dialog_after_save``, which settles a save
+  up to the reload confirm
 
 [POS]
 Server pytest-only helper shared by the MCP settings Chrome E2E tests.
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterable
 
 from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, wait_for_state
 from tests.support.chrome_mcp_settings_e2e import RELOAD_DIALOG_STATE_JS, confirm_reload_dialog
@@ -130,6 +133,19 @@ CLICK_SAVE_CONFIG_JS = """(() => {
   return { ok: true };
 })()"""
 
+# The editor scans the form 500 ms after the last edit and lists what it found while the modal is open.
+EDITOR_SCAN_FINDINGS_JS = """(() => {
+  const items = Array.from(document.querySelectorAll('.fixed.inset-0 ul.text-amber-700 li'));
+  const text = items.map((li) => (li.textContent || '').trim()).join('\\n');
+  return { ready: items.length > 0, text };
+})()"""
+
+# A save the security gate refuses leaves the modal open and shows the verdict in its error box.
+EDITOR_BLOCKED_MESSAGE_JS = """(() => {
+  const text = (document.querySelector('.fixed.inset-0 p.text-red-600')?.textContent || '').trim();
+  return { ready: text.length > 0, text };
+})()"""
+
 _MODAL_VALIDATION_ERROR_JS = """(() => {
   const modal = document.querySelector('.fixed.inset-0');
   if (!modal) return { ready: true, hasError: false };
@@ -169,6 +185,23 @@ _SAVE_VALIDATION_IDLE_JS = """(() => {
   return { ready: !validating, validating, text };
 })()"""
 
+# What a save that never reached the reload confirm left on the page: whether the editor is still open with an error,
+# which dialogs are up, and the page age (a small value after a long wait means the page reloaded underneath the save).
+_SAVE_PAGE_STATE_JS = """(() => {
+  const clip = (node) => (node?.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+  const modal = document.querySelector('.fixed.inset-0');
+  return {
+    path: location.pathname,
+    pageAgeSec: Math.round(performance.now() / 1000),
+    visibility: document.visibilityState,
+    modalHeading: clip(modal?.querySelector('h3')),
+    modalError: clip(modal?.querySelector('p.text-red-600, p.text-red-400')),
+    modalButtons: Array.from(modal?.querySelectorAll('button') || []).map(clip).filter(Boolean).slice(0, 6),
+    dialogs: Array.from(document.querySelectorAll('[role="alertdialog"], [role="dialog"]')).map(clip),
+    bodyHead: clip(document.body).slice(0, 120),
+  };
+})()"""
+
 _CLICK_SCAN_ACK_CONFIRM_JS = """(() => {
   const btn = Array.from(document.querySelectorAll('button')).find((b) =>
     /Acknowledge and continue|了解风险并继续/i.test(
@@ -198,6 +231,45 @@ _CLICK_DESCRIPTION_CUSTOM_JS = """(() => {
   btn.click();
   return { ok: true };
 })()"""
+
+
+def fill_editor_fields(client: ChromeMcpClient, page: McpPage, fields: Iterable[tuple[str, str]]) -> None:
+    """Fill the Add Service field found under each ``(label regex, value)`` pair."""
+    for label_pattern, value in fields:
+        filled = client.evaluate(page, fill_input_by_label_js(label_pattern, value), timeout_sec=15.0)
+        assert isinstance(filled, dict) and filled.get("ok") is True, (label_pattern, filled)
+
+
+def open_stdio_add_service_editor(client: ChromeMcpClient, page: McpPage, *, name: str) -> None:
+    """Open the Add Service modal on a ready MCP page, name the service and switch it to the STDIO connection type."""
+    opened = client.evaluate(page, CLICK_ADD_SERVICE_BUTTON_JS, timeout_sec=15.0)
+    assert isinstance(opened, dict) and opened.get("ok") is True, opened
+    editor = wait_for_state(client, page, ADD_EDITOR_READY_JS, timeout_sec=30.0)
+    assert editor.get("ready") is True, json.dumps(editor, ensure_ascii=False)
+    fill_editor_fields(client, page, [("Service Name|服务名称", name)])
+    selected_stdio: object = {"ok": False}
+    for attempt in range(4):
+        opened_type = client.evaluate(page, OPEN_CONNECTION_TYPE_JS, timeout_sec=15.0)
+        assert isinstance(opened_type, dict) and opened_type.get("ok") is True, opened_type
+        for _ in range(10):
+            time.sleep(0.15)
+            selected_stdio = client.evaluate(page, CLICK_STDIO_OPTION_JS, timeout_sec=15.0)
+            if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
+                break
+        if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
+            break
+        time.sleep(0.5 * (attempt + 1))
+    assert isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True, selected_stdio
+    stdio_ready = wait_for_state(client, page, STDIO_FIELDS_READY_JS, timeout_sec=15.0)
+    assert stdio_ready.get("ready") is True, json.dumps(stdio_ready, ensure_ascii=False)
+
+
+def _describe_save_page(client: ChromeMcpClient, page: McpPage) -> object:
+    """The page as a save left it, for the failure message of a save that never reached the reload confirm."""
+    try:
+        return client.evaluate(page, _SAVE_PAGE_STATE_JS, timeout_sec=10.0)
+    except (RuntimeError, TimeoutError) as exc:
+        return f"page unreadable: {exc}"
 
 
 def confirm_reload_dialog_after_save(client: ChromeMcpClient, page: McpPage, *, timeout_sec: float = 120.0) -> None:
@@ -245,4 +317,4 @@ def confirm_reload_dialog_after_save(client: ChromeMcpClient, page: McpPage, *, 
             wait_for_state(client, page, _SAVE_VALIDATION_IDLE_JS, timeout_sec=min(60.0, remaining))
             continue
         time.sleep(0.4)
-    raise AssertionError(f"reload confirm dialog after save did not appear: {last}")
+    raise AssertionError(f"reload confirm dialog after save did not appear: {last}; page: {_describe_save_page(client, page)}")

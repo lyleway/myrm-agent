@@ -152,6 +152,39 @@ class TestMCPScanEndpoint:
         assert results[0]["allowSave"] is True
         assert results[1]["allowSave"] is False
 
+    def test_scan_batch_refuses_only_the_server_that_carries_an_injection_env_name(self, client: TestClient) -> None:
+        """An import scans every server in one request: the refused one must not taint its ordinary neighbour."""
+        response = client.post(
+            "/api/v1/integrations/mcp/scan-batch",
+            json={
+                "configs": [
+                    {
+                        "name": "ordinary",
+                        "type": "stdio",
+                        "command": "node",
+                        "args": ["server.js"],
+                        "extraParams": {"env": {"LOG_LEVEL": "debug"}},
+                    },
+                    {
+                        "name": "injected",
+                        "type": "stdio",
+                        "command": "node",
+                        "args": ["server.js"],
+                        "extraParams": {"env": {"GIT_CONFIG_COUNT": "1"}},
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        ordinary, injected = response.json()["data"]["results"]
+        assert (ordinary["serverName"], ordinary["allowSave"]) == ("ordinary", True)
+        assert (injected["serverName"], injected["allowSave"]) == ("injected", False)
+        assert not [f for f in ordinary["findings"] if f["threatType"] == "dangerous_env_injection"]
+        assert [f["field"] for f in injected["findings"] if f["threatType"] == "dangerous_env_injection"] == [
+            "extra_params.env.GIT_CONFIG_COUNT"
+        ]
+
     def test_high_risk_requires_acknowledgement_flag(self, client: TestClient) -> None:
         response = client.post(
             "/api/v1/integrations/mcp/scan",

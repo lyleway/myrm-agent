@@ -2,6 +2,7 @@
 
 - stdio launch gates: a workspace-trust denial or an OSV malware advisory ends the actor for good, before any process
   is spawned and without start retries;
+- the environment an actor hands a stdio server carries none of the names that make a program run foreign code;
 - ``start()`` gives up on an owner task that never reports readiness instead of hanging its caller;
 - a crashing dynamic refresh keeps the previous tool map;
 - the serve loop skips cancelled resource reads and never loses a call that arrives while a keepalive probe fails;
@@ -108,6 +109,22 @@ class TestStdioLaunchGates:
             await check_actor_stdio_security_gates(MCPSessionActor("remote", conn), conn)
 
         osv.assert_not_awaited()
+
+
+def test_the_stdio_launch_parameters_drop_the_names_that_make_a_server_run_foreign_code() -> None:
+    env = {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.sshCommand",
+        "GIT_CONFIG_VALUE_0": "/tmp/hook.sh",
+        "LD_PRELOAD": "/tmp/x.so",
+        "LOG_LEVEL": "debug",
+    }
+    conn: dict[str, object] = {**_NPX_CONN, "env": env}
+
+    with patch("mcp.client.stdio.stdio_client") as stdio_client:
+        MCPSessionActor("probe", conn)._build_client_target(conn)
+
+    assert stdio_client.call_args.args[0].env == {"LOG_LEVEL": "debug"}
 
 
 @pytest.mark.asyncio

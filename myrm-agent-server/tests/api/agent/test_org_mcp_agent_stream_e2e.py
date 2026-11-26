@@ -5,16 +5,18 @@ Bypasses the browser; drives the real agent stream in-process (TestClient) with
 the MCP tool call really happened (Goodhart guard: the prompt never contains the
 tool's output tokens, so they can only come from the real tool result).
 
-``TestOrgMCPAgent`` proves the tool is reachable; ``TestOrgMCPEnvGuard`` proves the
-environment the stdio server process receives: code-injection variable names
-configured on the server are stripped, an ordinary variable still arrives.
+``TestOrgMCPAgent`` proves the tool is reachable; ``TestOrgMCPEnvGuard``,
+``TestUserMCPEnvGuard`` and ``TestRequestMCPEnvGuard`` prove the environment the stdio
+server process receives, whether the Control Plane pushed the server, the user saved it
+in Settings, or the WebUI sent it with the message (``mcp_cfg``, which wins over the
+saved value): code-injection variable names configured on the server are stripped, an
+ordinary variable still arrives.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import os
-import re
 import sys
 import time
 import uuid
@@ -35,6 +37,7 @@ from tests.api.agent.utils import (
     get_model_selection,
     get_search_service_config,
 )
+from tests.support.mcp_env_probe import ENV_PROBE_PROMPT, ENV_PROBE_SERVER, EXPECTED_ENV_REPORT, reported_env_states
 
 _SUPPORT = Path(__file__).resolve().parents[2] / "support"
 
@@ -51,48 +54,18 @@ _ORG_MCP_DICT: dict[str, object] = {
     ]
 }
 
-# Synthetic values: git would run ``echo`` for ssh transports if these names ever reached a process that invokes
-# git; the probe server never does.
-_INJECTION_ENV = {
-    "GIT_CONFIG_COUNT": "1",
-    "GIT_CONFIG_KEY_0": "core.sshCommand",
-    "GIT_CONFIG_VALUE_0": "echo synthetic-injection",
-}
-
-_ENV_PROBE_ORG_MCP_DICT: dict[str, object] = {
-    "servers": [
-        {
-            "id": "org-env-probe",
-            "name": "env-probe",
-            "type": "stdio",
-            "command": sys.executable,
-            "args": [str(_SUPPORT / "e2e_env_probe_stdio_mcp_server.py")],
-            "description": "org MCP that reports which probe environment variables it received",
-            "extra_params": {"env": {**_INJECTION_ENV, "E2E_PROBE_CONTROL": "kept"}},
-        }
-    ]
-}
+# The same server as the Control Plane pushes it (``orgMcpServers``), as a user saves it in Settings (``mcpServers``)
+# and as the WebUI sends it with a message (``mcp_cfg``).
+_ENV_PROBE_ORG_MCP_DICT: dict[str, object] = {"servers": [{**ENV_PROBE_SERVER, "id": "org-env-probe"}]}
+_ENV_PROBE_USER_MCP_DICT: dict[str, object] = {"mcpConfigs": [{**ENV_PROBE_SERVER, "id": "user-env-probe", "enabled": True}]}
+_ENV_PROBE_REQUEST_MCP_CFG: list[dict[str, object]] = [ENV_PROBE_SERVER]
 
 E2E_PROMPT = (
     "请调用 e2e-minimal MCP server 提供的 ping 工具。这是一个真实存在的 MCP 工具，"
     "必须真正调用它，禁止自己编造或用代码模拟。然后把工具返回的原始结果一字不差地告诉我。"
 )
 
-ENV_PROBE_PROMPT = (
-    "请调用 env-probe MCP server 提供的 env_presence 工具。这是一个真实存在的 MCP 工具，"
-    "必须真正调用它，禁止自己编造或用代码模拟。然后把工具返回的原始结果一字不差地告诉我，"
-    "最后用一句话说明 GIT_CONFIG_COUNT 与 E2E_PROBE_CONTROL 是否存在于该工具进程的环境中。"
-)
-
 _PONG_JSON = '{"result": "pong"}'
-
-_EXPECTED_ENV_REPORT = {
-    "GIT_CONFIG_COUNT": "absent",
-    "GIT_CONFIG_KEY_0": "absent",
-    "GIT_CONFIG_VALUE_0": "absent",
-    "E2E_PROBE_CONTROL": "present",
-}
-_ENV_REPORT_TOKEN = re.compile(r"\b(GIT_CONFIG_COUNT|GIT_CONFIG_KEY_0|GIT_CONFIG_VALUE_0|E2E_PROBE_CONTROL)=(present|absent)\b")
 
 
 def _org_mcp_pong_delivered(result: McpStreamRunResult) -> bool:
@@ -114,17 +87,13 @@ def _mcp_tool_tasks_seen(result: McpStreamRunResult) -> list[str]:
     return names
 
 
-def _reported_env_states(texts: list[str]) -> dict[str, str]:
-    """Probe states found in ``texts``; the first report of each name wins."""
-    states: dict[str, str] = {}
-    for text in texts:
-        for name, state in _ENV_REPORT_TOKEN.findall(text):
-            states.setdefault(name, state)
-    return states
+def _run_org_mcp_turn(
+    client: TestClient, prompt: str, chat_prefix: str, mcp_cfg: list[dict[str, object]] | None = None
+) -> McpStreamRunResult:
+    """Drive one real agent turn that must call an MCP tool and print what the stream produced.
 
-
-def _run_org_mcp_turn(client: TestClient, prompt: str, chat_prefix: str) -> McpStreamRunResult:
-    """Drive one real agent turn that must call an org MCP tool and print what the stream produced."""
+    ``mcp_cfg`` is what the WebUI sends with the message; without it the server reads the user's saved servers.
+    """
     if not preflight_llm_check():
         pytest.skip("LLM API preflight check failed (connectivity / timeout)")
 
@@ -142,6 +111,7 @@ def _run_org_mcp_turn(client: TestClient, prompt: str, chat_prefix: str) -> McpS
         "liteModelSelection": get_lite_model_selection(),
         "searchServiceCfg": get_search_service_config(),
         "enable_memory_auto_extraction": False,
+        **({"mcp_cfg": mcp_cfg} if mcp_cfg else {}),
     }
 
     log("query: " + prompt)
@@ -197,13 +167,29 @@ def org_mcp_dict() -> dict[str, object]:
     return _ORG_MCP_DICT
 
 
+@pytest.fixture
+def user_mcp_dict() -> dict[str, object] | None:
+    """MCP servers the user saved in Settings for the running test class (none by default)."""
+    return None
+
+
+@pytest.fixture
+def request_mcp_cfg() -> list[dict[str, object]] | None:
+    """MCP servers the WebUI sends with the message for the running test class (none by default)."""
+    return None
+
+
 @pytest.fixture(autouse=True)
-def _org_mcp_inject_config(mock_load_user_configs: object, org_mcp_dict: dict[str, object]) -> None:
-    """Inject org MCP into the mocked user configs (mirrors real org-mcp-sync)."""
+def _org_mcp_inject_config(
+    mock_load_user_configs: object,
+    org_mcp_dict: dict[str, object],
+    user_mcp_dict: dict[str, object] | None,
+) -> None:
+    """Inject org and user MCP into the mocked user configs (mirrors real org-mcp-sync and the saved Settings value)."""
     original = mock_load_user_configs.return_value
     mock_load_user_configs.return_value = dataclasses.replace(
         original,
-        mcp_dict=None,
+        mcp_dict=user_mcp_dict,
         org_mcp_dict=org_mcp_dict,
         security_config_dict={"yoloModeEnabled": True, "autoModeEnabled": True},
     )
@@ -237,18 +223,18 @@ class TestOrgMCPAgent:
     not os.environ.get("BASIC_API_KEY"),
     reason="E2E test requires BASIC_API_KEY environment variable",
 )
-class TestOrgMCPEnvGuard:
-    @pytest.fixture
-    def org_mcp_dict(self) -> dict[str, object]:
-        return _ENV_PROBE_ORG_MCP_DICT
+class _EnvGuardTurn:
+    """One real turn against the env-probe server; a subclass supplies it from one source of MCP configuration."""
 
     @pytest.mark.timeout(300)
-    def test_injection_env_names_never_reach_the_stdio_server(self, client: TestClient) -> None:
-        result = _run_org_mcp_turn(client, ENV_PROBE_PROMPT, "test-envguard-chat")
+    def test_injection_env_names_never_reach_the_stdio_server(
+        self, client: TestClient, request_mcp_cfg: list[dict[str, object]] | None
+    ) -> None:
+        result = _run_org_mcp_turn(client, ENV_PROBE_PROMPT, "test-envguard-chat", request_mcp_cfg)
         answer = result.full_answer
 
         probe_calls = [name for name in _mcp_tool_tasks_seen(result) if "env_presence" in name]
-        reported = _reported_env_states([answer])
+        reported = reported_env_states([answer])
         print(f"\n=== env-probe tool calls: {probe_calls} ===")
         print(f"=== env report echoed in the final answer: {reported} ===")
 
@@ -256,9 +242,35 @@ class TestOrgMCPEnvGuard:
             pytest.fail("Agent produced no final answer for the env-probe prompt")
 
         assert probe_calls, "env-probe tool was never called — no tasks_steps event names it"
-        assert reported == _EXPECTED_ENV_REPORT, (
-            f"stdio server received injection names or the tool result was fabricated — "
-            f"expected {_EXPECTED_ENV_REPORT}, answer reported {reported} (Goodhart guard)"
+        assert reported == EXPECTED_ENV_REPORT, (
+            f"stdio server received a GIT_CONFIG_ variable or the tool result was fabricated — "
+            f"expected {EXPECTED_ENV_REPORT}, answer reported {reported} (Goodhart guard)"
         )
 
-        print("\norg MCP env guard stream test passed")
+        print("\nMCP env guard stream test passed")
+
+
+class TestOrgMCPEnvGuard(_EnvGuardTurn):
+    @pytest.fixture
+    def org_mcp_dict(self) -> dict[str, object]:
+        return _ENV_PROBE_ORG_MCP_DICT
+
+
+class TestUserMCPEnvGuard(_EnvGuardTurn):
+    @pytest.fixture
+    def org_mcp_dict(self) -> dict[str, object]:
+        return {"servers": []}
+
+    @pytest.fixture
+    def user_mcp_dict(self) -> dict[str, object]:
+        return _ENV_PROBE_USER_MCP_DICT
+
+
+class TestRequestMCPEnvGuard(_EnvGuardTurn):
+    @pytest.fixture
+    def org_mcp_dict(self) -> dict[str, object]:
+        return {"servers": []}
+
+    @pytest.fixture
+    def request_mcp_cfg(self) -> list[dict[str, object]]:
+        return _ENV_PROBE_REQUEST_MCP_CFG

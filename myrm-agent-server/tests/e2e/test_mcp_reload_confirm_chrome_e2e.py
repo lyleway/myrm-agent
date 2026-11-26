@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -18,31 +17,25 @@ from tests.support.chrome_mcp_e2e import (
     warm_ui_route,
 )
 from tests.support.chrome_mcp_editor_e2e import (
-    ADD_EDITOR_READY_JS,
-    CLICK_ADD_SERVICE_BUTTON_JS,
     CLICK_SAVE_CONFIG_JS,
-    CLICK_STDIO_OPTION_JS,
-    OPEN_CONNECTION_TYPE_JS,
-    STDIO_FIELDS_READY_JS,
     confirm_reload_dialog_after_save,
-    fill_input_by_label_js,
+    fill_editor_fields,
+    open_stdio_add_service_editor,
 )
 from tests.support.chrome_mcp_settings_e2e import (
     CLICK_DIALOG_CANCEL_JS,
-    CLICK_IMPORT_JSON_BUTTON_JS,
-    CLICK_IMPORT_SUBMIT_JS,
-    MCP_IMPORT_MODAL_READY_JS,
     MCP_PAGE_READY_JS,
     RELOAD_DIALOG_CLOSED_JS,
     RELOAD_DIALOG_STATE_JS,
     confirm_reload_dialog,
+    import_mcp_json,
     mcp_page_state_js,
     put_mcp_configs,
     reload_mcp_settings_page,
     seed_empty_mcp_configs,
     server_config_in_api,
     server_exists_in_api,
-    set_import_textarea_js,
+    toggle_server_switch_js,
     wait_for_server_absent,
     wait_for_server_present,
     wait_until,
@@ -55,19 +48,6 @@ _E2E_STDIO_MCP_STUB = Path(__file__).resolve().parents[1] / "support" / "e2e_min
 
 _MCP_PAGE_HAS_PROBE_JS = mcp_page_state_js(_PROBE_SERVER_NAME)
 _MCP_PAGE_HAS_ADD_PROBE_JS = mcp_page_state_js(_ADD_SERVER_NAME)
-
-_TOGGLE_PROBE_SWITCH_JS = """(() => {
-  const nameNode = Array.from(document.querySelectorAll('p')).find((p) =>
-    (p.textContent || '').trim() === 'e2e-reload-probe'
-  );
-  if (!nameNode) return { ok: false, err: 'probe-row-not-found' };
-  const row = nameNode.closest('.group') || nameNode.parentElement?.parentElement?.parentElement;
-  if (!row) return { ok: false, err: 'probe-row-container-not-found' };
-  const switchBtn = row.querySelector('button[role="switch"]');
-  if (!switchBtn) return { ok: false, err: 'switch-not-found' };
-  switchBtn.click();
-  return { ok: true };
-})()"""
 
 _CLICK_PROBE_DELETE_JS = """(() => {
   const nameNode = Array.from(document.querySelectorAll('p')).find((p) =>
@@ -143,17 +123,15 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
     api_url = get_e2e_api_url()
     prepare_e2e_ui_session(api_url)
 
-    import_payload = json.dumps(
-        {
-            "mcpServers": {
-                _IMPORT_SERVER_NAME: {
-                    "command": sys.executable,
-                    "args": ["-c", "pass"],
-                    "description": "E2E import probe server",
-                }
+    import_payload: dict[str, object] = {
+        "mcpServers": {
+            _IMPORT_SERVER_NAME: {
+                "command": sys.executable,
+                "args": ["-c", "pass"],
+                "description": "E2E import probe server",
             }
         }
-    )
+    }
 
     warm_ui_route("/settings/mcp")
     with open_settings_subroute("/settings/mcp", timeout_ms=120_000) as (client, page):
@@ -166,7 +144,7 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         assert ready.get("ready") is True, json.dumps(ready, ensure_ascii=False)
         wait_for_state(client, page, _MCP_PAGE_HAS_PROBE_JS, timeout_sec=30.0)
 
-        toggled = client.evaluate(page, _TOGGLE_PROBE_SWITCH_JS, timeout_sec=15.0)
+        toggled = client.evaluate(page, toggle_server_switch_js(_PROBE_SERVER_NAME), timeout_sec=15.0)
         assert isinstance(toggled, dict) and toggled.get("ok") is True, toggled
         dialog = wait_for_state(client, page, RELOAD_DIALOG_STATE_JS, timeout_sec=30.0)
         assert dialog.get("ready") is True, json.dumps(dialog, ensure_ascii=False)
@@ -177,7 +155,7 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
 
         ready_after_cancel = wait_for_state(client, page, _MCP_PAGE_HAS_PROBE_JS, timeout_sec=30.0)
         assert ready_after_cancel.get("ready") is True, json.dumps(ready_after_cancel, ensure_ascii=False)
-        toggled_again = client.evaluate(page, _TOGGLE_PROBE_SWITCH_JS, timeout_sec=15.0)
+        toggled_again = client.evaluate(page, toggle_server_switch_js(_PROBE_SERVER_NAME), timeout_sec=15.0)
         assert isinstance(toggled_again, dict) and toggled_again.get("ok") is True, toggled_again
         confirm_reload_dialog(client, page)
         _wait_for_probe_disabled(timeout_sec=45.0)
@@ -200,17 +178,7 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         # --- Path 3: import JSON ---
         seed_empty_mcp_configs()
         reload_mcp_settings_page(client, page)
-        ready_import = wait_for_state(client, page, MCP_PAGE_READY_JS, timeout_sec=90.0)
-        assert ready_import.get("ready") is True, json.dumps(ready_import, ensure_ascii=False)
-
-        opened = client.evaluate(page, CLICK_IMPORT_JSON_BUTTON_JS, timeout_sec=15.0)
-        assert isinstance(opened, dict) and opened.get("ok") is True, opened
-        import_modal = wait_for_state(client, page, MCP_IMPORT_MODAL_READY_JS, timeout_sec=30.0)
-        assert import_modal.get("ready") is True, json.dumps(import_modal, ensure_ascii=False)
-        filled = client.evaluate(page, set_import_textarea_js(import_payload), timeout_sec=15.0)
-        assert isinstance(filled, dict) and filled.get("ok") is True, filled
-        submitted = client.evaluate(page, CLICK_IMPORT_SUBMIT_JS, timeout_sec=15.0)
-        assert isinstance(submitted, dict) and submitted.get("ok") is True, submitted
+        import_mcp_json(client, page, import_payload)
         confirm_reload_dialog(client, page, timeout_sec=90.0)
         wait_for_server_present(_IMPORT_SERVER_NAME)
 
@@ -220,50 +188,18 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         ready_add = wait_for_state(client, page, MCP_PAGE_READY_JS, timeout_sec=90.0)
         assert ready_add.get("ready") is True, json.dumps(ready_add, ensure_ascii=False)
 
-        opened_add = client.evaluate(page, CLICK_ADD_SERVICE_BUTTON_JS, timeout_sec=15.0)
-        assert isinstance(opened_add, dict) and opened_add.get("ok") is True, opened_add
-        add_editor = wait_for_state(client, page, ADD_EDITOR_READY_JS, timeout_sec=30.0)
-        assert add_editor.get("ready") is True, json.dumps(add_editor, ensure_ascii=False)
-        name_filled = client.evaluate(
+        open_stdio_add_service_editor(client, page, name=_ADD_SERVER_NAME)
+        fill_editor_fields(
+            client,
             page,
-            fill_input_by_label_js(
-                "Service Name|服务名称",
-                _ADD_SERVER_NAME,
+            (
+                ("Command|命令", sys.executable),
+                ("Arguments|参数", str(_E2E_STDIO_MCP_STUB)),
+                ("Description|描述", "E2E add probe server"),
+                ("Cache TTL|缓存时长", "60"),
+                ("Cacheable tools|可缓存工具", "ping"),
             ),
-            timeout_sec=15.0,
         )
-        assert isinstance(name_filled, dict) and name_filled.get("ok") is True, name_filled
-        selected_stdio: dict[str, object] = {"ok": False}
-        for attempt in range(4):
-            opened_type = client.evaluate(page, OPEN_CONNECTION_TYPE_JS, timeout_sec=15.0)
-            assert isinstance(opened_type, dict) and opened_type.get("ok") is True, opened_type
-            for _ in range(10):
-                time.sleep(0.15)
-                selected_stdio = client.evaluate(page, CLICK_STDIO_OPTION_JS, timeout_sec=15.0)
-                if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
-                    break
-            if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
-                break
-            time.sleep(0.5 * (attempt + 1))
-        assert isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True, selected_stdio
-        stdio_ready = wait_for_state(client, page, STDIO_FIELDS_READY_JS, timeout_sec=15.0)
-        assert stdio_ready.get("ready") is True, json.dumps(stdio_ready, ensure_ascii=False)
-        for label_pattern, value in (
-            ("Command|命令", sys.executable),
-            ("Arguments|参数", str(_E2E_STDIO_MCP_STUB)),
-            ("Description|描述", "E2E add probe server"),
-            ("Cache TTL|缓存时长", "60"),
-            ("Cacheable tools|可缓存工具", "ping"),
-        ):
-            filled_field = client.evaluate(
-                page,
-                fill_input_by_label_js(label_pattern, value),
-                timeout_sec=15.0,
-            )
-            assert isinstance(filled_field, dict) and filled_field.get("ok") is True, (
-                label_pattern,
-                filled_field,
-            )
         saved = client.evaluate(page, CLICK_SAVE_CONFIG_JS, timeout_sec=15.0)
         assert isinstance(saved, dict) and saved.get("ok") is True, saved
         confirm_reload_dialog_after_save(client, page, timeout_sec=120.0)

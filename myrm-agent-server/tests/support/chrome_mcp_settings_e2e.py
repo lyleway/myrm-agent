@@ -4,8 +4,8 @@
 - tests.support.chrome_mcp_e2e: page evaluation, state polling, page reload and the E2E backend HTTP client
 
 [OUTPUT]
-- Page probes and the Import JSON modal driver, the persisted MCP configs read and written through the backend API,
-  and the reload-confirm dialog that gates every persisted change
+- Page probes, the Import JSON modal driver and the server-row enable switch, the persisted MCP configs read and
+  written through the backend API, and the reload-confirm dialog that gates every persisted change
 
 [POS]
 Server pytest-only helper shared by the MCP settings Chrome E2E tests.
@@ -57,6 +57,23 @@ MCP_PAGE_READY_JS = mcp_page_state_js()
 APP_LAYOUT_READY_JS = """(() => ({
   ready: !!document.querySelector('[data-testid="app-layout"]'),
 }))()"""
+
+
+def toggle_server_switch_js(name: str) -> str:
+    """Click the enable switch on the row of the server called ``name``."""
+    return f"""(() => {{
+  const nameNode = Array.from(document.querySelectorAll('p')).find((p) =>
+    (p.textContent || '').trim() === {json.dumps(name)}
+  );
+  if (!nameNode) return {{ ok: false, err: 'server-row-not-found' }};
+  const row = nameNode.closest('.group') || nameNode.parentElement?.parentElement?.parentElement;
+  if (!row) return {{ ok: false, err: 'server-row-container-not-found' }};
+  const switchBtn = row.querySelector('button[role="switch"]');
+  if (!switchBtn) return {{ ok: false, err: 'switch-not-found' }};
+  switchBtn.click();
+  return {{ ok: true }};
+}})()"""
+
 
 MCP_IMPORT_MODAL_READY_JS = """(() => {
   const heading = Array.from(document.querySelectorAll('h3')).find((h) =>
@@ -123,6 +140,20 @@ def set_import_textarea_js(value: str) -> str:
   el.dispatchEvent(new Event('change', {{ bubbles: true }}));
   return {{ ok: true }};
 }})()"""
+
+
+def import_mcp_json(client: ChromeMcpClient, page: McpPage, payload: dict[str, object]) -> None:
+    """Open the Import JSON modal on a ready MCP page, paste ``payload`` (an ``mcpServers`` document) and submit."""
+    ready = wait_for_state(client, page, MCP_PAGE_READY_JS, timeout_sec=90.0)
+    assert ready.get("ready") is True, json.dumps(ready, ensure_ascii=False)
+    opened = client.evaluate(page, CLICK_IMPORT_JSON_BUTTON_JS, timeout_sec=15.0)
+    assert isinstance(opened, dict) and opened.get("ok") is True, opened
+    modal = wait_for_state(client, page, MCP_IMPORT_MODAL_READY_JS, timeout_sec=30.0)
+    assert modal.get("ready") is True, json.dumps(modal, ensure_ascii=False)
+    filled = client.evaluate(page, set_import_textarea_js(json.dumps(payload)), timeout_sec=15.0)
+    assert isinstance(filled, dict) and filled.get("ok") is True, filled
+    submitted = client.evaluate(page, CLICK_IMPORT_SUBMIT_JS, timeout_sec=15.0)
+    assert isinstance(submitted, dict) and submitted.get("ok") is True, submitted
 
 
 RELOAD_DIALOG_STATE_JS = """(() => {
@@ -269,9 +300,13 @@ def confirm_reload_dialog(client: ChromeMcpClient, page: McpPage, *, timeout_sec
     wait_for_state(client, page, RELOAD_DIALOG_CLOSED_JS, timeout_sec=30.0)
 
 
-def reload_mcp_settings_page(client: ChromeMcpClient, page: McpPage) -> None:
-    """Reload /settings/mcp until the app layout is back, retrying a reload that lands on a blank shell."""
-    target_url = f"{get_e2e_ui_url().rstrip('/')}/settings/mcp"
+def reload_mcp_settings_page(client: ChromeMcpClient, page: McpPage, route: str = "/settings/mcp") -> None:
+    """Reload a settings route (the MCP page by default) until the app layout is back, retrying a blank shell.
+
+    A reload is also how the page learns the version of a config that the test changed through the API: a push of
+    its own on the old version would be a conflict.
+    """
+    target_url = f"{get_e2e_ui_url().rstrip('/')}{route}"
     last: dict[str, object] = {}
     for attempt in range(3):
         reload_mcp_page(client, page, target_url=target_url)

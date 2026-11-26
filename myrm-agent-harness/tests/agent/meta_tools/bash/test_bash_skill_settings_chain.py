@@ -3,7 +3,8 @@
 Each test is one way an agent steered by untrusted text could try to read the settings of a skill it did not call: a
 command that only holds the skill path, a script of the skill it edited first, a skill directory it moved away. The
 skill script prints how long its password is, which the output masking does not hide. A skill command also has to run
-in the skill's directory whatever the commands before it did.
+in the skill's directory whatever the commands before it did. A setting named after a variable that makes a program
+run what its value names (``GIT_CONFIG_*``) never reaches the command, though the password beside it does.
 """
 
 from __future__ import annotations
@@ -28,12 +29,24 @@ SKILL = "demo"
 PLAIN_CALL = f"python3 .claude/skills/{SKILL}/scripts/who.py"
 SETTINGS = {"EMAIL_IMAP_HOST": "imap.example.test", "EMAIL_IMAP_PASSWORD": "skill-pw-11"}
 SCRIPT = (
-    "import os\n"
+    "import os, subprocess\n"
     "print('dir=' + os.path.basename(os.getcwd()))\n"
     "print('host=' + os.environ.get('EMAIL_IMAP_HOST', '-'))\n"
     "print('pwlen=' + str(len(os.environ.get('EMAIL_IMAP_PASSWORD', ''))))\n"
+    # What git itself would run. The shell's own header registers a credential helper through the same GIT_CONFIG_*
+    # variables, so their presence says nothing; only the files of the host are shut out so that the answer comes
+    # from the environment alone.
+    "no_files = {'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_CONFIG_SYSTEM': os.devnull}\n"
+    "ssh = subprocess.run(['git', 'config', '--get', 'core.sshCommand'], capture_output=True, text=True,\n"
+    "                     env={**os.environ, **no_files})\n"
+    "print('ssh_command=' + ('set' if ssh.stdout.strip() else 'unset'))\n"
 )
 PASSWORD_LENGTH = f"pwlen={len(SETTINGS['EMAIL_IMAP_PASSWORD'])}"
+GIT_CONFIGURATION = {
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.sshCommand",
+    "GIT_CONFIG_VALUE_0": "/tmp/hook.sh",
+}
 
 
 @dataclass(frozen=True)
@@ -79,6 +92,16 @@ async def test_a_plain_call_gets_the_settings_on_every_call(agent: Agent) -> Non
 
         assert "host=imap.example.test" in printed
         assert PASSWORD_LENGTH in printed
+
+
+async def test_settings_named_after_git_configuration_variables_are_not_delivered(agent: Agent) -> None:
+    """One numbered key/value pair (``core.sshCommand``) makes every ``git`` the skill's command starts run a program."""
+    agent.bash.set_skill_env_map({SKILL: {**SETTINGS, **GIT_CONFIGURATION}})
+
+    printed = await agent.run(PLAIN_CALL)
+
+    assert "ssh_command=unset" in printed
+    assert PASSWORD_LENGTH in printed
 
 
 async def test_a_command_that_only_holds_the_skill_path_gets_nothing(agent: Agent) -> None:
