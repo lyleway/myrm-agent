@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { markLocalBackendUnreachable } from '@/lib/backend-health';
+import { whenDatabaseReady } from '@/lib/platform-readiness';
 import { RESPONSE_BODY_DEADLINE_MS } from '@/services/config/adapters/BaseAdapter';
 import { TauriConfigAdapter } from '@/services/config/adapters/TauriAdapter';
 import { ConfigSyncError, DEFAULT_PERSONAL_SETTINGS, type ConfigChange } from '@/services/config/types';
@@ -41,7 +42,27 @@ const BACKEND_NOT_AVAILABLE = {
   error: 'Backend not available',
 };
 
-describe('TauriConfigAdapter backend unavailable', () => {
+/** A row as the backend answers it, and the record the adapter hands the sync layer for it. */
+const API_ROW = {
+  key: 'chatSettings',
+  value: { sample: true },
+  version: '2000_1',
+  updatedAt: '2026-11-26T00:00:00Z',
+  deviceId: 'other-device',
+  isSystemDefault: true,
+};
+
+const API_ROW_RECORD = {
+  key: 'chatSettings',
+  value: { sample: true },
+  meta: { version: '2000_1', updatedAt: '2026-11-26T00:00:00Z', deviceId: 'other-device' },
+  isSystemDefault: true,
+};
+
+/** The `fetch` double of an answer whose JSON body is `body`. */
+const answer = (status: number, body: unknown = {}) => answerWithBody(status, async () => body);
+
+describe('TauriConfigAdapter', () => {
   const originalFetch = globalThis.fetch;
   let adapter: TauriConfigAdapter;
 
@@ -119,6 +140,34 @@ describe('TauriConfigAdapter backend unavailable', () => {
       await expect(adapter.get('chatSettings')).resolves.toBeNull();
     });
 
+    it('returns the row with its version and writer, asked for with the session cookie', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answer(200, API_ROW));
+
+      await expect(adapter.get('chatSettings')).resolves.toEqual(API_ROW_RECORD);
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/config/chatSettings',
+        expect.objectContaining({ credentials: 'include' }),
+      );
+    });
+
+    it('hands on a row the backend could not decrypt as unreadable instead of dropping it', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answer(200, { ...API_ROW, unreadable: true }));
+
+      await expect(adapter.get('chatSettings')).resolves.toMatchObject({ unreadable: true });
+    });
+
+    it.each([401, 403, 422])(
+      'throws the refusal itself on HTTP %i, without calling the backend unreachable',
+      async (status) => {
+        vi.mocked(fetch).mockImplementationOnce(answer(status));
+
+        await expect(adapter.get('chatSettings')).rejects.toThrow(
+          new ConfigSyncError(`Failed to get config 'chatSettings': HTTP ${status}`),
+        );
+        expect(markLocalBackendUnreachable).not.toHaveBeenCalled();
+      },
+    );
+
     it.each([500, 502, 503, 504])('throws on HTTP %i: the state of the row is unknown', async (status) => {
       vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status, statusText: 'Unavailable' } as Response);
 
@@ -135,6 +184,93 @@ describe('TauriConfigAdapter backend unavailable', () => {
         expect(markLocalBackendUnreachable).toHaveBeenCalledTimes(1);
       },
     );
+  });
+
+  describe('getAll', () => {
+    it('asks only for the given keys, carrying the session cookie', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answer(200, { configs: {} }));
+
+      await adapter.getAll(['chatSettings', 'personalSettings']);
+
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/v1/config?keys=chatSettings%2CpersonalSettings',
+        expect.objectContaining({ credentials: 'include' }),
+      );
+    });
+
+    it('returns the rows by key', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answer(200, { configs: { chatSettings: API_ROW } }));
+
+      await expect(adapter.getAll()).resolves.toEqual(new Map([['chatSettings', API_ROW_RECORD]]));
+    });
+
+    it('answers an empty set when the backend has no rows (HTTP 404)', async () => {
+      vi.mocked(fetch).mockImplementationOnce(answer(404));
+
+      await expect(adapter.getAll()).resolves.toEqual(new Map());
+    });
+
+    it.each([401, 403, 422])(
+      'throws the refusal itself on HTTP %i, without calling the backend unreachable',
+      async (status) => {
+        vi.mocked(fetch).mockImplementationOnce(answer(status));
+
+        await expect(adapter.getAll()).rejects.toThrow(
+          new ConfigSyncError(`Failed to get all configs: HTTP ${status}`),
+        );
+        expect(markLocalBackendUnreachable).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('sync', () => {
+    it('sends nothing for an empty change list', async () => {
+      await expect(adapter.sync([])).resolves.toEqual({ success: true, conflicts: [], newVersions: new Map() });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('passes the answer of a delivered write through, conflicts included', async () => {
+      vi.mocked(fetch).mockImplementationOnce(
+        answer(200, { success: false, conflicts: ['personalSettings'], newVersions: { chatSettings: '2000_1' } }),
+      );
+
+      await expect(adapter.sync(CHANGES)).resolves.toEqual({
+        success: false,
+        conflicts: ['personalSettings'],
+        newVersions: new Map([['chatSettings', '2000_1']]),
+        error: undefined,
+      });
+    });
+
+    it.each([400, 422])('rejects on HTTP %i: the backend refused the write itself', async (status) => {
+      vi.mocked(fetch).mockImplementationOnce(answer(status));
+
+      await expect(adapter.sync(CHANGES)).rejects.toThrow(
+        new ConfigSyncError(`Failed to sync configs: HTTP ${status}`),
+      );
+      expect(markLocalBackendUnreachable).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('while the local database is not ready', () => {
+    beforeEach(() => {
+      vi.mocked(whenDatabaseReady).mockResolvedValueOnce(false);
+    });
+
+    it('getAll throws Backend not available without sending anything', async () => {
+      await expect(adapter.getAll()).rejects.toThrow(new ConfigSyncError('Backend not available'));
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('get throws Backend not available without sending anything', async () => {
+      await expect(adapter.get('chatSettings')).rejects.toThrow(new ConfigSyncError('Backend not available'));
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('sync reports Backend not available without sending anything', async () => {
+      await expect(adapter.sync(CHANGES)).resolves.toEqual(BACKEND_NOT_AVAILABLE);
+      expect(fetch).not.toHaveBeenCalled();
+    });
   });
 
   describe('an answer whose body does not arrive', () => {
