@@ -2,8 +2,9 @@
 
 Covers:
 - _sanitize_snippet XSS protection (unit)
-- ChatService.search_messages FTS5 integration (real SQLite, no mocks)
-- sent_at ISO serialization correctness
+- _serialize_search_sent_at: every serialized time names its UTC offset (unit)
+- ChatService.search_messages FTS5 integration (real SQLite, no mocks), including the sent_at offset and the
+  since/until window on both the trigram and the substring search path
 - GET /chats/search API endpoint routing & response
 """
 

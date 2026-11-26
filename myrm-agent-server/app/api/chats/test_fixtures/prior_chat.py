@@ -9,7 +9,7 @@
 - router: POST /test/seed-prior-chat-fixture (POS: E2E seed for @chat mention picker and search-result time checks; optional sent_at pins the message time, optional marker makes the seed searchable by itself; 404 outside local mode whatever the query holds)
 
 [POS]
-app.api.chats — Chrome E2E fixture for composer @chat: prior conversation mention.
+app.api.chats — Chrome E2E fixture: a prior conversation for the composer @chat mention, with a pinnable message time for the search-result time checks.
 """
 
 from __future__ import annotations

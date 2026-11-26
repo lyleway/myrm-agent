@@ -2,13 +2,13 @@
 
 [INPUT]
 tests.support.minimal_app::build_minimal_app (POS: 按需挂载 API 路由的测试 app)
-app.api.chats.test_fixtures.prior_chat::seed_prior_chat_fixture (POS: @chat E2E seed)
+app.api.chats.test_fixtures.prior_chat::seed_prior_chat_fixture (POS: @chat E2E seed with a pinnable message time)
 
 [OUTPUT]
-TestPriorChatRecallIntegration: HTTP recall search matches seeded prior chat index.
+TestPriorChatRecallIntegration: HTTP recall search matches seeded prior chat index; the seed pins the message send time, tags its messages with a marker, and is 404 outside local mode.
 
 [POS]
-Chats API 集成测。验证 @chat picker SSOT（/recall/search）与 inject 共用 recall 索引（真 DB，无 mock）。
+Chats API 集成测。验证 @chat picker SSOT（/recall/search）与 inject 共用 recall 索引，以及 seed 的 sent_at / marker 参数与非 local 模式的 404（真 DB，无 mock）。
 """
 
 from __future__ import annotations
