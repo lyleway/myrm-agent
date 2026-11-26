@@ -6,8 +6,7 @@ environment variable sanitization, timeout control, and response truncation.
 [INPUT]
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry; resolves a command to its backend)
-- core.security.process_env::EnvInheritPolicy, sanitize_env (POS: Child process environment isolation SSOT) [lazy]
+- toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
 
 [OUTPUT]
 - BaseRuntime: Abstract base for RuntimeBackend implementations.
@@ -28,7 +27,7 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
+from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -119,14 +118,7 @@ def build_safe_env(
     While enterprise network compatibility is on, ``NODE_USE_SYSTEM_CA=1`` is added so a Node-based CLI validates
     against the operating system's trust store the way the host does; a value ``config.env`` sets wins.
     """
-    from myrm_agent_harness.core.security.process_env import EnvInheritPolicy, sanitize_env
-
-    source = dict(os.environ if base_env is None else base_env)
-    env = sanitize_env(source, EnvInheritPolicy.CORE)
-    profile = profile_for(config.command) if config.command else None
-    home_env = profile.home_env if profile is not None else None
-    if home_env and home_env in source:
-        env[home_env] = source[home_env]
+    env = cli_base_env(config.command, os.environ if base_env is None else base_env)
 
     if config.env:
         if config.auth_mode == "subscription":

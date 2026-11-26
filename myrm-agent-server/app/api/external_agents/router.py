@@ -77,35 +77,53 @@ _login_registry = _LoginRegistry()
 
 @router.get("/auth/status")
 async def external_agent_auth_status() -> dict[str, object]:
-    """Report install + login state for every known backend via fresh detection."""
+    """Report install + login state for every known backend via fresh detection.
+
+    The login state is what each CLI says about itself where it can say it (Claude Code keeps its login in the
+    macOS Keychain, which no credential-file check sees); a CLI without a status command is judged by its file.
+    """
+    import asyncio
+    import os
+
     from myrm_agent_harness.toolkits.acp.auth import (
         CredentialStore,
         known_backends,
         profile_for,
+        resolve_login_state,
     )
+    from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 
     detector = BackendDetector()
     detected = {b.name: b for b in await detector.detect(include_version=True, refresh=True)}
     store = CredentialStore()
+    names = known_backends()
+    states = await asyncio.gather(
+        *(
+            resolve_login_state(
+                store,
+                name,
+                executable=detected[name].path if name in detected else None,
+                env=cli_base_env(detected[name].path if name in detected else None, os.environ),
+            )
+            for name in names
+        )
+    )
 
     backends: list[dict[str, object]] = []
-    for name in known_backends():
+    for name, state in zip(names, states, strict=True):
         profile = profile_for(name)
         if profile is None:
             continue
         found = detected.get(name)
-        state = store.state(name)
-        cli_installed = found is not None
         backends.append(
             {
                 "backend": name,
-                "installed": cli_installed,
+                "installed": found is not None,
                 "path": found.path if found else None,
                 "version": found.version if found else None,
                 "authenticated": state.authenticated,
                 "authStatus": state.status.value,
-                "readyForDelegation": state.authenticated or cli_installed,
                 "loginStrategy": profile.login_strategy.value,
                 "scriptableLogin": profile.scriptable_login,
                 "needsCodeInput": profile.needs_code_input,
@@ -116,29 +134,28 @@ async def external_agent_auth_status() -> dict[str, object]:
 
 @router.post("/install/{backend}")
 async def external_agent_install(backend: str) -> StreamingResponse:
-    """Install an external agent CLI into the isolated toolchain."""
-    from myrm_agent_harness.toolkits.acp.toolchains import IsolatedToolchainManager
+    """Install an external agent CLI into the isolated toolchain.
+
+    ``success`` is sent only after the toolchain has seen the installed CLI start; any other ending is an ``error``.
+    """
+    from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.toolchains import IsolatedToolchainManager, ToolchainError
 
     manager = IsolatedToolchainManager()
 
     async def event_stream() -> AsyncIterator[str]:
         try:
             async for msg in manager.install_backend(backend):
-                payload = {"type": "progress", "message": msg}
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            # After installation, force detector cache invalidation
-            from myrm_agent_harness.toolkits.acp.core.backend_detector import (
-                BackendDetector,
-            )
-
-            detector = BackendDetector()
-            detector.invalidate_cache()
-
+                yield f"data: {json.dumps({'type': 'progress', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'type': 'success', 'message': 'Installation complete'})}\n\n"
-        except Exception as exc:
-            logger.error("Installation failed", exc_info=True)
+        except ToolchainError as exc:
+            logger.warning("external_agent_install_failed backend=%s reason=%s", backend, exc)
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        except Exception as exc:
+            logger.error("external_agent_install_crashed backend=%s", backend, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Installation failed: {exc}'})}\n\n"
+        finally:
+            BackendDetector().invalidate_cache()
 
     return StreamingResponse(
         event_stream(),

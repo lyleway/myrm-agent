@@ -93,6 +93,7 @@ jobs:
           uv run --no-sync pytest -m integration -q --tb=short
           tests/toolkits/acp/test_real_cli_launch_contract.py
           tests/toolkits/acp/runtime/cli/test_real_cli_argv_contract.py
+          tests/toolkits/acp/runtime/cli/test_real_cli_login_contract.py
           tests/toolkits/acp/runtime/acp/test_real_acp_handshake.py
           tests/toolkits/acp/runtime/cli/test_real_cli_contract.py
           tests/toolkits/acp/runtime/cli/test_real_cli_failures.py

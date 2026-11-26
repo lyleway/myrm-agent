@@ -247,14 +247,14 @@ auth/
 ```
 
 **三大机制**：
-- **凭据检测**（`CredentialStore.state`）：该后端是否已登录？驱动预检与状态徽章；鉴权态从不缓存（用户随时登录/登出）
+- **登录态检测**（`resolve_login_state`）：该后端是否已登录？有状态命令的 CLI（`claude auth status`、`codex login status`）问 CLI 自己并以它的回答为准，没有的（gemini、qwen）与 CLI 无回应时退回 `CredentialStore.state` 的文件判断；驱动状态徽章；鉴权态从不缓存（用户随时登录/登出）
 - **交互式登录**（`CliLoginSession`）：spawn `<cli> <login_args>`，并发读 stdout/stderr，URL/设备码 → 可操作 PROMPT 事件，进程退出后用 `CredentialStore` 校验落地 → SUCCESS/ERROR；`needs_code_input` 时经 `feed()` 回填用户粘贴的 code
 - **凭据导入兜底**（`CredentialStore.import_credential`）：登录不可脚本化（gemini/qwen 浏览器流）或不便时的**通用路径**——用户在有浏览器的机器登录后粘贴 `auth.json`，原子安全写入对应路径
 
 **设计铁律**：
 - 鉴权态**绝不进入** Turn1 工具描述；`create_invoke_acp_agent_tool` 使用**固定 schema**（backend 列表仅在运行时 KeyError 返回值中暴露），不破坏提示词前缀缓存
 - 凭据路径环境感知：宿主通过重定向 home（如 `CODEX_HOME` → 持久卷）即可持久化凭据，harness 不依赖部署形态
-- 登录态检测基于文件，刻意**不做运行时硬预检**：跨平台凭据存储差异（如 macOS Keychain）会导致误判，CLI 自身的未登录错误以 `AUTH_FAILED`（Claude 的 `authentication_failed`、Codex 的 401）带着 CLI 原话准确透传，状态可见性由徽章承担
+- 登录态以 CLI 自述为准（文件判断看不见 macOS Keychain 里的 Claude 登录，也会把 CLI 已不认的文件当作已登录），但仍**不做运行时硬预检**：CLI 自身的未登录错误以 `AUTH_FAILED`（Claude 的 `authentication_failed`、Codex 的 401）带着 CLI 原话准确透传，状态可见性由徽章承担。两个 CLI 的自述格式由真二进制契约测试（`test_real_cli_login_contract.py`）盯住：claude 在 stdout 打 JSON（`loggedIn`、`authMethod`，未登录时退出码为 1），codex 在 stderr 说话（退出码 0 / 1）
 
 ---
 
@@ -271,11 +271,14 @@ acp/
 ├── core/                   # 共享基础设施
 │   ├── __init__.py
 │   ├── event_bus.py        # EventBus
-│   └── backend_detector.py # CLI 探测（detect + detect_with_auth 安装+登录态一次性视图）
+│   ├── probe.py            # run_probe：向 CLI 提一个短问题（--version、auth status），精确环境、输出与时间有界，超时杀整棵进程树
+│   └── backend_detector.py # CLI 探测（detect + detect_with_auth 安装+登录态一次性视图；版本与登录态并发询问）
 ├── auth/                   # 订阅鉴权子系统（业务无关机制）
 │   ├── __init__.py         # 公共导出
 │   ├── _profiles.py        # AuthProfile：CLI 凭据路径/登录命令/策略
 │   ├── credential_store.py # 状态检测 + 凭据导入兜底 + 清除
+│   ├── launch_env.py       # cli_base_env：每次启动 CLI 的基线环境（回合与探测共用）
+│   ├── login_state.py      # probe_login / resolve_login_state：CLI 自述的登录态，文件判断作兜底
 │   └── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
 ├── server/                 # ACP Server 方向（IDE → Agent）
 │   ├── __init__.py
@@ -304,7 +307,7 @@ acp/
 │       └── turn_parser.py  # 单回合 NDJSON 解析器（announce / result / 顶层 error 通知 / 连续 401 重试计数 / 增量文本去重）
 └── toolchains/             # 隔离工具链（Node/npm）
     ├── __init__.py
-    └── manager.py          # ToolchainManager
+    └── manager.py          # IsolatedToolchainManager：安装要么产出能启动的 CLI 要么抛 ToolchainError；内核锁、有界下载与 npm、跟随用户 npm 配置
 ```
 
 `toolkits/acp/acp_agent_tools.py` 通过 `RuntimePool` 发起委托，汇总 `USAGE_UPDATE` 事件的 token 消耗并推送至前端；用户停止时经 `utils/runtime/cancel_hook.on_token_cancelled` 停掉外部进程。`runtime/cli/turn_parser.py` 把一个回合的 NDJSON 行解析为 `RuntimeEvent`：Claude stream-json（content block 里的文本与 tool_use / tool_result，`--include-partial-messages` 的 `stream_event` 增量文本并按 API message id 去重）、Codex 新格式（`item.started/completed` + `turn.completed/failed`，含 `command_execution`、`file_change`、`reasoning` 事件映射）与 legacy `{"id","msg"}` envelope、纯文本；同时暴露 CLI 最先 announce 的会话 id 与 CLI 自己的 `result` 结论。`runtime/cli/parser.py` 提供各格式共用的事件构造。

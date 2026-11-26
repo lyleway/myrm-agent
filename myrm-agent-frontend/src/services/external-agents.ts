@@ -4,12 +4,13 @@
  *
  * [OUTPUT]
  * - ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
- * - getExternalAgentAuthStatus / streamExternalAgentLogin / feedExternalAgentLogin
- *   / importExternalAgentCredential / logoutExternalAgent
+ * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
+ *   / feedExternalAgentLogin / importExternalAgentCredential / logoutExternalAgent
  *
  * [POS]
- * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 交互式登录、
- * 凭据导入/登出，供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
+ * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
+ * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、凭据导入/登出，
+ * 供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
  */
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
 
@@ -22,8 +23,6 @@ export interface ExternalAgentAuthStatus {
   version: string | null;
   authenticated: boolean;
   authStatus: 'authenticated' | 'not_authenticated' | 'unknown';
-  /** True when subscription cred exists OR the CLI binary is on PATH (third-party model setups). */
-  readyForDelegation: boolean;
   loginStrategy: ExternalAgentLoginStrategy;
   scriptableLogin: boolean;
   needsCodeInput: boolean;
@@ -50,27 +49,6 @@ export async function getExternalAgentAuthStatus(): Promise<ExternalAgentAuthSta
   return res.backends ?? [];
 }
 
-/** Whether this backend can be delegated to (subscription cred OR CLI on PATH). */
-export function isExternalAgentDelegationReady(
-  status: Pick<ExternalAgentAuthStatus, 'authenticated' | 'installed' | 'readyForDelegation'>,
-): boolean {
-  return Boolean(status.readyForDelegation || status.authenticated || status.installed);
-}
-
-export type ExternalAgentBadgeKind = 'subscription' | 'cli_ready' | 'logged_out';
-
-export function resolveExternalAgentBadgeKind(
-  status: Pick<ExternalAgentAuthStatus, 'authenticated' | 'installed' | 'readyForDelegation'>,
-): ExternalAgentBadgeKind {
-  if (status.authenticated) {
-    return 'subscription';
-  }
-  if (isExternalAgentDelegationReady(status)) {
-    return 'cli_ready';
-  }
-  return 'logged_out';
-}
-
 /**
  * Match a configured command to the server's status row for the same backend.
  *
@@ -92,9 +70,9 @@ function resolveConfiguredBackendStatus(
  */
 export type ExternalCliReadiness = 'not_configured' | 'unavailable' | 'ready';
 
-/** True when auth/status reports any backend ready for delegation (PATH auto-detect). */
+/** True when auth/status reports any backend installed on this machine (PATH auto-detect). */
 export function hasAutoDetectedExternalCliBackend(statuses: ReadonlyArray<ExternalAgentAuthStatus>): boolean {
-  return statuses.some((row) => isExternalAgentDelegationReady(row));
+  return statuses.some((row) => row.installed);
 }
 
 /**
@@ -123,62 +101,73 @@ export function resolveExternalCliReadiness(
       return true;
     }
     const status = resolveConfiguredBackendStatus(command, statuses);
-    return status ? isExternalAgentDelegationReady(status) : true;
+    return status ? status.installed : true;
   });
   return resolvable ? 'ready' : 'unavailable';
 }
 
-export async function* streamExternalAgentInstall(
-  backend: string,
-): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
-  const response = await fetchWithTimeout(
-    `/external-agents/install/${backend}`,
-    {
-      method: 'POST',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    },
-    300000, // 5 minutes for installation
-  );
+/** `fetchWithTimeout` (used for SSE) does not attach the bearer token the way `apiRequest` does. */
+function withBearerToken(headers: Record<string, string>): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
+}
 
-  if (!response.body) {
-    throw new Error('No response body');
-  }
-
-  const reader = response.body.getReader();
+/**
+ * Parse an SSE body into events. Malformed frames are skipped; `[DONE]` ends the stream.
+ * Leaving early (consumer stops or the request is aborted) closes the underlying connection.
+ */
+async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-
   try {
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) {
-        break;
+        return;
       }
-
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            return;
-          }
-          try {
-            const event = JSON.parse(data) as ExternalAgentAuthEvent;
-            yield event;
-          } catch (e) {
-            console.error('Failed to parse SSE event:', data, e);
-          }
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
+        if (!dataLine) {
+          continue;
+        }
+        const data = dataLine.slice(5).trim();
+        if (data === '[DONE]') {
+          return;
+        }
+        try {
+          yield JSON.parse(data) as ExternalAgentAuthEvent;
+        } catch {
+          // ignore malformed frame
         }
       }
     }
   } finally {
-    reader.releaseLock();
+    reader.cancel().catch(() => undefined);
   }
+}
+
+/**
+ * Install a backend CLI into the managed toolchain, yielding the installer's progress, then `success` or `error`.
+ * The server bounds every install step itself, so no client-side deadline applies; abort the signal to cancel.
+ */
+export async function* streamExternalAgentInstall(
+  backend: string,
+  signal?: AbortSignal,
+): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
+  const response = await fetchWithTimeout(
+    `/external-agents/install/${encodeURIComponent(backend)}`,
+    { method: 'POST', headers: withBearerToken({ Accept: 'text/event-stream' }), signal },
+    0,
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`Install stream failed: ${response.status}`);
+  }
+  yield* readSseEvents(response.body);
 }
 
 /** Persist a credential blob captured elsewhere (universal fallback). */
@@ -218,17 +207,11 @@ export async function streamExternalAgentLogin(
   onEvent: (event: ExternalAgentAuthEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
   const response = await fetchWithTimeout(
     '/external-agents/auth/login',
     {
       method: 'POST',
-      headers,
+      headers: withBearerToken({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ command: params.command, backend: params.backend, sessionId: params.sessionId }),
       signal,
     },
@@ -239,32 +222,7 @@ export async function streamExternalAgentLogin(
     throw new Error(`Login stream failed: ${response.status}`);
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      let sep: number;
-      while ((sep = buffer.indexOf('\n\n')) >= 0) {
-        const frame = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        const dataLine = frame.split('\n').find((line) => line.startsWith('data:'));
-        if (!dataLine) {
-          continue;
-        }
-        try {
-          onEvent(JSON.parse(dataLine.slice(5).trim()) as ExternalAgentAuthEvent);
-        } catch {
-          // ignore malformed frame
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
+  for await (const event of readSseEvents(response.body)) {
+    onEvent(event);
   }
 }

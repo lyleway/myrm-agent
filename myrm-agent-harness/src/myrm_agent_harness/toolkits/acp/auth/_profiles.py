@@ -57,6 +57,9 @@ class AuthProfile:
     needs_code_input: bool  # whether login expects the user to paste a code back via stdin
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
     cli_launch_args: tuple[str, ...] = ()  # baseline non-interactive invocation args (never permission flags)
+    login_probe: tuple[
+        str, ...
+    ] = ()  # args that make the CLI report its own login state; empty: it has no such command
 
     def resolve_home(self, env: Mapping[str, str]) -> Path:
         """Resolve the CLI home directory, honouring an override env var if set."""
@@ -92,6 +95,7 @@ _PROFILES: dict[str, AuthProfile] = {
         logout_args=("logout",),
         needs_code_input=False,
         api_key_env=("OPENAI_API_KEY",),
+        login_probe=("login", "status"),
         # A delegated workspace is not necessarily a git repository, and `exec` refuses to start outside one
         # unless told otherwise. The sandbox the permission mode selects is unaffected by the flag.
         cli_launch_args=("exec", "--json", "--skip-git-repo-check"),
@@ -106,6 +110,7 @@ _PROFILES: dict[str, AuthProfile] = {
         logout_args=None,
         needs_code_input=True,
         api_key_env=("ANTHROPIC_API_KEY",),
+        login_probe=("auth", "status"),
         cli_launch_args=("-p", "--output-format", "stream-json", "--verbose"),
     ),
     "gemini": AuthProfile(

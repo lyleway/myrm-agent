@@ -13,7 +13,9 @@ business layer drives GUI/SaaS login, status badges, and credential persistence.
 | __init__.py | Package | Public surface of the ACP auth subsystem. | ✅ |
 | _profiles.py | Internal | Per-backend CLI knowledge: credential paths, login command, strategy, api-key env, baseline launch args, and the permission-mode → argv mapping. Sole owner of CLI invocation arguments. | ✅ |
 | credential_store.py | Core | Detect / import / clear subscription credentials (atomic, owner-only writes). | ✅ |
+| launch_env.py | Core | `cli_base_env`: the environment every launch of a CLI starts from (core variables, the CLI's own login-home variable, the managed Node on PATH for a CLI the isolated toolchain installed); shared by turns and probes so a probe sees what a turn will see. | ✅ |
 | login_session.py | Core | Drive `<cli> login` and stream structured AuthEvents (URL/code → SUCCESS/ERROR). | ✅ |
+| login_state.py | Core | `probe_login` / `resolve_login_state`: the login state a CLI reports about itself (`claude auth status`, `codex login status`), the credential file only as the fallback. | ✅ |
 
 ## Design notes
 - **Environment-aware paths**: `AuthProfile.resolve_home` honours per-CLI home
@@ -22,10 +24,14 @@ business layer drives GUI/SaaS login, status badges, and credential persistence.
 - **Auth never enters the model**: credentials and auth state stay in the backend /
   config layers; they are never injected into prompts or tool descriptions, so the
   prompt prefix cache is unaffected.
-- **No runtime hard pre-check**: file-based detection cannot see alternative stores
-  (e.g. macOS Keychain), so the runtime never blocks on it pre-emptively. The CLI's
-  own not-logged-in error surfaces as `AUTH_FAILED` carrying the CLI's own words; visibility is delivered by
-  status badges (`CredentialStore.state`, `BackendDetector.detect_with_auth`).
+- **The CLI knows where its login is**: a credential-file check cannot see a login kept
+  elsewhere (Claude Code on macOS uses the Keychain) and trusts a file the CLI may not
+  honour, so a CLI with a status command (`claude auth status`, `codex login status`) is asked
+  and its answer wins; gemini and qwen have none and are judged by their file. Both CLIs were
+  measured to answer without a network call, claude with JSON on stdout (exit 1 when logged
+  out), codex on stderr (exit 0 / 1). The runtime still never blocks a turn on the answer: the
+  CLI's own not-logged-in error surfaces as `AUTH_FAILED` carrying the CLI's own words, and
+  visibility is delivered by status badges (`resolve_login_state`, `BackendDetector.detect_with_auth`).
 - **Import is the universal fallback**: where scripted login is unavailable
   (`scriptable_login` is False) or inconvenient, the user pastes a credential blob
   captured elsewhere and `CredentialStore.import_credential` persists it safely.

@@ -247,41 +247,48 @@ class TestFindNpmGlobal:
 
 
 class TestGetVersion:
+    """``_get_version`` runs the real executable, so the cases are real scripts."""
+
+    @staticmethod
+    def _cli(directory: Path, body: str) -> str:
+        path = directory / "claude"
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return str(path)
+
     @pytest.mark.asyncio
-    async def test_extracts_version_string(self) -> None:
-        detector = BackendDetector()
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"claude 1.5.0\n", b""))
-
-        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
-            version = await detector._get_version("/usr/bin/claude")
-        assert version == "claude 1.5.0"
+    async def test_extracts_version_string(self, tmp_path: Path) -> None:
+        cli = self._cli(tmp_path, 'echo "claude 1.5.0"\necho "second line"\n')
+        assert await BackendDetector()._get_version(cli) == "claude 1.5.0"
 
     @pytest.mark.asyncio
-    async def test_returns_none_on_timeout(self) -> None:
-        detector = BackendDetector()
+    async def test_a_failing_command_has_no_version(self, tmp_path: Path) -> None:
+        cli = self._cli(tmp_path, 'echo "Error: broken install"\nexit 1\n')
+        assert await BackendDetector()._get_version(cli) is None
 
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
-
-        async def _raise_timeout(awaitable: object, timeout: float) -> tuple[bytes, bytes]:
-            if hasattr(awaitable, "close"):
-                awaitable.close()  # type: ignore[attr-defined]
-            raise TimeoutError
-
-        with (
-            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
-            patch("asyncio.wait_for", side_effect=_raise_timeout),
-        ):
-            version = await detector._get_version("/usr/bin/claude")
-        assert version is None
+    @pytest.mark.asyncio
+    async def test_a_silent_command_has_no_version(self, tmp_path: Path) -> None:
+        assert await BackendDetector()._get_version(self._cli(tmp_path, "exit 0\n")) is None
 
     @pytest.mark.asyncio
     async def test_returns_none_on_os_error(self) -> None:
-        detector = BackendDetector()
-        with patch("asyncio.create_subprocess_exec", side_effect=OSError("not found")):
-            version = await detector._get_version("/bad/path")
-        assert version is None
+        assert await BackendDetector()._get_version("/bad/path") is None
+
+    @pytest.mark.asyncio
+    async def test_versions_of_several_backends_are_asked_at_once(self, tmp_path: Path) -> None:
+        import time
+
+        slow = [self._cli(tmp_path, "sleep 1\necho v\n")]
+        for index in range(2):
+            directory = tmp_path / f"d{index}"
+            directory.mkdir()
+            slow.append(self._cli(directory, "sleep 1\necho v\n"))
+
+        started = time.monotonic()
+        versions = await BackendDetector()._versions(slow)
+
+        assert versions == ["v", "v", "v"]
+        assert time.monotonic() - started < 2.5  # three sequential one-second probes would take 3s
 
 
 class TestIsExecutable:
@@ -331,26 +338,47 @@ class TestCacheCrossConversion:
 
 
 class TestDetectWithAuth:
+    @staticmethod
+    def _cli(directory: Path, name: str, body: str) -> str:
+        path = directory / name
+        path.write_text("#!/bin/sh\n" + body)
+        path.chmod(0o755)
+        return str(path)
+
     @pytest.mark.asyncio
     async def test_detect_with_auth_combines_state(self, tmp_path: Path) -> None:
         detector = BackendDetector()
         detector.detect = AsyncMock(  # type: ignore[method-assign]
-            return_value=[DetectedBackend(name="codex", path="/usr/bin/codex")]
+            return_value=[DetectedBackend(name="codex", path=self._cli(tmp_path, "codex", "exit 1\n"))]
         )
-        env = {"HOME": str(tmp_path)}
-        pairs = await detector.detect_with_auth(env=env)
+        pairs = await detector.detect_with_auth(env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"})
         assert len(pairs) == 1
         backend, state = pairs[0]
         assert backend.name == "codex"
         assert state.status.value == "not_authenticated"
 
     @pytest.mark.asyncio
+    async def test_the_cli_is_asked_who_is_logged_in(self, tmp_path: Path) -> None:
+        detector = BackendDetector()
+        claude = self._cli(tmp_path, "claude", 'echo \'{"loggedIn": true, "authMethod": "claude.ai"}\'\n')
+        detector.detect = AsyncMock(  # type: ignore[method-assign]
+            return_value=[DetectedBackend(name="claude", path=claude)]
+        )
+
+        [(_, state)] = await detector.detect_with_auth(env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"})
+
+        assert state.authenticated
+        assert state.detail == "claude.ai"
+
+    @pytest.mark.asyncio
     async def test_detect_with_auth_pass_through_kwargs(self, tmp_path: Path) -> None:
         detector = BackendDetector()
-        mock_detect = AsyncMock(return_value=[DetectedBackend(name="codex", path="/usr/bin/codex")])
+        mock_detect = AsyncMock(
+            return_value=[DetectedBackend(name="codex", path=self._cli(tmp_path, "codex", "exit 1\n"))]
+        )
         detector.detect = mock_detect  # type: ignore[method-assign]
         await detector.detect_with_auth(
-            env={"HOME": str(tmp_path)},
+            env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
             include_version=True,
             refresh=True,
         )
