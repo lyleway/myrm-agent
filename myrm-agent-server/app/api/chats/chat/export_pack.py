@@ -61,6 +61,9 @@ class _ZipStreamBuffer:
     def flush(self) -> None:
         pass
 
+    def close(self) -> None:
+        """No-op: the central directory written when the archive closes is read from this buffer afterwards."""
+
     def read_and_clear(self) -> bytes:
         chunk = bytes(self._buf)
         self._buf.clear()
@@ -93,13 +96,10 @@ def _is_path_strictly_within(target: Path, base_dir: Path) -> bool:
 
 def _build_content_disposition(chat_title: str | None, chat_id: str) -> str:
     raw_title = chat_title or "chat"
-    safe_ascii = (
-        "".join(c for c in raw_title if c.isascii() and (c.isalnum() or c in ("-", "_"))).strip()
-        or "session"
-    )
+    safe_ascii = "".join(c for c in raw_title if c.isascii() and (c.isalnum() or c in ("-", "_"))).strip() or "session"
     ascii_filename = f"session_{safe_ascii[:30]}_{chat_id[:8]}.zip"
     encoded_filename = quote(f"session_{raw_title}_{chat_id[:8]}.zip")
-    return f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+    return f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
 
 
 async def _generate_zip_stream(
@@ -114,7 +114,7 @@ async def _generate_zip_stream(
     buf = _ZipStreamBuffer()
     manifest_files: list[dict[str, object]] = []
 
-    # 1. Read root session event log (with optional PII/secrets redaction)
+    # 1. Read root session event log (with optional secrets redaction)
     root_log_path = log_dir / f"{chat.id}.jsonl"
     root_log_bytes = b""
     if root_log_path.exists() and root_log_path.is_file():
@@ -187,11 +187,7 @@ async def _generate_zip_stream(
                     if not _is_safe_id(vault_id):
                         continue
                     obj_path = vault_objects_dir / vault_id
-                    if (
-                        obj_path.exists()
-                        and obj_path.is_file()
-                        and _is_path_strictly_within(obj_path, vault_objects_dir)
-                    ):
+                    if obj_path.exists() and obj_path.is_file() and _is_path_strictly_within(obj_path, vault_objects_dir):
                         try:
                             content = obj_path.read_bytes()
                             rel_arc = _sanitize_arcname(f"artifacts/{safe_art_name}/{ver.id}_{safe_art_name}")
