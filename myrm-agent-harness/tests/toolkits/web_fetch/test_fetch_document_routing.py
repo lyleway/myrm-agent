@@ -52,9 +52,6 @@ async def engine_with_http() -> AsyncIterator[tuple[FetchEngine, AsyncMock]]:
     engine = FetchEngine()
     http = AsyncMock()
     engine._http_fetcher = http
-    engine._browser_fetcher = AsyncMock()
-    engine._browser_fetcher.set_launch_mode_preference = MagicMock()
-    engine._stealth_fetcher = AsyncMock()
     yield engine, http
     await engine.shutdown()
 
@@ -169,7 +166,7 @@ async def test_empty_text_degrades(engine_with_http: tuple[FetchEngine, AsyncMoc
     assert degradable is True
 
 
-async def test_crawl_reads_text_without_any_browser_tier(engine_with_http: tuple[FetchEngine, AsyncMock]) -> None:
+async def test_crawl_reads_text_on_http(engine_with_http: tuple[FetchEngine, AsyncMock]) -> None:
     engine, http = engine_with_http
     http.fetch.return_value = _text_result("plain answer\n")
 
@@ -177,8 +174,6 @@ async def test_crawl_reads_text_without_any_browser_tier(engine_with_http: tuple
 
     assert doc is not None
     assert doc.page_content == "plain answer"
-    engine._browser_fetcher.fetch.assert_not_called()  # type: ignore[attr-defined]
-    engine._stealth_fetcher.fetch.assert_not_called()  # type: ignore[attr-defined]
 
 
 async def test_crawl_stops_at_an_unreadable_file_but_offers_it_to_remote_providers(
@@ -197,9 +192,6 @@ async def test_crawl_stops_at_an_unreadable_file_but_offers_it_to_remote_provide
         escalation.reset_mock()
         await engine._crawl_with_degradation(URL, allow_escalation=False)
         escalation.assert_not_called()
-
-    engine._browser_fetcher.fetch.assert_not_called()  # type: ignore[attr-defined]
-    engine._stealth_fetcher.fetch.assert_not_called()  # type: ignore[attr-defined]
 
 
 async def test_crawl_returns_what_a_remote_provider_reads_from_an_unreadable_file(
@@ -234,15 +226,10 @@ async def test_tier_outcomes_come_only_from_real_attempts(
     engine, http = engine_with_http
     http.fetch.return_value = fetched
 
-    with (
-        patch.object(engine._tier_breaker, "report") as report,
-        patch.object(engine._domain_metrics, "record_failure") as record_failure,
-    ):
+    with patch.object(engine._domain_metrics, "record_failure") as record_failure:
         await engine._try_and_report(URL, FetcherType.HTTP)
 
     if reported_success is None:
-        report.assert_not_called()
         record_failure.assert_not_called()
     else:
-        report.assert_called_once_with("example.com", FetcherType.HTTP, success=reported_success)
         assert record_failure.called is (not reported_success)

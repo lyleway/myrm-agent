@@ -3,7 +3,7 @@
 [INPUT]
 - core.security.detection.prompt_guard::scan_input (POS: Prompt injection / instruction hijack detection.)
 - core.security.detection.harmful_state_detector::scan_for_harmful_states (POS: Harmful psychological-state pattern detection.)
-- core.security.detection.leak_detector::redact_leaks / scan_for_leaks (POS: Secret/PII leak detection and redaction.)
+- core.security.detection.leak_detector::redact_leaks / scan_for_leaks (POS: Credential leak detection and redaction.)
 - core.security.detection.password_heuristic::find_password_spans (POS: Keyword-anchored password and PIN/OTP detection.)
 - core.security.persistence.secret_spans::find_assignment_secret_spans / redact_spans (POS: Labeled secret values and position-based redaction.)
 - core.security.detection.instruction_shape::detect_instruction_shapes (POS: Instruction-shape spoofing detection.)

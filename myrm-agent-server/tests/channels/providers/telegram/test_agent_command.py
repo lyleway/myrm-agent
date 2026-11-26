@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.channels.types import TopicContext
 from app.channels.types.messages import InboundMessage
 
 
@@ -142,14 +143,18 @@ class TestHandleAgentCommand:
         assert result is None
 
 
-class _FakeTopicContext:
-    def __init__(self, agent_id: str | None = None):
-        self.agent_id = agent_id
+def _topic(agent_id: str | None, *, revoked: bool = False) -> TopicContext:
+    return TopicContext(topic_id="t", agent_id=agent_id, identity_revoked=revoked)
 
 
-class _FakeTopicManager:
-    async def resolve_topic(self, *args, **kwargs):
-        return None
+class _TopicsByLevel:
+    """Bindings by ``(chat_id, thread_id)``; the channel-wide binding is stored under the chat id ``__global__``."""
+
+    def __init__(self, bindings: dict[tuple[str, str | None], TopicContext] | None = None) -> None:
+        self._bindings = bindings or {}
+
+    async def resolve_topic(self, channel: str, chat_id: str, thread_id: str | None) -> TopicContext | None:
+        return self._bindings.get((chat_id, thread_id))
 
 
 class TestSendAgentPicker:
@@ -180,7 +185,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_FakeTopicManager(),
+                return_value=_TopicsByLevel(),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -208,7 +213,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_FakeTopicManager(),
+                return_value=_TopicsByLevel(),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -229,7 +234,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_FakeTopicManager(),
+                return_value=_TopicsByLevel(),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -249,7 +254,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_FakeTopicManager(),
+                return_value=_TopicsByLevel(),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -266,12 +271,6 @@ class TestSendAgentPicker:
         ]
         msg = _make_msg(content="/agent")
 
-        class _BoundTopicManager:
-            async def resolve_topic(self, channel_name, chat_id, thread_id):
-                if thread_id is None:
-                    return _FakeTopicContext(agent_id="a2")
-                return None
-
         with (
             patch(
                 "app.services.agent.agent_service.AgentService.get_agent_list",
@@ -280,7 +279,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_BoundTopicManager(),
+                return_value=_TopicsByLevel({("12345", None): _topic("a2")}),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -303,7 +302,7 @@ class TestSendAgentPicker:
             ),
             patch(
                 "app.core.channel_bridge.topic_config.SqlTopicManager",
-                return_value=_FakeTopicManager(),
+                return_value=_TopicsByLevel(),
             ),
         ):
             await channel._send_agent_picker(msg)
@@ -312,3 +311,50 @@ class TestSendAgentPicker:
         keyboard = call_kwargs["reply_markup"]["inline_keyboard"]
         assert keyboard[0][0]["text"] == "Alpha"
         assert "✅" not in keyboard[0][0]["text"]
+
+    async def _picker_labels(self, channel, topics: _TopicsByLevel, msg: InboundMessage) -> list[str]:
+        agents = [FakeAgentProfile(id="a1", display_name="Alpha"), FakeAgentProfile(id="a2", display_name="Beta")]
+        with (
+            patch(
+                "app.services.agent.agent_service.AgentService.get_agent_list",
+                new_callable=AsyncMock,
+                return_value=(agents, 2),
+            ),
+            patch("app.core.channel_bridge.topic_config.SqlTopicManager", return_value=topics),
+        ):
+            await channel._send_agent_picker(msg)
+        keyboard = channel._client.send_message.call_args.kwargs["reply_markup"]["inline_keyboard"]
+        return [row[0]["text"] for row in keyboard]
+
+    @pytest.mark.asyncio
+    async def test_picker_marks_the_agent_of_the_thread_binding_over_the_chat_binding(self, channel):
+        topics = _TopicsByLevel({("12345", "77"): _topic("a1"), ("12345", None): _topic("a2")})
+
+        labels = await self._picker_labels(channel, topics, _make_msg(content="/agent", thread_id="77"))
+
+        assert labels == ["✅ Alpha", "Beta"]
+
+    @pytest.mark.asyncio
+    async def test_picker_marks_the_agent_of_a_channel_wide_binding(self, channel):
+        topics = _TopicsByLevel({("__global__", None): _topic("a2")})
+
+        labels = await self._picker_labels(channel, topics, _make_msg(content="/agent"))
+
+        assert labels == ["Alpha", "✅ Beta"]
+
+    @pytest.mark.asyncio
+    async def test_picker_marks_nothing_when_the_thread_binding_names_no_agent(self, channel):
+        """The thread binding serves the message even without an agent, so the chat's agent is not the one in use."""
+        topics = _TopicsByLevel({("12345", "77"): _topic(None), ("12345", None): _topic("a2")})
+
+        labels = await self._picker_labels(channel, topics, _make_msg(content="/agent", thread_id="77"))
+
+        assert labels == ["Alpha", "Beta"]
+
+    @pytest.mark.asyncio
+    async def test_picker_marks_nothing_for_a_frozen_identity(self, channel):
+        topics = _TopicsByLevel({("12345", None): _topic("a2", revoked=True)})
+
+        labels = await self._picker_labels(channel, topics, _make_msg(content="/agent"))
+
+        assert labels == ["Alpha", "Beta"]

@@ -27,7 +27,7 @@ Wiki raw ingress SSOT — browser clip and URL markdown asset localization befor
 
 - `pipeline.raw_gate` (`publish_raw`, `RawGateCaller`, extension re-clip replace via `replace_source_url`)
 - `core.structure` (`WikiStructure`, raw path resolution)
-- `toolkits.web_fetch` (`ContentPruningFilter`, `MarkdownGenerator`)
+- `toolkits.web_fetch` (`MarkdownGenerator`)
 
 ## Clip path defaults
 

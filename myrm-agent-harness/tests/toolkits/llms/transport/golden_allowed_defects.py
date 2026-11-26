@@ -14,7 +14,16 @@ difference is wanted.
 
 from __future__ import annotations
 
-from .golden_allowed_types import ANTHROPIC, GEMINI, NATIVE_SEARCH_CLAUDE, AllowedDiff, contains
+from .golden_allowed_types import ANTHROPIC, GEMINI, NATIVE_SEARCH_CLAUDE, AllowedDiff, _Change, contains
+
+
+def _only_empty_assistant_turn_omitted(diff: _Change) -> bool:
+    """Whether ``new`` equals ``old`` with only the empty ``output_text`` assistant turn removed."""
+    if not isinstance(diff.old, list) or not isinstance(diff.new, list):
+        return False
+    empty_turn = {"role": "assistant", "content": [{"type": "output_text", "text": ""}]}
+    return [item for item in diff.old if item != empty_turn] == diff.new
+
 
 DEFECT_RULES: tuple[AllowedDiff, ...] = (
     # --- defects of the baseline request construction -------------------------------------------------------------
@@ -176,5 +185,15 @@ DEFECT_RULES: tuple[AllowedDiff, ...] = (
         r"/body/stream_options",
         providers=("openai_like",),
         scenarios=("anthropic_wire_stream",),
+    ),
+    AllowedDiff(
+        "responses-empty-assistant-turn-omitted",
+        "A tool-only assistant turn emitted a bogus empty `output_text` assistant message before `function_call`; "
+        "omitting it aligns the Responses wire with strict providers and preserves reasoning-to-call pairing.",
+        "~",
+        r"/body/input",
+        providers=("openai", "openai_like", "openrouter"),
+        scenarios=("responses_tools",),
+        when=_only_empty_assistant_turn_omitted,
     ),
 )

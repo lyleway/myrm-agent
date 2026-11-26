@@ -1,6 +1,6 @@
 """
-@input: 依赖 health_check 的「启动健康检查」，依赖 granian 外部库
-@output: 对外提供 granian 多进程启动（仅适用于无嵌入式数据库的场景）
+@input: 依赖 health_check 的「启动健康检查」，依赖 granian 外部库，依赖同目录 granian_log_config.json（granian 日志格式器配置）
+@output: 对外提供 granian 多进程启动（仅适用于无嵌入式数据库的场景）；granian 自身日志经脱敏格式器写出
 @pos: granian 服务器启动器 —— 多进程模式（可选）
 
 🔄 更新规则：修改此文件后，请更新头注释 + 所属文件夹 _ARCH.md
@@ -9,8 +9,13 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from app.startup.health_check import run_startup_health_check
+
+# granian 的 `_granian` 与 `granian.access` 日志器带各自的 stdout 处理器且不向上传播，应用根处理器的脱敏管不到它们
+# （含未处理异常的回溯）；granian 把这份文件合并进默认日志配置，把两个格式器换成脱敏格式器。
+_LOG_CONFIG = Path(__file__).with_name("granian_log_config.json")
 
 
 def start_with_granian(
@@ -55,6 +60,8 @@ def start_with_granian(
         "1",
         "--runtime-threads",
         "2",
+        "--log-config",
+        str(_LOG_CONFIG),
         "app.main:app",
     ]
 

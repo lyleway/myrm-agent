@@ -133,7 +133,7 @@ async def extract_youtube_transcript(
         return None
 
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api import FetchedTranscript, YouTubeTranscriptApi
     except ImportError:
         logger.error("youtube-transcript-api not installed. Install: uv sync --extra web (or myrm-agent-harness[web])")
         return None
@@ -148,7 +148,7 @@ async def extract_youtube_transcript(
         proxy_url = proxy_config.to_url()
         yt_proxy_config = GenericProxyConfig(https_url=proxy_url)
 
-    async def _fetch_transcript() -> list | None:
+    async def _fetch_transcript() -> FetchedTranscript | None:
         try:
             api = YouTubeTranscriptApi(proxy_config=yt_proxy_config)
             return await asyncio.to_thread(api.fetch, video_id, languages=languages)

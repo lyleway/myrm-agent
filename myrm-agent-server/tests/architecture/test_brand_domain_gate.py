@@ -56,7 +56,7 @@ _LEGACY_CASES = [
     pytest.param(f"see https://{_OFFICIAL_DOMAIN}/docs", False, id="official-domain"),
     pytest.param(f"see https://x{_LEGACY_DOMAIN}/x", False, id="longer-name-before"),
     pytest.param(f"see https://{_LEGACY_DOMAIN}x/x", False, id="longer-name-after"),
-    pytest.param("clone https://github.com/Pursue-LLL/myrm-agent", False, id="current-github-repo"),
+    pytest.param("clone https://github.com/lyleway/myrm-agent", False, id="current-github-repo"),
 ]
 
 _ANY_BRAND_CASES = [
@@ -64,7 +64,7 @@ _ANY_BRAND_CASES = [
     pytest.param(f"see https://docs.{_OFFICIAL_DOMAIN}/docs", True, id="official-subdomain"),
     pytest.param(f"mail to noreply@{_OFFICIAL_DOMAIN}", True, id="official-email"),
     pytest.param("see https://example.com/docs", False, id="other-domain"),
-    pytest.param("clone https://github.com/Pursue-LLL/myrm-agent", False, id="repository-name"),
+    pytest.param("clone https://github.com/lyleway/myrm-agent", False, id="repository-name"),
 ]
 
 _HOST_CASES = [
@@ -84,7 +84,7 @@ _HOST_CASES = [
     pytest.param(f"https://x.{_PRODUCT_NAME}.example/a", [], id="reserved-example"),
     pytest.param(f"git@{_PRODUCT_NAME}.local", [], id="reserved-local"),
     pytest.param(f"https://example.com/{_PRODUCT_NAME}", [], id="name-only-in-the-path"),
-    pytest.param("https://github.com/Pursue-LLL/myrm-agent", [], id="repository-name"),
+    pytest.param("https://github.com/lyleway/myrm-agent", [], id="repository-name"),
     pytest.param(f"npm i @{_PRODUCT_NAME}/pkg", [], id="package-scope-without-a-host"),
     pytest.param(
         f"a https://{_PRODUCT_NAME}-a.com and b https://{_PRODUCT_NAME}-b.org",

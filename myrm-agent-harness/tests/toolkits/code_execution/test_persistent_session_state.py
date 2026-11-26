@@ -11,6 +11,7 @@ import pytest
 from myrm_agent_harness.toolkits.code_execution.session import (
     LocalPersistentSession,
 )
+from myrm_agent_harness.toolkits.code_execution.session.command_stream import SESSION_CLOSED_BEFORE_START
 from myrm_agent_harness.toolkits.code_execution.session.models import SessionState
 from tests.toolkits.code_execution._session_helpers import captured_stdout_chunks, make_config, state_of
 
@@ -248,10 +249,10 @@ class TestExecuteStartsTheShell:
             await session.close()
 
     @pytest.mark.asyncio
-    async def test_a_terminated_session_is_started_again_by_the_next_command(self) -> None:
+    async def test_a_session_whose_shell_was_discarded_is_started_again_by_the_next_command(self) -> None:
         session = LocalPersistentSession(make_config())
         await session.start()
-        await session.close()
+        await session._discard_shell()
         assert session.state == SessionState.TERMINATED
         try:
             result = await session.execute("echo again")
@@ -260,6 +261,19 @@ class TestExecuteStartsTheShell:
             assert state_of(session) == SessionState.ACTIVE
         finally:
             await session.close()
+
+    @pytest.mark.asyncio
+    async def test_a_closed_session_refuses_commands_and_starts_no_shell(self) -> None:
+        session = LocalPersistentSession(make_config())
+        await session.start()
+        await session.close()
+
+        result = await session.execute("echo again")
+
+        assert not result.success
+        assert result.error == SESSION_CLOSED_BEFORE_START
+        assert session.process is None
+        assert state_of(session) == SessionState.TERMINATED
 
 
 class TestAutoTeeAndDiskQuota:

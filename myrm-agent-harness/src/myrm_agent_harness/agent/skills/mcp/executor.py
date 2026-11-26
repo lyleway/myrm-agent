@@ -10,8 +10,10 @@
 
 [INPUT]
 - agent.skills.mcp.ipc_proxy::IPCEndpoint (POS: what the generated client needs to reach one IPC server)
+- agent.skills.mcp.tool_name_utils::build_tool_name_map (POS: canonical MCP tool names → Python identifiers)
 - toolkits.code_execution::MCPConfigItem (POS: Code execution toolkit entry point. Aggregates execution configuration, executor implementations, workspace management, and factory functions for the Agent-in-Sandbox architecture.)
 - toolkits.code_execution.saved_script::SavedScript (POS: A workspace script that ``python file.py`` would run; builds its in-process launcher)
+- utils.python_parse::PYTHON_PARSE_ERRORS (POS: Python parse error tuple for AST fallback)
 
 [OUTPUT]
 - SkillExecutionContext: class — Skill Execution Context
@@ -21,22 +23,22 @@
 Provides SkillExecutionContext, SkillExecutor.
 """
 
+import ast
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from myrm_agent_harness.agent.skills.mcp.ipc_proxy import IPCEndpoint
+from myrm_agent_harness.agent.skills.mcp.tool_name_utils import build_tool_name_map
 from myrm_agent_harness.toolkits.code_execution import MCPConfigItem
 from myrm_agent_harness.toolkits.code_execution.python_extractor import (
-    SKILL_IMPORT_RE as SKILL_NAME_PATTERN,
-)
-from myrm_agent_harness.toolkits.code_execution.python_extractor import (
-    TOOLS_IMPORT_RE as TOOLS_IMPORT_PATTERN,
-)
-from myrm_agent_harness.toolkits.code_execution.python_extractor import (
+    SKILL_IMPORT_RE,
+    TOOLS_IMPORT_RE,
     detect_ptc_imports,
 )
 from myrm_agent_harness.toolkits.code_execution.saved_script import SavedScript
+from myrm_agent_harness.utils.python_parse import PYTHON_PARSE_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +118,8 @@ class SkillExecutor:
         if not python_code:
             return self._not_a_skill(command)
 
-        return self._skill_context(command, self._rewrite_skill_imports(python_code), identifier, endpoint)
+        rewritten = self._rewrite_skill_imports(python_code)
+        return self._skill_context(command, rewritten, identifier, endpoint, import_source=rewritten)
 
     def prepare_script_for_execution(
         self,
@@ -141,8 +144,9 @@ class SkillExecutor:
         if not is_ptc or not identifier:
             return self._not_a_skill(command)
 
-        launcher = script.launcher(self._rewrite_skill_imports(script.source))
-        return self._skill_context(command, launcher, identifier, endpoint)
+        rewritten = self._rewrite_skill_imports(script.source)
+        launcher = script.launcher(rewritten)
+        return self._skill_context(command, launcher, identifier, endpoint, import_source=rewritten)
 
     @staticmethod
     def _not_a_skill(command: str) -> SkillExecutionContext:
@@ -157,19 +161,27 @@ class SkillExecutor:
         )
 
     def _skill_context(
-        self, command: str, user_code: str, identifier: str, endpoint: IPCEndpoint
+        self,
+        command: str,
+        user_code: str,
+        identifier: str,
+        endpoint: IPCEndpoint,
+        *,
+        import_source: str,
     ) -> SkillExecutionContext:
         """在用户代码前注入 IPC 客户端，并取技能的 MCP 配置。"""
         from myrm_agent_harness.agent.skills.mcp.builtin_registry import BUILTIN_SKILL_NAME
 
         mcp_config = None
+        skill_functions: dict[str, list[str]] = {}
         if identifier == BUILTIN_SKILL_NAME:
             logger.info("Detected PTC builtin tools import")
         else:
             mcp_config = self.get_skill_mcp_config(identifier)
+            skill_functions = self._collect_skill_functions(self._extract_skill_names(import_source, identifier))
             logger.info(f"Detected MCP skill: {identifier}")
 
-        ipc_client_code = self._generate_mcp_client_code(endpoint)
+        ipc_client_code = self._generate_mcp_client_code(endpoint, skill_functions=skill_functions or None)
         prepared_code = f"{ipc_client_code}\n\n# === User Code ===\n{user_code}"
 
         return SkillExecutionContext(
@@ -236,11 +248,11 @@ class SkillExecutor:
 
     def _detect_ptc_by_regex(self, code: str) -> tuple[bool, str | None]:
         """正则回退：仅在代码无法解析成 AST（语法错误、片段代码）时使用。"""
-        skill_match = SKILL_NAME_PATTERN.search(code)
+        skill_match = SKILL_IMPORT_RE.search(code)
         if skill_match:
             return True, skill_match.group(1)
 
-        if TOOLS_IMPORT_PATTERN.search(code):
+        if TOOLS_IMPORT_RE.search(code):
             from myrm_agent_harness.agent.skills.mcp.builtin_registry import BUILTIN_SKILL_NAME
 
             return True, BUILTIN_SKILL_NAME
@@ -323,19 +335,57 @@ class SkillExecutor:
         return extract_python_from_bash(command)
 
     @staticmethod
-    def _generate_mcp_client_code(endpoint: IPCEndpoint) -> str:
-        """生成 MCP IPC 客户端代码
+    def _extract_skill_names(code: str, primary: str) -> list[str]:
+        """Collect all MCP skill names referenced by imports in *code*, starting with *primary*."""
+        names: list[str] = [primary]
+        try:
+            tree = ast.parse(code)
+        except PYTHON_PARSE_ERRORS:
+            names.extend(SKILL_IMPORT_RE.findall(code))
+            return list(dict.fromkeys(names))
 
-        通过 Unix Socket 与 Agent 主进程通信。
+        modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                modules.append(node.module)
+        for mod in modules:
+            parts = mod.split(".")
+            candidate = parts[1] if parts[0] == "skills" and len(parts) > 1 else parts[0]
+            if candidate.endswith("_skill"):
+                names.append(candidate)
+        return list(dict.fromkeys(names))
 
-        Args:
-            endpoint: 这次执行专属的 IPC 服务端
+    @staticmethod
+    def _collect_skill_functions(skill_names: Iterable[str]) -> dict[str, list[str]]:
+        """Resolve each MCP skill's callable Python names for wildcard-import module exports."""
+        from myrm_agent_harness.agent.skills.runtime.registry import skill_registry
 
-        Returns:
-            MCP 客户端代码字符串
-        """
+        exported: dict[str, list[str]] = {}
+        for skill_name in skill_names:
+            meta = skill_registry.get_mcp_skill_for_ipc(skill_name)
+            if meta and meta.is_mcp_skill and meta.mcp and meta.mcp.tools:
+                exported[skill_name] = list(build_tool_name_map(meta.mcp.tools).values())
+        return exported
+
+    @staticmethod
+    def _generate_mcp_client_code(
+        endpoint: IPCEndpoint,
+        *,
+        skill_functions: dict[str, list[str]] | None = None,
+    ) -> str:
+        """生成 MCP IPC 客户端代码（含可选星号导入函数表）。"""
         from myrm_agent_harness.agent.skills.mcp.client_templates import generate_ipc_client_code
 
+        if skill_functions:
+            return generate_ipc_client_code(
+                endpoint.socket_path,
+                auth_token=endpoint.auth_token,
+                trace_nonce=endpoint.trace_nonce,
+                tcp_port=endpoint.tcp_port,
+                skill_functions=skill_functions,
+            )
         return generate_ipc_client_code(
             endpoint.socket_path,
             auth_token=endpoint.auth_token,

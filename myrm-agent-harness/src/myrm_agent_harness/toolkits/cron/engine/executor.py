@@ -210,7 +210,7 @@ class JobExecutor(FailureAlertMixin, IncrementalMonitoringMixin, RunCloserMixin,
         model, usage_in, usage_out, usage_total = _extract_telemetry(result)
         delivery_status, delivery_error = await self._try_deliver(job, result)
 
-        # A failed delivery keeps its category and masked address beside the record; a runner's own entry wins.
+        # A failed delivery keeps its category and address beside the record; a runner's own entry wins.
         run_metadata = dict(result.metadata) if isinstance(result.metadata, dict) else (result.metadata or None)
         if delivery_status == DeliveryStatus.FAILED and delivery_error:
             category, _ = classify_connector_error(delivery_error)

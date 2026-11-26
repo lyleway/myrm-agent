@@ -1,8 +1,8 @@
-"""Buttons and menus on Discord: its outbound sends text and files only, so they reach the user as text."""
+"""Buttons and menus on Discord: its outbound sends text and files only, so links and options reach the user as text."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -32,9 +32,9 @@ async def _deliver(component: ActionButton | SelectMenu) -> MagicMock:
     target = MagicMock(spec=discord.TextChannel)
     target.send = AsyncMock(return_value=MagicMock(id=42))
     channel = DiscordChannel(DiscordChannelConfig(bot_token="test_token"))
-    channel._resolve_channel = AsyncMock(return_value=target)
 
-    await channel.send(prepared)
+    with patch.object(channel, "_resolve_channel", AsyncMock(return_value=target)):
+        await channel.send(prepared)
 
     return target
 
@@ -50,7 +50,6 @@ def test_the_adapter_declares_no_native_components() -> None:
     ("component", "line"),
     [
         (_LINK, f"• Open → {_SHARE_URL}"),
-        (_CALLBACK, "• Approve → /approve:req-1"),
         (_MENU, "• Pick one: Fast, Deep"),
     ],
 )
@@ -60,4 +59,15 @@ async def test_a_component_reaches_discord_as_a_text_line(component: ActionButto
     target.send.assert_awaited_once()
     sent = target.send.call_args.kwargs
     assert sent["content"] == f"Report ready\n\n{line}"
+    assert "view" not in sent
+
+
+@pytest.mark.asyncio
+async def test_a_callback_button_leaves_the_text_untouched() -> None:
+    """Discord resolves no callback from a button and no typed command can stand in for one."""
+    target = await _deliver(_CALLBACK)
+
+    target.send.assert_awaited_once()
+    sent = target.send.call_args.kwargs
+    assert sent["content"] == "Report ready"
     assert "view" not in sent

@@ -63,9 +63,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Pursue-LLL/myrm-agent"
-Source = "https://github.com/Pursue-LLL/myrm-agent/tree/main/myrm-agent-harness"
-Issues = "https://github.com/Pursue-LLL/myrm-agent/issues"
+Repository = "https://github.com/lyleway/myrm-agent"
+Source = "https://github.com/lyleway/myrm-agent/tree/main/myrm-agent-harness"
+Issues = "https://github.com/lyleway/myrm-agent/issues"
 
 [project.scripts]
 verify-harness-distribution = "myrm_agent_harness.runtime.install_guard.verify:main"
@@ -112,10 +112,9 @@ computer-use = [
   "uiautomation>=2.0.29; sys_platform == 'win32'",  # Windows UI Automation 无障碍树与窗口文本 (perception/windows_ax.py、backends/windows/text_io.py)
   "pyobjc-framework-Quartz>=13.0; sys_platform == 'darwin'",  # macOS 原生 CGEvent（绕开 rubicon-objc arm64 缺陷）
 ]
-# toolkits/web_fetch/ - L1 HTTP / L3 stealth 爬取 + YouTube 字幕快路径
+# toolkits/web_fetch/ - L1 HTTP 爬取 + YouTube 字幕快路径
 web = [
-  "scrapling[fetchers]>=0.5.1",      # L1: curl_cffi TLS 指纹 HTTP / L3: Patchright+BrowserForge 反检测
-  "curl_cffi>=0.17.0",               # L1 有界下载 (fetchers/bounded_get.py): libcurl 写回调中止传输, 0.17.0 起验证; L1 连接钉死 (fetchers/connection_pin.py): 会话级 curl_options 的 CURLOPT_RESOLVE
+  "curl_cffi>=0.17.0",               # L1 直接 HTTP 抓取、TLS 指纹、有界下载 (bounded_get.py) 与连接钉死 (connection_pin.py)
   "youtube-transcript-api>=1.2.5",   # YouTube 字幕提取 (youtube_extractor; HTML fallback when missing)
 ]
 
@@ -264,6 +263,9 @@ ignore = [
   "SIM102",
   "SIM105",
 ] # Fire-and-forget tasks are intentional in command dispatch
+# The public-surface stub re-exports every name as `name as name`, which isort splits into one three-line statement per
+# name; one statement per module keeps the file well under the line budget.
+"src/**/api/__init__.pyi" = ["I001"]
 
 [tool.mypy]
 python_version = "3.13"

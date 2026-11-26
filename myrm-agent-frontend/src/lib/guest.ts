@@ -1,7 +1,7 @@
 /**
  * 认证工具函数
  *
- * 提供认证状态检查和 Token 管理功能。
+ * 提供认证状态检查、Token 管理，以及其他标签页换号的订阅。
  *
  * 注意：本项目没有"访客模式"：
  * - Tauri 模式：自动登录 local_user
@@ -70,4 +70,22 @@ export function clearAuthToken(): void {
   }
   localStorage.removeItem(AUTH_TOKEN_KEY);
   clearAuthSessionCookie();
+}
+
+/**
+ * 订阅「别的标签页登录、登出或换了账号」，返回取消订阅函数。
+ * 浏览器只向其他标签页派发 `storage` 事件，改令牌的这一页自己收不到回调。
+ */
+export function onAuthTokenChangedElsewhere(onChange: () => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => undefined;
+  }
+
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === AUTH_TOKEN_KEY) {
+      onChange();
+    }
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
 }

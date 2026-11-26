@@ -12,6 +12,7 @@ ContextVar binding, and metrics only — httpx vendor implementations live in
 |------|------|-------|
 | protocols.py | `FetchEscalationProvider` Protocol + `EscalationFetchResult` | ✅ |
 | context.py | Per-run ContextVar bind (`bind_web_fetch_escalation_context`) | ✅ |
+| content_validator.py | `is_valid_escalation_content` central L4 response quality gate | ✅ |
 | metrics.py | `WebFetchEscalationMetrics` counters | ✅ |
 | __init__.py | Public re-exports | ✅ |
 

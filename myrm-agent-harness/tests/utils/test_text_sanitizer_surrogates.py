@@ -1,6 +1,8 @@
-"""Tests for surrogate character sanitization in text_sanitizer."""
+"""Tests for surrogate character handling in text_sanitizer: removal by sanitize_text, repair by encodable_text."""
 
-from myrm_agent_harness.utils.text_sanitizer import sanitize_llm_output, sanitize_text
+import pytest
+
+from myrm_agent_harness.utils.text_sanitizer import encodable_text, sanitize_llm_output, sanitize_text
 
 
 class TestSurrogateCharacterSanitization:
@@ -34,3 +36,22 @@ class TestSurrogateCharacterSanitization:
         """Test that sanitize_llm_output delegates to sanitize_text."""
         text = "Hello\ud800World"
         assert sanitize_llm_output(text) == sanitize_text(text)
+
+
+class TestEncodableText:
+    @pytest.mark.parametrize(
+        "text", ["", "plain ascii", "naïve café", "\u4e2d\u6587", "emoji \U0001f600", "\ufffd", "\x00\x85 control"]
+    )
+    def test_an_encodable_text_is_the_same_object(self, text: str) -> None:
+        content = "".join([text, ""])  # a fresh object, so identity below is not interning luck
+
+        assert encodable_text(content) is content
+
+    def test_each_lone_surrogate_becomes_a_replacement_character(self) -> None:
+        assert encodable_text("a\udc80b\ud83d\ude00") == "a\ufffdb\ufffd\ufffd"
+
+    def test_nothing_but_the_lone_surrogates_changes(self) -> None:
+        assert encodable_text("keep \x85 <think>x</think> \ud800 \u4e2d") == "keep \x85 <think>x</think> \ufffd \u4e2d"
+
+    def test_the_result_encodes_as_utf_8(self) -> None:
+        assert encodable_text("a\ud800b").encode("utf-8") == b"a\xef\xbf\xbdb"

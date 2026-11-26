@@ -2,8 +2,8 @@
 
 The harness exposes bilingual (en/zh) LLM tool descriptions; the host's ``_tool_description_locale`` binds the session
 and channel language, and a tool setup that does not hand it to its factory shows every session the English text.
-web_fetch_tool is checked at the factory call (the Turn1 schema-locale contract, same as web_search); the skill market
-and manage tools by the descriptions they end up with.
+web_fetch_tool and the memory tools are checked at the factory call (the Turn1 schema-locale contract, same as
+web_search); the skill market and manage tools by the descriptions they end up with.
 """
 
 from __future__ import annotations

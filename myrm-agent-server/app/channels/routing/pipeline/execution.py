@@ -63,7 +63,7 @@ class RouterExecutionMixin(RouterDeliveryMixin):
     """Mixin: execution lifecycle — prepare the context and run the turn; effects and delivery come from ``RouterDeliveryMixin``."""
 
     async def _resolve_topic(self: RouterExecutionHost, msg: InboundMessage) -> TopicContext | None:
-        """Load per-thread or per-channel overrides when a TopicManager is configured.
+        """The binding that serves ``msg`` (thread, else chat, else channel) when a TopicManager is configured.
         Also syncs topic metadata for auto-discovery in the UI.
         """
         if self._topic_resolver is None:

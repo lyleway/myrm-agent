@@ -26,8 +26,6 @@ from myrm_agent_harness.utils.content_sniff import PayloadKind
 
 class FetcherType(Enum):
     HTTP = auto()
-    BROWSER = auto()
-    STEALTH = auto()
 
 
 @dataclass(slots=True)

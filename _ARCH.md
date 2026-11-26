@@ -2,7 +2,7 @@
 
 ## 架构概述
 
-MIT 开源仓库，包含 `myrm-agent-harness`（Agent 执行引擎框架，同名 PyPI 包）、`myrm-agent-server`（业务后端）、`myrm-agent-frontend`（Web UI）、`myrm-agent-desktop`（Tauri 桌面）、`myrm-agent-extension`（Chrome MV3 浏览器桥）。**运行时**经 `[tool.uv.sources]` 把同仓 `myrm-agent-harness/` 装为 editable path 依赖（`uv sync`，`dev/setup.sh` 同路径）（见 [scripts/_ARCH.md](scripts/_ARCH.md)）。仓库边界、三部署模式与启动序见 **[ARCHITECTURE.md](ARCHITECTURE.md)**；贡献流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。桌面安装包发布于 [Pursue-LLL/myrm-agent Releases](https://github.com/Pursue-LLL/myrm-agent/releases)。
+MIT 开源仓库，包含 `myrm-agent-harness`（Agent 执行引擎框架，同名 PyPI 包）、`myrm-agent-server`（业务后端）、`myrm-agent-frontend`（Web UI）、`myrm-agent-desktop`（Tauri 桌面）、`myrm-agent-extension`（Chrome MV3 浏览器桥）。**运行时**经 `[tool.uv.sources]` 把同仓 `myrm-agent-harness/` 装为 editable path 依赖（`uv sync`，`dev/setup.sh` 同路径）（见 [scripts/_ARCH.md](scripts/_ARCH.md)）。仓库边界、三部署模式与启动序见 **[ARCHITECTURE.md](ARCHITECTURE.md)**；贡献流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。桌面安装包发布于 [lyleway/myrm-agent Releases](https://github.com/lyleway/myrm-agent/releases)。
 
 ## 根目录文件
 

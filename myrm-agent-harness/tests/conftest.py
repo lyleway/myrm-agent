@@ -86,7 +86,6 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 _PROCESS_DOMAIN_STATE = (
     ("myrm_agent_harness.toolkits.web_fetch.router.domain_metrics", "_global_domain_metrics_manager"),
-    ("myrm_agent_harness.toolkits.web_fetch.router.tier_breaker", "_global_tier_breaker"),
 )
 
 

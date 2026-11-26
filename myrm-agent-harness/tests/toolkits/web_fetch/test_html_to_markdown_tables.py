@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import CustomHTML2Text
+from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
 from myrm_agent_harness.toolkits.web_fetch.processing.markdown_table import render_markdown_table
 
 
 def _convert(html: str) -> str:
-    return CustomHTML2Text().handle(html)
+    return HTML2Markdown().handle(html)
 
 
 class TestRenderMarkdownTable:
@@ -130,10 +130,80 @@ class TestUnclosedRows:
         assert len(converted) <= len(html)
 
 
+class TestOrderedListStart:
+    @pytest.mark.parametrize(
+        ("start_attr", "expected_first"),
+        [
+            ("abc", "1. x"),
+            ("1.", "1. x"),
+            ("3.5", "3. x"),
+            ("1e3", "1. x"),
+            ("-3", "-3. x"),
+            (" 7 ", "7. x"),
+            ("", "1. x"),
+            ("+4", "4. x"),
+        ],
+    )
+    def test_ol_start_follows_html_signed_integer_parsing(self, start_attr: str, expected_first: str) -> None:
+        assert _convert(f'<ol start="{start_attr}"><li>x</li></ol>') == f"{expected_first}\n"
+
+
 class TestConverterReuse:
-    def test_converter_still_renders_tables_after_a_cell_failed(self) -> None:
-        converter = CustomHTML2Text()
-        with pytest.raises(ValueError, match="invalid literal"):
-            converter.handle('<table><tr><td><ol start="abc"><li>x</li></ol></td></tr></table>')
+    def test_converter_still_renders_tables_after_a_cell_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import _TAG_HANDLERS
+
+        converter = HTML2Markdown()
+
+        def _boom(_self: HTML2Markdown, _tag: object) -> str:
+            raise RuntimeError("injected cell failure")
+
+        monkeypatch.setitem(_TAG_HANDLERS, "ol", _boom)
+        with pytest.raises(RuntimeError, match="injected cell failure"):
+            converter.handle("<table><tr><td><ol><li>x</li></ol></td></tr></table>")
 
         assert converter.handle("<table><tr><td>a</td></tr></table>") == "|  |\n| --- |\n| a |\n"
+
+
+class TestNestedTableOracleAndPerformance:
+    def test_bottom_up_table_set_matches_subtree_find_on_3000_random_pages(self) -> None:
+        """G7 等价预言机：自底向上预计算的含行表格集合在 3,000 个随机页面上与逐节点 node.find('tr') 完全等价。"""
+        import random
+
+        from bs4 import BeautifulSoup, Tag
+
+        from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown_helpers import tables_with_rows
+
+        rng = random.Random(20261123)
+        tags = ["div", "table", "tr", "td", "p", "span", "tbody"]
+
+        def _gen_node(depth: int) -> str:
+            if depth >= 6 or rng.random() < 0.25:
+                return f"t{rng.randint(0, 99)}"
+            tag = rng.choice(tags)
+            n_children = rng.randint(0, 3)
+            inner = "".join(_gen_node(depth + 1) for _ in range(n_children))
+            return f"<{tag}>{inner}</{tag}>"
+
+        for _ in range(3000):
+            html = "<body><table><tr><td>" + _gen_node(0) + "</td></tr></table></body>"
+            soup = BeautifulSoup(html, "html.parser")
+            root = soup.find("body")
+            assert isinstance(root, Tag)
+            got = tables_with_rows(root)
+            expected = {id(t) for t in root.find_all("table") if t.find("tr") is not None}
+            assert got == expected
+
+    @pytest.mark.timeout(10)
+    def test_deeply_nested_tables_convert_in_linear_time(self) -> None:
+        """G10：4,000 层嵌套表格不再触发 O(N^2) 停摆。"""
+        import time
+
+        depth = 4000
+        html = "<table><tr><td>c" * depth + "x" + "</td></tr></table>" * depth
+        t0 = time.perf_counter()
+        converted = _convert(html)
+        elapsed = time.perf_counter() - t0
+
+        assert converted.count("| c |") == depth - 1
+        assert "| cx |" in converted
+        assert elapsed < 3.0, f"deep nested table took too long: {elapsed:.2f}s"

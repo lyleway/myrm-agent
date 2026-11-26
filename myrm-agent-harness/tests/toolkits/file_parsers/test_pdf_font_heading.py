@@ -455,8 +455,8 @@ class TestPDFPlumberParserIntegration:
         mock_font_detect.assert_not_called()
         assert "# Chapter 1" in result.text
 
-    def test_parallel_mode_with_font_heading(self, tmp_path):
-        """Font heading detection works together with parallel page parsing."""
+    def test_multi_page_sequential_with_font_heading(self, tmp_path):
+        """Font heading detection works together with sequential multi-page parsing."""
         from unittest.mock import patch
 
         from myrm_agent_harness.toolkits.file_parsers.pdf import PDFPlumberParser
@@ -465,8 +465,6 @@ class TestPDFPlumberParserIntegration:
             heading_detection="auto",
             extract_tables=False,
             extract_bookmarks=True,
-            parallel=True,
-            max_workers=2,
         )
         test_pdf = tmp_path / "test.pdf"
         test_pdf.write_text("dummy")

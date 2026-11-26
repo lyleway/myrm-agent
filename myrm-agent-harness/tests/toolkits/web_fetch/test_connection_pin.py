@@ -1,14 +1,14 @@
 """The HTTP tier connects only to the addresses a fetch vetted, whatever else the host name resolves to.
 
-Real curl_cffi, through Scrapling, performs every request here against listeners of this process. A name under
-``.invalid`` never resolves (RFC 6761), so a request to one can reach a listener only through the pin.
+Real curl_cffi performs every request here against listeners of this process. A name under ``.invalid`` never resolves
+(RFC 6761), so a request to one can reach a listener only through ``CURLOPT_RESOLVE`` built by ``connection_pin``.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterator
-from contextlib import AsyncExitStack, asynccontextmanager, contextmanager, suppress
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -21,16 +21,9 @@ from curl_cffi.requests.exceptions import CertificateVerifyError
 from myrm_agent_harness.toolkits.web_fetch.fetchers import bounded_get as bounded_get_module
 from myrm_agent_harness.toolkits.web_fetch.fetchers import connection_pin
 from myrm_agent_harness.toolkits.web_fetch.fetchers.bounded_get import FetchedResponse, bounded_get
-from myrm_agent_harness.toolkits.web_fetch.fetchers.connection_pin import (
-    ConnectionPinError,
-    ensure_connection_pinning,
-    pinned_connection,
-)
+from myrm_agent_harness.toolkits.web_fetch.fetchers.connection_pin import build_pin_curl_options
 from tests.support.mcp_testkit.tls_pki import generate_inspection_chain
 from tests.support.tls_loopback import PROXY_VARIABLES, https_server
-
-# Scrapling builds its lxml parser with an option lxml now warns about; the project turns warnings into errors.
-pytestmark = pytest.mark.filterwarnings("ignore:The 'strip_cdata' option")
 
 _PINNED_NAME = "pin-target.invalid"
 
@@ -78,7 +71,7 @@ async def _listen(label: str, *, host: str = "127.0.0.1", port: int = 0) -> Asyn
 
 
 async def _get(url: str, addresses: tuple[str, ...] = ()) -> FetchedResponse:
-    return await bounded_get(url, {"timeout": 2, "follow_redirects": False}, addresses)
+    return await bounded_get(url, {"timeout": 2, "allow_redirects": False}, addresses)
 
 
 @pytest.fixture(autouse=True)
@@ -106,12 +99,14 @@ class TestPinnedConnection:
 
     async def test_the_pin_holds_for_the_host_and_port_it_was_made_for_only(self) -> None:
         async with _listen("pinned") as site:
-            async with pinned_connection(f"http://{_PINNED_NAME}:{site.port}/", ("127.0.0.1",)):
-                await _get(f"http://{_PINNED_NAME}:{site.port}/")
+            opts = build_pin_curl_options(f"http://{_PINNED_NAME}:{site.port}/", ("127.0.0.1",))
+            async with AsyncSession(curl_options=opts) as session:
+                ok = await session.get(f"http://{_PINNED_NAME}:{site.port}/", timeout=2)
+                assert ok.status_code == 200
                 with suppress(RequestsError):
-                    await _get(f"http://other-target.invalid:{site.port}/")
+                    await session.get(f"http://other-target.invalid:{site.port}/", timeout=2)
                 with suppress(RequestsError):
-                    await _get(f"http://{_PINNED_NAME}:{site.port + 1}/")
+                    await session.get(f"http://{_PINNED_NAME}:{site.port + 1}/", timeout=2)
 
             assert site.host_headers == [f"{_PINNED_NAME}:{site.port}"]
 
@@ -170,53 +165,18 @@ class TestPinnedConnection:
         assert named.status == 200
 
 
-@pytest.mark.asyncio
-class TestSessionsOutsideThePin:
-    async def test_a_session_is_pinned_only_inside_the_pinned_connection(self) -> None:
-        async with pinned_connection(f"http://{_PINNED_NAME}:8080/", ("127.0.0.1",)):
-            inside = AsyncSession(curl_options={CurlOpt.TCP_NODELAY: 1})
-        outside = AsyncSession()
-
-        assert inside.curl_options == {CurlOpt.TCP_NODELAY: 1, CurlOpt.RESOLVE: [f"{_PINNED_NAME}:8080:127.0.0.1"]}
-        assert outside.curl_options == {}
-        await inside.close()
-        await outside.close()
-
-    async def test_the_pins_of_concurrent_tasks_do_not_mix(self) -> None:
-        barrier = asyncio.Barrier(2)
-
-        async def options_seen(name: str) -> dict[CurlOpt, object]:
-            async with pinned_connection(f"http://{name}:8080/", ("127.0.0.1",)):
-                await barrier.wait()  # both tasks are inside their own pin before either one opens a session
-                session = AsyncSession()
-            options = dict(session.curl_options)
-            await session.close()
-            return options
-
-        first, second = await asyncio.gather(options_seen("a.invalid"), options_seen("b.invalid"))
-
-        assert first == {CurlOpt.RESOLVE: ["a.invalid:8080:127.0.0.1"]}
-        assert second == {CurlOpt.RESOLVE: ["b.invalid:8080:127.0.0.1"]}
-
-    async def test_installing_twice_wraps_the_session_once(self) -> None:
-        connection_pin._install()
-        wrapped = AsyncSession.__init__
-
-        connection_pin._install()
-
-        assert AsyncSession.__init__ is wrapped
+class TestBuildPinCurlOptions:
+    def test_returns_curl_resolve_entry_for_valid_host_and_addresses(self) -> None:
+        opts = build_pin_curl_options(f"http://{_PINNED_NAME}:8080/", ("127.0.0.1",))
+        assert opts == {CurlOpt.RESOLVE: [f"{_PINNED_NAME}:8080:127.0.0.1"]}
 
     @pytest.mark.parametrize(
         ("url", "addresses"),
         [("http://127.0.0.1:8080/", ("127.0.0.1",)), ("http://[::1]/", ("::1",)), ("http://example.test/", ())],
         ids=["ipv4-literal", "ipv6-literal", "name-without-addresses"],
     )
-    async def test_nothing_is_pinned_when_there_is_nothing_to_pin(self, url: str, addresses: tuple[str, ...]) -> None:
-        async with pinned_connection(url, addresses):
-            session = AsyncSession()
-
-        assert session.curl_options == {}
-        await session.close()
+    def test_nothing_is_pinned_when_there_is_nothing_to_pin(self, url: str, addresses: tuple[str, ...]) -> None:
+        assert build_pin_curl_options(url, addresses) == {}
 
 
 class TestResolveEntry:
@@ -255,75 +215,25 @@ class TestResolveEntry:
         assert connection_pin._resolve_entry(url, addresses) is None
 
 
-@contextmanager
-def _options_dropped(_options: object) -> Iterator[None]:
-    """A Scrapling that no longer opens its sessions the way the pin reaches them."""
-    yield
-
-
-@pytest.mark.asyncio
-class TestProbe:
-    @pytest.fixture(autouse=True)
-    def _unverified(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(connection_pin, "_probe_passed", False)
-
-    async def test_the_installed_clients_honor_the_pin(self) -> None:
-        await ensure_connection_pinning()
-
-        assert connection_pin._probe_passed is True
-
-    async def test_a_passed_probe_is_not_repeated(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        await ensure_connection_pinning()
-        monkeypatch.setattr(asyncio, "start_server", AsyncMock(side_effect=AssertionError("probed again")))
-
-        await ensure_connection_pinning()
-
-    async def test_an_environment_proxy_does_not_fool_or_fail_the_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        for name in PROXY_VARIABLES:
-            monkeypatch.setenv(name, "http://127.0.0.1:1")
-
-        await ensure_connection_pinning()
-
-        assert connection_pin._probe_passed is True
-
-    async def test_a_pin_that_does_not_arrive_fails_the_probe(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(connection_pin, "_session_options_set", _options_dropped)
-
-        with pytest.raises(ConnectionPinError, match="Connection pinning is not effective"):
-            await ensure_connection_pinning()
-
-        assert connection_pin._probe_passed is False
-
-    async def test_a_fetch_is_refused_while_the_pin_does_not_arrive(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(connection_pin, "_session_options_set", _options_dropped)
-
-        async with _listen("pinned") as site:
-            with pytest.raises(ConnectionPinError):
-                await _get(f"http://{_PINNED_NAME}:{site.port}/", ("127.0.0.1",))
-
-            assert site.heads == []
-
-
 @pytest.mark.asyncio
 async def test_a_request_through_a_proxy_is_not_pinned(
-    install_fake_scrapling: AsyncMock, monkeypatch: pytest.MonkeyPatch
+    install_fake_curl_session: AsyncMock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A proxy resolves the host itself, so the addresses of the fetch's own lookup mean nothing to that request."""
-    pinned = MagicMock()
+    seen: list[tuple[str, tuple[str, ...]]] = []
 
-    @asynccontextmanager
-    async def record(url: str, addresses: tuple[str, ...]) -> AsyncIterator[None]:
-        pinned(url, addresses)
-        yield
+    def record(url: str, addresses: tuple[str, ...]) -> dict[object, object]:
+        seen.append((url, addresses))
+        return {}
 
-    monkeypatch.setattr(bounded_get_module, "pinned_connection", record)
-    response = MagicMock(status=200, headers={}, url="http://example.test/", encoding="utf-8", body=b"")
-    install_fake_scrapling.return_value = response
+    monkeypatch.setattr(bounded_get_module, "build_pin_curl_options", record)
+    response = MagicMock(status_code=200, headers={}, url="http://example.test/", encoding="utf-8", body=b"")
+    install_fake_curl_session.return_value = response
 
     await bounded_get("http://example.test/", {"proxy": "http://proxy.test:8080"}, ("93.184.216.34",))
     await bounded_get("http://example.test/", {}, ("93.184.216.34",))
 
-    assert [call.args for call in pinned.call_args_list] == [
+    assert seen == [
         ("http://example.test/", ()),
         ("http://example.test/", ("93.184.216.34",)),
     ]

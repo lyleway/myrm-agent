@@ -51,7 +51,7 @@ _ANSWERING = frozenset(
         "resolve_path",
     }
 )
-_STATE = frozenset({"workspace_path", "bind_workspace", "get_executor_name", "metrics"})
+_STATE = frozenset({"workspace_path", "bind_workspace", "get_executor_name", "metrics", "warm_up"})
 _ANSWER = object()
 
 
@@ -108,6 +108,9 @@ def test_the_state_is_the_wrapped_executors() -> None:
 
     middleware.bind_workspace("/other")
     inner.bind_workspace.assert_called_once_with("/other")
+
+    middleware.warm_up()
+    inner.warm_up.assert_called_once_with()
 
 
 def test_wrapping_an_executor_keeps_the_counters_it_has_accumulated() -> None:

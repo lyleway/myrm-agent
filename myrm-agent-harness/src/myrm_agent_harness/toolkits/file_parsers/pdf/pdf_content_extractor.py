@@ -102,7 +102,6 @@ def _extract_text_sync(
 
     parser = PDFPlumberParser(
         extract_tables=True,
-        parallel=True,
         table_format=table_format,
         max_pages=max_pages,
         stitch_tables=stitch_tables,
@@ -223,7 +222,8 @@ def _render_pages_sync(
                     scale = 1.0
 
                 scale = max(0.1, min(scale, 2.0))
-                pil_image = page.render(scale=scale).to_pil()
+                # pypdfium2 accepts float scale at runtime; its stub annotates scale as int.
+                pil_image = page.render(scale=scale).to_pil()  # pyright: ignore[reportArgumentType]
 
                 buf = io.BytesIO()
                 pil_image.save(buf, format="PNG")

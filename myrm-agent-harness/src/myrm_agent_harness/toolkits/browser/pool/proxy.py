@@ -42,7 +42,7 @@ class ProxyConfig:
     password: str | None = None
 
     def to_url(self) -> str:
-        """Convert to URL string for httpx/Scrapling (e.g. http://user:pass@host:port)."""
+        """Convert to URL string for httpx/curl_cffi (e.g. http://user:pass@host:port)."""
         if self.username and self.password:
             parsed = urlparse(self.server)
             host = f"{parsed.hostname}:{parsed.port}" if parsed.port else str(parsed.hostname)

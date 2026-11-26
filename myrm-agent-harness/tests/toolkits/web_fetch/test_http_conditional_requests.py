@@ -45,7 +45,7 @@ async def test_cache_fresh_no_validation():
 @pytest.mark.asyncio
 async def test_cache_expired_sends_conditional_request():
     """测试缓存过期时发送条件请求（304 复用缓存）"""
-    engine = FetchEngine(cache_ttl=1, stale_while_revalidate=False)
+    engine = FetchEngine(cache_ttl=1)
 
     # 第一次请求：返回完整内容 + ETag
     first_result = FetchResult(
@@ -94,7 +94,7 @@ async def test_cache_expired_sends_conditional_request():
 @pytest.mark.asyncio
 async def test_cache_expired_content_changed():
     """测试缓存过期且内容变更时更新缓存（200 响应）"""
-    engine = FetchEngine(cache_ttl=1, stale_while_revalidate=False)
+    engine = FetchEngine(cache_ttl=1)
 
     # 第一次请求
     first_result = FetchResult(
@@ -140,7 +140,7 @@ async def test_cache_expired_content_changed():
 @pytest.mark.asyncio
 async def test_last_modified_validation():
     """测试缓存过期时使用 Last-Modified 验证"""
-    engine = FetchEngine(cache_ttl=1, stale_while_revalidate=False)
+    engine = FetchEngine(cache_ttl=1)
 
     first_result = FetchResult(
         html="<html><body>content</body></html>",
@@ -183,8 +183,8 @@ async def test_last_modified_validation():
 
 @pytest.mark.asyncio
 async def test_cache_expired_no_validation_headers():
-    """测试缓存过期但无验证头时返回过期缓存"""
-    engine = FetchEngine(cache_ttl=1, stale_while_revalidate=False)
+    """测试缓存过期且无验证头时同步重取，不返回过期缓存"""
+    engine = FetchEngine(cache_ttl=1)
 
     first_result = FetchResult(
         html="<html><body>content</body></html>",
@@ -205,10 +205,10 @@ async def test_cache_expired_no_validation_headers():
         # 等待缓存过期
         await asyncio.sleep(1.1)
 
-        # 第二次请求（缓存过期但无验证头，返回过期缓存）
+        # 第二次请求（缓存过期且无验证头，必须重新抓取）
         doc2 = await engine.crawl("https://example.com")
         assert doc2 is not None
-        assert mock_crawl.call_count == 1  # 仍然只调用了 1 次（返回过期缓存）
+        assert mock_crawl.call_count == 2
 
     await engine.shutdown()
 

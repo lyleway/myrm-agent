@@ -272,7 +272,7 @@ class GlobalBrowserPool(
             self._register_disconnect_handler(inst)
             self._browsers.append(inst)
 
-            for ctx_type in [ContextType.CRAWL, ContextType.AGENT]:
+            for ctx_type in [ContextType.AGENT]:
                 ctx_key = f"{ctx_type.value}_warmup"
                 inst.contexts[ctx_key] = await self._context_factory.create_context(
                     inst.browser,

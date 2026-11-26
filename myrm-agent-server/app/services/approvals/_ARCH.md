@@ -3,7 +3,7 @@
 ## 架构概述
 
 本模块实现跨端的统一拦截与审批决策业务层（Approval Registry）。
-基于 Harness 审批中间件抛出的 `interrupt()` 中断，将审批请求落库至 `approvals` 表（ORM：`ApprovalRecord`），并广播 SSE 事件至 Web 前端，同时支持拦截并转化成 `OutboundMessage` 发送至原生 IM 渠道（如 Slack/Feishu）。
+基于 Harness 审批中间件抛出的 `interrupt()` 中断，将审批请求落库至 `approvals` 表（ORM：`ApprovalRecord`），并广播 SSE 事件至 Web 前端；待审批记录的会话来自 IM 时，还把与通知分发器同一张的审批卡（`core/notifications/approval_card.build_approval_card`：所有者语言、按钮只给点得动的路由、不含请求载荷）发给会话对端。`outbound_draft` 不推：它只由所有者决定，所有者收到的是通知分发器的卡。
 IM/渠道 ActionButton 回调由 `channels/routing/commands/router_commands/approval.py::_handle_action_button_approval` 处理：解析 `approval:{action}:{id}` → 权限校验 → `resolve_approval` 落库 → 编辑原 IM 消息 → `SessionGate.submit(resume_msg)` 恢复 Agent。`resolve_approval` 事务起始先取 SQLite 写锁（`acquire_write_lock`）再读后写，仅处理 `status == "PENDING"` 的记录，已解决的审批返回 `None`（幂等保护：并发的重复点击、`/draft` 与 TTL 清理排队等待后读到已定案状态，只有一方生效，另一方不会翻转状态；等锁最多一个 `busy_timeout`，超时才以 `database is locked` 失败；IM 点击落在已处理的审批上时，原卡片被改写为“已处理”提示，且不含可点击按钮）。Web Drawer 对 `subagent_approval` 由前端 `resumeApprovalStream` 先 resume，再由本模块 `resolve_approval` 落库；growth/无 thread_id 项仅落库不 resume。
 支持通过 `expires_at` 和 Cron 定时任务进行超时审批 (TTL) 的自动降级与自动清理。清理任务（`cleanup_expired_approvals`）只把过期记录定案（`TIMEOUT`；`auto_send` 的被扣留回复为 `APPROVED`）并刷新所涉聊天的运行摘要待审批计数（没有运行的聊天靠计数归零回到空闲），不唤醒 Agent；挂起 Agent 的超时恢复由 harness `ApprovalTimeoutScheduler` 在计时器到点时完成（自动拒绝并恢复，与手动处理通过 `resolve_if_first` 幂等竞争）。
 
@@ -30,5 +30,5 @@ Growth drafts（`skill_draft` / `skill_patch` / `semantic_memory`）统一存储
 - `app.database.models.approval` -> 访问 `ApprovalRecord` 存储拦截任务。
 - `app.database.factory` -> `acquire_write_lock`：定案（读后写）事务起始先取 SQLite 写锁。
 - `app.services.event.app_event_bus` -> `ServerEventBus` 下发 SSE 实时通信唤醒 Web/Desktop 卡片。
-- `app.channels` -> 下发 `OutboundMessage` Native Blocks 推送。
+- `app.core.notifications.approval_card` / `app.core.channel_bridge`（网关、`resolve_user_locale`）-> 审批卡推给会话 IM 对端。
 - `myrm_agent_harness.agent.types` -> 使用 `Command` 恢复挂起的 Agent State。

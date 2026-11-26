@@ -13,11 +13,11 @@ Deterministic Gmail ingest path for wiki source sync; zero LLM.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any
 
 import httpx
 from myrm_agent_harness.toolkits.wiki import WikiStructure
@@ -174,7 +174,7 @@ async def _fetch_message_markdown(token: str, message_id: str) -> tuple[str, str
     date_header = _header(headers, "Date") or ""
     received = _format_date(date_header)
     plain, html = _extract_bodies(payload)
-    body = plain.strip() if plain.strip() else html_body_to_markdown(html)
+    body = plain.strip() if plain.strip() else await asyncio.to_thread(html_body_to_markdown, html)
     if not body.strip():
         snippet = data.get("snippet")
         body = str(snippet) if snippet else ""
@@ -205,14 +205,14 @@ def _format_date(date_header: str) -> str:
         return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
-def _extract_bodies(payload: dict[str, Any]) -> tuple[str, str]:
+def _extract_bodies(payload: dict[str, object]) -> tuple[str, str]:
     plain_parts: list[str] = []
     html_parts: list[str] = []
     _walk_parts(payload, plain_parts, html_parts)
     return "\n\n".join(plain_parts), "\n\n".join(html_parts)
 
 
-def _walk_parts(part: dict[str, Any], plain_parts: list[str], html_parts: list[str]) -> None:
+def _walk_parts(part: dict[str, object], plain_parts: list[str], html_parts: list[str]) -> None:
     mime = str(part.get("mimeType", ""))
     body = part.get("body")
     data_b64 = body.get("data") if isinstance(body, dict) else None

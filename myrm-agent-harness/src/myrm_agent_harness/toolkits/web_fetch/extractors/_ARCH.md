@@ -3,7 +3,7 @@
 ## Overview
 
 Third-party content extractors — fast-path parsing for WeChat / Bilibili / YouTube / X,
-used by the FetchEngine before L2/L3 browser fallback. Each extractor owns parsing
+used by the FetchEngine ahead of L1 HTTP fetch and optional L4 remote escalation. Each extractor owns parsing
 for a single source and may leverage optional deps (`youtube-transcript-api`) or the
 SessionVault cookie store (Bilibili AI subtitles) without requiring a browser.
 
@@ -21,10 +21,10 @@ SessionVault cookie store (Bilibili AI subtitles) without requiring a browser.
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Aggregation facade — re-exports the extractors' public symbols. | ✅ |
-| weixin_extractor.py | Core | WeChat Official Account fast-path — MicroMessenger UA + `#js_content` extraction (host `/s` URLs, data-src images, publish_time metadata); follows the article's one `?nwr_flag=1` bounce but never leaves https `mp.weixin.qq.com` article URLs; Browser fallback when blocked. | ✅ |
-| bilibili_extractor.py | Core | Bilibili subtitle fast-path — public API + SessionVault cookie for AI subtitles; Browser fallback when unavailable. | ✅ |
+| weixin_extractor.py | Core | WeChat Official Account fast-path — MicroMessenger UA + `#js_content` extraction (host `/s` URLs, data-src images, publish_time metadata); follows the article's one `?nwr_flag=1` bounce but never leaves https `mp.weixin.qq.com` article URLs; HTTP/L4 fallback when blocked. | ✅ |
+| bilibili_extractor.py | Core | Bilibili subtitle fast-path — public API + SessionVault cookie for AI subtitles; HTTP/L4 fallback when unavailable. | ✅ |
 | youtube_extractor.py | Core | YouTube transcript fast-path — `[web]` optional `youtube-transcript-api` + oEmbed metadata (title/author); HTML fallback when missing. | ✅ |
-| x_extractor.py | Core | Twitter / X post fast-path — FxTwitter API / oEmbed structured extraction (text, metrics, media); Browser fallback on failure. | ✅ |
+| x_extractor.py | Core | Twitter / X post fast-path — FxTwitter API / oEmbed structured extraction (text, metrics, media); HTTP/L4 fallback on failure. | ✅ |
 
 ## Key Dependencies
 
@@ -34,4 +34,4 @@ SessionVault cookie store (Bilibili AI subtitles) without requiring a browser.
 
 ## Consumers
 
-- `web_fetch/engine/fetch_mixin.py` (`_fetch_from_network`) — fast-path ahead of the L1/L2/L3 tier ladder
+- `web_fetch/engine/fetch_mixin.py` (`_fetch_from_network`) — fast-path ahead of L1 HTTP fetch and optional L4 escalation

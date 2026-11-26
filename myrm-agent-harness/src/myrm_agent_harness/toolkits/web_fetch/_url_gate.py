@@ -1,9 +1,9 @@
-"""Pre-fetch URL gate of the web fetch tool: canonical spelling, host blocklist, SSRF guard, exfiltration check.
+"""Pre-fetch URL gate of the web fetch tool: wrapper unwrapping, HTTP(S) canonical spelling, host blocklist, SSRF guard, and exfiltration check.
 
 [INPUT]
 - utils.url_syntax::parse_outbound_url (POS: the one canonical spelling of an outbound URL)
 - toolkits.browser.domain_filter::DomainBlocklist (POS: hostname blocklist for benchmark decontamination) [lazy]
-- core.security.guards.ssrf::validate_url_for_ssrf (POS: SSRF classification of a URL) [lazy]
+- core.security.guards.ssrf::async_validate_url_for_ssrf (POS: Async SSRF classification of a URL without blocking the event loop) [lazy]
 - utils.url_utils::check_url_exfiltration, sanitize_url_for_error (POS: secret-in-URL detection) [lazy]
 - utils.errors::ToolError, ToolErrorCategory
 
@@ -11,17 +11,56 @@
 - validate_urls: the URLs in canonical spelling, or a ToolError naming the first URL that may not be fetched
 
 [POS]
-Runs before any request of the web fetch tool. A URL is judged in the spelling it is fetched in, so the
-blocklist, the SSRF guard and the HTTP, stealth and browser tiers all read the same host.
+Runs before any request of the web fetch tool. A URL is unwrapped from unambiguous model wrappers (Markdown links,
+matching quotes/angle brackets/backticks, unbalanced trailing parentheses — never modifying legal RFC 3986 URL
+characters) and judged in the canonical HTTP(S) spelling it is fetched in, so the blocklist, the SSRF guard, and
+the HTTP fetcher all read the same host.
 """
 
 from __future__ import annotations
 
+import re
+
 from myrm_agent_harness.utils.errors import ToolError, ToolErrorCategory
 from myrm_agent_harness.utils.url_syntax import parse_outbound_url
 
+_WEB_FETCH_ALLOWED_SCHEMES = frozenset({"http", "https"})
+_HTTP_PREFIX_RE = re.compile(r"^https?://", re.IGNORECASE)
+_MARKDOWN_LINK_RE = re.compile(r'^\[[^\]]*\]\(\s*<?(https?://[^\s)>]+)>?(?:\s+["\'][^"\']*["\'])?\s*\)$', re.IGNORECASE)
+_MATCHING_WRAPPERS: tuple[tuple[str, str], ...] = (("<", ">"), ('"', '"'), ("'", "'"), ("`", "`"))
 
-def validate_urls(
+
+def _unwrap_model_url(raw: str) -> str:
+    """Safely strip unambiguous model-injected wrappers without altering legal RFC 3986 URL characters.
+
+    Only unwraps when the inner candidate starts with ``http://`` or ``https://``, so non-HTTP schemes and bare
+    hostnames stay untouched for ``parse_outbound_url`` to reject cleanly.
+    """
+    value = raw.strip()
+    md = _MARKDOWN_LINK_RE.match(value)
+    if md:
+        value = md.group(1)
+
+    for left, right in _MATCHING_WRAPPERS:
+        if len(value) >= 2 and value.startswith(left) and value.endswith(right):
+            candidate = value[1:-1].strip()
+            if _HTTP_PREFIX_RE.match(candidate):
+                value = candidate
+                break
+
+    if not _HTTP_PREFIX_RE.match(value):
+        return value
+
+    # Drop only unbalanced trailing closing parentheses (e.g. prose "(see https://example.com)") while keeping
+    # balanced parentheses (e.g. Wikipedia URLs) and legal trailing characters like "!" / "," / ";" intact.
+    unbalanced_closes = value.count(")") - value.count("(")
+    while unbalanced_closes > 0 and value.endswith(")"):
+        value = value[:-1]
+        unbalanced_closes -= 1
+    return value
+
+
+async def validate_urls(
     urls: list[str],
     *,
     blocked_hostnames: tuple[str, ...] | None,
@@ -33,11 +72,18 @@ def validate_urls(
     """
     targets = []
     for url in urls:
-        target, error = parse_outbound_url(url)
+        cleaned = _unwrap_model_url(url)
+        target, error = parse_outbound_url(cleaned)
         if target is None:
             raise ToolError(
                 f"URL blocked: {error} — {url}",
                 user_hint="The URL is not a valid http(s) address. Use a different URL.",
+            )
+        scheme = target.url.split(":", 1)[0]
+        if scheme not in _WEB_FETCH_ALLOWED_SCHEMES:
+            raise ToolError(
+                f"URL blocked: Blocked URL scheme: {scheme} — {url}",
+                user_hint="Only http:// and https:// URLs are supported by web_fetch.",
             )
         targets.append(target)
     canonical_urls = [target.url for target in targets]
@@ -61,12 +107,12 @@ def validate_urls(
     if allow_private_networks:
         return canonical_urls
 
-    from myrm_agent_harness.core.security.guards.ssrf import validate_url_for_ssrf
+    from myrm_agent_harness.core.security.guards.ssrf import async_validate_url_for_ssrf
     from myrm_agent_harness.utils.logger_utils import get_agent_logger
     from myrm_agent_harness.utils.url_utils import check_url_exfiltration, sanitize_url_for_error
 
     for url in canonical_urls:
-        verdict = validate_url_for_ssrf(url)
+        verdict = await async_validate_url_for_ssrf(url)
         if not verdict.safe:
             raise ToolError(
                 f"URL blocked (SSRF protection): {verdict.error} — {url}",

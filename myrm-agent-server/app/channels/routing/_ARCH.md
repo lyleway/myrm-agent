@@ -58,11 +58,14 @@ exact payload `myrm-agent-harness.apply_approval_decisions` expects:
 Approval requests reach IM chats as `ActionButton`s whose `action_id` is
 `approval:{approve|deny}:{record_id}`. Two senders produce them:
 
-- `ApprovalRegistry.create_approval()` posts an approval block into the chat the
-  request belongs to (`chat.source != "web"`).
+- `ApprovalRegistry.create_approval()` posts the same card into the chat the
+  request belongs to (`chat.source != "web"`), except for held replies (`outbound_draft`):
+  only the owner decides those and the owner gets the dispatcher's card.
 - The notification dispatcher's owner card (`core/notifications/approval_card.py`)
-  attaches buttons only for `APPROVAL_CLICK_CHANNELS` (Telegram). Other channels
-  get a localized "open the app" hint, since their clicks never reach this handler.
+  attaches buttons only for `APPROVAL_CLICK_CHANNELS` (Telegram) and only when the send
+  stays local: control-plane egress (cloud sandbox) carries plain text, so a hosted Telegram
+  card gets the hint too. Every other route gets a localized "open the app" hint, since a click
+  there never reaches this handler.
 
 Telegram's inbound parser is the only one that turns a click into
 `InboundMessage(content="approval:approve:{id}", metadata={"callback_prefix": "act",
@@ -233,6 +236,13 @@ before marking the peer for a fresh Chat:
 
 Only after cleanup does `handle_new_session` (commands/session.py) flag the peer and
 send the confirmation reply.
+
+The flag (`_new_session_peers`) is spent by the next turn (`_prepare_execution_context` sets `force_new_epoch` on it),
+never by a command in between. `_dispatch_system_command` calls `carry_new_session_to_command` first: while the flag
+waits, the command message gets `force_new_epoch`, so `resolve_command_session_key` finds no conversation and `/undo`,
+`/retry`, `/compact`, `/handoff` and `/goal` act on none (not on the one `/new` just ended). A message that already
+arrives with `force_new_epoch` (the channel ingress takes it) puts the flag back, so the next turn, which may come
+without it, still starts the new conversation.
 
 ## Consume-Loop Resilience
 
@@ -406,7 +416,7 @@ Pinned by `tests/channels/routing/test_bot_loop_guard.py`,
 | stream_config.py | Config | Unified configuration for streaming components. | [OK] |
 | stream_manager.py | Core | Streaming optimization components used by Router for intelligent updates: change tracking, adaptive throttling and the `StreamCoordinator` that combines them with `block_chunker.py` (progress estimation lives in `progress_estimator.py`). | [OK] |
 | stream_metrics.py | Core | Provides observability into streaming quality via tracing infrastructure. `stream_reply_span` is the root span of one streamed reply (records a failure by class only); `end_session` puts the session's update decisions, edits and failed edits on the current span (`myrm.stream.*`). | [OK] |
-| topic_binding.py | Core | `resolve_bound_topic(resolver, msg)`: the one cascade that picks the binding serving a message: the thread's, else the chat's, else the channel's (`__global__`). The first binding that exists wins even when it names no agent, and the returned context carries the level in `matched_by` (`thread_binding`, `chat_binding`, `channel_binding`). The router (`RouterExecutionMixin._resolve_topic`) serves every inbound turn with it, and the IM commands find the conversation they act on with it (`core/channel_bridge/command_session.py`), so a command cannot pick another binding than the turn it follows. The agent a binding names is its `TopicContext.effective_agent_id`. | [OK] |
+| topic_binding.py | Core | `resolve_bound_topic(resolver, msg)`: the one cascade that picks the binding serving a message: the thread's, else the chat's, else the channel's (`__global__`). The first binding that exists wins even when it names no agent, and the returned context carries the level in `matched_by` (`thread_binding`, `chat_binding`, `channel_binding`). The router (`RouterExecutionMixin._resolve_topic`) serves every inbound turn with it, and the IM commands find the conversation they act on with it (`core/channel_bridge/command_session.py`), so a command cannot pick another binding than the turn it follows. The Telegram `/agent` picker marks the agent that serves the chat with it too (`providers/telegram/hooks.py`). The agent a binding names is its `TopicContext.effective_agent_id`. | [OK] |
 
 ## Channel agent bind (`/bind`)
 

@@ -22,20 +22,24 @@ const DEFAULT_CONFIG: WebFetchEscalationConfigValue = {
     inheritFromSearch: true,
     api_key: null,
     apiBase: null,
+    networkIsolationConfirmed: false,
   },
   sessionCap: 5,
 };
+
+type DebouncedField = 'jina' | 'firecrawlKey' | 'firecrawlBase';
 
 const WebFetchEscalationCard = memo(() => {
   const t = useTranslations('settings.webFetchEscalation');
   const [expanded, setExpanded] = useState(false);
   const [config, setConfig] = useState<WebFetchEscalationConfigValue>(DEFAULT_CONFIG);
+  const configRef = useRef<WebFetchEscalationConfigValue>(DEFAULT_CONFIG);
   const [jinaKeyText, setJinaKeyText] = useState('');
   const [firecrawlKeyText, setFirecrawlKeyText] = useState('');
   const [firecrawlBaseText, setFirecrawlBaseText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [verifying, setVerifying] = useState<'jina' | 'firecrawl' | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const debounceTimersRef = useRef<Partial<Record<DebouncedField, ReturnType<typeof setTimeout>>>>({});
 
   useEffect(() => {
     try {
@@ -50,6 +54,7 @@ const WebFetchEscalationCard = memo(() => {
             ...(record as WebFetchEscalationConfigValue).firecrawl,
           },
         };
+        configRef.current = loaded;
         setConfig(loaded);
         setJinaKeyText(loaded.jinaApiKey ?? '');
         setFirecrawlKeyText(loaded.firecrawl.api_key ?? '');
@@ -60,16 +65,25 @@ const WebFetchEscalationCard = memo(() => {
     } finally {
       setIsLoading(false);
     }
-    return () => clearTimeout(debounceRef.current);
+    const timers = debounceTimersRef.current;
+    return () => {
+      for (const timer of Object.values(timers)) {
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+      }
+    };
   }, []);
 
   const persist = useCallback(
     (patch: Partial<WebFetchEscalationConfigValue>) => {
+      const current = configRef.current;
       const newConfig: WebFetchEscalationConfigValue = {
-        ...config,
+        ...current,
         ...patch,
-        firecrawl: patch.firecrawl ? { ...config.firecrawl, ...patch.firecrawl } : config.firecrawl,
+        firecrawl: patch.firecrawl ? { ...current.firecrawl, ...patch.firecrawl } : current.firecrawl,
       };
+      configRef.current = newConfig;
       setConfig(newConfig);
       try {
         const syncManager = getConfigSyncManager();
@@ -80,6 +94,7 @@ const WebFetchEscalationCard = memo(() => {
             inheritFromSearch: newConfig.firecrawl.inheritFromSearch,
             api_key: newConfig.firecrawl.api_key,
             apiBase: newConfig.firecrawl.apiBase,
+            networkIsolationConfirmed: Boolean(newConfig.firecrawl.networkIsolationConfirmed),
           },
           sessionCap: newConfig.sessionCap,
         });
@@ -87,22 +102,22 @@ const WebFetchEscalationCard = memo(() => {
         toast({ title: t('saveFailed'), variant: 'destructive' });
       }
     },
-    [config, t],
+    [t],
   );
 
-  const debouncedKeySave = useCallback(
-    (field: 'jina' | 'firecrawl', value: string) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        if (field === 'jina') {
-          persist({ jinaApiKey: value.trim() || null });
-        } else {
-          persist({ firecrawl: { ...config.firecrawl, api_key: value.trim() || null } });
-        }
-      }, 500);
-    },
-    [config.firecrawl, persist],
-  );
+  const scheduleFieldSave = useCallback((field: DebouncedField, save: () => void) => {
+    const existing = debounceTimersRef.current[field];
+    if (existing !== undefined) {
+      clearTimeout(existing);
+    }
+    debounceTimersRef.current[field] = setTimeout(() => {
+      delete debounceTimersRef.current[field];
+      save();
+    }, 500);
+  }, []);
+
+  const hasCustomFirecrawlBase = firecrawlBaseText.trim().length > 0;
+  const effectiveFirecrawlInherit = !hasCustomFirecrawlBase && config.firecrawl.inheritFromSearch;
 
   const handleVerify = async (provider: 'jina' | 'firecrawl') => {
     setVerifying(provider);
@@ -113,8 +128,9 @@ const WebFetchEscalationCard = memo(() => {
         body: JSON.stringify({
           provider,
           api_key: apiKey,
-          inherit_from_search: provider === 'firecrawl' && config.firecrawl.inheritFromSearch,
-          api_base: provider === 'firecrawl' ? config.firecrawl.apiBase : null,
+          inherit_from_search: provider === 'firecrawl' && effectiveFirecrawlInherit,
+          api_base: provider === 'firecrawl' ? firecrawlBaseText.trim() || null : null,
+          network_isolation_confirmed: provider === 'firecrawl' && Boolean(config.firecrawl.networkIsolationConfirmed),
         }),
       });
       toast({ title: t('verifySuccess', { provider: provider.toUpperCase() }) });
@@ -135,27 +151,32 @@ const WebFetchEscalationCard = memo(() => {
 
   return (
     <section className="rounded-2xl border border-border/60 bg-card/40 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-muted/30 transition-colors"
-      >
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex w-full items-center justify-between gap-3 px-5 py-4 hover:bg-muted/30 transition-colors">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="flex flex-1 items-center gap-3 min-w-0 text-left"
+        >
           <IconGlobe className="h-5 w-5 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">{t('title')}</h3>
             <p className="text-xs text-muted-foreground truncate">{t('subtitle')}</p>
           </div>
-        </div>
+        </button>
         <div className="flex items-center gap-3 shrink-0">
-          <Switch
-            checked={config.enabled}
-            onCheckedChange={(v) => persist({ enabled: v })}
-            onClick={(e) => e.stopPropagation()}
-          />
-          <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
+          <Switch checked={config.enabled} onCheckedChange={(v) => persist({ enabled: v })} />
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={t('title')}
+            onClick={() => setExpanded((v) => !v)}
+            className="p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronDown className={cn('h-4 w-4 transition-transform', expanded && 'rotate-180')} />
+          </button>
         </div>
-      </button>
+      </div>
 
       {expanded && (
         <div className="border-t border-border/50 px-5 py-4 space-y-4">
@@ -168,10 +189,13 @@ const WebFetchEscalationCard = memo(() => {
               placeholder={t('jinaApiKeyPlaceholder')}
               value={jinaKeyText}
               onChange={(e) => {
-                setJinaKeyText(e.target.value);
-                debouncedKeySave('jina', e.target.value);
+                const nextValue = e.target.value;
+                setJinaKeyText(nextValue);
+                scheduleFieldSave('jina', () => {
+                  persist({ jinaApiKey: nextValue.trim() || null });
+                });
               }}
-              className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/50"
             />
             <p className="text-[10px] text-muted-foreground">{t('jinaApiKeyHint')}</p>
             <Button
@@ -192,11 +216,17 @@ const WebFetchEscalationCard = memo(() => {
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-muted-foreground">{t('firecrawlInherit')}</span>
               <Switch
-                checked={config.firecrawl.inheritFromSearch}
-                onCheckedChange={(v) => persist({ firecrawl: { ...config.firecrawl, inheritFromSearch: v } })}
+                checked={effectiveFirecrawlInherit}
+                disabled={hasCustomFirecrawlBase}
+                onCheckedChange={(v) =>
+                  persist({ firecrawl: { ...configRef.current.firecrawl, inheritFromSearch: v } })
+                }
               />
             </div>
-            {!config.firecrawl.inheritFromSearch && (
+            {hasCustomFirecrawlBase && (
+              <p className="text-[10px] text-muted-foreground">{t('firecrawlCustomBaseKeyHint')}</p>
+            )}
+            {(!config.firecrawl.inheritFromSearch || hasCustomFirecrawlBase) && (
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{t('firecrawlApiKey')}</label>
                 <input
@@ -204,10 +234,15 @@ const WebFetchEscalationCard = memo(() => {
                   placeholder={t('firecrawlApiKeyPlaceholder')}
                   value={firecrawlKeyText}
                   onChange={(e) => {
-                    setFirecrawlKeyText(e.target.value);
-                    debouncedKeySave('firecrawl', e.target.value);
+                    const nextValue = e.target.value;
+                    setFirecrawlKeyText(nextValue);
+                    scheduleFieldSave('firecrawlKey', () => {
+                      persist({
+                        firecrawl: { ...configRef.current.firecrawl, api_key: nextValue.trim() || null },
+                      });
+                    });
                   }}
-                  className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/50"
                 />
               </div>
             )}
@@ -218,15 +253,48 @@ const WebFetchEscalationCard = memo(() => {
                 placeholder="https://api.firecrawl.dev"
                 value={firecrawlBaseText}
                 onChange={(e) => {
-                  setFirecrawlBaseText(e.target.value);
-                  clearTimeout(debounceRef.current);
-                  debounceRef.current = setTimeout(() => {
-                    persist({ firecrawl: { ...config.firecrawl, apiBase: e.target.value.trim() || null } });
-                  }, 500);
+                  const nextBase = e.target.value;
+                  setFirecrawlBaseText(nextBase);
+                  scheduleFieldSave('firecrawlBase', () => {
+                    const trimmed = nextBase.trim() || null;
+                    persist({
+                      firecrawl: {
+                        ...configRef.current.firecrawl,
+                        apiBase: trimmed,
+                        inheritFromSearch: trimmed ? false : configRef.current.firecrawl.inheritFromSearch,
+                        networkIsolationConfirmed: trimmed
+                          ? Boolean(configRef.current.firecrawl.networkIsolationConfirmed)
+                          : false,
+                      },
+                    });
+                  });
                 }}
-                className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                className="w-full bg-background font-mono text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/50"
               />
               <p className="text-[10px] text-muted-foreground">{t('firecrawlApiBaseHint')}</p>
+              {hasCustomFirecrawlBase && (
+                <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(config.firecrawl.networkIsolationConfirmed)}
+                    onChange={(e) =>
+                      persist({
+                        firecrawl: {
+                          ...configRef.current.firecrawl,
+                          networkIsolationConfirmed: e.target.checked,
+                        },
+                      })
+                    }
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-primary"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-xs font-medium text-foreground">{t('firecrawlNetworkIsolation')}</span>
+                    <span className="block text-[10px] text-muted-foreground">
+                      {t('firecrawlNetworkIsolationHint')}
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
             <Button
               type="button"
@@ -253,7 +321,7 @@ const WebFetchEscalationCard = memo(() => {
                   persist({ sessionCap: Math.min(50, Math.max(1, parsed)) });
                 }
               }}
-              className="w-24 bg-background text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              className="w-24 bg-background text-xs rounded-lg border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring/50"
             />
             <p className="text-[10px] text-muted-foreground">{t('sessionCapHint')}</p>
           </div>

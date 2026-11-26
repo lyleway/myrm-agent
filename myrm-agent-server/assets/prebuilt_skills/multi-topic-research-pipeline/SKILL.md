@@ -80,7 +80,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 Fan-out research: select any number of topics, and the pipeline creates one
 parallel research task per topic. Once all research tasks complete, a synthesis

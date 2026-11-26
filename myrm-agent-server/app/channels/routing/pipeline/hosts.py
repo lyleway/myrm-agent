@@ -175,6 +175,7 @@ class RouterCommandDispatchHost(Protocol):
     _gate: SessionGate
     _registry: CommandRegistry
     _skill_command_handler: SkillCommandHandler | None
+    _new_session_peers: dict[str, float]
 
     async def _check_admin_permission(self, msg: InboundMessage) -> bool: ...
 

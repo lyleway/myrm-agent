@@ -271,7 +271,7 @@ class TestExtractPackageInfo:
         from myrm_agent_harness.toolkits.mcp.security import _extract_package_info
 
         result = _extract_package_info("npx", ["-y", "@modelcontextprotocol/server-filesystem"])
-        assert result == ("@modelcontextprotocol/", "npm")
+        assert result == ("@modelcontextprotocol/server-filesystem", "npm")
 
     def test_npm_scoped_package_no_slash(self) -> None:
         from myrm_agent_harness.toolkits.mcp.security import _extract_package_info
@@ -283,7 +283,81 @@ class TestExtractPackageInfo:
         from myrm_agent_harness.toolkits.mcp.security import _extract_package_info
 
         result = _extract_package_info("pip", ["install", "mcp-server-sqlite"])
-        assert result == ("install", "PyPI")
+        assert result == ("mcp-server-sqlite", "PyPI")
+
+    @pytest.mark.parametrize(
+        ("command", "args", "expected"),
+        [
+            # npm / npx / pnpm / yarn scoped packages, versions, -p/--package, subcommands, and local paths
+            (
+                "npx",
+                ["-y", "@modelcontextprotocol/server-filesystem@0.6.2", "/tmp"],
+                ("@modelcontextprotocol/server-filesystem", "npm"),
+            ),
+            ("npx", ["-y", "mcp-remote@0.1.0", "https://example.com"], ("mcp-remote", "npm")),
+            (
+                "npx",
+                ["-y", "-p", "@modelcontextprotocol/server-github@latest", "mcp-github"],
+                ("@modelcontextprotocol/server-github", "npm"),
+            ),
+            (
+                "npx",
+                ["-y", "--package=@modelcontextprotocol/server-github", "mcp-github"],
+                ("@modelcontextprotocol/server-github", "npm"),
+            ),
+            (
+                "pnpm",
+                ["dlx", "@modelcontextprotocol/server-fetch@1.0.0"],
+                ("@modelcontextprotocol/server-fetch", "npm"),
+            ),
+            (
+                "npm",
+                ["exec", "-y", "--", "@modelcontextprotocol/server-memory"],
+                ("@modelcontextprotocol/server-memory", "npm"),
+            ),
+            ("npx", ["-y", "./local-server.js"], None),
+            ("npm", ["run", "start"], None),
+            ("pnpm", ["run", "mcp"], None),
+            # Python interpreters: local script paths, inline code, and `--` / `-` must never leak to OSV
+            ("python", ["/local/mcp_server.py"], None),
+            ("python3", ["/Users/secret/project/srv.py"], None),
+            ("python3", ["-u", "/local/srv.py"], None),
+            ("python3", ["/local/srv.py", "-m", "prod"], None),
+            ("python3", ["-c", "import sys; print(sys.argv)", "-m", "fake"], None),
+            ("python3", ["-cprint(1)", "-m", "fake"], None),
+            ("python3", ["--", "-m", "fake"], None),
+            ("python3", ["-", "-m", "fake"], None),
+            ("python3", ["-X", "-m"], None),
+            ("python3", ["-m"], None),
+            ("python3", ["-m", "/tmp/evil.py"], None),
+            # Python interpreters: real -m module launches extract the top-level PyPI module
+            ("python", ["-m", "mcp_server_git"], ("mcp_server_git", "PyPI")),
+            ("python3", ["-u", "-m", "mcp_server_sqlite"], ("mcp_server_sqlite", "PyPI")),
+            (
+                "python3",
+                ["-W", "ignore", "-X", "utf8", "-m", "mcp_server_git.server", "--repo", "."],
+                ("mcp_server_git", "PyPI"),
+            ),
+            ("/opt/venv/bin/python3.13", ["-um", "mcp_server_fetch"], ("mcp_server_fetch", "PyPI")),
+            (r"C:\venv\Scripts\python.exe", ["-mmcp_server_time"], ("mcp_server_time", "PyPI")),
+            # pip / pip3 / uvx / pipx subcommands, flags, and version specifiers
+            ("pip3", ["install", "--upgrade", "mcp-server-sqlite==1.2.3"], ("mcp-server-sqlite", "PyPI")),
+            ("pip", ["install", "-r", "requirements.txt", "mcp-server-fetch[http]>=0.5"], ("mcp-server-fetch", "PyPI")),
+            ("pip", ["install", "-e", "."], None),
+            ("uvx", ["--from", "mcp-server-git==0.6.0", "mcp-server-git"], ("mcp-server-git", "PyPI")),
+            ("uvx", ["--python", "3.12", "mcp-server-fetch@latest"], ("mcp-server-fetch", "PyPI")),
+            ("pipx", ["run", "--spec", "mcp-server-time>=1.0", "mcp-server-time"], ("mcp-server-time", "PyPI")),
+        ],
+    )
+    def test_cli_package_extraction_cases(
+        self,
+        command: str,
+        args: list[str],
+        expected: tuple[str, str] | None,
+    ) -> None:
+        from myrm_agent_harness.toolkits.mcp.security import _extract_package_info
+
+        assert _extract_package_info(command, args) == expected
 
     def test_uvx_extracts_package(self) -> None:
         from myrm_agent_harness.toolkits.mcp.security import _extract_package_info
@@ -336,6 +410,15 @@ class TestCheckOsvMalware:
 
         result = await check_osv_malware("unknown", ["arg"])
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_local_python_script_never_calls_osv(self) -> None:
+        from myrm_agent_harness.toolkits.mcp.security import check_osv_malware
+
+        with patch("myrm_agent_harness.toolkits.mcp.security.create_httpx_client") as mock_factory:
+            result = await check_osv_malware("python3", ["/Users/secret/mcp_server.py", "-m", "prod"])
+            assert result is None
+            mock_factory.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_malware_detected(self) -> None:

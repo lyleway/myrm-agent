@@ -4,13 +4,13 @@
 - channels.routing.pipeline.hosts::RouterCommandDispatchHost (POS: typing protocol for the host attributes and handlers this mixin calls)
 - channels.routing.command_defs::CommandAction, CommandDef, CommandKind (POS: slash command data model and enums)
 - channels.routing.command_registry::ResolvedCommand (POS: central O(1) command lookup result)
-- channels.routing.commands::parse_personality_args, parse_topic_args, parse_yolo_args (POS: slash command argument parsing)
+- channels.routing.commands::carry_new_session_to_command, parse_personality_args, parse_topic_args, parse_yolo_args (POS: slash command argument parsing and the pending ``/new`` carried to a command)
 - channels.routing.inbound_risk_gate::hold_risky_inbound (POS: risk screening of a sender's text before any agent reads it)
 - channels.i18n::get_text, resolve_message_locale (POS: localized channel copy)
 - channels.types::InboundMessage, OutboundMessage (POS: channel message envelopes)
 
 [OUTPUT]
-- RouterCommandDispatchMixin: ``_dispatch_resolved`` (owner check, risk screening, then system / agent-route / skill), ``_dispatch_system_command`` (action to handler), the ``!shell`` migration reply, skill-bound commands and ``/help``
+- RouterCommandDispatchMixin: ``_dispatch_resolved`` (owner check, risk screening, then system / agent-route / skill), ``_dispatch_system_command`` (a pending ``/new`` carried to the command, then action to handler), the ``!shell`` migration reply, skill-bound commands and ``/help``
 
 [POS]
 Command-dispatch segment of ``AgentRouter``. The handlers it starts live in the ``commands`` subpackage (``RouterCommandsMixin``); this mixin only decides which one runs.
@@ -23,7 +23,12 @@ import asyncio
 from app.channels.i18n import get_text, resolve_message_locale
 from app.channels.routing.command_defs import CommandAction, CommandDef, CommandKind
 from app.channels.routing.command_registry import ResolvedCommand
-from app.channels.routing.commands import parse_personality_args, parse_topic_args, parse_yolo_args
+from app.channels.routing.commands import (
+    carry_new_session_to_command,
+    parse_personality_args,
+    parse_topic_args,
+    parse_yolo_args,
+)
 from app.channels.routing.inbound_risk_gate import hold_risky_inbound
 from app.channels.routing.pipeline.hosts import RouterCommandDispatchHost
 from app.channels.types import InboundMessage, OutboundMessage
@@ -78,6 +83,8 @@ class RouterCommandDispatchMixin:
         raw_args: str,
     ) -> bool:
         """Dispatch a system command by action type. Returns True if consumed."""
+        carry_new_session_to_command(msg, self._new_session_peers)
+
         if action == CommandAction.STOP:
             asyncio.create_task(self._cancel_active_task(msg))
             return True

@@ -1,7 +1,7 @@
 """ContentPipeline — Converts HTML into LLM-friendly Documents.
 
 Unified content processing pipeline, decoupled from the Fetcher layer:
-regardless of whether HTML comes from curl_cffi, Patchright, or Scrapling,
+regardless of whether HTML comes from curl_cffi or escalation providers,
 it passes through the same processing pipeline.
 
 [INPUT]
@@ -9,6 +9,7 @@ web_fetch.processing.content_pruning::ContentPruningFilter (POS: Boilerplate / n
 web_fetch.processing.html_scan::extract_title (POS: Linear-time scans of raw HTML text)
 web_fetch.fetchers.protocols::FetcherType, FetchResult (POS: Fetcher protocol types)
 web_fetch.processing.markdown_generator::MarkdownGenerator (POS: HTML-to-Markdown conversion)
+web_fetch.processing.static_page_gate::should_fallback_to_raw_markdown (POS: L1 static long-page fallback gate)
 utils.content_sniff::PayloadKind (POS: Tells text responses from web pages)
 utils.text_cleaner::clean_text (POS: Generic text cleaning utility)
 
@@ -16,6 +17,7 @@ utils.text_cleaner::clean_text (POS: Generic text cleaning utility)
 ContentPipeline: Transforms raw FetchResult HTML into cleaned, Markdown-formatted Documents; text responses
 (plain, markdown, csv, feeds) become Documents verbatim
 (``process`` synchronously, ``aprocess`` on a dedicated conversion thread)
+run_on_conversion_thread: Runs a CPU-bound conversion callable on the dedicated conversion thread while preserving contextvars
 SOURCE_TRUNCATED_KEY: Document metadata flag: the source was cut short (``process`` sets it when the fetcher cut the
 source at its size ceiling; the binary router sets it when it cuts a parsed text)
 
@@ -32,6 +34,7 @@ import atexit
 import contextvars
 import json
 import logging
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Final
 
@@ -40,10 +43,11 @@ from langchain_core.documents import Document
 from myrm_agent_harness.utils.content_sniff import PayloadKind
 from myrm_agent_harness.utils.text_cleaner import clean_text
 
-from ..fetchers.protocols import FetcherType, FetchResult
+from ..fetchers.protocols import FetchResult
 from .content_pruning import ContentPruningFilter
 from .html_scan import extract_title
 from .markdown_generator import MarkdownGenerator
+from .static_page_gate import should_fallback_to_raw_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,23 @@ SOURCE_TRUNCATED_KEY: Final = "source_truncated"
 # after its awaiting task was cancelled is the only orphan there can be; futures still queued are dropped unstarted.
 _CONVERSION_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-fetch-convert")
 atexit.register(_CONVERSION_EXECUTOR.shutdown, wait=False, cancel_futures=True)
+
+
+async def run_on_conversion_thread[**P, R](
+    fn: Callable[P, R],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
+    """Run a CPU-bound HTML conversion callable on the dedicated conversion thread.
+
+    Preserves the caller's ``contextvars`` snapshot and keeps conversions off the event loop.
+    """
+    context = contextvars.copy_context()
+
+    def _invoke() -> R:
+        return context.run(fn, *args, **kwargs)
+
+    return await asyncio.get_running_loop().run_in_executor(_CONVERSION_EXECUTOR, _invoke)
 
 
 class ContentPipeline:
@@ -84,28 +105,35 @@ class ContentPipeline:
         )
 
     def _extract_raw_markdown(self, html: str, base_url: str) -> str:
-        from .html_to_markdown import CustomHTML2Text
+        from .html_to_markdown import HTML2Markdown
 
-        h = CustomHTML2Text(baseurl=base_url)
+        h = HTML2Markdown(baseurl=base_url)
         h.update_params(body_width=0)
         return h.handle(html).strip()
 
-    def _extract_with_generator(self, html: str, base_url: str, is_stealth: bool) -> str:
+    def _extract_with_generator(self, fetch_result: FetchResult) -> str:
         assert self._md_generator is not None
+        html = fetch_result.html
         result = self._md_generator.generate_markdown(
             input_html=html,
-            base_url=base_url,
+            base_url=fetch_result.url,
             content_filter=self._md_generator.content_filter,
         )
 
         fit = result.fit_markdown.strip()
-        if is_stealth:
-            if not fit or len(fit) < _FIT_MARKDOWN_THRESHOLD:
-                logger.warning("fit_markdown too short for stealth page, falling back to raw_markdown")
-                return clean_text(result.raw_markdown)
-            return clean_text(fit)
+        if len(fit) > _FIT_MARKDOWN_THRESHOLD:
+            return fit
 
-        return fit if len(fit) > _FIT_MARKDOWN_THRESHOLD else ""
+        if should_fallback_to_raw_markdown(
+            fetcher_type=fetch_result.fetcher_type,
+            status_code=fetch_result.status_code,
+            raw_markdown=result.raw_markdown,
+            html_length=len(html),
+        ):
+            logger.info("L1 static long-page gate accepted raw_markdown fallback for %s", fetch_result.url)
+            return clean_text(result.raw_markdown)
+
+        return ""
 
     def _try_structured_data_bypass(self, fetch_result: FetchResult) -> Document | None:
         content_type = (
@@ -179,8 +207,7 @@ class ContentPipeline:
         if self._md_generator is None:
             content = self._extract_raw_markdown(fetch_result.html, fetch_result.url)
         else:
-            is_stealth = fetch_result.fetcher_type == FetcherType.STEALTH
-            content = self._extract_with_generator(fetch_result.html, fetch_result.url, is_stealth)
+            content = self._extract_with_generator(fetch_result)
 
         if not content or len(content.strip()) < _MIN_CONTENT_LENGTH:
             return None
@@ -197,9 +224,4 @@ class ContentPipeline:
         Conversion is CPU-bound Python. On the event loop it would freeze every other request (streams, parallel
         fetches) for as long as it runs, and the fetch timeout cannot interrupt it there.
         """
-        context = contextvars.copy_context()
-
-        def convert() -> Document | None:
-            return context.run(self.process, fetch_result)
-
-        return await asyncio.get_running_loop().run_in_executor(_CONVERSION_EXECUTOR, convert)
+        return await run_on_conversion_thread(self.process, fetch_result)

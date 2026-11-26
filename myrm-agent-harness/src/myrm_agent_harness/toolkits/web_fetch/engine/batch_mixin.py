@@ -1,15 +1,14 @@
-"""FetchEngine batch crawling and cache warm-up helpers.
+"""FetchEngine batch crawling helpers.
 
 [INPUT]
 - web_fetch.engine.types::FailedResult, SuccessResult (POS: Batch result aliases)
 
 [OUTPUT]
-- FetchEngineBatchMixin: ``crawl_many``, ``prefetch_with_retry`` and ``prefetch`` built on ``FetchEngine.crawl``
+- FetchEngineBatchMixin: ``crawl_many`` built on ``FetchEngine.crawl``
 - cancel_fetches: cancels fetches that are not already unwinding and waits briefly for them to release their pages
 
 [POS]
-Mixin: concurrent crawling of many URLs under one concurrency cap and a per-URL patience, retrying warm-up,
-background prefetch.
+Mixin: concurrent crawling of many URLs under one concurrency cap and a per-URL patience.
 """
 
 from __future__ import annotations
@@ -26,15 +25,13 @@ if TYPE_CHECKING:
 
     from langchain_core.documents import Document
 
-    from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
-
 logger = logging.getLogger(__name__)
 
 # Once any page is in hand, a URL whose fetch has run this long is no longer waited for.
 _STRAGGLER_AFTER_S = 25.0
-# With no page in hand, a URL is waited for this long past its crawl timeout (time to close its browser page).
+# With no page in hand, a URL is waited for this long past its crawl timeout to unwind cleanly.
 _UNWIND_GRACE_S = 3.0
-# When a call is torn down, its cancelled fetches get this long to release their browser pages.
+# When a call is torn down, its cancelled fetches get this long to settle.
 _CANCEL_SETTLE_S = 2.0
 
 
@@ -45,9 +42,9 @@ def _consume_outcome(task: asyncio.Task[Document | None]) -> None:
 
 
 async def cancel_fetches(fetches: Iterable[asyncio.Task[Document | None]]) -> None:
-    """Cancel the fetches of a call that is torn down (or of an engine shutting down) and let them release their pages.
+    """Cancel the fetches of a call that is torn down (or of an engine shutting down) and let them settle.
 
-    A fetch the engine's crawl timeout has already cancelled is unwinding (closing its browser page); a second cancel
+    A fetch the engine's crawl timeout has already cancelled is already unwinding; a second cancel
     would cut that cleanup short, so it is left to finish on its own.
     """
     cancelled: list[asyncio.Task[Document | None]] = []
@@ -61,8 +58,20 @@ async def cancel_fetches(fetches: Iterable[asyncio.Task[Document | None]]) -> No
 
 
 class FetchEngineBatchMixin:
+    if TYPE_CHECKING:
+        _crawl_timeout: float
+        _detached_fetches: set[asyncio.Task[Document | None]]
+
+        async def crawl(
+            self,
+            url: str,
+            *,
+            force_refresh: bool = False,
+            allow_escalation: bool = True,
+        ) -> Document | None: ...
+
     async def crawl_many(
-        self: FetchEngine,
+        self,
         urls: list[str],
         *,
         max_concurrency: int = 10,
@@ -129,64 +138,3 @@ class FetchEngineBatchMixin:
             await cancel_fetches(running)
             raise
         return success_results, failed_results
-
-    async def prefetch_with_retry(
-        self: FetchEngine,
-        urls: list[str],
-        *,
-        max_retries: int = 3,
-        initial_backoff: float = 1.0,
-        max_concurrency: int = 10,
-    ) -> tuple[SuccessResult, FailedResult]:
-        """Warm up cache (concurrent + auto-retry on failure + exponential backoff)."""
-        success_results: SuccessResult = []
-        failed_results: FailedResult = []
-        results_lock = asyncio.Lock()
-        sem = asyncio.Semaphore(max_concurrency)
-
-        async def retry_one(url: str) -> None:
-            async with sem:
-                retry_count = 0
-                backoff = initial_backoff
-                last_error = None
-
-                while retry_count <= max_retries:
-                    try:
-                        force_refresh = retry_count > 0
-                        doc = await self.crawl(url, force_refresh=force_refresh)
-                        if doc is not None:
-                            async with results_lock:
-                                success_results.append((url, doc))
-                            return
-                        last_error = "Crawl returned None"
-                        logger.warning(
-                            f"Prefetch failed (attempt {retry_count + 1}/{max_retries + 1}): {url} — {last_error}"
-                        )
-                    except Exception as e:
-                        last_error = str(e)
-                        logger.warning(f"Prefetch failed (attempt {retry_count + 1}/{max_retries + 1}): {url} — {e}")
-
-                    retry_count += 1
-                    if retry_count <= max_retries:
-                        await asyncio.sleep(backoff)
-                        backoff *= 2
-
-                logger.error(f"Prefetch exhausted all retries: {url} — {last_error}")
-                async with results_lock:
-                    failed_results.append((url, None))
-
-        await asyncio.gather(*(retry_one(u) for u in urls))
-        return success_results, failed_results
-
-    async def prefetch(self: FetchEngine, urls: list[str], *, max_concurrency: int = 5) -> None:
-        """Cache warmup: background async load URLs into cache."""
-        sem = asyncio.Semaphore(max_concurrency)
-
-        async def prefetch_one(url: str) -> None:
-            async with sem:
-                try:
-                    await self.crawl(url)
-                except Exception:
-                    logger.warning(f"Prefetch failed: {url}")
-
-        await asyncio.gather(*(prefetch_one(u) for u in urls), return_exceptions=True)

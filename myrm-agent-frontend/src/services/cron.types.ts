@@ -147,7 +147,10 @@ export interface CronProgressStep {
 export type MonitorContractErrorCode = 'invalid_json_like_output';
 export type MonitorFailureCountSource = 'persistent_state' | 'memory_fallback';
 
-/** Why a run's delivery failed and where it was headed; `target` has its credentials masked. */
+/**
+ * Why a run's delivery failed and where it was headed. `target` masks a password and sensitive query values only,
+ * so a secret in the path (the token of a Feishu, Slack or Discord hook) stays as written.
+ */
 export interface ConnectorFailureDetail {
   category: string;
   target: string;
@@ -415,11 +418,14 @@ export interface PrerequisiteCheckResponse {
   override_allowed: boolean;
 }
 
-/** What the destination a job delivers to has done in the last day; the failure fields are empty while it is healthy. */
+/**
+ * What the latest delivery attempts say about the destination a job delivers to; the failure fields are empty while
+ * it is healthy.
+ */
 export interface DeliveryHealth {
   status: 'healthy' | 'degraded' | 'down';
   failure_streak: number;
+  /** When the run behind the newest attempt finished, whether it went through or not, as a UTC moment. */
+  last_attempt_at: string;
   last_error_category?: string | null;
-  /** When the run behind the newest failure finished, as a UTC moment. */
-  last_failed_at?: string | null;
 }

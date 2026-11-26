@@ -1,5 +1,7 @@
 """[INPUT]
-- .common (POS: shared constants and helpers)
+- .common (POS: shared primitives of the channel topic-config domain)
+- .config_store::ConfigStoreMixin (POS: reads and writes the stored topic map of a channel)
+- app.database.factory::acquire_write_lock (POS: takes the SQLite write lock at the start of a read-then-write transaction)
 
 [OUTPUT]
 - IdentityMixin
@@ -10,6 +12,7 @@ Topic manager mixin: identity revoke/restore, expiry and bulk unbinding.
 
 from __future__ import annotations
 
+import copy
 import time
 from datetime import datetime, timezone
 
@@ -18,9 +21,14 @@ from .common import (
     _CHANNEL_LEVEL_KEY,
     logger,
 )
+from .config_store import ConfigStoreMixin
 
 
-class IdentityMixin:
+class IdentityMixin(ConfigStoreMixin):
+    # The last-active bookkeeping; ``SqlTopicManager.__init__`` creates it.
+    _active_mem: dict[str, str]
+    _active_flush_ts: dict[str, float]
+
     async def revoke_identity(
         self,
         channel: str,
@@ -121,18 +129,23 @@ class IdentityMixin:
             from sqlalchemy import select
 
             from app.database.connection import get_session
+            from app.database.factory import acquire_write_lock
             from app.database.models import UserConfig
 
             async with get_session() as session:
+                # Same order as ``_save_config``: lock first, so no commit can land between the read and the update.
+                await acquire_write_lock(session)
                 result = await session.execute(select(UserConfig).where(UserConfig.config_key.like("%Topics")))
                 rows = result.scalars().all()
 
-                changed_channels = []
+                changed_channels: list[str] = []
                 for row in rows:
-                    config = row.config_value
-                    if not isinstance(config, dict):
+                    if not isinstance(row.config_value, dict):
                         continue
 
+                    # A JSON column does not track in-place edits, and assigning the same object back issues no UPDATE:
+                    # the edits go to a copy.
+                    config = copy.deepcopy(row.config_value)
                     changed = False
                     for chat_id, group_topics in list(config.items()):
                         if not isinstance(group_topics, dict):

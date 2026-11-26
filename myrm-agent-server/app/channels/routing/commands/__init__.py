@@ -8,7 +8,8 @@
 [OUTPUT]
 - Aggregate facade re-exporting every public name of the ``commands`` subpackage:
   - commands: argument parsers (yolo/personality/memory/approval/topic) + slash-command
-    handlers (new_session/compact/retry/undo/topic_command) + DenyWithReason/TopicCommand DTOs
+    handlers (new_session/compact/retry/undo/topic_command), ``carry_new_session_to_command`` (a pending ``/new`` as
+    the command before the next turn sees it) + DenyWithReason/TopicCommand DTOs
   - router_commands.mixin: RouterCommandsMixin composed from the feature mixins below
   - router_commands.approval: RouterCommandsApprovalMixin (emoji/button/reaction approval)
   - router_commands.draft: RouterCommandsDraftMixin + parse_draft_args (/draft: decide a held reply from chat)
@@ -49,7 +50,7 @@ from app.channels.routing.commands.router_commands import (
     RouterCommandsStopMixin,
     parse_draft_args,
 )
-from app.channels.routing.commands.session import handle_compact, handle_new_session
+from app.channels.routing.commands.session import carry_new_session_to_command, handle_compact, handle_new_session
 from app.channels.routing.commands.topic import TopicCommand, handle_topic_command, parse_topic_args
 from app.channels.routing.commands.turns import handle_retry, handle_undo
 
@@ -68,6 +69,7 @@ __all__ = [
     "RouterCommandsSessionMixin",
     "RouterCommandsStopMixin",
     "TopicCommand",
+    "carry_new_session_to_command",
     "handle_compact",
     "handle_new_session",
     "handle_retry",

@@ -75,11 +75,10 @@ def _filename(title: str, extension: str) -> str:
 
 
 async def _html_to_markdown(html: str, *, base_url: str) -> str:
-    from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import ContentPruningFilter
     from myrm_agent_harness.toolkits.web_fetch.processing.markdown_generator import MarkdownGenerator
 
     def convert() -> str:
-        generator = MarkdownGenerator(content_filter=ContentPruningFilter())
+        generator = MarkdownGenerator()
         return (generator.generate_markdown(html, base_url=base_url).raw_markdown or "").strip()
 
     return await asyncio.to_thread(convert)

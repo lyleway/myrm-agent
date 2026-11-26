@@ -9,7 +9,7 @@ Dual tracking approach:
 - Runtime tracking: Record actual tool calls (99% accuracy)
 
 [INPUT]
-- (none)
+- utils.clean_yaml::load_clean_yaml (POS: Parse step for skill frontmatter and package manifests that come from a market repository or a local directory the user pointed at.)
 
 [OUTPUT]
 - SkillDependency: Skill dependency record.
@@ -26,6 +26,8 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+
+from myrm_agent_harness.utils.clean_yaml import load_clean_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class SkillDependencyTracker:
     - Dual tracking: static analysis + runtime (99% accuracy)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize dependency tracker."""
         # Skill-skill dependencies
         self._dependencies: dict[str, list[str]] = defaultdict(list)
@@ -322,9 +324,7 @@ def parse_skill_dependencies(skill_content: str) -> SkillDependencies:
     if frontmatter_match:
         body = skill_content[frontmatter_match.end() :]
         try:
-            import yaml
-
-            meta = yaml.safe_load(frontmatter_match.group(1))
+            meta = load_clean_yaml(frontmatter_match.group(1))
             raw = meta.get("dependencies") if isinstance(meta, dict) else None
             if raw:
                 if isinstance(raw, str):

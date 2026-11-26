@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
 
 _RELEASE_REPO_ENV = "MYRM_GITHUB_RELEASE_REPO"
-_DEFAULT_RELEASE_REPO = "Pursue-LLL/myrm-agent"
+_DEFAULT_RELEASE_REPO = "lyleway/myrm-agent"
 _LATEST_TTL_SEC = 3600.0
 _FETCH_TIMEOUT_SEC = 8.0
 _GIT_TIMEOUT_SEC = 10.0

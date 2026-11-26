@@ -69,15 +69,19 @@ def build_wiki_client(
     )
     patcher.start()
     client = TestClient(app)
+    client.__enter__()
     client._wiki_archiver_patcher = patcher  # type: ignore[attr-defined]
     return client, archiver, structure
 
 
 def cleanup_wiki_client(client: TestClient) -> None:
-    cast(FastAPI, client.app).dependency_overrides.clear()
-    patcher = getattr(client, "_wiki_archiver_patcher", None)
-    if patcher is not None:
-        patcher.stop()
+    try:
+        client.__exit__(None, None, None)
+    finally:
+        cast(FastAPI, client.app).dependency_overrides.clear()
+        patcher = getattr(client, "_wiki_archiver_patcher", None)
+        if patcher is not None:
+            patcher.stop()
 
 
 def poll_clip_job(client: TestClient, job_id: str) -> dict[str, object]:

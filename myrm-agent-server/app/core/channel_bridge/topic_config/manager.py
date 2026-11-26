@@ -44,6 +44,7 @@ class SqlTopicManager(BindingMixin, IdentityMixin, PolicyMixin, ConfigStoreMixin
     ) -> None:
         self._cache: dict[str, dict[str, object]] = {}
         self._cache_ts: dict[str, float] = {}
+        self._read_generation: dict[str, int] = {}
         self._default_idle_timeout_h = idle_timeout_hours
         self._default_max_age_h = max_age_hours
         self._active_mem: dict[str, str] = {}

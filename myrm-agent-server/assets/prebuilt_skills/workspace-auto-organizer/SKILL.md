@@ -27,7 +27,7 @@ Produce a **reviewable organize plan** for a workspace folder. **Do not** run `m
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 ## Workflow
 

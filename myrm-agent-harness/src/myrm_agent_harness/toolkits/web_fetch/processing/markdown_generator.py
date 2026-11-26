@@ -4,10 +4,10 @@ Converts HTML to Markdown and, when a content filter is configured, also
 produces the filtered ("fit") variant that keeps only the main content.
 
 [INPUT]
-- processing.html_to_markdown::CustomHTML2Text (POS: HTML-to-Markdown converter) [lazy]
+- processing.html_to_markdown::HTML2Markdown (POS: HTML-to-Markdown converter) [lazy]
 
 [OUTPUT]
-- MarkdownResult: raw / fit Markdown plus the filtered HTML
+- MarkdownResult: raw and fit Markdown variants
 - ContentFilter: content filter protocol
 - MarkdownGenerator: HTML → Markdown generator with an optional content filter
 
@@ -17,8 +17,11 @@ Markdown generation stage of ContentPipeline.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -27,7 +30,6 @@ class MarkdownResult:
 
     raw_markdown: str = ""
     fit_markdown: str = ""
-    fit_html: str = ""
 
 
 @runtime_checkable
@@ -55,10 +57,10 @@ class MarkdownGenerator:
         html2text_options: dict[str, object] | None = None,
         content_filter: ContentFilter | None = None,
     ) -> MarkdownResult:
-        from .html_to_markdown import CustomHTML2Text
+        from .html_to_markdown import HTML2Markdown
 
         try:
-            h = CustomHTML2Text(baseurl=base_url)
+            h = HTML2Markdown(baseurl=base_url)
             default_options: dict[str, object] = {
                 "body_width": 0,
                 "ignore_emphasis": False,
@@ -83,27 +85,27 @@ class MarkdownGenerator:
 
             try:
                 raw_markdown = h.handle(input_html)
-            except Exception as e:
-                raw_markdown = f"Error converting HTML to markdown: {e}"
+            except Exception:
+                logger.warning("HTML-to-Markdown conversion failed for base_url=%s", base_url, exc_info=True)
+                raw_markdown = ""
 
             raw_markdown = raw_markdown.replace("    ```", "```")
 
             fit_markdown: str = ""
-            filtered_html: str = ""
             active_filter = content_filter or self.content_filter
             if active_filter:
                 try:
                     filtered_segments = active_filter.filter_content(input_html)
                     filtered_html = "\n".join(f"<div>{s}</div>" for s in filtered_segments)
                     fit_markdown = h.handle(filtered_html)
-                except Exception as e:
-                    fit_markdown = f"Error generating fit markdown: {e}"
-                    filtered_html = ""
+                except Exception:
+                    logger.warning("Fit Markdown generation failed for base_url=%s", base_url, exc_info=True)
+                    fit_markdown = ""
 
             return MarkdownResult(
                 raw_markdown=raw_markdown or "",
                 fit_markdown=fit_markdown or "",
-                fit_html=filtered_html or "",
             )
-        except Exception as e:
-            return MarkdownResult(raw_markdown=f"Error in markdown generation: {e}")
+        except Exception:
+            logger.warning("Markdown generation setup failed for base_url=%s", base_url, exc_info=True)
+            return MarkdownResult()

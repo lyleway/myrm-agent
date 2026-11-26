@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ConnectorHealthBadge from '../ConnectorHealthBadge';
 import { getJobDeliveryHealth } from '@/services/cron';
 import type { CronJob, DeliveryHealth } from '@/services/cron';
@@ -35,14 +35,19 @@ const JOB_ELSEWHERE: BadgeJob = {
   delivery: { channel: 'webhook', target: 'https://hooks.example.com/b' },
 };
 
-const HEALTHY: DeliveryHealth = { status: 'healthy', failure_streak: 0 };
+// The clock stands still three days after the newest attempt, so the age the pill shows does not depend on the day the
+// suite runs.
+const NOW = new Date('2026-06-20T08:30:00Z');
+const LAST_ATTEMPT_AT = '2026-06-17T08:30:00Z';
+
+const HEALTHY: DeliveryHealth = { status: 'healthy', failure_streak: 0, last_attempt_at: LAST_ATTEMPT_AT };
 
 function failing(overrides: Partial<DeliveryHealth> = {}): DeliveryHealth {
   return {
     status: 'degraded',
     failure_streak: 3,
+    last_attempt_at: LAST_ATTEMPT_AT,
     last_error_category: 'timeout',
-    last_failed_at: '2026-06-17T08:30:00Z',
     ...overrides,
   };
 }
@@ -60,6 +65,11 @@ describe('ConnectorHealthBadge', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('shows nothing until the destination has been judged', () => {
@@ -88,27 +98,58 @@ describe('ConnectorHealthBadge', () => {
     expect(await screen.findByTestId('connector-health-badge')).toHaveTextContent('connectorStatusHealthy');
     expect(screen.getByText(/connectorHealthStatus/)).toHaveClass('sr-only');
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByText('connectorHealthBasis')).not.toBeInTheDocument();
+  });
+
+  it.each(['healthy', 'degraded', 'down'] as const)(
+    'says how long ago the newest attempt finished on a %s destination',
+    async (status) => {
+      healthMock.mockResolvedValue(status === 'healthy' ? HEALTHY : failing({ status }));
+
+      render(<ConnectorHealthBadge job={JOB} />);
+
+      expect(await screen.findByTestId('connector-health-age')).toHaveTextContent('3 days ago');
+      // The status word stays what names the verdict.
+      expect(screen.getByTestId('connector-health-badge')).not.toHaveTextContent('3 days ago');
+    },
+  );
+
+  it('dates a verdict that is weeks old, so an old "OK" is not taken for a fresh one', async () => {
+    healthMock.mockResolvedValue({ ...HEALTHY, last_attempt_at: '2026-05-26T08:30:00Z' });
+
+    render(<ConnectorHealthBadge job={JOB} />);
+
+    expect(await screen.findByTestId('connector-health-age')).toHaveTextContent('25 days ago');
   });
 
   it.each([
     ['degraded', 'connectorStatusDegraded'],
     ['down', 'connectorStatusDown'],
-  ] as const)('explains a %s destination: why, what to do, the streak and when', async (status, label) => {
-    healthMock.mockResolvedValue(failing({ status }));
+  ] as const)(
+    'explains a %s destination: why, what to do, the streak, when, and that only real deliveries change it',
+    async (status, label) => {
+      healthMock.mockResolvedValue(failing({ status }));
 
-    render(<ConnectorHealthBadge job={JOB} />);
+      render(<ConnectorHealthBadge job={JOB} />);
 
-    // The name is the hidden prefix plus the verdict; spacing between the two depends on layout, which jsdom lacks.
-    const pill = await screen.findByRole('button', { name: new RegExp(`^connectorHealthStatus:\\s*${label}$`) });
-    expect(pill).toHaveTextContent(label);
-    expect(screen.getByText('connectorCategoryTimeout')).toBeInTheDocument();
-    expect(screen.getByText('connectorCategoryTimeoutHint')).toBeInTheDocument();
-    expect(screen.getByText('connectorFailureStreak:3')).toBeInTheDocument();
-    expect(screen.getByText(/^connectorLastFailedAt:.*2026/)).toBeInTheDocument();
-  });
+      // The name is the hidden prefix, the verdict and its age; spacing between them depends on layout, which jsdom
+      // lacks.
+      const pill = await screen.findByRole('button', {
+        name: new RegExp(`^connectorHealthStatus:\\s*${label}\\s*·\\s*3 days ago$`),
+      });
+      expect(pill).toHaveTextContent(label);
+      expect(screen.getByText('connectorCategoryTimeout')).toBeInTheDocument();
+      expect(screen.getByText('connectorCategoryTimeoutHint')).toBeInTheDocument();
+      expect(screen.getByText('connectorFailureStreak:3')).toBeInTheDocument();
+      expect(screen.getByText(/^connectorLastFailedAt:.*2026/)).toBeInTheDocument();
+      expect(screen.getByText('connectorHealthBasis')).toBeInTheDocument();
+    },
+  );
 
   it('words an address the application refused as such', async () => {
-    healthMock.mockResolvedValue(failing({ status: 'down', failure_streak: 1, last_error_category: 'address_rejected' }));
+    healthMock.mockResolvedValue(
+      failing({ status: 'down', failure_streak: 1, last_error_category: 'address_rejected' }),
+    );
 
     render(<ConnectorHealthBadge job={JOB} />);
 
@@ -126,15 +167,6 @@ describe('ConnectorHealthBadge', () => {
 
     expect(await screen.findByText('connectorCategoryUnknown')).toBeInTheDocument();
     expect(screen.getByText('connectorCategoryUnknownHint')).toBeInTheDocument();
-  });
-
-  it('leaves the failure time out when the server gave none', async () => {
-    healthMock.mockResolvedValue(failing({ last_failed_at: null }));
-
-    render(<ConnectorHealthBadge job={JOB} />);
-    await screen.findByText('connectorFailureStreak:3');
-
-    expect(screen.queryByText(/connectorLastFailedAt/)).not.toBeInTheDocument();
   });
 
   it('shows nothing when the verdict cannot be loaded', async () => {

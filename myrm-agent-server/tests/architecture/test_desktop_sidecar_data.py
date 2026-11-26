@@ -34,6 +34,7 @@ _DATA_READERS = {
     "app/core/skills/prebuilt_sync.py": "assets/prebuilt_skills",
     "app/services/agent/template_utils.py": "assets/prebuilt_agents",
     "app/services/kanban/pipeline/spec_io.py": "assets/prebuilt_skills",
+    "app/startup/granian_runner.py": "app/startup/granian_log_config.json",
 }
 
 # Modules that use `__file__` for something else, and why a bundle without that file is fine.

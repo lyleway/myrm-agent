@@ -48,7 +48,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 Important safety rules:
 - Execute each command independently (do NOT use inline subshells `$()`, which are blocked by security policy).

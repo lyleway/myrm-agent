@@ -1,5 +1,9 @@
 """Tests for wire message translator."""
 
+from collections.abc import Mapping
+
+import pytest
+
 from myrm_agent_harness.toolkits.llms.adapters.wire.translator import (
     chat_messages_to_responses_input,
     extract_responses_instructions,
@@ -36,13 +40,74 @@ def test_assistant_tool_calls_become_function_call_items() -> None:
         }
     ]
     converted = chat_messages_to_responses_input(messages)
-    assert converted[1]["type"] == "function_call"
-    assert converted[1]["name"] == "web_search"
+    assert len(converted) == 1
+    assert converted[0]["type"] == "function_call"
+    assert converted[0]["name"] == "web_search"
+    assert converted[0]["call_id"] == "call_123"
+
+
+@pytest.mark.parametrize(
+    "empty_content",
+    ["", None, "   \n\t ", [], [{"type": "text", "text": "  "}]],
+    ids=["empty-str", "none", "whitespace", "empty-list", "blank-part"],
+)
+def test_assistant_empty_or_null_content_with_tool_calls_omits_message_item(empty_content: object) -> None:
+    reasoning_blob = {"type": "reasoning", "id": "rs_1", "encrypted_content": "enc"}
+    messages = [
+        {
+            "role": "assistant",
+            "content": empty_content,
+            "responses_reasoning_items": [reasoning_blob],
+            "tool_calls": [
+                {
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "web_search", "arguments": '{"q":"ai"}'},
+                }
+            ],
+        }
+    ]
+    converted = chat_messages_to_responses_input(messages)
+    assert [item.get("type") for item in converted] == ["reasoning", "function_call"]
+    assert converted[0]["id"] == "rs_1"
+    assert converted[0]["summary"] == []
     assert converted[1]["call_id"] == "call_123"
 
 
-def test_two_turn_tool_history() -> None:
+@pytest.mark.parametrize("empty_content", ["", None, "   ", []])
+def test_assistant_reasoning_without_output_or_tool_calls_is_omitted(empty_content: object) -> None:
+    reasoning_blob = {"type": "reasoning", "id": "rs_orphan", "encrypted_content": "enc"}
     messages = [
+        {
+            "role": "assistant",
+            "content": empty_content,
+            "responses_reasoning_items": [reasoning_blob],
+            "tool_calls": [{"id": "call_x", "type": "function", "function": {"name": "  ", "arguments": "{}"}}],
+        }
+    ]
+    assert chat_messages_to_responses_input(messages) == []
+
+
+def test_assistant_multipart_drops_blank_text_and_keeps_non_empty_text() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "  "}, {"type": "text", "text": "kept"}],
+        }
+    ]
+    converted = chat_messages_to_responses_input(messages)
+    assert converted == [{"role": "assistant", "content": [{"type": "output_text", "text": "kept"}]}]
+
+
+def test_system_none_content_adds_no_input_item() -> None:
+    converted = chat_messages_to_responses_input(
+        [{"role": "system", "content": None}, {"role": "user", "content": "hi"}]
+    )
+    assert converted == [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}]
+
+
+def test_two_turn_tool_history() -> None:
+    messages: list[Mapping[str, object]] = [
         {"role": "user", "content": "search news"},
         {
             "role": "assistant",
@@ -119,7 +184,7 @@ def test_min_output_tokens_floor() -> None:
 
 def test_assistant_reasoning_items_replay_before_message() -> None:
     reasoning_blob = {"type": "reasoning", "id": "rs_abc", "encrypted_content": "enc_blob"}
-    messages = [
+    messages: list[Mapping[str, object]] = [
         {"role": "user", "content": "step 1"},
         {
             "role": "assistant",
@@ -197,7 +262,7 @@ def test_long_call_id_is_clamped() -> None:
 
 
 def test_system_instructions_from_list_content() -> None:
-    messages = [
+    messages: list[Mapping[str, object]] = [
         {"role": "system", "content": [{"type": "text", "text": "line1"}, "line2"]},
         {"role": "user", "content": "hi"},
     ]
@@ -241,7 +306,10 @@ def test_user_content_json_fallback_for_unknown_part() -> None:
 
 
 def test_system_instructions_from_non_string_content() -> None:
-    messages = [{"role": "system", "content": {"policy": "strict"}}, {"role": "user", "content": "hi"}]
+    messages: list[Mapping[str, object]] = [
+        {"role": "system", "content": {"policy": "strict"}},
+        {"role": "user", "content": "hi"},
+    ]
     instructions, remaining = extract_responses_instructions(messages)
     assert instructions == '{"policy": "strict"}'
     assert remaining == [{"role": "user", "content": "hi"}]

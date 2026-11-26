@@ -173,7 +173,7 @@ def test_no_claim_about_the_default_working_directory(locale: _Locale) -> None:
 @_BOTH
 def test_reason_and_limits_stay_in_the_parameter_schema(locale: _Locale) -> None:
     """``reason`` and the yield / background-job limits are owned by the ``BashInput`` field texts."""
-    for fragment in ("≥10", "yield_after_seconds", "Max 5", "最多 5"):
+    for fragment in ("ALWAYS provide this parameter first", "approval UI", "yield_after_seconds", "Max 5", "最多 5"):
         assert fragment not in locale.text
 
 

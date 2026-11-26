@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils/classnameUtils';
 
 type SafetyState = 'safe' | 'placeholder_dev' | 'placeholder_prod' | 'invalid' | 'unknown';
 
-const OFFICIAL_RELEASES_URL = 'https://github.com/Pursue-LLL/myrm-agent/releases';
+const OFFICIAL_RELEASES_URL = 'https://github.com/lyleway/myrm-agent/releases';
 
 async function queryUpdaterSafety(): Promise<SafetyState> {
   if (!isTauriRuntime()) {

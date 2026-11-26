@@ -35,7 +35,7 @@ def _canonical(url: str) -> str:
 
 def _response(location: str | None = None) -> MagicMock:
     response = MagicMock()
-    response.status = 302 if location else 200
+    response.status_code = 302 if location else 200
     response.headers = {"Location": location} if location else {"content-type": "text/html"}
     response.body = ("<article><p>" + "x" * 300 + "</p></article>").encode()
     response.encoding = "utf-8"
@@ -81,53 +81,53 @@ def judged(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 class TestEveryHopIsRequestedInItsCanonicalSpelling:
     @pytest.mark.parametrize("spelling", DIAL_SPELLINGS)
     async def test_the_requested_url_under_the_local_policy(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock, spelling: str
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock, spelling: str
     ) -> None:
         url = f"http://{spelling}/page"
-        install_fake_scrapling.return_value = _response()
+        install_fake_curl_session.return_value = _response()
 
         await _fetch(local_fetcher, url)
 
-        assert _requested(install_fake_scrapling) == [_canonical(url)]
+        assert _requested(install_fake_curl_session) == [_canonical(url)]
 
     @pytest.mark.parametrize("spelling", _REDIRECT_SPELLINGS)
     async def test_a_redirect_location_under_the_local_policy(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock, spelling: str
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock, spelling: str
     ) -> None:
         """The entry origin is granted in its canonical spelling, so a private spelling of it stays reachable."""
         target = _canonical(f"http://{spelling}/page")
-        install_fake_scrapling.side_effect = [_response(f"http://{spelling}/next"), _response()]
+        install_fake_curl_session.side_effect = [_response(f"http://{spelling}/next"), _response()]
 
         await _fetch(local_fetcher, target)
 
-        assert _requested(install_fake_scrapling) == [target, _canonical(f"http://{spelling}/next")]
+        assert _requested(install_fake_curl_session) == [target, _canonical(f"http://{spelling}/next")]
 
     @pytest.mark.parametrize("spelling", DIAL_SPELLINGS)
     async def test_the_requested_url_under_the_cloud_policy(
-        self, install_fake_scrapling: AsyncMock, judged: list[str], spelling: str
+        self, install_fake_curl_session: AsyncMock, judged: list[str], spelling: str
     ) -> None:
         url = f"http://{spelling}/page"
-        install_fake_scrapling.return_value = _response()
+        install_fake_curl_session.return_value = _response()
 
         await _fetch(HttpFetcher(), url)
 
-        assert judged == _requested(install_fake_scrapling) == [_canonical(url)]
+        assert judged == _requested(install_fake_curl_session) == [_canonical(url)]
 
     @pytest.mark.parametrize("spelling", _REDIRECT_SPELLINGS)
     async def test_a_redirect_location_under_the_cloud_policy(
-        self, install_fake_scrapling: AsyncMock, judged: list[str], spelling: str
+        self, install_fake_curl_session: AsyncMock, judged: list[str], spelling: str
     ) -> None:
-        install_fake_scrapling.side_effect = [_response(f"http://{spelling}/next"), _response()]
+        install_fake_curl_session.side_effect = [_response(f"http://{spelling}/next"), _response()]
 
         await _fetch(HttpFetcher(), "http://example.test/page")
 
         expected = ["http://example.test/page", _canonical(f"http://{spelling}/next")]
-        assert judged == _requested(install_fake_scrapling) == expected
+        assert judged == _requested(install_fake_curl_session) == expected
 
     async def test_the_fetch_result_is_attributed_to_the_canonical_url(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock
     ) -> None:
-        install_fake_scrapling.return_value = _response()
+        install_fake_curl_session.return_value = _response()
 
         result = await _fetch(local_fetcher, "http://EXAMPLE.test./page")
 
@@ -135,64 +135,64 @@ class TestEveryHopIsRequestedInItsCanonicalSpelling:
         assert result.url == "http://example.test/page"
 
     async def test_a_relative_redirect_continues_from_the_canonical_url(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock
     ) -> None:
-        install_fake_scrapling.side_effect = [_response("/next"), _response()]
+        install_fake_curl_session.side_effect = [_response("/next"), _response()]
 
         await _fetch(local_fetcher, "http://EXAMPLE.test./page")
 
-        assert _requested(install_fake_scrapling) == ["http://example.test/page", "http://example.test/next"]
+        assert _requested(install_fake_curl_session) == ["http://example.test/page", "http://example.test/next"]
 
     async def test_a_fetch_without_the_shield_requests_the_url_as_written(
-        self, install_fake_scrapling: AsyncMock
+        self, install_fake_curl_session: AsyncMock
     ) -> None:
-        install_fake_scrapling.return_value = _response()
+        install_fake_curl_session.return_value = _response()
 
         await _fetch(HttpFetcher(), "http://EXAMPLE.test./page", shield=False)
 
-        assert _requested(install_fake_scrapling) == ["http://EXAMPLE.test./page"]
+        assert _requested(install_fake_curl_session) == ["http://EXAMPLE.test./page"]
 
 
 @pytest.mark.asyncio
 class TestAUrlWithNoCanonicalSpellingIsRefusedBeforeItIsSent:
     @pytest.mark.parametrize("url", _NO_CANONICAL_SPELLING)
     async def test_the_requested_url_under_the_local_policy(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock, url: str
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock, url: str
     ) -> None:
         with pytest.raises(SSRFSecurityError):
             await _fetch(local_fetcher, url)
 
-        install_fake_scrapling.assert_not_awaited()
+        install_fake_curl_session.assert_not_awaited()
 
     @pytest.mark.parametrize("url", _NO_CANONICAL_SPELLING)
     async def test_a_redirect_location_under_the_local_policy(
-        self, local_fetcher: HttpFetcher, install_fake_scrapling: AsyncMock, url: str
+        self, local_fetcher: HttpFetcher, install_fake_curl_session: AsyncMock, url: str
     ) -> None:
-        install_fake_scrapling.side_effect = [_response(url)]
+        install_fake_curl_session.side_effect = [_response(url)]
 
         with pytest.raises(SSRFSecurityError):
             await _fetch(local_fetcher, "http://example.test/start")
 
-        assert _requested(install_fake_scrapling) == ["http://example.test/start"]
+        assert _requested(install_fake_curl_session) == ["http://example.test/start"]
 
     @pytest.mark.parametrize("url", _NO_CANONICAL_SPELLING)
     async def test_the_requested_url_under_the_cloud_policy(
-        self, install_fake_scrapling: AsyncMock, judged: list[str], url: str
+        self, install_fake_curl_session: AsyncMock, judged: list[str], url: str
     ) -> None:
         with pytest.raises(SSRFSecurityError):
             await _fetch(HttpFetcher(), url)
 
         assert judged == []
-        install_fake_scrapling.assert_not_awaited()
+        install_fake_curl_session.assert_not_awaited()
 
     @pytest.mark.parametrize("url", _NO_CANONICAL_SPELLING)
     async def test_a_redirect_location_under_the_cloud_policy(
-        self, install_fake_scrapling: AsyncMock, judged: list[str], url: str
+        self, install_fake_curl_session: AsyncMock, judged: list[str], url: str
     ) -> None:
-        install_fake_scrapling.side_effect = [_response(url)]
+        install_fake_curl_session.side_effect = [_response(url)]
 
         with pytest.raises(SSRFSecurityError):
             await _fetch(HttpFetcher(), "http://example.test/start")
 
         assert judged == ["http://example.test/start"]
-        assert _requested(install_fake_scrapling) == ["http://example.test/start"]
+        assert _requested(install_fake_curl_session) == ["http://example.test/start"]

@@ -3,11 +3,11 @@
 # MyrmAgent remote installer — canonical OSS one-liner entry.
 #
 #   curl -fsSL https://myrmagent.ai/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/Pursue-LLL/myrm-agent/main/scripts/install-remote.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/lyleway/myrm-agent/main/scripts/install-remote.sh | bash
 #
 # Windows (PowerShell):
 #   irm https://myrmagent.ai/install.ps1 | iex
-#   irm https://raw.githubusercontent.com/Pursue-LLL/myrm-agent/main/scripts/install-remote.ps1 | iex
+#   irm https://raw.githubusercontent.com/lyleway/myrm-agent/main/scripts/install-remote.ps1 | iex
 #
 # Clones (or updates) this repo, then runs scripts/install.sh.
 # ============================================================================
@@ -15,7 +15,7 @@
 set -e
 
 REPO_DIR="${MYRM_INSTALL_DIR:-$HOME/.myrm/myrm-agent}"
-REPO_URL="${MYRM_REPO_URL:-https://github.com/Pursue-LLL/myrm-agent.git}"
+REPO_URL="${MYRM_REPO_URL:-https://github.com/lyleway/myrm-agent.git}"
 
 if [[ -d "${REPO_DIR}/myrm-agent-server" ]]; then
   cd "${REPO_DIR}"

@@ -298,7 +298,6 @@ async def execute_stream_pipeline(
 
             async with open_web_fetch_escalation_context(
                 session_id=str(context["session_id"]),
-                browser_source=getattr(agent_wrapper, "browser_source", None),
             ):
                 try:
                     # process_stream takes the loosely typed shapes its many callers pass; these are the ones run() accepts.

@@ -2,8 +2,8 @@
 
 ## Overview
 
-Server-side **Web Fetch Escalation Layer (WFEL)** — L4 remote reader fallback (Jina / Firecrawl)
-after harness CrawlEngine exhausts local L1 HTTP → L2 Browser → L3 Stealth. Default **OFF** via
+Server-side **Web Fetch Escalation Layer (WFEL)** — L4 remote reader fallback (Jina / Firecrawl / self-hosted compatible service)
+after harness FetchEngine L1 HTTP fetch fails. Default **OFF** via
 Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness keeps Protocol only.
 
 ## File & Submodule Index
@@ -12,7 +12,8 @@ Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness 
 |------------|------|-------------|-------|
 | binding.py | Core | Per agent-run ContextVar bind via `open_web_fetch_escalation_context` | ✅ |
 | providers/jina.py | Core | Jina Reader httpx provider | ✅ |
-| providers/firecrawl.py | Core | Firecrawl v2 scrape httpx provider (keyless free tier or API key, custom api_base) | ✅ |
+| providers/firecrawl.py | Core | Firecrawl v2 scrape httpx provider (keyless free tier or API key, endpoint-policy gated custom api_base) | ✅ |
+| providers/endpoint_policy.py | Core | External L4 endpoint validation, metadata/userinfo/key-inheritance guard, DNS-pinned IP validation, hosted disable env | ✅ |
 | escalation/registry.py | Core | Build provider chain from config + searchServices inherit | ✅ |
 | escalation/session_counter.py | Core | Per chat session L4 attempt cap | ✅ |
 | escalation/_ARCH.md | Doc | Submodule index | ✅ |
@@ -20,10 +21,11 @@ Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness 
 ## Wiring
 
 - **Stream bind**: `app/ai_agents/general_agent/stream_pipeline.py` wraps agent run with
-  `open_web_fetch_escalation_context(session_id, browser_source)`.
+  `open_web_fetch_escalation_context(session_id=...)`.
 - **Verify API**: `app/api/integrations/web_fetch.py` POST `/integrations/web-fetch/verify`.
 - **Config**: `app/schemas/config.py` → key `webFetchEscalation` (encrypted at rest).
 - **Plane deny**: env `MYRM_WEB_FETCH_ESCALATION=denied` → registry returns no providers.
+- **Hosted custom endpoint disable**: env `MYRM_WEB_FETCH_CUSTOM_API_BASE_DISABLED=1` → custom `api_base` rejected across registry and verify API.
 
 ## Boundaries
 

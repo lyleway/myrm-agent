@@ -3,6 +3,11 @@
 Scores every node by text density, link density, tag weight, class/id hints and text length, drops the nodes below a
 threshold and removes navigation, ads and other boilerplate. A ``header`` inside a content region is kept.
 
+[INPUT]
+- web_fetch.processing.html_to_markdown_helpers::strip_non_visible_elements (POS: Non-visible DOM removal before scoring)
+- web_fetch.processing.language_switcher::strip_language_switchers (POS: Language-switcher list removal before pruning)
+- web_fetch.processing.pruning_metrics::dom_path_units, compute_subtree_metrics (POS: Iterative DOM subtree metrics for pruning)
+
 [OUTPUT]
 ContentPruningFilter: Reduces a page to its main-content HTML blocks (``filter_content``)
 
@@ -20,6 +25,10 @@ from collections import deque
 from typing import cast
 
 from bs4 import BeautifulSoup, Comment, Tag
+
+from .html_to_markdown_helpers import strip_non_visible_elements
+from .language_switcher import strip_language_switchers
+from .pruning_metrics import compute_subtree_metrics, dom_path_units
 
 logger = logging.getLogger(__name__)
 
@@ -60,24 +69,6 @@ _BREAKPOINT_HIDDEN = frozenset(f"{breakpoint}:hidden" for breakpoint in ("sm", "
 _MAX_SCORING_PATH_UNITS = 600_000
 
 
-def _dom_path_units(root: Tag, limit: int) -> int:
-    """Count the ancestor-descendant element pairs below *root* (the sum of every element's depth).
-
-    Counts iteratively and stops once above *limit*, so measuring a pathologically deep page is cheap itself.
-    """
-    total = 0
-    stack: list[tuple[Tag, int]] = [(root, 0)]
-    while stack:
-        node, depth = stack.pop()
-        for child in node.children:
-            if isinstance(child, Tag):
-                total += depth + 1
-                if total > limit:
-                    return total
-                stack.append((child, depth + 1))
-    return total
-
-
 class ContentPruningFilter:
     """Prunes a page's DOM tree down to its main content.
 
@@ -90,21 +81,11 @@ class ContentPruningFilter:
         self,
         *,
         threshold: float = 0.48,
-        min_word_threshold: int = 0,
         metric_weights: dict[str, float] | None = None,
     ):
         self.threshold = threshold
-        self.min_word_threshold = min_word_threshold
 
         self.excluded_tags: set[str] = set(_EXCLUDED_TAGS)
-
-        self.metric_config = {
-            "text_density": True,
-            "link_density": True,
-            "tag_weight": True,
-            "class_id_weight": True,
-            "text_length": True,
-        }
 
         self.metric_weights: dict[str, float] = {
             "text_density": 0.4,
@@ -150,26 +131,36 @@ class ContentPruningFilter:
             for element in soup.find_all(tag):
                 element.decompose()
 
-    def _prune_tree(self, node: Tag) -> None:
-        text_len = len(node.get_text(strip=True))
-        tag_len = len(node.encode_contents().decode("utf-8"))
-        link_text_len = sum(len(s.strip()) for s in (a.string for a in node.find_all("a", recursive=False)) if s)
+    def _prune_tree(self, root: Tag) -> None:
+        text_lens, tag_lens = compute_subtree_metrics(root)
+        stack: list[Tag] = [root]
+        while stack:
+            node = stack.pop()
+            nid = id(node)
+            text_len = text_lens[nid]
+            tag_len = tag_lens[nid]
+            link_text_len = sum(
+                len(str(child.string).strip())
+                for child in node.children
+                if isinstance(child, Tag) and child.name == "a" and child.string
+            )
 
-        metrics = {
-            "node": node,
-            "tag_name": node.name,
-            "text_len": text_len,
-            "tag_len": tag_len,
-            "link_text_len": link_text_len,
-        }
+            metrics = {
+                "node": node,
+                "tag_name": node.name,
+                "text_len": text_len,
+                "tag_len": tag_len,
+                "link_text_len": link_text_len,
+            }
 
-        score = self._compute_composite_score(metrics, text_len, tag_len, link_text_len)
+            score = self._compute_composite_score(metrics, text_len, tag_len, link_text_len)
 
-        if score < self.threshold:
-            node.decompose()
-        else:
-            for child in [child for child in node.children if isinstance(child, Tag)]:
-                self._prune_tree(child)
+            if score < self.threshold:
+                node.decompose()
+            else:
+                tag_children = [child for child in node.children if isinstance(child, Tag)]
+                for child in reversed(tag_children):
+                    stack.append(child)
 
     def _compute_class_id_weight(self, node: Tag) -> float:
         class_id_score = 0.0
@@ -271,8 +262,11 @@ class ContentPruningFilter:
         if not body:
             return []
 
+        strip_language_switchers(body)
+        strip_non_visible_elements(body)
+
         # Over the limit only the scoring is skipped: comments, excluded tags and block extraction still run.
-        within_scoring_limit = _dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS
+        within_scoring_limit = dom_path_units(body, _MAX_SCORING_PATH_UNITS) <= _MAX_SCORING_PATH_UNITS
         scored_elements = list(body.find_all(True)) if within_scoring_limit else []
 
         for el in scored_elements:
@@ -365,63 +359,52 @@ class ContentPruningFilter:
         link_text_len: int,
     ) -> float:
         node = cast(Tag, metrics["node"])
-        if self.min_word_threshold:
-            text = node.get_text(strip=True)
-            word_count = text.count(" ") + 1
-            if word_count < self.min_word_threshold:
-                return -1.0
-
         score = 0.0
         total_weight = 0.0
 
-        if self.metric_config["text_density"]:
-            density = text_len / tag_len if tag_len > 0 else 0
-            score += self.metric_weights["text_density"] * density
-            total_weight += self.metric_weights["text_density"]
+        density = text_len / tag_len if tag_len > 0 else 0
+        score += self.metric_weights["text_density"] * density
+        total_weight += self.metric_weights["text_density"]
 
-        if self.metric_config["link_density"]:
-            link_ratio = link_text_len / text_len if text_len > 0 else 0
-            if link_ratio > 0.5:
-                is_pure_list = self._is_pure_link_list(node)
-                if is_pure_list:
-                    if link_ratio > 0.8:
-                        density = 0.3
-                    elif link_ratio > 0.6:
-                        density = 0.5
-                    else:
-                        density = 1.0
+        link_ratio = link_text_len / text_len if text_len > 0 else 0
+        if link_ratio > 0.5:
+            is_pure_list = self._is_pure_link_list(node)
+            if is_pure_list:
+                if link_ratio > 0.8:
+                    density = 0.3
+                elif link_ratio > 0.6:
+                    density = 0.5
                 else:
                     density = 1.0
             else:
                 density = 1.0
-            score += self.metric_weights["link_density"] * density
-            total_weight += self.metric_weights["link_density"]
+        else:
+            density = 1.0
+        score += self.metric_weights["link_density"] * density
+        total_weight += self.metric_weights["link_density"]
 
-        if self.metric_config["tag_weight"]:
-            tag_name = str(metrics["tag_name"])
-            if tag_name == "header":
-                tag_score = 0.7 if self._check_in_content_area(node) else 0.1
-            else:
-                tag_score = self.tag_weights.get(tag_name, 0.5)
-            score += self.metric_weights["tag_weight"] * tag_score
-            total_weight += self.metric_weights["tag_weight"]
+        tag_name = str(metrics["tag_name"])
+        if tag_name == "header":
+            tag_score = 0.7 if self._check_in_content_area(node) else 0.1
+        else:
+            tag_score = self.tag_weights.get(tag_name, 0.5)
+        score += self.metric_weights["tag_weight"] * tag_score
+        total_weight += self.metric_weights["tag_weight"]
 
-        if self.metric_config["class_id_weight"]:
-            class_score = self._compute_class_id_weight(node)
-            score += self.metric_weights["class_id_weight"] * max(0.0, class_score)
-            total_weight += self.metric_weights["class_id_weight"]
+        class_score = self._compute_class_id_weight(node)
+        score += self.metric_weights["class_id_weight"] * max(0.0, class_score)
+        total_weight += self.metric_weights["class_id_weight"]
 
-        if self.metric_config["text_length"]:
-            if text_len < 10:
-                length_score = 0.8
-            elif text_len < 50:
-                length_score = 1.0
-            elif text_len < 200:
-                length_score = 0.9
-            else:
-                length_score = min(1.0, math.log(text_len) / math.log(200))
-            score += self.metric_weights["text_length"] * length_score
-            total_weight += self.metric_weights["text_length"]
+        if text_len < 10:
+            length_score = 0.8
+        elif text_len < 50:
+            length_score = 1.0
+        elif text_len < 200:
+            length_score = 0.9
+        else:
+            length_score = min(1.0, math.log(text_len) / math.log(200))
+        score += self.metric_weights["text_length"] * length_score
+        total_weight += self.metric_weights["text_length"]
 
         final_score = score / total_weight if total_weight > 0 else 0.0
 

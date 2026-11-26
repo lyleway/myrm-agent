@@ -102,10 +102,22 @@ class LocalExecutor(LocalBashMixin, LocalFileOpsMixin, CodeExecutor):
         self._current_workspace: Path | None = None
         self._bash_sessions: dict[str, LocalPersistentSession] = {}
         self._bash_start_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+        self._venv_warm_task: asyncio.Task[None] | None = None
         self._closed: bool = False
 
         if workspace_path:
             self.bind_workspace(workspace_path)
+
+    def warm_up(self) -> None:
+        """Create the shared venv in the background so the first Python run does not wait for it."""
+        if self._venv_warm_task is None:
+            self._venv_warm_task = asyncio.create_task(self._warm_venv())
+
+    async def _warm_venv(self) -> None:
+        try:
+            await self._venv_manager.get_python_executable()
+        except Exception as exc:
+            logger.warning(" LocalExecutor: venv warm-up failed, the first Python run retries it: %s", exc)
 
     def bind_workspace(self, workspace_path: str) -> None:
         path = Path(workspace_path)
@@ -265,6 +277,8 @@ class LocalExecutor(LocalBashMixin, LocalFileOpsMixin, CodeExecutor):
         )
 
         python_executable = await self._venv_manager.get_python_executable()
+        if context is not None:
+            await self._venv_manager.ensure_pip_ready_for(context.code)
         return await run_python_subprocess(
             script_path=script_path,
             timeout=timeout,
@@ -285,6 +299,8 @@ class LocalExecutor(LocalBashMixin, LocalFileOpsMixin, CodeExecutor):
             spawn_background_process,
         )
 
+        if not context.harness_owned:
+            await self._venv_manager.ensure_pip_ready_for(" ".join((context.code, *(context.args or ()))))
         return await spawn_background_process(
             context=context,
             current_workspace=self._current_workspace,
@@ -324,6 +340,9 @@ class LocalExecutor(LocalBashMixin, LocalFileOpsMixin, CodeExecutor):
         if self._closed:
             return
         self._closed = True
+        if self._venv_warm_task is not None and not self._venv_warm_task.done():
+            self._venv_warm_task.cancel()
+            await asyncio.gather(self._venv_warm_task, return_exceptions=True)
         await self.cleanup_bash_sessions()
 
     def _setup_workspace(self, workspace_path: str | None) -> None:
@@ -337,14 +356,5 @@ class LocalExecutor(LocalBashMixin, LocalFileOpsMixin, CodeExecutor):
         return "LocalExecutor"
 
     async def __aenter__(self) -> Self:
-        """Async context manager entry."""
+        """Async context manager entry; leaving the block releases the executor through ``close()``."""
         return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> None:
-        """Async context manager exit: clean up sessions."""
-        await self.cleanup_bash_sessions()

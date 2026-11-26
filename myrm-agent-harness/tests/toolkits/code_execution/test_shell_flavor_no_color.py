@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 from myrm_agent_harness.toolkits.code_execution.session.shell_flavor import BashFlavor
-from tests.toolkits.code_execution._session_helpers import split_bash_wrapper
+from tests.toolkits.code_execution._session_helpers import BASH_TRAP_RESET, split_bash_wrapper
 
 
 def _bash_roundtrip(value: str) -> str:
@@ -122,8 +122,9 @@ class TestBashFlavorNoColor:
     def test_wrapped_command_multiline_rc_capture(self) -> None:
         """The wrapper captures rc inside the block so comment-only or empty
         commands cannot wedge an open brace block (which would hang the shell),
-        an EXIT trap emits the marker pair when the shell ends, and TERM,
-        HUP and INT end the shell with 128 + the signal so the trap reports it."""
+        an EXIT trap emits the marker pair when the shell ends, TERM, HUP
+        and INT end the shell with 128 + the signal so the trap reports it,
+        and those three traps are removed again once the command is done."""
         flavor = BashFlavor()
         wrapped = flavor.build_wrapped_command("echo hi", "EX", "END", "$?")
 
@@ -136,7 +137,7 @@ class TestBashFlavorNoColor:
             'trap \'echo "EX"$?; echo "END"\' EXIT',
         ]
         assert block == ["echo hi", "__myrm_rc__=$?"]
-        assert after == ["echo 'EX'\"$__myrm_rc__\"", "echo 'END'"]
+        assert after == ["echo 'EX'\"$__myrm_rc__\"", "echo 'END'", BASH_TRAP_RESET]
 
     def test_wrapped_command_single_line_variant(self) -> None:
         """A single-line command still round-trips through the wrapper."""

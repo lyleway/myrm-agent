@@ -5,7 +5,7 @@ platform::PlatformInfo (POS: OS detection and shell path resolution)
 
 [OUTPUT]
 ShellFlavor: ABC for platform-specific shell command formatting; applies a command's ``CommandEnv`` around it.
-BashFlavor: Bash/POSIX shell driver with ulimit init, marker-emitting signal/EXIT traps, and block-rc command wrapping whose stdin is /dev/null.
+BashFlavor: Bash/POSIX shell driver with ulimit init, marker-emitting signal/EXIT traps (the signal traps live only while a command runs), and block-rc command wrapping whose stdin is /dev/null.
 PowerShellFlavor: Windows PowerShell driver with UTF-8 encoding, Progress suppression, exit() interceptor, and dual exit code normalization.
 WindowsFlavor: Legacy Windows cmd driver.
 get_flavor: Factory returning the appropriate flavor for the platform.
@@ -134,7 +134,10 @@ class BashFlavor(ShellFlavor):
         #
         # A signal that ends the shell runs the EXIT trap too, and bash hands it the status of the last command that
         # finished, not the signal's: a command that was terminated would come back as a success. So TERM, HUP and
-        # INT end the shell with the status a shell reports for them (128 + the signal number).
+        # INT end the shell with the status a shell reports for them (128 + the signal number). Those three traps
+        # exist only while a command runs: the last line removes them. A shell between two commands is blocked
+        # reading its stdin, and bash runs a trap only after that read returns, so a trap left installed would hold
+        # a SIGTERM back until the next input arrives and ``close()`` would wait out its whole grace period.
         #
         # The command's variables are exported inside the block, so the command inherits them from the persistent
         # shell. The scoped ones are unset after the end marker rather than inside the block, so that nothing after
@@ -159,7 +162,7 @@ class BashFlavor(ShellFlavor):
             f"__myrm_rc__={exit_code_var}\n"
             "} </dev/null\n"
             f"echo '{exit_marker}'\"$__myrm_rc__\"\n"
-            f"echo '{end_marker}'\n" + "".join(f"{line}\n" for line in unset_lines)
+            f"echo '{end_marker}'\n" + "".join(f"{line}\n" for line in unset_lines) + "trap - TERM HUP INT\n"
         )
 
 

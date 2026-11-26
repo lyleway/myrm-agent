@@ -48,7 +48,6 @@ class TestDomainMetrics:
         metrics.record_failure(FetcherType.HTTP)
 
         assert metrics.get_recent_failures_count(FetcherType.HTTP) == 1
-        assert metrics.get_recent_failures_count(FetcherType.BROWSER) == 0
 
     def test_time_decay_failures(self):
         """测试时间衰减失败计数"""
@@ -105,21 +104,21 @@ class TestDomainMetrics:
     def test_serialization_round_trip(self):
         """测试序列化往返保留全部学习数据"""
         metrics = DomainMetrics(domain="example.com")
-        metrics.record_failure(FetcherType.STEALTH)
+        metrics.record_failure(FetcherType.HTTP)
         metrics.record_wait_strategy("networkidle", 150)
         metrics.record_networkidle_result(success=False)
 
         restored = DomainMetrics.from_dict(json.loads(json.dumps(metrics.to_dict())))
 
         assert restored.domain == "example.com"
-        assert restored.get_recent_failures_count(FetcherType.STEALTH) == 1
-        assert restored.get_recent_failures_count(FetcherType.HTTP) == 0
+        assert restored.get_recent_failures_count(FetcherType.HTTP) == 1
         assert list(restored.wait_strategy_latencies["networkidle"]) == [150.0]
         assert restored.networkidle_fail_count == 1
         assert restored.last_access == metrics.last_access
 
-    def test_persisted_data_with_unknown_keys_still_loads(self):
-        """已落盘的数据含本模型不再记录的字段（逐层级延迟/计数）时，共享的学习数据照常恢复"""
+    def test_persisted_data_with_unknown_keys_and_removed_tiers_still_loads(self):
+        """已落盘的数据含未知字段或已迁出的 BROWSER/STEALTH 键时，共享学习数据照常恢复（E53）"""
+        now = time.time()
         persisted = {
             "domain": "old.com",
             "fetcher_latencies": {"HTTP": [100.0]},
@@ -128,7 +127,7 @@ class TestDomainMetrics:
             "fetcher_total_counts": {"HTTP": 4},
             "total_accesses": 4,
             "networkidle_success_count": 7,
-            "failure_timestamps": {"HTTP": [time.time()]},
+            "failure_timestamps": {"HTTP": [now], "BROWSER": [now], "STEALTH": [now]},
             "last_access": 123.0,
         }
 
@@ -136,9 +135,7 @@ class TestDomainMetrics:
 
         assert restored.networkidle_success_count == 7
         assert restored.get_recent_failures_count(FetcherType.HTTP) == 1
-        assert restored.get_recent_failures_count(FetcherType.STEALTH) == 0
         assert restored.last_access == 123.0
-        restored.record_failure(FetcherType.STEALTH)  # 持久化数据缺的层级队列也已就绪
 
 
 class TestDomainMetricsManager:
@@ -171,11 +168,11 @@ class TestDomainMetricsManager:
         manager = DomainMetricsManager(storage_path=tmp_path / "metrics.json")
         assert manager.get("new.com") is None
 
-        manager.record_failure("new.com", FetcherType.BROWSER)
+        manager.record_failure("new.com", FetcherType.HTTP)
 
         metrics = manager.get("new.com")
         assert metrics is not None
-        assert metrics.get_recent_failures_count(FetcherType.BROWSER) == 1
+        assert metrics.get_recent_failures_count(FetcherType.HTTP) == 1
 
 
 class TestConcurrencySafety:

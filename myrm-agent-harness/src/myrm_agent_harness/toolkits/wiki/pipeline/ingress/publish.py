@@ -2,7 +2,7 @@
 
 [INPUT]
 - pipeline.raw_gate (POS: raw publication gate)
-- toolkits.web_fetch (POS: HTML→markdown pruning)
+- toolkits.web_fetch (POS: HTML→markdown conversion)
 - ingress.asset_store (POS: wiki/assets hash store)
 
 [OUTPUT]
@@ -14,13 +14,13 @@ Wiki raw ingress writers. Normalize clip/URL content then call publish_raw.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from myrm_agent_harness.toolkits.web_fetch.processing.content_pruning import ContentPruningFilter
 from myrm_agent_harness.toolkits.web_fetch.processing.markdown_generator import MarkdownGenerator
 from myrm_agent_harness.toolkits.wiki.core.structure import WikiStructure
 from myrm_agent_harness.toolkits.wiki.pipeline.raw_gate import (
@@ -83,8 +83,7 @@ def _build_frontmatter(
 def _html_to_markdown(html: str, *, base_url: str) -> str:
     if not html.strip():
         return ""
-    pruner = ContentPruningFilter()
-    generator = MarkdownGenerator(content_filter=pruner)
+    generator = MarkdownGenerator()
     result = generator.generate_markdown(html, base_url=base_url)
     return (result.raw_markdown or "").strip()
 
@@ -129,7 +128,7 @@ async def publish_clip_ingress(
 
     body = request.markdown.strip()
     if not body and request.html.strip():
-        body = _html_to_markdown(request.html, base_url=request.source_url)
+        body = await asyncio.to_thread(_html_to_markdown, request.html, base_url=request.source_url)
     if not body:
         body = f"# {request.title or 'Untitled'}\n\n(source: {request.source_url})"
 

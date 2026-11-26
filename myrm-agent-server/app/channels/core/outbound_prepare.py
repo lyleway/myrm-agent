@@ -174,20 +174,23 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
 
     **Example**::
 
-        # Original message with buttons
+        # Original message with a link button
         msg = OutboundMessage(
             channel="whatsapp",
             recipient_id="user123",
-            content="Choose an option:",
+            content="Your report is ready:",
             components=(
-                (ActionButton(label="Approve", action_id="approve"),),
+                (ActionButton(label="Open report", action_id="report:open", url="https://example.com/r/1"),),
             ),
         )
 
         # After downgrade (WhatsApp doesn't support buttons)
         result = downgrade_components(msg, whatsapp_channel.capabilities, channel_name="whatsapp")
-        # result.content = "Choose an option:\\n\\n• Approve → /approve"
+        # result.content = "Your report is ready:\\n\\n• Open report → https://example.com/r/1"
         # result.components = ()
+
+    A button without a ``url`` has no text equivalent and is dropped with its row; use a required
+    ``QuickReply`` when the reply can be typed.
     """
     if not msg.components and not msg.quick_replies and not msg.media:
         return msg

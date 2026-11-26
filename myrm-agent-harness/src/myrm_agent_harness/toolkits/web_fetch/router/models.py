@@ -117,7 +117,8 @@ class DomainMetrics:
         metrics.networkidle_success_count = data.get("networkidle_success_count", 0)
         metrics.networkidle_fail_count = data.get("networkidle_fail_count", 0)
         for ft_name, timestamps in data.get("failure_timestamps", {}).items():
-            metrics.failure_timestamps[FetcherType[ft_name]] = deque(timestamps, maxlen=_MAX_FAILURE_SAMPLES)
+            if ft_name in FetcherType.__members__:
+                metrics.failure_timestamps[FetcherType[ft_name]] = deque(timestamps, maxlen=_MAX_FAILURE_SAMPLES)
         metrics.last_access = data.get("last_access", time.time())
         return metrics
 

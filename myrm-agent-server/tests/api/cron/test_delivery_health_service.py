@@ -15,12 +15,13 @@
 - Jobs group by destination (channel and exact address) whatever their status; in-app and addressless deliveries have
   no destination, and two bots whose redacted addresses read alike stay apart
 - A run counts for the destination it was delivered to, not for the one its job points at now
-- Attempts are read from the last day and ordered by when they finished, not by when they started
+- The newest attempts decide, ordered by when they finished rather than by when they started, however long ago they were
+- The verdict says when its newest attempt finished, in every state, so how old it is can always be told
 - The records the executor writes are the ones the service reads, for a failure that carries no text as well
 
 [POS]
-The service decides which rows it selects (statuses, window, order, how many) and which of their fields it believes. A
-mocked session cannot show any of that, so every case runs against real rows.
+The service decides which rows it selects (statuses, order, how many) and which of their fields it believes. A mocked
+session cannot show any of that, so every case runs against real rows.
 """
 
 from __future__ import annotations
@@ -138,16 +139,21 @@ async def _verdict(channel: str = "webhook", target: str | None = _WEBHOOK) -> D
     return health
 
 
+def _healthy(last_attempt_at: datetime) -> DeliveryHealth:
+    """The verdict of a destination whose newest attempt, finished at ``last_attempt_at``, went through."""
+    return DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0, last_attempt_at=last_attempt_at)
+
+
 async def test_a_failing_task_does_not_make_its_destination_unhealthy(store: SqlAlchemyCronStore) -> None:
     """The notice of a failed task reaches the target: the task's error and failure count describe the task, not the target."""
     await store.save_job(_job("report", _WEBHOOK, consecutive_failures=5, last_error="401 Unauthorized: invalid api key"))
     stored = await store.get_job("report")
     assert stored is not None
     assert stored.consecutive_failures == 5  # the task's failure state is really there to be ignored
-    for minutes_ago in (5, 15):
-        await _run(store, "report", minutes_ago, DeliveryStatus.DELIVERED, task=RunStatus.ERROR)
+    delivered_at = await _run(store, "report", 5, DeliveryStatus.DELIVERED, task=RunStatus.ERROR)
+    await _run(store, "report", 15, DeliveryStatus.DELIVERED, task=RunStatus.ERROR)
 
-    assert await _verdict() == DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0)
+    assert await _verdict() == _healthy(delivered_at)
 
 
 async def test_a_destination_nothing_was_delivered_to_has_no_verdict(store: SqlAlchemyCronStore) -> None:
@@ -174,7 +180,7 @@ async def test_skipped_runs_cannot_crowd_failed_deliveries_out(store: SqlAlchemy
 
 
 async def test_only_the_latest_attempts_are_read(store: SqlAlchemyCronStore) -> None:
-    """A destination with more attempts in the window than the service reads is judged by the latest ones."""
+    """A destination with more attempts than the service reads is judged by the latest ones."""
     await store.save_job(_job("busy", _WEBHOOK))
     for minutes_ago in range(1, 56):
         await _run(store, "busy", minutes_ago, *_BAD_GATEWAY)
@@ -218,17 +224,34 @@ async def test_the_failure_fields_describe_the_newest_failure(store: SqlAlchemyC
 
     assert health.last_error_category == ConnectorErrorCategory.ADDRESS_REJECTED
     # SQLite hands datetimes back without a zone; the service names the moment, so a client cannot read it as local time
-    assert health.last_failed_at == failed_at
+    assert health.last_attempt_at == failed_at
 
 
 async def test_a_healthy_destination_reports_no_failure(store: SqlAlchemyCronStore) -> None:
     await store.save_job(_job("job", _WEBHOOK))
-    await _run(store, "job", 1, *_OK)
+    delivered_at = await _run(store, "job", 1, *_OK)
     await _run(store, "job", 2, *_BAD_GATEWAY)
 
-    health = await _verdict()
+    assert await _verdict() == _healthy(delivered_at)  # no category: the failure behind it is over
 
-    assert (health.last_error_category, health.last_failed_at) == (None, None)
+
+@pytest.mark.parametrize(
+    "attempts",
+    [
+        pytest.param([_OK, _BAD_GATEWAY], id="healthy"),
+        pytest.param([_BAD_GATEWAY, _OK], id="degraded"),
+        pytest.param([_BAD_GATEWAY] * 3, id="down"),
+    ],
+)
+async def test_the_verdict_says_how_old_its_newest_attempt_is(store: SqlAlchemyCronStore, attempts: list[Attempt]) -> None:
+    """A destination that is rarely delivered to keeps its verdict for weeks, so the age of that verdict is part of it."""
+    await store.save_job(_job("rare", _WEBHOOK))
+    finished = [
+        await _run(store, "rare", (25 + position) * 24 * 60, delivery, error)
+        for position, (delivery, error) in enumerate(attempts)
+    ]
+
+    assert (await _verdict()).last_attempt_at == finished[0]
 
 
 async def test_a_failure_without_error_text_is_an_unknown_failure(store: SqlAlchemyCronStore) -> None:
@@ -278,10 +301,10 @@ async def test_bots_whose_redacted_addresses_read_alike_stay_apart(store: SqlAlc
     await store.save_job(_job("bot-b", bot_b, channel="wecom"))
     for minutes_ago in (1, 2, 3):
         await _run(store, "bot-a", minutes_ago, *_BAD_GATEWAY)
-    await _run(store, "bot-b", 1, *_OK)
+    delivered_at = await _run(store, "bot-b", 1, *_OK)
 
     assert (await _verdict("wecom", bot_a)).status == DeliveryHealthStatus.DOWN
-    assert await _verdict("wecom", bot_b) == DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0)
+    assert await _verdict("wecom", bot_b) == _healthy(delivered_at)
 
 
 async def test_a_run_counts_for_the_destination_it_was_delivered_to(store: SqlAlchemyCronStore) -> None:
@@ -291,9 +314,9 @@ async def test_a_run_counts_for_the_destination_it_was_delivered_to(store: SqlAl
     for minutes_ago in (10, 11, 12):
         await _run(store, "moved", minutes_ago, *_BAD_GATEWAY)
     await store.save_job(_job("moved", new))
-    await _run(store, "moved", 1, *_OK)
+    delivered_at = await _run(store, "moved", 1, *_OK)
 
-    assert await _verdict("webhook", new) == DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0)
+    assert await _verdict("webhook", new) == _healthy(delivered_at)
     assert await DeliveryHealthService.get_destination_health("webhook", old) is None  # no job delivers there now
 
 
@@ -310,26 +333,30 @@ async def test_the_run_that_delivered_last_decides_not_the_one_that_started_last
     """Runs overlap: a slow one that started first and delivered last is the destination's latest word."""
     await store.save_job(_job("slow", _WEBHOOK))
     await store.save_job(_job("quick", _WEBHOOK))
-    await _run(store, "slow", 40, *_OK, seconds_to_finish=29 * 60)  # started first, delivered 11 minutes ago
+    delivered_at = await _run(store, "slow", 40, *_OK, seconds_to_finish=29 * 60)  # started first, delivered 11 minutes ago
     await _run(store, "quick", 20, *_BAD_GATEWAY)  # started later, failed 20 minutes ago
 
-    assert await _verdict() == DeliveryHealth(DeliveryHealthStatus.HEALTHY, failure_streak=0)
+    assert await _verdict() == _healthy(delivered_at)  # the verdict's time is when that run finished, not started
 
 
-async def test_attempts_older_than_a_day_have_no_say(store: SqlAlchemyCronStore) -> None:
-    await store.save_job(_job("old", _WEBHOOK))
-    for minutes_ago in (25 * 60, 26 * 60, 27 * 60):
-        await _run(store, "old", minutes_ago, *_BAD_GATEWAY)
+@pytest.mark.parametrize(
+    ("days_ago", "status", "streak"),
+    [
+        pytest.param([3], DeliveryHealthStatus.DEGRADED, 1, id="one-failure-days-back"),
+        pytest.param([7, 14, 21], DeliveryHealthStatus.DOWN, 3, id="three-weekly-failures"),
+    ],
+)
+async def test_how_long_ago_an_attempt_was_does_not_matter(
+    store: SqlAlchemyCronStore, days_ago: list[int], status: DeliveryHealthStatus, streak: int
+) -> None:
+    """A job that runs rarely has nothing newer to say, so its old attempts stay the destination's verdict."""
+    await store.save_job(_job("rare", _WEBHOOK))
+    for days in days_ago:
+        await _run(store, "rare", days * 24 * 60, *_BAD_GATEWAY)
 
-    assert await DeliveryHealthService.get_destination_health("webhook", _WEBHOOK) is None
+    health = await _verdict()
 
-
-async def test_the_window_counts_from_when_the_run_finished(store: SqlAlchemyCronStore) -> None:
-    """A long run that started just outside the day but delivered inside it is an attempt of the last day."""
-    await store.save_job(_job("long", _WEBHOOK))
-    await _run(store, "long", 24 * 60 + 10, *_BAD_GATEWAY, seconds_to_finish=20 * 60)
-
-    assert (await _verdict()).failure_streak == 1
+    assert (health.status, health.failure_streak) == (status, streak)
 
 
 class _FailingDelivery:

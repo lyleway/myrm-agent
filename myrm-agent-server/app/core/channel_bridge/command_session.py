@@ -10,13 +10,14 @@
 - app.services.agent.profile.profile_resolver::get_agent_profile_resolver
 
 [OUTPUT]
-- resolve_command_session_key: session key a message's conversation is stored under
+- resolve_command_session_key: session key a message's conversation is stored under, or None while ``/new`` has ended it and no turn has begun the next
 
 [POS]
-/undo, /retry, /compact and /handoff act on the conversation of the chat they are sent from. The agent that serves the
-message and the reset policy that applies decide which conversation that is, so this resolves both the way the turn
-executor does (the serving binding's ``effective_agent_id``; the agent's own policy, else the person's). A command that
-resolved either differently would act on another conversation than the one the user is talking in.
+/undo, /retry, /compact, /handoff and /goal act on the conversation of the chat they are sent from. The agent that
+serves the message and the reset policy that applies decide which conversation that is, so this resolves both the way
+the turn executor does (the serving binding's ``effective_agent_id``; the agent's own policy, else the person's). A
+command that resolved either differently would act on another conversation than the one the user is talking in. After
+``/new`` the next turn opens a new conversation, so until it does there is none for a command to act on.
 """
 
 from __future__ import annotations
@@ -30,8 +31,14 @@ from app.core.channel_bridge.topic_config import SqlTopicManager
 from app.services.agent.profile.profile_resolver import get_agent_profile_resolver
 
 
-async def resolve_command_session_key(msg: InboundMessage) -> str:
-    """The session key under which the turns of ``msg``'s conversation are stored right now."""
+async def resolve_command_session_key(msg: InboundMessage) -> str | None:
+    """The session key under which the turns of ``msg``'s conversation are stored right now.
+
+    ``None`` when ``msg`` carries ``force_new_epoch``: ``/new`` ended that conversation and the next turn starts another.
+    """
+    if msg.metadata.get("force_new_epoch"):
+        return None
+
     topic = await resolve_bound_topic(SqlTopicManager(), msg)
     agent_id = topic.effective_agent_id if topic else None
 

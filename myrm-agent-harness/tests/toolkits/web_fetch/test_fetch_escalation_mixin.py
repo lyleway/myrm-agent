@@ -145,7 +145,7 @@ class TestEscalationMixin:
     @pytest.mark.asyncio
     async def test_escalation_html_pipeline_returns_none_continues(self) -> None:
         engine = FetchEngine()
-        http, _, _ = stub_fetchers(engine)
+        http = stub_fetchers(engine)
         http.fetch.return_value = http_result("", status=404)
         engine._escalation_providers = [
             SimpleNamespace(

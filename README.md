@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
-  <a href="https://github.com/Pursue-LLL/myrm-agent/stargazers"><img src="https://img.shields.io/github/stars/Pursue-LLL/myrm-agent?style=for-the-badge&logo=github&color=FFD43B" alt="GitHub Stars"></a>
+  <a href="https://github.com/lyleway/myrm-agent/stargazers"><img src="https://img.shields.io/github/stars/lyleway/myrm-agent?style=for-the-badge&logo=github&color=FFD43B" alt="GitHub Stars"></a>
   <a href="https://discord.gg/myrm"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
@@ -26,7 +26,7 @@
   <a href="https://docs.myrmagent.ai">Docs</a> ·
   <a href="https://app.myrmagent.ai">Cloud</a> ·
   <a href="https://discord.gg/myrm">Discord</a> ·
-  <a href="https://github.com/Pursue-LLL/myrm-agent/releases">Download</a>
+  <a href="https://github.com/lyleway/myrm-agent/releases">Download</a>
 </p>
 
 ---
@@ -65,7 +65,7 @@ curl -fsSL https://myrmagent.ai/install.sh | bash
 ### From source
 
 ```bash
-git clone https://github.com/Pursue-LLL/myrm-agent.git
+git clone https://github.com/lyleway/myrm-agent.git
 cd myrm-agent
 bash scripts/install.sh
 myrm start
@@ -77,7 +77,7 @@ Open **http://localhost:3000** and configure your LLM provider in the GUI.
 
 ### Desktop App
 
-Download the latest release for your platform from [Releases](https://github.com/Pursue-LLL/myrm-agent/releases).
+Download the latest release for your platform from [Releases](https://github.com/lyleway/myrm-agent/releases).
 
 ## Integrations
 

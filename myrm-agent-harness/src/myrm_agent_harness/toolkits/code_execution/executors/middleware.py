@@ -95,5 +95,8 @@ class CodeExecutorMiddleware(CodeExecutor):
     def get_executor_name(self) -> str:
         return self.inner.get_executor_name()
 
+    def warm_up(self) -> None:
+        self.inner.warm_up()
+
     async def close(self) -> None:
         await self.inner.close()

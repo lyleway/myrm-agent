@@ -76,16 +76,12 @@ def test_a_verification_page_without_any_vendor_marker_is_blocked() -> None:
 @pytest.mark.parametrize("status", [200, 202])
 async def test_an_interstitial_from_l1_is_not_delivered_as_content(status: int) -> None:
     engine = FetchEngine()
-    http, browser, _stealth = stub_fetchers(engine)
+    http = stub_fetchers(engine)
     pipeline = cast("MagicMock", engine._pipeline)
-    browser_page = http_result(RICH_HTML)
     http.fetch.return_value = http_result(_page(), status)
-    browser.fetch.return_value = browser_page
-    pipeline.aprocess.return_value = make_document()
 
-    doc, result = await engine._crawl_with_degradation(URL)
+    doc, _result = await engine._crawl_with_degradation(URL, allow_escalation=False)
 
-    assert doc is not None
-    assert result is browser_page
-    pipeline.aprocess.assert_awaited_once_with(browser_page)
+    assert doc is None
+    pipeline.aprocess.assert_not_awaited()
     await engine.shutdown()

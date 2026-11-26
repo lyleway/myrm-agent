@@ -39,7 +39,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs), **`command`**, and **`timeout=300`** — the search runs server-side and can take up to 180s; the default 120s cuts it off. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs), **`command`**, and **`timeout=300`** — the search runs server-side and can take up to 180s; the default 120s cuts it off. Put `reason` first.
 
 ## Overview
 

@@ -71,13 +71,12 @@ async def hang(*_args: object, **_kwargs: object) -> None:
 
 
 @asynccontextmanager
-async def running_engine(*, cache_ttl: int = 3600, stale_while_revalidate: bool = True) -> AsyncIterator[FetchEngine]:
+async def running_engine(*, cache_ttl: int = 900) -> AsyncIterator[FetchEngine]:
     # SSRF policy is not under test; allowing private networks keeps the fake hosts from needing a DNS lookup.
     fetch_engine = FetchEngine(
         allow_private_networks=True,
         crawl_timeout=_CAP_S,
         cache_ttl=cache_ttl,
-        stale_while_revalidate=stale_while_revalidate,
         youtube_languages=_LANGUAGES,
         proxy_pool=_PROXY_POOL,
     )
@@ -225,13 +224,13 @@ async def test_a_url_without_a_fast_path_goes_straight_to_the_ladder(engine: Fet
             "wechat",
             None,
             page("l"),
-            ["Weixin article fast-path missed, degrading to browser", "Weixin article browser degradation succeeded"],
+            ["Weixin article fast-path missed, falling back to HTTP/L4", "Weixin article fallback fetch succeeded"],
         ),
         (
             "wechat",
             None,
             None,
-            ["Weixin article fast-path missed, degrading to browser", "Weixin article fetch failed after degradation"],
+            ["Weixin article fast-path missed, falling back to HTTP/L4", "Weixin article fetch failed after degradation"],
         ),
         ("x", page("x"), None, ["Twitter/X post fast-path succeeded"]),
         ("x", None, page("l"), ["Twitter/X post fast-path missed, degrading to standard fetch"]),
@@ -269,7 +268,7 @@ async def test_the_validators_go_to_the_ladder_and_the_ladders_come_back_to_the_
         engines = [
             (
                 platform,
-                await stack.enter_async_context(running_engine(cache_ttl=1, stale_while_revalidate=False)),
+                await stack.enter_async_context(running_engine(cache_ttl=1)),
             )
             for platform in PLATFORMS
         ]

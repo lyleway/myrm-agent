@@ -9,7 +9,7 @@ import { writeToClipboard } from '@/lib/utils/clipboardUtils';
 import { getCpChannelCredentialStatus } from '@/services/channels';
 
 interface CpInboundUrlBannerProps {
-  channel: 'slack' | 'discord' | 'telegram';
+  channel: 'slack' | 'telegram';
 }
 
 export function CpInboundUrlBanner({ channel }: CpInboundUrlBannerProps) {
@@ -63,11 +63,9 @@ export function CpInboundUrlBanner({ channel }: CpInboundUrlBannerProps) {
     return null;
   }
 
-  const label = channel === 'discord' ? t('cpInteractionsUrlLabel') : t('cpWebhookUrlLabel');
-
   return (
     <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-3 space-y-2">
-      <p className="text-xs font-medium text-foreground">{label}</p>
+      <p className="text-xs font-medium text-foreground">{t('cpWebhookUrlLabel')}</p>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <code className="flex-1 break-all rounded-md bg-background/80 px-2 py-1.5 text-xs text-muted-foreground border border-border/60">
           {url}

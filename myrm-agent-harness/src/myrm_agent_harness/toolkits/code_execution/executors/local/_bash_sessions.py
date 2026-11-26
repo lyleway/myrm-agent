@@ -16,7 +16,7 @@ arrive together (its parallel sub-agents) start it once: the registry check and 
 [OUTPUT]
 - shell_grants: The granted roots a shell of this run may use, none without an enforcing sandbox
 - grant_command_paths: Those roots as the paths the command validator lets a command name
-- get_or_create_bash_session: The healthy shell for a context, started once when there is none
+- get_or_create_bash_session: The healthy shell for a context, started once when there is none; a shell it replaces is closed
 - close_bash_sessions: Close and forget every shell
 
 [POS]
@@ -91,7 +91,9 @@ async def get_or_create_bash_session(
     """Get the healthy persistent shell for this context or start one.
 
     A shell's sandbox is fixed when it starts, so a read-only run keeps its own shell and never reuses the
-    writable run's under the same session id, and a change of the granted directories starts a new shell.
+    writable run's under the same session id, and a change of the granted directories starts a new shell. A shell
+    the registry drops (its grants changed, or it is gone or unhealthy) is closed first: a command still queued on
+    it is refused by the closed session and runs on the shell that replaced it (see ``execute_bash``).
     Callers of one identity pass through ``start_locks`` one at a time, so the check and the start are one step:
     shells started side by side would all but the last be dropped from ``sessions`` while their processes keep
     running, and two callers that both find the shell unhealthy would both restart it. The check never waits for a
@@ -119,8 +121,8 @@ async def get_or_create_bash_session(
                     logger.debug(f" [LocalExecutor] Reusing Bash session: {session_key}")
                     return session
                 logger.warning(f" [LocalExecutor] Unhealthy Bash session, restarting: {session_key}")
-                await session.close()
-                del sessions[session_key]
+            # A shell that is gone is closed too, so a command still queued on it cannot start a shell in it.
+            await sessions.pop(session_key).close()
 
         logger.info(f" [LocalExecutor] Creating new Bash session: {session_key}")
         config = SessionConfig(

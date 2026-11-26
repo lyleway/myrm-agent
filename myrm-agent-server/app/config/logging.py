@@ -56,8 +56,9 @@ def configure_logging() -> None:
     _suppress_library_logs("httpx", logging.WARNING)
     _suppress_library_logs("transformers", logging.ERROR)
 
-    # uvicorn 以 log_config=None 启动（app/startup/uvicorn_runner.py、app/main.py），它的 dictConfig 不会重置这里设的级别，
-    # 其日志器也走上面的根处理器。
+    # uvicorn 以 log_config=None 启动（app/startup/uvicorn_runner.py、app/main.py）：不装 dictConfig，其日志器走上面的根处理器。
+    # uvicorn_runner 另传 log_level 与 access_log，uvicorn 的 Config 会把级别设到日志器上、盖过下面的钉值；
+    # 脚本入口 app/main.py 不传 log_level，沿用下面的钉值。
     if is_debug_mode():
         _suppress_library_logs("uvicorn.access", logging.DEBUG)
     else:

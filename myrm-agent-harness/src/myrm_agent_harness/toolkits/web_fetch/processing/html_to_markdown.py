@@ -1,10 +1,12 @@
 """HTML to Markdown converter built on BeautifulSoup.
 
 [INPUT]
+- web_fetch.processing.html_to_markdown_helpers::ConvertOptions, BLOCK_TAGS, parse_ol_start, resolve_url, strip_non_visible_elements, tables_with_rows (POS: Shared configuration and pure helper functions for HTML2Markdown)
 - web_fetch.processing.markdown_table::render_markdown_table (POS: Markdown table layout for converted HTML tables)
 
 [OUTPUT]
-- CustomHTML2Text: HTML-to-Markdown converter for fetched page content; a table becomes one Markdown table that also lists the rows of its nested tables
+- HTML2Markdown: HTML-to-Markdown converter for fetched page content; a table becomes one Markdown table that also lists the rows of its nested tables
+- ConvertOptions: Re-exported conversion parameters dataclass
 
 [POS]
 HTML to Markdown conversion utilities for the web fetch processing pipeline.
@@ -14,136 +16,26 @@ from __future__ import annotations
 
 import html
 import re
-import urllib.parse
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
 from typing import ClassVar, cast
 
 from bs4 import BeautifulSoup, Comment, Tag
 from bs4.element import NavigableString
 
+from .html_to_markdown_helpers import (
+    BLOCK_TAGS,
+    ConvertOptions,
+    parse_ol_start,
+    resolve_url,
+    strip_non_visible_elements,
+    tables_with_rows,
+)
 from .markdown_table import render_markdown_table
-
-
-@dataclass
-class ConvertOptions:
-    """Conversion parameters matching the html2text API surface used by callers."""
-
-    body_width: int = 0
-    ignore_emphasis: bool = False
-    ignore_links: bool = False
-    ignore_images: bool = False
-    protect_links: bool = False
-    single_line_break: bool = False
-    mark_code: bool = False
-    escape_snob: bool = False
-    skip_internal_links: bool = True
-    ignore_mailto_links: bool = True
-    escape_backslash: bool = False
-    escape_dot: bool = False
-    escape_plus: bool = False
-    escape_dash: bool = False
-    include_sup_sub: bool = False
-    preserve_tags: set[str] = field(default_factory=set)
-    handle_code_in_pre: bool = False
-
-
-_BLOCK_TAGS: set[str] = {
-    "address",
-    "article",
-    "aside",
-    "blockquote",
-    "details",
-    "dialog",
-    "dd",
-    "div",
-    "dl",
-    "dt",
-    "fieldset",
-    "figcaption",
-    "figure",
-    "footer",
-    "form",
-    "h1",
-    "h2",
-    "h3",
-    "h4",
-    "h5",
-    "h6",
-    "header",
-    "hgroup",
-    "hr",
-    "li",
-    "main",
-    "nav",
-    "ol",
-    "p",
-    "pre",
-    "section",
-    "table",
-    "ul",
-}
-
-_INLINE_TAGS: set[str] = {
-    "a",
-    "abbr",
-    "b",
-    "bdi",
-    "bdo",
-    "br",
-    "cite",
-    "code",
-    "data",
-    "dfn",
-    "em",
-    "i",
-    "kbd",
-    "mark",
-    "q",
-    "rp",
-    "rt",
-    "ruby",
-    "s",
-    "samp",
-    "small",
-    "span",
-    "strong",
-    "sub",
-    "sup",
-    "time",
-    "u",
-    "var",
-    "wbr",
-    "del",
-    "ins",
-    "strike",
-}
-
-_HEADING_TAGS: set[str] = {"h1", "h2", "h3", "h4", "h5", "h6"}
-
-_MD_SPECIAL_RE = re.compile(r"([\\`*_\[\]()#+\-!|>~{}])")
 
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
 # The lookbehind pins a match to the start of a run of spaces. Without it every later space of a run that no newline
 # follows starts another scan to the end of the run: quadratic in the run length.
 _TRAILING_SPACES_RE = re.compile(r"(?<! ) +\n")
-
-
-def _escape_md(text: str) -> str:
-    return _MD_SPECIAL_RE.sub(r"\\\1", text)
-
-
-def _resolve_url(base: str, url: str) -> str:
-    if not url or url.startswith(("http://", "https://", "mailto:", "data:", "//")):
-        return url
-    if not base:
-        return url
-    return urllib.parse.urljoin(base, url)
-
-
-def _is_lifted_table_part(node: Tag) -> bool:
-    """Whether *node*, met inside a table cell, is a row or a table of rows that the enclosing table already lists."""
-    return node.name == "tr" or (node.name == "table" and node.find("tr") is not None)
 
 
 class HTML2Markdown:
@@ -161,6 +53,7 @@ class HTML2Markdown:
         self._current_depth: int = 0
         # Number of table cells being converted: inside one, the rows of the enclosing table are already listed.
         self._cell_depth: int = 0
+        self._tables_with_tr: set[int] = set()
         if kwargs:
             self.update_params(**kwargs)
 
@@ -186,7 +79,12 @@ class HTML2Markdown:
         body = soup.find("body")
         root = body if body else soup
 
-        result = self._convert_node(root)
+        strip_non_visible_elements(root)
+        self._tables_with_tr = tables_with_rows(root)
+        try:
+            result = self._convert_node(root)
+        finally:
+            self._tables_with_tr = set()
         result = _TRAILING_SPACES_RE.sub("\n", result)
         result = _MULTI_NEWLINE_RE.sub("\n\n", result)
         return result.strip() + "\n" if result.strip() else ""
@@ -213,14 +111,14 @@ class HTML2Markdown:
             if tag_name in self._opts.preserve_tags:
                 return str(node)
 
-            if self._cell_depth and _is_lifted_table_part(node):
+            if self._cell_depth and (tag_name == "tr" or (tag_name == "table" and id(node) in self._tables_with_tr)):
                 return ""
 
             handler = _TAG_HANDLERS.get(tag_name)
             if handler:
                 return handler(self, node)
 
-            if tag_name in _BLOCK_TAGS:
+            if tag_name in BLOCK_TAGS:
                 inner = self._convert_children(node)
                 return f"\n\n{inner.strip()}\n\n" if inner.strip() else ""
 
@@ -342,7 +240,7 @@ class HTML2Markdown:
         if self._opts.skip_internal_links and str(href).startswith("#"):
             return self._convert_children(tag)
 
-        href = _resolve_url(self._baseurl, str(href))
+        href = resolve_url(self._baseurl, str(href))
         inner = self._convert_children(tag).strip()
         if not inner:
             inner = href
@@ -358,7 +256,7 @@ class HTML2Markdown:
         src = tag.get("src", "") or ""
         if isinstance(src, list):
             src = src[0] if src else ""
-        src = _resolve_url(self._baseurl, str(src))
+        src = resolve_url(self._baseurl, str(src))
         alt = tag.get("alt", "") or ""
         if isinstance(alt, list):
             alt = " ".join(alt)
@@ -381,7 +279,7 @@ class HTML2Markdown:
 
     def _handle_ol(self, tag: Tag) -> str:
         items: list[str] = []
-        start = int(str(tag.get("start") or 1))
+        start = parse_ol_start(tag.get("start"))
         idx = start
         for child in tag.children:
             if isinstance(child, Tag) and child.name == "li":
@@ -397,7 +295,7 @@ class HTML2Markdown:
 
     def _handle_table(self, tag: Tag) -> str:
         # ``find_all`` reaches the rows of nested tables too, so they become rows of this table and a cell never
-        # renders a nested table itself (see ``_is_lifted_table_part``). Converting them inside the cell as well would
+        # renders a nested table itself (see ``tables_with_rows``). Converting them inside the cell as well would
         # repeat the nested rows once per nesting level: exponential in the depth.
         rows: list[list[str]] = []
         for tr in tag.find_all("tr"):
@@ -486,13 +384,3 @@ _TAG_HANDLERS: dict[str, Callable[[HTML2Markdown, Tag], str]] = {
     "q": HTML2Markdown._handle_q,
     "abbr": HTML2Markdown._handle_abbr,
 }
-
-
-class CustomHTML2Text(HTML2Markdown):
-    """API-compatible wrapper preserving the exact interface used by callers.
-
-    Matches the ``CustomHTML2Text(baseurl=...)`` / ``update_params(...)`` /
-    ``handle(html)`` call pattern from pipeline.py and markdown_generator.py.
-    """
-
-    pass

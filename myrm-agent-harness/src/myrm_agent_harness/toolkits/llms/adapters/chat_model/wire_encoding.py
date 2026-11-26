@@ -8,38 +8,22 @@ Only the messages are rewritten: the tool declarations and the other request par
 step and are not touched.
 
 [INPUT]
-- (none — stdlib only: re)
+- utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 
 [OUTPUT]
-- encodable_text: one string made encodable (itself when it already is, else a copy with each lone surrogate as ``U+FFFD``)
 - replace_lone_surrogates: rewrite every unencodable string value of the wire messages of one request (nested in dicts and lists) to ``U+FFFD``, in place
 
 [POS]
 Last pure step of the message funnel of ``TransportChatModel``, run before the outbound guard so a policy sees the text that is
 actually sent. A string that is already encodable is left as the same object, so the request bytes (and with them the
-provider prompt cache) do not change for any ordinary history. ``encodable_text`` is the same replacement for a single string:
-the tool-result guard applies it where a result enters the conversation, so everything downstream of that point (hashing,
+provider prompt cache) do not change for any ordinary history. The tool-result guard applies the same replacement
+(``encodable_text``) where a result enters the conversation, so everything downstream of that point (hashing,
 persisting, logging) handles the text the funnel will later send.
 """
 
 from __future__ import annotations
 
-import re
-
-_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
-_REPLACEMENT = "\ufffd"
-
-
-def encodable_text(text: str) -> str:
-    """*text* itself when UTF-8 can encode it, else a copy with each lone surrogate replaced."""
-    if text.isascii():
-        return text
-    try:
-        text.encode("utf-8")
-    except UnicodeEncodeError:
-        return _LONE_SURROGATE.sub(_REPLACEMENT, text)
-    return text
-
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 type _Container = dict[str, object] | list[object]
 

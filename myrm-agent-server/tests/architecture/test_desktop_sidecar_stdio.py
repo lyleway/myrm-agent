@@ -2,9 +2,11 @@
 
 Two launches break a backend that prints text, and the tests start a child the way each parent does:
 
-- From the shell (no console, `--noconsole` build) Python starts with `sys.stdout` and friends set to `None`, and
-  uvicorn cannot configure its logging (`sys.stdout.isatty()`): the backend dies before it serves a request.
-  Descriptors 0-2 are closed to reproduce that.
+- From the shell (no console, `--noconsole` build) Python starts with `sys.stdout` and friends set to `None`: a
+  library that writes to one raises `AttributeError` (tqdm, which huggingface_hub depends on, does) and
+  `faulthandler.enable()` raises `RuntimeError`. Descriptors 0-2 are closed to reproduce that, and the probes
+  are standard-library calls, so the guard runs in every environment (the desktop contract job installs no
+  progress-bar library).
 - With stdout redirected, Python encodes it in the ANSI code page and the first emoji in a startup message raises
   `UnicodeEncodeError`. `PYTHONIOENCODING=cp1252` reproduces the Windows default on any host.
 """
@@ -25,21 +27,24 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="closes descript
 
 # Reports through a file because the child has no stdout to report on.
 _CHILD = """
+import faulthandler
 import runpy
 import sys
 
 hook, report = sys.argv[1:3]
-try:
-    if hook:
-        runpy.run_path(hook)
-    from uvicorn.config import Config
-
-    Config("app.main:app")  # builds the logging configuration from sys.stdout
-    outcome = "configured"
-except Exception as exc:
-    outcome = f"{type(exc).__name__}: {exc}"
+if hook:
+    runpy.run_path(hook)
+outcomes = []
+# A write is what a progress bar does; a descriptor request is what faulthandler does.
+for name, use in (("write", lambda: sys.stderr.write("progress")), ("descriptor", faulthandler.enable)):
+    try:
+        use()
+        outcomes.append(f"{name}: ok")
+    except Exception as exc:
+        outcomes.append(f"{name}: {type(exc).__name__}")
+outcomes.append(str(sys.stdout.isatty() if sys.stdout else None))
 with open(report, "w", encoding="utf-8") as handle:
-    handle.write(f"{outcome}\\n{sys.stdout.isatty() if sys.stdout else None}")
+    handle.write("\\n".join(outcomes))
 """
 
 _PRINT_CHILD = """
@@ -67,18 +72,17 @@ def _start_without_standard_streams(tmp_path: Path, hook: Path | None) -> list[s
     return report.read_text(encoding="utf-8").splitlines()
 
 
-def test_uvicorn_cannot_configure_logging_without_standard_streams(tmp_path: Path) -> None:
-    """The premise of the hook: if uvicorn stops needing `sys.stdout`, the hook is dead code and must go."""
-    outcome, _ = _start_without_standard_streams(tmp_path, hook=None)
+def test_a_library_cannot_use_the_standard_streams_of_a_process_that_has_none(tmp_path: Path) -> None:
+    """The premise of the first half: if Python stops leaving the streams `None`, the hook has no use there."""
+    outcomes = _start_without_standard_streams(tmp_path, hook=None)
 
-    assert outcome.startswith("ValueError: Unable to configure formatter"), outcome
+    assert outcomes == ["write: AttributeError", "descriptor: RuntimeError", "None"]
 
 
-def test_the_hook_lets_uvicorn_configure_logging(tmp_path: Path, build_module: ModuleType) -> None:
-    outcome, is_tty = _start_without_standard_streams(tmp_path, build_module.STDIO_RUNTIME_HOOK)
+def test_the_hook_gives_a_library_streams_it_can_use(tmp_path: Path, build_module: ModuleType) -> None:
+    outcomes = _start_without_standard_streams(tmp_path, build_module.STDIO_RUNTIME_HOOK)
 
-    assert outcome == "configured"
-    assert is_tty == "False"
+    assert outcomes == ["write: ok", "descriptor: ok", "False"]
 
 
 def _print_to_redirected_stdout(tmp_path: Path, hook: Path | None) -> tuple[int, str, bytes]:
@@ -96,7 +100,10 @@ def _print_to_redirected_stdout(tmp_path: Path, hook: Path | None) -> tuple[int,
 
 
 def test_a_legacy_codepage_cannot_print_the_startup_banner(tmp_path: Path) -> None:
-    """The premise of the encoding half: if Python stops defaulting to the ANSI code page, drop that half."""
+    """Negative control: with a legacy code page forced, the banner raises without the hook, so the hook test can fail.
+
+    The code page is forced rather than inherited, so a change of Python's default encoding does not turn this red.
+    """
     returncode, stderr, _ = _print_to_redirected_stdout(tmp_path, hook=None)
 
     assert returncode != 0

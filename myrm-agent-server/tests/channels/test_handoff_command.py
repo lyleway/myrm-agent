@@ -75,6 +75,14 @@ async def test_a_chat_without_a_conversation_has_nothing_to_hand_off(collaborato
     collaborators.handoff.assert_not_awaited()
 
 
+async def test_a_conversation_new_has_ended_has_nothing_to_hand_off(collaborators: _Handoff) -> None:
+    collaborators.session_key.return_value = None
+
+    assert await _reply_to("feishu") == get_text(_MESSAGE, "handoff_failed", error="No active session")
+    collaborators.chat_lookup.assert_not_awaited()
+    collaborators.handoff.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("error", "key", "words_the_target"),
     [

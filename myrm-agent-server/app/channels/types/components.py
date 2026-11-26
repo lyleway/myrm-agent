@@ -105,8 +105,10 @@ class ToolStep:
 def render_components_as_text(components: tuple[ComponentRow, ...], *, locale: str = "en") -> str:
     """Render interactive components as plain-text fallback.
 
-    Used by channels that do not support native interactive components.
-    Generates human-readable instructions for interaction.
+    Used by routes that cannot show native interactive components. A link button becomes
+    ``• label → url`` and a select menu lists its options. A button that only carries an
+    ``action_id`` has no text equivalent — nothing resolves a command derived from a callback
+    id — so it is left out; a typed alternative must be an explicit ``QuickReply``.
 
     Args:
         components: Tuple of component rows to render.
@@ -115,7 +117,7 @@ def render_components_as_text(components: tuple[ComponentRow, ...], *, locale: s
             override via ``OutboundMessage.metadata["locale"]``.
 
     Returns:
-        Formatted text listing available actions and options.
+        Formatted text listing the links and options; empty when nothing in the rows can be shown as text.
     """
     lines: list[str] = []
     for row in components:
@@ -123,9 +125,6 @@ def render_components_as_text(components: tuple[ComponentRow, ...], *, locale: s
             if isinstance(comp, ActionButton):
                 if comp.url:
                     lines.append(f"• {comp.label} → {comp.url}")
-                else:
-                    cmd = comp.action_id.split(":", 1)[1] if ":" in comp.action_id else comp.action_id
-                    lines.append(f"• {comp.label} → /{cmd}")
             elif isinstance(comp, SelectMenu):
                 opts = ", ".join(o.label for o in comp.options)
                 prefix = channel_t(locale, "component_options_prefix")

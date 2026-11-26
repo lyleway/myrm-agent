@@ -277,3 +277,74 @@ async def test_publish_clip_ingress_localizes_remote_markdown_images(
     content = temp_structure.get_raw_file_path(result.relative_path).read_text(encoding="utf-8")
     assert "wiki/assets/" in content or "../wiki/assets/" in content
     assert "cdn.example.com" not in content
+
+
+@pytest.mark.asyncio
+async def test_publish_clip_ingress_empty_body_writes_placeholder(
+    temp_structure: WikiStructure,
+) -> None:
+    result = await publish_clip_ingress(
+        temp_structure,
+        ClipIngressRequest(
+            source_url="https://example.com/empty-clip",
+            title="Empty Clip",
+            clip_mode=ClipMode.FULL_PAGE,
+            html="   ",
+            markdown="",
+        ),
+    )
+    assert result.written is True
+    content = temp_structure.get_raw_file_path(result.relative_path).read_text(encoding="utf-8")
+    assert "# Empty Clip" in content
+    assert "(source: https://example.com/empty-clip)" in content
+
+
+@pytest.mark.asyncio
+async def test_publish_url_markdown_ingress_handles_folder_and_gate_errors(
+    temp_structure: WikiStructure,
+) -> None:
+    from myrm_agent_harness.toolkits.wiki.pipeline.ingress.publish import publish_url_markdown_ingress
+    from myrm_agent_harness.toolkits.wiki.pipeline.ingress.types import UrlMarkdownIngressRequest
+    from myrm_agent_harness.toolkits.wiki.pipeline.raw_gate import RawGateError
+
+    first = await publish_url_markdown_ingress(
+        temp_structure,
+        UrlMarkdownIngressRequest(
+            url="https://example.com/doc",
+            filename="guide",
+            folder_path="refs",
+            localize_public_assets=False,
+        ),
+        markdown="# Guide\n",
+    )
+    assert first.written is True
+    assert first.relative_path == "refs/guide.md"
+
+    conflict = await publish_url_markdown_ingress(
+        temp_structure,
+        UrlMarkdownIngressRequest(
+            url="https://example.com/doc",
+            relative_path="refs/guide.md",
+            localize_public_assets=False,
+        ),
+        markdown="# Guide Updated\n",
+    )
+    assert conflict.written is False
+    assert conflict.conflict is True
+
+    with patch(
+        "myrm_agent_harness.toolkits.wiki.pipeline.ingress.publish.publish_raw",
+        new_callable=AsyncMock,
+        side_effect=RawGateError("raw_security_blocked", "blocked"),
+    ):
+        blocked = await publish_url_markdown_ingress(
+            temp_structure,
+            UrlMarkdownIngressRequest(
+                url="https://example.com/blocked",
+                relative_path="refs/blocked.md",
+                localize_public_assets=False,
+            ),
+            markdown="# Secret\n",
+        )
+    assert blocked.written is False
+    assert blocked.security_blocked is True

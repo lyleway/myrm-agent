@@ -2,7 +2,7 @@
  * [INPUT]
  * - `@/lib/guest` getAuthToken (POS: the session's bearer token)
  * - `@/lib/deploy-mode` getApiBaseUrl (POS: cloud API origin)
- * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure (POS: the failure answer both adapters share)
+ * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer (POS: the failure answer and the deadline-bound request both adapters share)
  * - `../types` ConfigSyncError / record and change shapes (POS: adapter contract)
  *
  * [OUTPUT]
@@ -10,15 +10,24 @@
  *
  * [POS]
  * Cloud-mode adapter of the sync layer. Sensitive values are encrypted by the server (AES-256-GCM); the frontend never
- * handles ciphertext. Only a 404 answers "no such row": a missing or expired token, an unreachable API and a server
- * error make `get` throw, so the sync layer can tell "absent" from "unknown". A `sync` that could not be delivered
- * (transport failure, 401, 408, 429, 502, 503, 504) returns `backendUnavailableSyncResult()`, which the sync layer
- * keeps for a retry; any other refusal (422, 500 ...) throws, because repeating the same write cannot succeed.
+ * handles ciphertext. Only a 404 answers "no such row": a missing or expired token, an unreachable API, a server
+ * error and an answer body that never arrives make `get` throw, so the sync layer can tell "absent" from "unknown".
+ * A `sync` that could not be delivered (transport failure, 401, 408, 429, 502, 503, 504, or an answer body that never
+ * arrives) returns `backendUnavailableSyncResult()`, which the sync layer keeps for a retry; any other refusal
+ * (422, 500 ...) throws, because repeating the same write cannot succeed.
  */
 
 import { getAuthToken } from '@/lib/guest';
 import { getApiBaseUrl } from '@/lib/deploy-mode';
-import { BaseConfigAdapter, backendUnavailableSyncResult, isTransportFailure } from './BaseAdapter';
+import {
+  BaseConfigAdapter,
+  backendUnavailableSyncResult,
+  fetchWithDeadlines,
+  isLostAnswer,
+  isTransportFailure,
+  type DeadlineAnswer,
+  type DeadlineInit,
+} from './BaseAdapter';
 import type { ConfigKey, ConfigRecord, ConfigChange, SyncResult, ConfigVersion, ConfigValueMap } from '../types';
 import { ConfigSyncError } from '../types';
 
@@ -49,7 +58,7 @@ interface ApiSyncResponse {
 export class SandboxConfigAdapter extends BaseConfigAdapter {
   async getAll(keys?: readonly ConfigKey[]): Promise<Map<ConfigKey, ConfigRecord>> {
     const url = keys?.length ? `/config?keys=${encodeURIComponent(keys.join(','))}` : '/config';
-    const response = await this.authFetch(url);
+    const { response, readJson } = await this.authFetch(url);
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -58,7 +67,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       throw new ConfigSyncError(`Failed to get all configs: ${response.statusText}`);
     }
 
-    const data: ApiAllConfigsResponse = await response.json();
+    const data = await readJson<ApiAllConfigsResponse>();
     const result = new Map<ConfigKey, ConfigRecord>();
 
     for (const [key, record] of Object.entries(data.configs)) {
@@ -69,7 +78,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
   }
 
   async get<K extends ConfigKey>(key: K): Promise<ConfigRecord<K> | null> {
-    const response = await this.authFetch(`/config/${key}`);
+    const { response, readJson } = await this.authFetch(`/config/${key}`);
 
     if (response.status === 404) {
       return null;
@@ -79,52 +88,8 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       throw new ConfigSyncError(`Failed to get config '${key}': ${response.statusText}`);
     }
 
-    const data: ApiConfigResponse<K> = await response.json();
+    const data = await readJson<ApiConfigResponse<K>>();
     return this.toConfigRecord(data);
-  }
-
-  async set<K extends ConfigKey>(
-    key: K,
-    value: ConfigValueMap[K],
-    expectedVersion?: ConfigVersion,
-  ): Promise<ConfigRecord<K>> {
-    const response = await this.authFetch(`/config/${key}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        value,
-        expectedVersion,
-        deviceId: this.deviceId,
-      }),
-    });
-
-    if (response.status === 409) {
-      const { ConfigConflictError } = await import('../types');
-      const errorData = await response.json();
-      throw new ConfigConflictError(key, expectedVersion ?? '0_0', errorData.serverVersion ?? '0_0');
-    }
-
-    if (!response.ok) {
-      throw new ConfigSyncError(`Failed to set config '${key}': ${response.statusText}`);
-    }
-
-    const data: ApiConfigResponse<K> = await response.json();
-    return this.toConfigRecord(data);
-  }
-
-  async delete(key: ConfigKey): Promise<boolean> {
-    const response = await this.authFetch(`/config/${key}`, {
-      method: 'DELETE',
-    });
-
-    if (response.status === 404) {
-      return false;
-    }
-
-    if (!response.ok) {
-      throw new ConfigSyncError(`Failed to delete config '${key}': ${response.statusText}`);
-    }
-
-    return true;
   }
 
   async sync(changes: ConfigChange[]): Promise<SyncResult> {
@@ -136,9 +101,9 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       };
     }
 
-    let response: Response;
+    let answer: DeadlineAnswer;
     try {
-      response = await this.authFetch('/config/sync', {
+      answer = await this.authFetch('/config/sync', {
         method: 'POST',
         body: JSON.stringify({
           changes,
@@ -153,6 +118,7 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       return backendUnavailableSyncResult();
     }
 
+    const { response, readJson } = answer;
     if (UNDELIVERED_SYNC_STATUSES.has(response.status)) {
       console.warn(`[SandboxAdapter] Backend not available (HTTP ${response.status}), sync failed`);
       return backendUnavailableSyncResult();
@@ -162,7 +128,16 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
       throw new ConfigSyncError(`Failed to sync configs: ${response.statusText}`);
     }
 
-    const data: ApiSyncResponse = await response.json();
+    let data: ApiSyncResponse;
+    try {
+      data = await readJson<ApiSyncResponse>();
+    } catch (error) {
+      if (!isLostAnswer(error)) {
+        throw error;
+      }
+      console.warn('[SandboxAdapter] The sync answer never arrived, sync failed:', error);
+      return backendUnavailableSyncResult();
+    }
 
     return {
       success: data.success,
@@ -186,24 +161,21 @@ export class SandboxConfigAdapter extends BaseConfigAdapter {
     };
   }
 
-  private async authFetch(path: string, options?: RequestInit): Promise<Response> {
+  private async authFetch(path: string, options?: DeadlineInit): Promise<DeadlineAnswer> {
     const token = getAuthToken();
     if (!token) {
-      return new Response(null, { status: 401, statusText: 'Unauthorized' });
+      // Made up here, never on the network: there is nothing to wait for and nothing to cancel.
+      const response = new Response(null, { status: 401, statusText: 'Unauthorized' });
+      return { response, readJson: <T>() => response.json() as Promise<T> };
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
-
-    const baseUrl = getApiBaseUrl();
-    return fetch(`${baseUrl}${path}`, {
+    return fetchWithDeadlines(`${getApiBaseUrl()}${path}`, {
       ...options,
-      signal: controller.signal,
       headers: {
         ...options?.headers,
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-    }).finally(() => clearTimeout(timeoutId));
+    });
   }
 }

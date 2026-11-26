@@ -21,7 +21,6 @@ from myrm_agent_harness.core.security.guards.ssrf import (
     resolve_and_check,
     validate_url_for_ssrf,
 )
-from myrm_agent_harness.toolkits.browser.domain_filter import DomainAllowlist
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
 
 
@@ -88,17 +87,6 @@ class TestFetchEngineCrawlRealGuards:
         engine = FetchEngine()
         try:
             doc = await engine.crawl("http://127.0.0.1/admin")
-            assert doc is None
-        finally:
-            await engine.shutdown()
-
-    @pytest.mark.asyncio
-    async def test_crawl_honors_domain_allowlist(self) -> None:
-        allowlist = DomainAllowlist.from_strings(["allowed.example"])
-        engine = FetchEngine(domain_allowlist=allowlist)
-        engine._allow_private_networks = True  # 隔离白名单层，跳过 IP 校验
-        try:
-            doc = await engine.crawl("http://blocked.example/page")
             assert doc is None
         finally:
             await engine.shutdown()

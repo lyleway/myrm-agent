@@ -15,12 +15,15 @@ without spawning a sandbox or an IPC server.
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.agent.skills.mcp.executor import SkillExecutor
 from myrm_agent_harness.agent.skills.mcp.ipc_proxy import IPCEndpoint
+from myrm_agent_harness.agent.skills.runtime.registry import skill_registry
 from myrm_agent_harness.backends.skills.types import MCPSkillData, SkillMetadata
 from myrm_agent_harness.toolkits.code_execution import MCPConfigItem
 from myrm_agent_harness.toolkits.code_execution.saved_script import SavedScript, resolve_saved_script
@@ -135,6 +138,25 @@ def test_generate_client_forwards_the_endpoint(monkeypatch: pytest.MonkeyPatch) 
     }
 
 
+def test_generate_client_forwards_skill_functions_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    import myrm_agent_harness.agent.skills.mcp.client_templates as client_templates
+
+    captured: dict[str, object] = {}
+
+    def fake_generate(socket_path: str, **kwargs: object) -> str:
+        captured["socket_path"] = socket_path
+        captured.update(kwargs)
+        return "CLIENT"
+
+    monkeypatch.setattr(client_templates, "generate_ipc_client_code", fake_generate)
+    endpoint = IPCEndpoint(socket_path="/tmp/sock", tcp_port=0, auth_token="token", trace_nonce="nonce")
+
+    code = SkillExecutor._generate_mcp_client_code(endpoint, skill_functions={"demo_skill": ["ping"]})
+
+    assert code == "CLIENT"
+    assert captured["skill_functions"] == {"demo_skill": ["ping"]}
+
+
 @pytest.fixture
 def serving(monkeypatch: pytest.MonkeyPatch) -> SkillExecutor:
     """An executor whose host serves ``demo_skill`` only."""
@@ -222,3 +244,101 @@ def test_prepared_script_with_the_real_client_template_is_valid_python(
 
     compile(context.prepared_code, "<prepared>", "exec")
     assert context.prepared_code.endswith(script.launcher(script.source))
+
+
+@pytest.mark.parametrize(
+    "import_stmt",
+    [
+        "from skills.mcp_star_demo_skill import *",
+        "from mcp_star_demo_skill import *",
+    ],
+)
+def test_prepared_inline_code_supports_star_import_in_subprocess(import_stmt: str) -> None:
+    skill = _mcp_skill(
+        "mcp_star_demo_skill",
+        ["mcp__star__list_namespaces", "mcp__star__2d-plot"],
+        [{"name": "star", "type": "stdio", "command": "echo", "args": []}],
+    )
+    skill_registry.register(skill)
+    try:
+        context = SkillExecutor().prepare_for_execution(
+            f"python3 -c '{import_stmt}; print(list_namespaces.__name__, _2d_plot.__name__)'",
+            _ENDPOINT,
+        )
+    finally:
+        skill_registry._skills.pop(skill.name, None)
+        skill_registry._ipc_mcp_skill_cache.pop(skill.name, None)
+
+    assert context.is_skill is True
+    proc = subprocess.run(
+        [sys.executable, "-c", context.prepared_code],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "list_namespaces _2d_plot"
+
+
+def test_prepared_inline_code_supports_multi_skill_star_imports_in_subprocess() -> None:
+    alpha = _mcp_skill(
+        "mcp_star_alpha_skill",
+        ["mcp__alpha__list_pods"],
+        [{"name": "alpha", "type": "stdio", "command": "echo", "args": []}],
+    )
+    beta = _mcp_skill(
+        "mcp_star_beta_skill",
+        ["mcp__beta__run_query"],
+        [{"name": "beta", "type": "stdio", "command": "echo", "args": []}],
+    )
+    skill_registry.register(alpha)
+    skill_registry.register(beta)
+    try:
+        code = (
+            "from skills.mcp_star_alpha_skill import *\n"
+            "from mcp_star_beta_skill import *\n"
+            "print(list_pods.__name__, run_query.__name__)\n"
+        )
+        context = SkillExecutor().prepare_for_execution(f"python3 -c '{code}'", _ENDPOINT)
+    finally:
+        for name in (alpha.name, beta.name):
+            skill_registry._skills.pop(name, None)
+            skill_registry._ipc_mcp_skill_cache.pop(name, None)
+
+    assert context.is_skill is True
+    proc = subprocess.run(
+        [sys.executable, "-c", context.prepared_code],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "list_pods run_query"
+
+
+def test_prepared_saved_script_supports_star_import_in_subprocess(tmp_path: Path) -> None:
+    skill = _mcp_skill(
+        "mcp_star_saved_skill",
+        ["mcp__saved__get_status"],
+        [{"name": "saved", "type": "stdio", "command": "echo", "args": []}],
+    )
+    skill_registry.register(skill)
+    try:
+        script = _saved(tmp_path, "from mcp_star_saved_skill import *\nprint(get_status.__name__)\n")
+        context = SkillExecutor().prepare_script_for_execution("python3 probe.py", script, _ENDPOINT)
+    finally:
+        skill_registry._skills.pop(skill.name, None)
+        skill_registry._ipc_mcp_skill_cache.pop(skill.name, None)
+
+    assert context.is_skill is True
+    proc = subprocess.run(
+        [sys.executable, "-c", context.prepared_code],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "get_status"

@@ -44,7 +44,7 @@ You audit the quality of an existing test suite. You do **not** write tests unle
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 ## Report First, Fix Later
 

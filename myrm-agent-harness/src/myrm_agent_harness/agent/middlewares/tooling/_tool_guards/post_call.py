@@ -5,7 +5,7 @@
 - agent.security.guards.loop_guard (POS: 会话级循环检测)
 - semantic_failure_sniffer (POS: 语义失败嗅探)
 - agent.security.audit::record_decision (POS: 安全审计)
-- toolkits.llms.adapters.chat_model.wire_encoding::encodable_text (POS: 把字符串里的孤立代理项换成 U+FFFD，使其可被 UTF-8 编码)
+- utils.text_sanitizer::encodable_text (POS: 只把孤立代理项换成 U+FFFD、使文本可被 UTF-8 编码的修复)
 
 [OUTPUT]
 - run_post_call_guards: 编码规整、预算截断、投毒检测、污点、hook 校验与循环记录
@@ -40,8 +40,8 @@ from myrm_agent_harness.agent.security.guards.context_budget import (
     get_context_budget_guard,
 )
 from myrm_agent_harness.agent.security.guards.loop_guard import CallRecord, LoopAction, LoopGuard
-from myrm_agent_harness.toolkits.llms.adapters.chat_model.wire_encoding import encodable_text
 from myrm_agent_harness.utils.logger_utils import get_agent_logger
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 from .shared import _emit_loop_guard_event
 

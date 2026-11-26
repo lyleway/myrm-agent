@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import CustomHTML2Text
+from myrm_agent_harness.toolkits.web_fetch.processing.html_to_markdown import HTML2Markdown
 
 _RUN = 750_000
 
 
 def _convert(html: str) -> str:
-    return CustomHTML2Text().handle(html)
+    return HTML2Markdown().handle(html)
 
 
 def test_hard_break_leaves_no_trailing_spaces() -> None:

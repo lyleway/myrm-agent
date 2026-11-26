@@ -350,17 +350,22 @@ class WebFetchFirecrawlConfig(BaseModel):
         alias="apiBase",
         description="Custom Firecrawl API base URL for self-hosted instances",
     )
+    network_isolation_confirmed: bool = Field(
+        default=False,
+        alias="networkIsolationConfirmed",
+        description="Confirm custom self-hosted endpoint outbound network is isolated from internal/metadata networks",
+    )
 
     class Config:
         populate_by_name = True
 
 
 class WebFetchEscalationConfigValue(BaseModel):
-    """Remote reader fallback (L4) after local HTTP/Browser/Stealth exhaustion."""
+    """Remote reader fallback (L4) after local HTTP fetch fails."""
 
     enabled: bool = Field(default=False, description="Enable remote fetch escalation (default OFF)")
     jina_api_key: str | None = Field(
-        None,
+        default=None,
         alias="jinaApiKey",
         description="Optional Jina Reader API key (null = free tier)",
         json_schema_extra={"ui:widget": "password"},

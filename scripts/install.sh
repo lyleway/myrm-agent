@@ -37,7 +37,7 @@ ensure_project_root() {
         return 0
     fi
     REPO_DIR="${MYRM_INSTALL_DIR:-$HOME/.myrm/myrm-agent}"
-    REPO_URL="${MYRM_REPO_URL:-https://github.com/Pursue-LLL/myrm-agent.git}"
+    REPO_URL="${MYRM_REPO_URL:-https://github.com/lyleway/myrm-agent.git}"
     log_info "Preparing install at ${REPO_DIR} ..."
     if [[ -d "${REPO_DIR}/myrm-agent-server" ]]; then
         cd "${REPO_DIR}"

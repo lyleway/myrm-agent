@@ -6,6 +6,7 @@
 
 [OUTPUT]
 - handle_new_session: Handle /new command: mark peer so next message creates a fresh Chat.
+- carry_new_session_to_command: Let a command that runs before the next turn see the ended conversation as gone; the marker stays for that turn.
 - handle_compact: Handle /compact command: compress chat context to reduce token cost.
 
 [POS]
@@ -63,6 +64,21 @@ async def handle_new_session(
         reply_to_id=msg.message_id if msg.is_group else None,
     )
     await bus.publish_outbound(reply)
+
+
+def carry_new_session_to_command(msg: InboundMessage, new_session_peers: dict[str, float]) -> None:
+    """Let a command that runs before the next turn see the conversation ``/new`` ended, and keep the marker for that turn.
+
+    The next turn spends the marker ``/new`` leaves in ``new_session_peers``, so a command learns of it through the
+    message's ``force_new_epoch`` flag: the resolver of the conversation a command acts on finds none while the flag is set.
+    A message can also arrive already flagged by whoever forwarded it (the channel ingress takes the flag); that flag
+    stands for this one message and the next turn may come without it, so the marker is set here again.
+    """
+    peer_key = routing_state_key(msg.channel, msg.chat_id or msg.sender_id, msg.thread_id)
+    if msg.metadata.get("force_new_epoch"):
+        new_session_peers.setdefault(peer_key, time.monotonic())
+    elif peer_key in new_session_peers:
+        msg.metadata["force_new_epoch"] = True
 
 
 async def handle_compact(

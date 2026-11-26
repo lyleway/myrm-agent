@@ -8,6 +8,8 @@
 - _AX_INVOKE_SCRIPT, _build_ax_invoke_script: AX element action script
 - _MAX_ELEMENTS, _SNAPSHOT_ROLE_FILTER: capture cap and the roles a snapshot keeps
 - _build_app_selector, _TARGET_APP_BUNDLE_IDS: how a script finds its target application process
+- _applescript_literal: a caller-supplied string as an AppleScript string literal that cannot end itself early
+- _ESCAPE_HANDLERS, _META_LINE_HANDLER: the handlers that make a text read from the screen one delimiter-free output field
 
 [POS]
 The osascript text the capture and invoke modules run; nothing here executes a process.
@@ -70,6 +72,16 @@ def _applescript_string_list(values: tuple[str, ...]) -> str:
     return ", ".join(f'"{value}"' for value in values)
 
 
+def _applescript_literal(value: str) -> str:
+    """``value`` as an AppleScript string literal that evaluates back to exactly ``value``.
+
+    A script is source text, so a quote left raw in a caller-supplied string would end the literal early and what
+    follows would run as code, and a raw backslash would escape the closing quote or the escape added for a quote.
+    Those two are all a literal needs escaped: line breaks and tabs are legal inside one.
+    """
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 _TARGET_APP_BUNDLE_IDS: dict[str, str] = {
     "TextEdit": "com.apple.TextEdit",
 }
@@ -81,16 +93,45 @@ def _build_app_selector(target_app: str | None) -> str:
     bundle_id = _TARGET_APP_BUNDLE_IDS.get(target_app)
     if bundle_id:
         return f'set targetApp to first application process whose bundle identifier is "{bundle_id}"'
-    escaped = target_app.replace('"', '\\"')
+    name = _applescript_literal(target_app)
     # Exact name first; contains fallback so short names like "Excel" match "Microsoft Excel".
     # AppleScript's `whose A or B` does not guarantee exact-priority, so use try/on error.
     return (
         "try\n"
-        f'    set targetApp to first application process whose name is "{escaped}"\n'
+        f"    set targetApp to first application process whose name is {name}\n"
         "on error\n"
-        f'    set targetApp to first application process whose name contains "{escaped}"\n'
+        f"    set targetApp to first application process whose name contains {name}\n"
         "end try"
     )
+
+
+# A snapshot is lines of `|||`-separated fields, so a text read from the screen may carry neither the field delimiter
+# nor a line break: `|` becomes `/`, which leaves no `|||` inside a field, and line breaks become spaces. Everything
+# else, a backslash included, passes through. `replaceText` splits and joins on the text item delimiters, which is
+# linear in the length of the text where rebuilding it character by character is not.
+_ESCAPE_HANDLERS = """on escapeText(t)
+    if t is missing value then return ""
+    set s to t as string
+    set s to my replaceText(s, "|", "/")
+    set s to my replaceText(s, linefeed, " ")
+    set s to my replaceText(s, return, " ")
+    return s
+end escapeText
+
+on replaceText(sourceText, oldText, newText)
+    set AppleScript's text item delimiters to oldText
+    set parts to text items of sourceText
+    set AppleScript's text item delimiters to newText
+    set resultText to parts as string
+    set AppleScript's text item delimiters to ""
+    return resultText
+end replaceText"""
+
+# The first output line names the application. Its application name, window title and bundle id are supplied by the
+# process, the open page or the open document, so they are escaped like an element's name; the pid is a number.
+_META_LINE_HANDLER = """on metaLine(appName, winTitle, bundleId, appPid)
+    return (my escapeText(appName)) & "|||META|||" & (my escapeText(winTitle)) & "|||" & (my escapeText(bundleId)) & "|||" & appPid
+end metaLine"""
 
 
 def _build_ax_snapshot_script(
@@ -99,31 +140,12 @@ def _build_ax_snapshot_script(
     role_filter = _applescript_string_list(_SNAPSHOT_ROLE_FILTER)
     always_emit_roles = _applescript_string_list(_SNAPSHOT_ALWAYS_EMIT_ROLES)
     app_selector = _build_app_selector(target_app)
-    query_str = (query or "").lower().strip().replace('"', '\\"')
-    role_str = (role or "").lower().strip().replace('"', '\\"')
+    query_literal = _applescript_literal((query or "").lower().strip())
+    role_literal = _applescript_literal((role or "").lower().strip())
     return f"""
-on escapeText(t)
-    if t is missing value then return ""
-    set s to t as string
-    set soh to ASCII character 1
-    set out to ""
-    set n to count of s
-    repeat with i from 1 to n
-        set c to character i of s
-        if c is ASCII character 10 then
-            set c to soh
-        else if c is ASCII character 13 then
-            set c to soh
-        else if c is ASCII character 92 then
-            set out to out & c & c
-        else if c is "|" then
-            set out to out & "/"
-        else
-            set out to out & c
-        end if
-    end repeat
-    return out
-end escapeText
+{_ESCAPE_HANDLERS}
+
+{_META_LINE_HANDLER}
 
 tell application "System Events"
     {app_selector}
@@ -145,7 +167,7 @@ tell application "System Events"
     end try
 
     set outputLines to {{}}
-    set end of outputLines to appName & "|||META|||" & winTitle & "|||" & bundleId & "|||" & appPid
+    set end of outputLines to my metaLine(appName, winTitle, bundleId, appPid)
 
     set uiElements to {{}}
     try
@@ -159,8 +181,8 @@ tell application "System Events"
     end try
     try
         set maxElements to count of uiElements
-        set targetQuery to "{query_str}"
-        set targetRole to "{role_str}"
+        set targetQuery to {query_literal}
+        set targetRole to {role_literal}
         if targetQuery is "" and targetRole is "" then
             if maxElements > {_MAX_ELEMENTS} then set maxElements to {_MAX_ELEMENTS}
         end if
@@ -235,25 +257,6 @@ _AX_SNAPSHOT_SCRIPT = _build_ax_snapshot_script()
 def _build_ax_invoke_script(target_app: str | None = None) -> str:
     app_selector = _build_app_selector(target_app)
     return f"""
-on escapeText(t)
-    if t is missing value then return ""
-    set s to t as string
-    set bs to ASCII character 92
-    set dq to ASCII character 34
-    set s to my replaceText(s, bs, bs & bs)
-    set s to my replaceText(s, dq, bs & dq)
-    return s
-end escapeText
-
-on replaceText(sourceText, oldText, newText)
-    set AppleScript's text item delimiters to oldText
-    set parts to text items of sourceText
-    set AppleScript's text item delimiters to newText
-    set resultText to parts as string
-    set AppleScript's text item delimiters to ""
-    return resultText
-end replaceText
-
 on run argv
     set actionName to item 1 of argv
     set elemIndex to item 2 of argv as integer

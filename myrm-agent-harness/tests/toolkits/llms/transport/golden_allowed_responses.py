@@ -40,6 +40,16 @@ RESPONSES_RULES: tuple[AllowedDiff, ...] = (
         providers=("xai",),
     ),
     AllowedDiff(
+        "responses-function-call-output-string",
+        "String tool outputs are sent as plain string `function_call_output.output` instead of a single-item "
+        "`input_text` list.",
+        "~",
+        r"/body/input\[\d+\]/output",
+        providers=("xai",),
+        scenarios=("reasoning_tools", "tool_history"),
+        when=lambda diff: isinstance(diff.new, str) and diff.old == [{"text": diff.new, "type": "input_text"}],
+    ),
+    AllowedDiff(
         "xai-search-tools",
         "xAI native search is a `web_search` tool on the Responses endpoint, as in the baseline; tool items carry no "
         "`strict: null`.",

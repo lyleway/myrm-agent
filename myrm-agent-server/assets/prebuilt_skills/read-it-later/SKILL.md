@@ -23,7 +23,7 @@ contract:
     - "Phase 4: Write-back — update the source item with a summary and mark as processed"
   potential_traps:
     - description: "Anti-bot pages returning empty or garbled content"
-      mitigation: "Use web_fetch_tool with stealth mode; skip and log failures without blocking other items"
+      mitigation: "Skip and log blocked, empty, or garbled items without retrying or blocking other items"
       severity: medium
     - description: "Duplicate ingestion on retry after partial failure"
       mitigation: "Dual-layer dedup: check MCP processed tag first, then memory_recall for local URL records"
@@ -39,7 +39,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 ## Overview
 
@@ -76,9 +76,9 @@ Use the configured MCP service to list items from the designated task group or t
 For each unprocessed URL:
 
 1. Use `web_fetch_tool` to retrieve the full article content
-   - The tool automatically handles anti-bot measures with multi-layer fallback
+   - Uses fast local HTTP fetch with optional configured remote reader fallback; if a site explicitly blocks access, skip and log the item rather than retrying
    - For paywalled content, extract whatever is publicly available
-2. If fetching fails after retries, log the failure and continue to the next item
+2. If fetching fails or is blocked, log the failure and continue to the next item
 3. Extract the core article text — strip navigation, ads, and boilerplate
 
 ### Content Quality Check

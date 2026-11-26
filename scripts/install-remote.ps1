@@ -3,7 +3,7 @@
 # [POS] Windows one-liner entry (irm https://myrmagent.ai/install.ps1 | iex)
 #
 #   irm https://myrmagent.ai/install.ps1 | iex
-#   irm https://raw.githubusercontent.com/Pursue-LLL/myrm-agent/main/scripts/install-remote.ps1 | iex
+#   irm https://raw.githubusercontent.com/lyleway/myrm-agent/main/scripts/install-remote.ps1 | iex
 #
 # Clones (or updates) the repo, then runs scripts/install.ps1.
 #Requires -Version 5.1
@@ -15,7 +15,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 }
 
 $repoDir = if ($env:MYRM_INSTALL_DIR) { $env:MYRM_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".myrm\myrm-agent" }
-$repoUrl = if ($env:MYRM_REPO_URL) { $env:MYRM_REPO_URL } else { "https://github.com/Pursue-LLL/myrm-agent.git" }
+$repoUrl = if ($env:MYRM_REPO_URL) { $env:MYRM_REPO_URL } else { "https://github.com/lyleway/myrm-agent.git" }
 
 if (Test-Path (Join-Path $repoDir "myrm-agent-server")) {
     Set-Location $repoDir

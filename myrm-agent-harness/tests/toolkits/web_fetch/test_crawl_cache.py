@@ -8,8 +8,8 @@ from langchain_core.documents import Document
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
 
 SSRF_BYPASS = patch(
-    "myrm_agent_harness.core.security.guards.ssrf.validate_url_for_ssrf",
-    return_value=type("SSRFResult", (), {"safe": True, "error": None})(),
+    "myrm_agent_harness.core.security.guards.ssrf.async_validate_url_for_ssrf",
+    new=AsyncMock(return_value=type("SSRFResult", (), {"safe": True, "error": None})()),
 )
 
 

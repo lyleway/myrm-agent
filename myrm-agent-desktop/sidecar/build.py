@@ -52,6 +52,9 @@ HARNESS_ROOT = PROJECT_ROOT / "myrm-agent-harness"
 # The harness package as the checkout holds it. The build ships the installed copy (a wheel built from this one), so
 # it passes that copy to `pyinstaller_command`; this one answers when only the command is looked at.
 HARNESS_SOURCE_DIR = HARNESS_ROOT / "src" / HARNESS_PACKAGE
+# The script sandbox's worker as the platform names it; the build passes the installed one, so this answers when only
+# the command is looked at.
+MONTY_WORKER_DEFAULT = Path(monty_worker_name())
 OUTPUT_DIR = PROJECT_ROOT / "myrm-agent-desktop" / "src-tauri" / "binaries"
 SHARED_PROVIDER_REMAP = PROJECT_ROOT / "shared" / "config" / "provider_legacy_remap.json"
 STDIO_RUNTIME_HOOK = Path(__file__).parent / "stdio_runtime_hook.py"
@@ -78,6 +81,10 @@ SERVER_DATA_NOT_SHIPPED = {
     "app/channels/providers/whatsapp/bridge": (
         "the bridge runs `npm install` inside its own directory and starts the Node.js found on PATH; an installed "
         "app has neither a writable directory there nor a Node.js on a launcher's PATH"
+    ),
+    "app/startup/granian_log_config.json": (
+        "the SERVER_MODE=granian launcher of run.py passes it to the granian command; an installed app starts through "
+        "app/main.py and never runs granian"
     ),
 }
 
@@ -179,7 +186,7 @@ def pyinstaller_command(
     server_python: Path,
     work_dir: Path,
     harness_dir: Path = HARNESS_SOURCE_DIR,
-    monty_worker: Path = Path(monty_worker_name()),
+    monty_worker: Path = MONTY_WORKER_DEFAULT,
 ) -> list[str]:
     """PyInstaller invocation that writes the one-folder bundle to SIDECAR_DIR.
 
@@ -299,7 +306,8 @@ def build_backend(*, skip_harness_install: bool = False) -> None:
     _verify_bundle(server_python, harness_dir)
 
     if SYSTEM != "windows":
-        os.chmod(SIDECAR_EXECUTABLE, 0o755)  # noqa: S103 - the entry point must be executable for every user of the install
+        # The entry point must be executable for every user of the install.
+        SIDECAR_EXECUTABLE.chmod(0o755)
     if SYSTEM == "darwin":
         _assert_macos_architecture(SIDECAR_EXECUTABLE)
 

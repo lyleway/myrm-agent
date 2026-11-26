@@ -1,17 +1,18 @@
-"""Approval notification card: localized copy, the request's reason, reply preview and channel-aware decision buttons.
+"""Approval notification card: localized copy, the request's reason, reply preview and route-aware decision buttons.
 
 [INPUT]
 - app.channels.i18n::channel_t (POS: localized channel copy catalog)
 - app.channels.types::DraftTimeoutAction (POS: what happens when a held reply expires)
 - app.channels.types.components::ActionButton, ButtonStyle, ComponentRow (POS: interactive card components)
 - app.services.approvals.outbound_draft::draft_code (POS: how a held reply is named in chat)
+- app.services.channels.cp_egress_client::should_route_via_control_plane (POS: whether replies leave through the text-only control-plane egress)
 
 [OUTPUT]
-- APPROVAL_CLICK_CHANNELS: channels whose button clicks are resolved by the router
+- APPROVAL_CLICK_CHANNELS: channels whose inbound parser turns a button click into the approval message the router resolves
 - build_approval_card: (text, buttons) for one APPROVAL_REQUIRED event on one target channel
 
 [POS]
-Presentation of approval requests for IM notification targets. Pure functions over the event data.
+Presentation of approval requests for IM notification targets. Functions over the event data and the delivery route.
 The card says what is being asked: the request's ``reason`` as the registry publishes it, quoted and capped.
 Every quoted text comes from a request or a held message, not from us, so it is shown without the syntax that
 would make a chat platform ping a whole channel or label a link as something else.
@@ -32,9 +33,11 @@ from app.channels.i18n import channel_t
 from app.channels.types import DraftTimeoutAction
 from app.channels.types.components import ActionButton, ButtonStyle, ComponentRow
 from app.services.approvals.outbound_draft import draft_code
+from app.services.channels.cp_egress_client import should_route_via_control_plane
 
 # Telegram is the only channel whose inbound parser turns a button click into the ``approval:<decision>:<id>``
-# message that the router resolves; a button on any other channel would do nothing when pressed.
+# message that the router resolves; a button on any other channel would do nothing when pressed. A click also has to
+# reach this instance: control-plane egress carries plain text only, so no button is shown on a hosted channel.
 APPROVAL_CLICK_CHANNELS: frozenset[str] = frozenset({"telegram"})
 
 _OUTBOUND_DRAFT = "outbound_draft"
@@ -57,7 +60,7 @@ def build_approval_card(
 ) -> tuple[str, tuple[ComponentRow, ...]]:
     """Render one approval request for ``channel``.
 
-    Approve/Deny buttons are attached only where a click can be resolved; every other channel gets a
+    Approve/Deny buttons are attached only where a click can be resolved; every other route gets a
     pointer to the app, since a click there never reaches the approval handler. A held reply additionally
     names the ``/draft`` commands there, so the owner can decide by typing.
     """
@@ -68,12 +71,17 @@ def build_approval_card(
     else:
         content = _generic_content(data, action_type, locale)
 
-    if approval_id and channel in APPROVAL_CLICK_CHANNELS:
+    if approval_id and _click_reaches_router(channel):
         return content, (_decision_buttons(approval_id, locale),)
     hints = [_t(locale, "approval_card_open_app")]
     if approval_id and action_type == _OUTBOUND_DRAFT:
         hints.insert(0, _t(locale, "approval_draft_commands", code=draft_code(approval_id)))
     return "\n\n".join((content, *hints)), ()
+
+
+def _click_reaches_router(channel: str | None) -> bool:
+    """Whether a button sent to ``channel`` can be pressed and resolved: the channel parses clicks and the send stays local."""
+    return channel in APPROVAL_CLICK_CHANNELS and not should_route_via_control_plane(channel)
 
 
 def _t(locale: str | None, key: str, **kwargs: object) -> str:

@@ -16,7 +16,8 @@ Abstract persistent shell session base. Manages subprocess lifecycle, state mach
 script armor (on POSIX each command runs as ``bash <script>`` in a child of the shell, so what it exports or
 changes dies with it), and runs the commands of one shell one at a time; the command pump lives in
 ``CommandStreamMixin``. A command whose request is cancelled is stopped like a timed-out one (tree killed, session
-rebuilt on the next command); a command that reaches a shell that died is never replayed.
+rebuilt on the next command); a command that reaches a shell that died is never replayed. A closed session is final:
+a command that reaches it after ``close()`` is refused, it never starts a shell.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from myrm_agent_harness.toolkits.code_execution.security.script_armor import (
 from myrm_agent_harness.toolkits.code_execution.session.command_stream import (
     CANCELLED_BEFORE_START,
     CANCELLED_EXIT_CODE,
+    SESSION_CLOSED_BEFORE_START,
     CommandStreamMixin,
 )
 from myrm_agent_harness.toolkits.code_execution.session.models import (
@@ -64,6 +66,10 @@ def _cancelled_before_start() -> SessionExecutionResult:
     return SessionExecutionResult(False, "", "", CANCELLED_EXIT_CODE, error=CANCELLED_BEFORE_START)
 
 
+def _closed_before_start() -> SessionExecutionResult:
+    return SessionExecutionResult(False, "", "", 1, error=SESSION_CLOSED_BEFORE_START)
+
+
 class PersistentSession(CommandStreamMixin, ABC):
     """Abstract base class for persistent shell sessions."""
 
@@ -77,6 +83,9 @@ class PersistentSession(CommandStreamMixin, ABC):
         self._lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
         self._commands_waiting = 0
+        # Set by ``close()``, never cleared: a closed session refuses commands (see ``execute``) instead of starting
+        # a shell that nothing tracks.
+        self._closed = False
         self._state = SessionState.IDLE
 
     @property
@@ -165,8 +174,10 @@ class PersistentSession(CommandStreamMixin, ABC):
         cancelled while its command waits, or before, never starts it (``CANCELLED_BEFORE_START``); one cancelled
         while the command runs stops it (see ``CommandStreamMixin``). A shell that dies under the command is not
         retried, because the command may already have run: the failure is returned and the next command starts a
-        new shell. ``env`` is applied around this command only: it is the one way a command's credentials reach a
-        shell that was started before them.
+        new shell. A closed session starts none: a command that reaches it after ``close()`` is refused
+        (``SESSION_CLOSED_BEFORE_START``), so one that waited behind the command a closing session ended never runs
+        in a shell its owner has already dropped. ``env`` is applied around this command only: it is the one way a
+        command's credentials reach a shell that was started before them.
         """
         timeout = timeout or self.config.timeout
         try:
@@ -176,6 +187,8 @@ class PersistentSession(CommandStreamMixin, ABC):
         try:
             if cancel_token is not None and cancel_token.is_cancelled:
                 return _cancelled_before_start()
+            if self._closed:
+                return _closed_before_start()
             start_time = time.perf_counter()
             await self.start()
             result = await self._execute_core(command, timeout, cancel_token, env)
@@ -274,6 +287,10 @@ class PersistentSession(CommandStreamMixin, ABC):
         await self._transit_state(SessionState.TERMINATED)
 
     async def close(self) -> None:
+        """Kill the shell tree and end the session for good: a command that arrives later is refused."""
+        # Marked before the first await: a command waiting for the shell gets its turn as soon as the command ahead
+        # of it ends, which can be while this close still waits for ``_lock``, and it has to find the session closed.
+        self._closed = True
         async with self._lock:
             await self._close_unlocked()
 

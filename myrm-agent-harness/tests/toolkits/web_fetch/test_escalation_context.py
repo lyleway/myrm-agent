@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from myrm_agent_harness.toolkits.browser.pool.config import LaunchMode
 from myrm_agent_harness.toolkits.web_fetch.escalation.context import (
     bind_web_fetch_escalation_context,
-    get_bound_browser_launch_mode,
     get_bound_escalation_providers,
 )
 from myrm_agent_harness.toolkits.web_fetch.escalation.metrics import WebFetchEscalationMetrics
@@ -21,11 +19,9 @@ class _Provider:
 
 def test_bind_context_sets_and_resets_providers() -> None:
     assert get_bound_escalation_providers() is None
-    with bind_web_fetch_escalation_context(providers=[_Provider()], launch_mode=LaunchMode.EXTENSION):
+    with bind_web_fetch_escalation_context(providers=[_Provider()]):
         assert get_bound_escalation_providers() is not None
-        assert get_bound_browser_launch_mode() == LaunchMode.EXTENSION
     assert get_bound_escalation_providers() is None
-    assert get_bound_browser_launch_mode() is None
 
 
 def test_metrics_snapshot() -> None:

@@ -74,18 +74,21 @@ async def test_firecrawl_provider_success() -> None:
     }
     mock_response.raise_for_status = MagicMock()
 
-    with patch(
-        "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
-        new=AsyncMock(return_value=SSRFResult(safe=True)),
+    with (
+        patch(
+            "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
+            new=AsyncMock(return_value=SSRFResult(safe=True)),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.resolve_and_validate_endpoint_ips",
+            new=AsyncMock(return_value=["93.184.216.34"]),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.secure_request",
+            new=AsyncMock(return_value=mock_response),
+        ),
     ):
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
-            result = await provider.fetch_url("https://example.com")
+        result = await provider.fetch_url("https://example.com")
 
     assert result is not None
     assert "Text" in result.content
@@ -110,18 +113,21 @@ async def test_firecrawl_provider_ssrf_blocked() -> None:
 @pytest.mark.asyncio
 async def test_firecrawl_provider_http_error() -> None:
     provider = FirecrawlEscalationProvider("fc-key")
-    with patch(
-        "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
-        new=AsyncMock(return_value=SSRFResult(safe=True)),
+    with (
+        patch(
+            "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
+            new=AsyncMock(return_value=SSRFResult(safe=True)),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.resolve_and_validate_endpoint_ips",
+            new=AsyncMock(return_value=["93.184.216.34"]),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.secure_request",
+            new=AsyncMock(side_effect=httpx.HTTPError("fail")),
+        ),
     ):
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post = AsyncMock(side_effect=httpx.HTTPError("fail"))
-            mock_client_cls.return_value = mock_client
-
-            assert await provider.fetch_url("https://example.com") is None
+        assert await provider.fetch_url("https://example.com") is None
 
 
 @pytest.mark.asyncio
@@ -155,15 +161,18 @@ async def test_firecrawl_provider_empty_markdown() -> None:
     mock_response.json.return_value = {"data": {"markdown": ""}}
     mock_response.raise_for_status = MagicMock()
 
-    with patch(
-        "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
-        new=AsyncMock(return_value=SSRFResult(safe=True)),
+    with (
+        patch(
+            "app.services.web_fetch.providers.firecrawl.async_validate_url_for_ssrf",
+            new=AsyncMock(return_value=SSRFResult(safe=True)),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.resolve_and_validate_endpoint_ips",
+            new=AsyncMock(return_value=["93.184.216.34"]),
+        ),
+        patch(
+            "app.services.web_fetch.providers.firecrawl.secure_request",
+            new=AsyncMock(return_value=mock_response),
+        ),
     ):
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-
-            assert await provider.fetch_url("https://example.com") is None
+        assert await provider.fetch_url("https://example.com") is None

@@ -20,7 +20,6 @@ from tests.toolkits.web_fetch._degradation_support import (
     RICH_HTML,
     http_result,
     make_document,
-    start_on,
     stub_fetchers,
 )
 
@@ -97,27 +96,21 @@ def test_a_server_error_with_a_data_body_is_not_judged_as_a_page(body: str) -> N
 
 async def test_a_server_error_page_from_l1_is_not_delivered_as_content() -> None:
     engine = FetchEngine()
-    http, browser, _stealth = stub_fetchers(engine)
+    http = stub_fetchers(engine)
     pipeline = cast("MagicMock", engine._pipeline)
-    browser_page = http_result(RICH_HTML)
     http.fetch.return_value = http_result(_content_page(30_000), 521)
-    browser.fetch.return_value = browser_page
-    pipeline.aprocess.return_value = make_document()
 
-    doc, result = await engine._crawl_with_degradation(URL)
+    doc, _result = await engine._crawl_with_degradation(URL, allow_escalation=False)
 
-    assert doc is not None
-    assert result is browser_page
-    pipeline.aprocess.assert_awaited_once_with(browser_page)
+    assert doc is None
+    pipeline.aprocess.assert_not_awaited()
     await engine.shutdown()
 
 
-async def test_a_server_error_page_that_every_tier_returns_is_never_processed() -> None:
+async def test_a_server_error_page_from_l1_is_never_processed() -> None:
     engine = FetchEngine()
-    http, browser, stealth = stub_fetchers(engine)
-    start_on(engine, FetcherType.HTTP)
-    for fetcher in (http, browser, stealth):
-        fetcher.fetch.return_value = http_result(_content_page(30_000), 500)
+    http = stub_fetchers(engine)
+    http.fetch.return_value = http_result(_content_page(30_000), 500)
 
     doc, _result = await engine._crawl_with_degradation(URL, allow_escalation=False)
 

@@ -53,7 +53,7 @@ contract:
 
 ## Bash execution contract
 
-When calling `bash_code_execute_tool`, always pass **`reason`** (≥10 characters: why this command runs) and **`command`**. Put `reason` first.
+When calling `bash_code_execute_tool`, always pass **`reason`** (why this command runs) and **`command`**. Put `reason` first.
 
 Companion skill for the `blender` integration in the Myrm catalog. The MCP
 server provides the connection to a running Blender instance; this skill teaches
