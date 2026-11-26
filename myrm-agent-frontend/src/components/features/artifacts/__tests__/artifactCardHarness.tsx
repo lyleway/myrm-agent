@@ -109,7 +109,11 @@ vi.mock('../PublishModal', () => ({
   ),
 }));
 vi.mock('../WeChatDraftPanel', () => ({
-  WeChatDraftPanel: (props: { htmlPath: string; onComplete: () => void; fetchInlineContent: () => Promise<unknown> }) => (
+  WeChatDraftPanel: (props: {
+    htmlPath: string;
+    onComplete: () => void;
+    fetchInlineContent: () => Promise<unknown>;
+  }) => (
     <div data-testid="wechat-panel" data-path={props.htmlPath}>
       <button onClick={props.onComplete}>finish-draft</button>
       <button onClick={() => void props.fetchInlineContent()}>load-page</button>
@@ -163,7 +167,8 @@ export const fetchMock = vi.fn(async (url: string) => {
     blob: async () => new Blob([route.text ?? '']),
   };
 });
-export const storageFetches = () => fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('storage:'));
+export const storageFetches = () =>
+  fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith('storage:'));
 export const deployable = (value: boolean) =>
   hoisted.routes.set(PREFLIGHT_URL, {
     ok: true,

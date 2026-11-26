@@ -12,7 +12,7 @@
 
 [POS]
 Business layer. The only module that reads or writes the three artifact-app tables; the API layer and the fetch proxy
-go through it. Every function takes the caller's session and commits its own write.
+go through it. Every database function takes the caller's session and commits its own write.
 """
 
 from __future__ import annotations

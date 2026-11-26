@@ -27,7 +27,7 @@ interface ArtifactAppsState {
   uninstall: (artifactId: string) => Promise<void>;
 }
 
-/** Every artifact card asks for the registry on mount; concurrent askers share one request. */
+/** Every HTML artifact card asks for the registry on mount; concurrent askers share one request. */
 let inflightRefresh: Promise<void> | null = null;
 
 /** A read already in flight started before the change and may miss it, so wait for it and read again. */

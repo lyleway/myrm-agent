@@ -6,8 +6,10 @@
  * getArtifactColor, abilitiesOf, ArtifactAbilities.
  *
  * [POS]
- * What the artifact card can offer for each artifact kind. One lookup per kind, so the
- * card never re-derives a kind rule inline.
+ * What the artifact card offers for each artifact kind (preview, copy, inline preview, ingest,
+ * install) and the kind's color, one lookup per kind. Other per-kind rules live elsewhere, for
+ * example share and deploy eligibility (`../artifactUtils`), hover preloading
+ * (`./useArtifactContent`) and the WeChat draft panel (`../ArtifactCard`).
  */
 
 import type { ArtifactType } from '@/store/chat/types';
@@ -49,12 +51,14 @@ const COPYABLE: ReadonlySet<ArtifactType> = new Set<ArtifactType>([
 ]);
 const INLINE_PREVIEWABLE: ReadonlySet<ArtifactType> = new Set<ArtifactType>(['html', 'svg', 'mermaid']);
 const INGESTABLE: ReadonlySet<ArtifactType> = new Set<ArtifactType>(['code', 'document', 'html', 'svg', 'mermaid']);
+const INSTALLABLE: ReadonlySet<ArtifactType> = new Set<ArtifactType>(['html']);
 
 export interface ArtifactAbilities {
   preview: boolean;
   copy: boolean;
   inlinePreview: boolean;
   ingest: boolean;
+  install: boolean;
 }
 
 export function getArtifactColor(type: ArtifactType): string {
@@ -67,5 +71,6 @@ export function abilitiesOf(type: ArtifactType): ArtifactAbilities {
     copy: COPYABLE.has(type),
     inlinePreview: INLINE_PREVIEWABLE.has(type),
     ingest: INGESTABLE.has(type),
+    install: INSTALLABLE.has(type),
   };
 }

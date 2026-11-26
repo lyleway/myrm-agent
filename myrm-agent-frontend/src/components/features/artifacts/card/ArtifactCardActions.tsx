@@ -3,7 +3,7 @@
 /**
  * [INPUT]
  * - ./IconAction, ./ArtifactAppButton, ./ArtifactLocalFileActions, ./ArtifactSharePopover (POS: row building blocks)
- * - ./artifactKinds (POS: ArtifactAbilities)
+ * - ./artifactKinds (POS: what the card offers for each artifact kind)
  * - ./useArtifactPublishing, ./useArtifactActions (POS: state and handlers the row drives)
  * - @/components/features/dashboard-workspace/useDashboardWorkspaceStore (POS: pin to dashboard)
  * - @/services/hosting (POS: ArtifactPublication)
@@ -13,8 +13,8 @@
  * ArtifactCardActions, PanelToggle.
  *
  * [POS]
- * The action row at the right of an artifact card. Which buttons appear depends only on
- * the artifact kind, its local path and its publishing state.
+ * The action row at the right of an artifact card. Which buttons appear depends on the
+ * artifact kind, its file name, its local path and its publishing state.
  */
 
 import { useTranslations } from 'next-intl';
@@ -105,12 +105,14 @@ export function ArtifactCardActions({
       {isSharePreviewableArtifact(current) ? (
         <ArtifactSharePopover artifactId={current.id} artifactType={current.type} />
       ) : null}
-      {artifact.type === 'html' ? <ArtifactAppButton artifactId={current.id} name={current.filename} /> : null}
+      {abilities.install ? <ArtifactAppButton artifactId={current.id} name={current.filename} /> : null}
       {publishing.isDeployCandidate ? (
         <IconAction
           icon={Globe}
           title={
-            canDeploy ? t('publish.openModal') : (deployPreflight?.hint ?? deployPreflight?.message ?? t('publish.openModal'))
+            canDeploy
+              ? t('publish.openModal')
+              : (deployPreflight?.hint ?? deployPreflight?.message ?? t('publish.openModal'))
           }
           toneClass={canDeploy ? 'text-primary' : 'text-muted-foreground opacity-60'}
           onAction={publishing.openDeploy}

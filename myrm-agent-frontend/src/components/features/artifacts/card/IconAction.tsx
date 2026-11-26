@@ -28,7 +28,15 @@ interface IconActionProps {
   testId?: string;
 }
 
-export function IconAction({ icon: Icon, title, onAction, toneClass, iconClassName, disabled, testId }: IconActionProps) {
+export function IconAction({
+  icon: Icon,
+  title,
+  onAction,
+  toneClass,
+  iconClassName,
+  disabled,
+  testId,
+}: IconActionProps) {
   return (
     <Button
       variant="ghost"

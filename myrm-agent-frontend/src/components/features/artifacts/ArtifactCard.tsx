@@ -11,8 +11,9 @@
  * ArtifactCard (default).
  *
  * [POS]
- * Card for one artifact in a chat message. Composes the card parts and owns only what
- * they share: which sections are open and the single click-to-preview target.
+ * Card for one artifact in a chat message. Composes the card parts and holds the state that spans them:
+ * which sections are open, the inline preview text and the single click-to-preview target. It also decides
+ * which optional panels the artifact has.
  */
 
 import React, { useCallback, useState } from 'react';

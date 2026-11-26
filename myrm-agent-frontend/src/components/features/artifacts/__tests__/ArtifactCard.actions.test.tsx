@@ -133,9 +133,7 @@ describe('ArtifactCard publishing', () => {
     expect(screen.getByTestId('banners')).toHaveAttribute('data-count', '1');
 
     rerender(
-      <ArtifactCard
-        artifact={artifactOf({ filename: 'new.html', publications: [PUBLICATION, SECOND_PUBLICATION] })}
-      />,
+      <ArtifactCard artifact={artifactOf({ filename: 'new.html', publications: [PUBLICATION, SECOND_PUBLICATION] })} />,
     );
     expect(screen.getByRole('heading', { name: 'new.html' })).toBeInTheDocument();
     expect(screen.getByTestId('banners')).toHaveAttribute('data-count', '2');
@@ -189,9 +187,7 @@ describe('ArtifactCard actions', () => {
 
     env.ingestArtifact.mockResolvedValueOnce({ success: false, message: 'bad' });
     fireEvent.click(screen.getByTitle('ingestToWiki.title'));
-    await waitFor(() =>
-      expect(env.toast.error).toHaveBeenCalledWith('ingestToWiki.failed', { description: 'bad' }),
-    );
+    await waitFor(() => expect(env.toast.error).toHaveBeenCalledWith('ingestToWiki.failed', { description: 'bad' }));
 
     env.ingestArtifact.mockRejectedValueOnce(new Error('offline'));
     fireEvent.click(screen.getByTitle('ingestToWiki.title'));
