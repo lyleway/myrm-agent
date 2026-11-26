@@ -12,7 +12,8 @@
  * - @/hooks/ui/useFocusedMode (POS: whether the page is shown without the app shell)
  *
  * [OUTPUT]
- * - AppHostView: the page of one installed app: title bar with a permissions / keep-on-top / uninstall menu, then the app.
+ * - AppHostView: the page of one installed app: title bar with a permissions / keep-on-top / uninstall menu and a review
+ *   reminder while a permission is undecided (icon only on narrow screens, with an accessible name), then the app.
  *
  * [POS]
  * Body of `/apps/[artifactId]`. The app runs in the same sandbox as any HTML artifact (scripts only, no network); the

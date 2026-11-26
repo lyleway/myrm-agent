@@ -6,7 +6,8 @@
  * [OUTPUT]
  * - installApp / uninstallApp / listInstalledApps / fetchAppDetail: the install registry of HTML artifacts.
  * - saveGrant: store the user's decision on one capability.
- * - proxyAppFetch / reportAppActivity / fetchAppActivity: the host fetch proxy and the metadata-only activity log.
+ * - proxyAppFetch / reportAppActivity / fetchAppActivity: the host fetch proxy and the metadata-only activity log; a report
+ *   is sent with `keepalive`, so it reaches the server when the page closes right after the call.
  *
  * [POS]
  * HTTP client of the installed-app API (`/artifact-apps`). Only the app host page calls the proxy and the log:
