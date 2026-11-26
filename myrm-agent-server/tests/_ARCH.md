@@ -712,7 +712,8 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/chats/test_kanban_closure_seed_fixture.py` | 模块 | Kanban closure fixture seed HTTP 单测（`/chats/test/seed-kanban-closure-fixture`） |
 | `api/chats/test_kanban_closure_seed_integration.py` | 模块 | Kanban closure seed 真 DB 集成（metadata + board task） |
 | `api/chats/test_citation_seed_integration.py` | 模块 | citation seed → GET messages 集成单测（真 DB metadata） |
-| `api/chats/test_prior_chat_recall_integration.py` | 模块 | prior_chat seed → GET `/recall/search` SSOT + mention inject 集成（真 DB，无 mock） |
+| `api/chats/test_prior_chat_recall_integration.py` | 模块 | prior_chat seed → GET `/recall/search` SSOT + mention inject 集成；seed 的 `sent_at` 把消息盖在固定时刻（GET `/search` 返回带 `+00:00` 偏移的时间），缺偏移时 422；`marker` 让一次 seed 只被自己的标记搜到，不合法的标记 422（真 DB，无 mock） |
+| `e2e/test_chat_search_time_chrome_e2e.py` | 模块 | 聊天历史搜索结果的时间（Chrome 3 个节点，无 LLM；seed 用 `sent_at` 固定消息时刻、用 `marker` 让每次检查只搜到自己这一份）：Cmd+K（READ×2）——跨 UTC 日的时刻在结果卡片上显示查看者本地的日期，同时断言搜索接口返回带 `+00:00` 偏移的 `sent_at`；月末（3 月 31 日）选「最近一月」时窗口回到 2 月 28 日，3 月 1 日的消息仍在窗内（页内只在点击预设那一刻固定时钟）。设置 → 记忆 → 团队资产里共享上下文的历史搜索（NAMESPACE_WRITE×1）——同一个跨 UTC 日的时刻按查看者本地的月、日、时分显示 |
 | `api/channels/test_telegram_test_connection.py` | 模块 | Telegram 连接测试接口：令牌经表单带来的代理校验（有、空串、缺省三种），不可用的代理地址在响应里不带其中的凭据 |
 | `api/channels/test_instance_credentials.py` | 模块 | 渠道凭据配置键与 camelCase 转 snake_case、实例凭据的读取与删除（按 `config_key` 而非 `id`）、创建实例时按渠道凭据声明归一化凭据（飞书、微信、钉钉、无声明回退、未知渠道抛错） |
 | `api/channels/test_instance_credentials_save.py` | 模块 | `save_channel_credentials`：实例密钥加密落库、按 merge 保留未提交字段、多实例按 `instance_id` 重建并传字符串凭据、默认实例热重载、未注册渠道热注册、重建或替换失败时保住旧渠道与已存凭据 |
@@ -1108,7 +1109,8 @@ pytest marker 是收集过滤器。四层金字塔（server 侧）：
 - **Subagent Dashboard Chrome E2E**：`tests/e2e/test_subagent_dashboard_chrome_e2e.py`（LIVE lane ×6：`subagent-dashboard-e2e-prepare.mjs` delegate → Dashboard cancel / pause toggle / token+model / budget used-limit / canvas 拓扑渲染+点击节点定位回树 / fission 拓扑经 store bridge 注入后合并渲染；`open_mcp_page(..., timeout_ms=MAX_PAGE_TIMEOUT_MS)`）
 - **Subagent rebind 单测**：`tests/services/agent/test_subagent_rebind_event.py`（`AgentService.update_agent` 变更 `subagent_ids` → `SUBAGENT_REBIND_REQUIRED`）
 - **Citation seed 集成单测**：`tests/api/chats/test_citation_seed_integration.py`（seed → GET messages 断言 `citedMemoryIds`；默认 CI 套件执行，不依赖 Chrome）
-- **Prior chat recall SSOT 集成单测**：`tests/api/chats/test_prior_chat_recall_integration.py`（seed-prior-chat-fixture → GET `/recall/search` → mention inject；默认 CI，不依赖 Chrome）
+- **Prior chat recall SSOT 集成单测**：`tests/api/chats/test_prior_chat_recall_integration.py`（seed-prior-chat-fixture → GET `/recall/search` → mention inject；`sent_at` 固定消息时刻 → GET `/search`；默认 CI，不依赖 Chrome）
+- **聊天历史搜索时间 Chrome E2E**：`tests/e2e/test_chat_search_time_chrome_e2e.py`（`seed-prior-chat-fixture?sent_at=&marker=` 固定消息时刻并打标记 → Cmd+K 结果卡片日期按查看者时区、月末预设窗口、共享上下文历史命中的月日时分；`./myrm-dev test -m chrome_e2e`）
 - **MCP reload confirm Chrome E2E**：`tests/e2e/test_mcp_reload_confirm_chrome_e2e.py`（READ×1 SHPOIB 单会话：toggle · delete · import · add/save → `MCPReloadConfirmDialog`；见 `CHROME_MCP_E2E.md` §MCP reload confirm）
 - 并行（内存充足时）：`PYTEST_XDIST_WORKERS=4 scripts/dev/run_tests_low_memory.sh`；每个 worker 是独立 Python 进程，内存随 worker 数叠加，所以 `pyproject.toml` 的 `--maxprocesses=4` 把 `-n auto` 与显式 `-n N` 都封顶在 4 个，要更多须显式加 `--maxprocesses=M`（`tests/architecture/test_xdist_worker_cap.py` 守着这一条）
 - 定位高内存文件：`uv run python scripts/dev/profile_test_memory.py tests/api/agent --top 20`

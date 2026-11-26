@@ -28,7 +28,7 @@ local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.
 | `guardrail_bash.py` | guardrail bash Badge seed |
 | `media_cards.py` | 生成媒体卡片 seed（`POST /chats/test/seed-media-cards-fixture`：图像任务 / 视频任务 / 同步图像编辑 / 语音各一条已登记条目，媒体经落库回调真实存储；`address=file` 为任务结果指向不可加载地址的负向对照，`address=expired` 为任务记录已不存在） |
 | `memory_lifecycle.py` | memory lifecycle seed |
-| `prior_chat.py` | composer @chat: mention seed |
+| `prior_chat.py` | composer @chat: mention seed（`POST /chats/test/seed-prior-chat-fixture`；可选 `sent_at`（须带 UTC 偏移）给消息盖固定时刻，可选 `marker`（单个字母数字词）追加到两条消息末尾让一次 seed 能被单独搜到；Cmd+K 与共享上下文历史搜索的时间检查用） |
 | `revert.py` | RevertFiles seed（chat + snapshot data） |
 | `rich_media_preview.py` | workspace rich-media preview seed（png/pdf/zip/txt 落盘） |
 | `security_preset.py` | SecurityPreset seed（agent-bound chats） |
