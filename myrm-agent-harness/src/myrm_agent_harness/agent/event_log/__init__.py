@@ -12,7 +12,7 @@ debugging, cross-session analysis, and task-level replay.
 - EventLogger: session-level analysis (classify → sanitize → buffer → write + analytics)
 - EventLogAnalytics: global-level analysis (cross-session aggregation)
 - FileEventLogBackend: built-in JSONL file backend
-- ExecutionTrace: task-level aggregation for replay and scoring
+- ExecutionTrace: task-level aggregation for replay, analytics, and dataset export
 - TraceMetadata: context dimensions (user_id, agent_id, task_type, trace_id)
 - Data classes: ToolUsageStats, ActivityPatterns, DailyActivity, GlobalActivityPatterns
 

@@ -4,10 +4,10 @@ Provides a read-side view that reconstructs the complete execution flow
 (input → tool calls → intermediate states → errors → output) from the
 append-only event stream.  Used by downstream systems:
 
-- Frontend task replay timeline
-- Skill Evolution scoring (task_input + agent_output)
-- Memory extraction (successful tool call patterns)
-- Analytics dimension slicing (user_id, agent_id, task_type)
+- Session trace API (frontend task replay timeline)
+- Session analytics (context breakdown)
+- Chat export (tool-call summary)
+- Dataset export (training samples from task_input and output)
 
 [INPUT]
 - none (imports no other project module)

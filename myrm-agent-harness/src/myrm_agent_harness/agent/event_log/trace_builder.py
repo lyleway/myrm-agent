@@ -1,7 +1,7 @@
 """Trace builder — constructs ExecutionTrace from raw event streams.
 
 Reads events from EventLogBackend and aggregates them into a structured
-ExecutionTrace for task-level replay, scoring, and pattern extraction.
+ExecutionTrace for task-level replay, session analytics, and dataset export.
 
 The aggregation is split across focused helper modules to keep each one small
 and single-purpose:

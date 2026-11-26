@@ -9,7 +9,7 @@
 1. **Checkpointer 互补**：Checkpointer 保存图状态；EventLog 保存细粒度事件流（tool/llm/token）
 2. **可选注入**：通过 `event_log_backend` 注入 BaseAgent，未配置时零开销
 3. **读侧分析**：analytics / trace_builder 供会话追踪、统计分析与数据集导出消费
-4. **导出管道**：dataset_export 支持 ShareGPT/Alpaca/OpenAI JSONL + 凭据遮蔽（始终执行）+ PII 脱敏
+4. **导出管道**：dataset_export 支持 ShareGPT/Alpaca/OpenAI JSONL + 凭据遮蔽（始终执行）+ PII 脱敏（仅任务输入与最终回答）；任务输入取自 `session_start` 载荷、最终回答取自 `session_end` 载荷，而 `EventLogger` 写入的 `session_start` 载荷为空、`session_end` 只含 `summary`，运行时记录的会话因此过不了默认质量门（`min_content_length` 50）
 5. **会话级生命周期**：`FileEventLogBackend` 每个会话一个 `{session_id}.jsonl`。按时间老化由 `cleanup_old_logs` 负责；业务层在会话被永久删除时调用 `remove_session_log` 立即删除该会话的文件（会话标识解析到日志目录之外时拒绝）。事件日志含完整提示词与工具结果，是否为某类会话创建后端由业务层决定（不注入 `event_log_backend` 即不落盘）
 
 ---
