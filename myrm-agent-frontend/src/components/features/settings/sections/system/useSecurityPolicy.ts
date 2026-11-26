@@ -285,8 +285,8 @@ export function useSecurityPolicy(t: (key: string, fallback?: Record<string, str
   );
 
   const handleProfileSelect = useCallback(
-    (profile: { config_json: Record<string, unknown> }) => {
-      const parsed = parseProfileConfig(profile.config_json);
+    (profile: { configJson: Record<string, unknown> }) => {
+      const parsed = parseProfileConfig(profile.configJson);
 
       if (parsed.rules && parsed.derivedMatrix) {
         capabilityRules.setRules(parsed.rules);

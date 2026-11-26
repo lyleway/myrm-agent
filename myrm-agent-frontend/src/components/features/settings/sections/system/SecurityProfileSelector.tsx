@@ -23,19 +23,19 @@ import { fetchWithTimeout } from '@/lib/api';
 
 interface SecurityProfile {
   id: string;
-  profile_key: string;
-  display_name: string;
+  profileKey: string;
+  displayName: string;
   description: string | null;
-  config_json: Record<string, unknown>;
-  is_builtin: boolean;
-  is_active: boolean;
-  created_at: string | null;
-  updated_at: string | null;
+  configJson: Record<string, unknown>;
+  isBuiltin: boolean;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 interface ProfileListResponse {
   profiles: SecurityProfile[];
-  active_key: string | null;
+  activeKey: string | null;
 }
 
 const PROFILE_ICONS: Record<string, typeof IconShield> = {
@@ -63,7 +63,7 @@ const SecurityProfileSelector = memo(function SecurityProfileSelector({
       }
       const data: ProfileListResponse = await res.json();
       setProfiles(data.profiles);
-      setActiveKey(data.active_key);
+      setActiveKey(data.activeKey);
     } catch (err) {
       console.error('Failed to load security profiles:', err);
     } finally {
@@ -84,8 +84,8 @@ const SecurityProfileSelector = memo(function SecurityProfileSelector({
           throw new Error(`HTTP ${res.status}`);
         }
         const activated: SecurityProfile = await res.json();
-        setActiveKey(activated.profile_key);
-        toast.success(t('profile.activated', { name: activated.display_name }));
+        setActiveKey(activated.profileKey);
+        toast.success(t('profile.activated', { name: activated.displayName }));
         onProfileSelect?.(activated);
       } catch (err) {
         toast.error(t('profile.activateFailed'));
@@ -97,7 +97,7 @@ const SecurityProfileSelector = memo(function SecurityProfileSelector({
     [onProfileSelect, t],
   );
 
-  const activeProfile = profiles.find((p) => p.profile_key === activeKey);
+  const activeProfile = profiles.find((p) => p.profileKey === activeKey);
 
   if (loading) {
     return (
@@ -111,30 +111,31 @@ const SecurityProfileSelector = memo(function SecurityProfileSelector({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className="w-full justify-between">
+        <Button variant="outline" className="w-full justify-between" data-testid="security-profile-trigger">
           <div className="flex items-center gap-2">
             <IconShield className="h-4 w-4" />
-            <span>{activeProfile?.display_name ?? t('profile.selectDefault', { default: 'Select Profile' })}</span>
+            <span>{activeProfile?.displayName ?? t('profile.selectDefault', { default: 'Select Profile' })}</span>
           </div>
           <IconChevronDown className="h-4 w-4 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">
         {profiles.map((profile) => {
-          const Icon = PROFILE_ICONS[profile.profile_key] ?? IconShield;
-          const isActive = profile.profile_key === activeKey;
-          const isActivatingThis = activating === profile.profile_key;
+          const Icon = PROFILE_ICONS[profile.profileKey] ?? IconShield;
+          const isActive = profile.profileKey === activeKey;
+          const isActivatingThis = activating === profile.profileKey;
 
           return (
             <DropdownMenuItem
-              key={profile.profile_key}
-              onClick={() => handleActivate(profile.profile_key)}
+              key={profile.profileKey}
+              data-testid={`security-profile-option-${profile.profileKey}`}
+              onClick={() => handleActivate(profile.profileKey)}
               disabled={isActivatingThis}
               className="flex items-center gap-2"
             >
               <Icon className="h-4 w-4 shrink-0" />
               <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{profile.display_name}</div>
+                <div className="font-medium truncate">{profile.displayName}</div>
                 {profile.description && (
                   <div className="text-xs text-muted-foreground truncate">{profile.description}</div>
                 )}
