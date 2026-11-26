@@ -71,7 +71,9 @@ class TurnPermissions:
     def _restore_deadline(self, decision: asyncio.Future[PermissionVerdict]) -> None:
         """Set the deadline again, with the budget that was left, once the last waiting request is answered."""
         self._pending.discard(decision)
-        if self._pending or self._budget_left is None or self._clock.expired():
+        # A request that ends because the turn did runs this after the turn's clock has been left, and a clock that has
+        # been left cannot be set again.
+        if self._closed or self._pending or self._budget_left is None or self._clock.expired():
             return
         self._clock.reschedule(asyncio.get_running_loop().time() + self._budget_left)
         self._budget_left = None

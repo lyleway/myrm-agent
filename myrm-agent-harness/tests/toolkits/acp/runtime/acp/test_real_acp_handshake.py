@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 from acp import PROTOCOL_VERSION, spawn_agent_process
-from acp.schema import ClientCapabilities, FileSystemCapabilities, Implementation, InitializeResponse
+from acp.schema import Implementation, InitializeResponse
 
-from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler
+from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler, client_capabilities
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 from tests.toolkits.acp.acp_contract import ACP_ARGS, handshake_gaps
 from tests.toolkits.acp.cli_contract import cli_binary, probe_env
@@ -41,9 +41,7 @@ async def _initialize(agent: str, home: Path) -> InitializeResponse:
             # The same client capabilities ``AcpRuntime`` declares.
             return await connection.initialize(
                 protocol_version=PROTOCOL_VERSION,
-                client_capabilities=ClientCapabilities(
-                    fs=FileSystemCapabilities(read_text_file=True, write_text_file=True), terminal=False
-                ),
+                client_capabilities=client_capabilities(),
                 client_info=Implementation(name="myrm-acp-client", version="1.0.0"),
             )
 

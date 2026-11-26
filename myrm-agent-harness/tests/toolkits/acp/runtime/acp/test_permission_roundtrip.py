@@ -1,7 +1,7 @@
 """An ACP agent's permission requests and file calls, answered over the real SDK wire.
 
 The scripted agent (``_mock_acp_agent.py``) is a real SDK agent: it sends ``session/request_permission`` and
-``fs/read_text_file`` / ``fs/write_text_file`` through the SDK and reports what came back, so these tests
+``fs/write_text_file`` through the SDK and reports what came back, so these tests
 cover what the runtime hands to the SDK and how the SDK's answer reads on the agent's side.
 """
 
@@ -20,6 +20,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     PermissionMode,
     PermissionRequest,
     PermissionVerdict,
+    RuntimeEvent,
     RuntimeEventType,
 )
 
@@ -27,7 +28,6 @@ from ._fakes import make_pool
 
 _PERMISSION_DENIED = "-32001"
 _INVALID_PARAMS = "-32602"
-_NOT_FOUND = "-32002"
 
 
 @dataclass
@@ -43,13 +43,13 @@ class _Broker:
 
 
 async def _report(
-    pool: RuntimePool, workspace: Path, verb: str, args: dict[str, object], *, broker: PermissionBroker | None
+    pool: RuntimePool, workspace: Path, verb: str, args: dict[str, object] | None, *, broker: PermissionBroker | None
 ) -> str:
-    """The agent's report of one scripted call: ``verb`` with ``args`` as the prompt."""
+    """The agent's report of one scripted call: ``verb`` with ``args`` (when it takes any) as the prompt."""
     text: list[str] = []
     async for event in pool.run_turn(
         "mock",
-        f"/{verb} {json.dumps(args)}",
+        f"/{verb}" if args is None else f"/{verb} {json.dumps(args)}",
         session_id="chat-1",
         workspace=str(workspace),
         permissions=broker,
@@ -228,55 +228,17 @@ class TestFileWrites:
         assert (tmp_path / "a.txt").read_text() == "x"
 
 
-class TestFileReads:
-    async def _read(self, workspace: Path, args: dict[str, object]) -> str:
+class TestWhatTheHostOffers:
+    async def test_the_agent_is_offered_file_writes_and_not_file_reads(self, tmp_path: Path) -> None:
         pool = make_pool(permission_mode="safe")
         try:
-            return await _report(pool, workspace, "read", args, broker=None)
+            report = await _report(pool, tmp_path, "capabilities", None, broker=None)
         finally:
             await pool.close_all()
 
-    async def test_a_file_is_read_whole_without_asking_anyone(self, tmp_path: Path) -> None:
-        (tmp_path / "a.txt").write_bytes(b"one\r\ntwo\nthree")
-
-        assert await self._read(tmp_path, {"path": "a.txt"}) == '[read] "one\\r\\ntwo\\nthree"'
-
-    @pytest.mark.parametrize(
-        ("line", "limit", "expected"),
-        [(2, 1, "two\n"), (2, None, "two\nthree"), (None, 2, "one\ntwo\n"), (3, 5, "three"), (9, 1, "")],
-    )
-    async def test_line_and_limit_pick_lines_independently(
-        self, tmp_path: Path, line: int | None, limit: int | None, expected: str
-    ) -> None:
-        (tmp_path / "a.txt").write_bytes(b"one\ntwo\nthree")
-
-        report = await self._read(tmp_path, {"path": "a.txt", "line": line, "limit": limit})
-
-        assert report == f"[read] {json.dumps(expected)}"
-
-    async def test_a_file_outside_the_workspace_is_an_error(self, tmp_path: Path) -> None:
-        outside = tmp_path.parent / "outside.txt"
-        outside.write_text("classified")
-        workspace = tmp_path / "ws"
-        workspace.mkdir()
-
-        report = await self._read(workspace, {"path": str(outside)})
-
-        assert report.startswith(f"[read] error {_INVALID_PARAMS} Invalid params")
-        assert "classified" not in report
-
-    async def test_a_file_that_does_not_exist_is_an_error(self, tmp_path: Path) -> None:
-        assert (await self._read(tmp_path, {"path": "missing.txt"})).startswith(
-            f"[read] error {_NOT_FOUND} Resource not found"
-        )
-
-    async def test_a_file_that_is_not_text_is_an_error_not_a_lossy_read(self, tmp_path: Path) -> None:
-        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00bad")
-
-        report = await self._read(tmp_path, {"path": "blob.bin"})
-
-        assert report.startswith(f"[read] error {_INVALID_PARAMS} Invalid params")
-        assert "not UTF-8 text" in report
+        offered = json.loads(report.removeprefix("[capabilities] "))
+        assert offered["fs"] == {"read_text_file": False, "write_text_file": True}
+        assert offered["terminal"] is False
 
 
 class TestWaitingForAPerson:
@@ -298,3 +260,48 @@ class TestWaitingForAPerson:
             await pool.close_all()
 
         assert report == "[permission] selected allow-once"
+
+
+class TestCancellingWhileAsked:
+    async def test_the_waiting_request_is_answered_as_cancelled_and_the_agent_ends_its_prompt(
+        self, tmp_path: Path
+    ) -> None:
+        asked = asyncio.Event()
+        withdrawn = asyncio.Event()
+
+        class _NeverAnswering:
+            async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+                asked.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    withdrawn.set()
+                    raise
+                raise AssertionError("unreachable")
+
+        pool = make_pool(permission_mode="safe")
+        events: list[RuntimeEvent] = []
+
+        async def run() -> None:
+            async for event in pool.run_turn(
+                "mock",
+                f"/permission {json.dumps({'kind': 'edit', 'title': 'Edit'})}",
+                session_id="chat-1",
+                workspace=str(tmp_path),
+                permissions=_NeverAnswering(),
+            ):
+                events.append(event)
+
+        try:
+            turn = asyncio.create_task(run())
+            await asyncio.wait_for(asked.wait(), 30)
+            await pool.cancel("mock", "chat-1")
+            await asyncio.wait_for(turn, 30)
+        finally:
+            await pool.close_all()
+
+        assert withdrawn.is_set()
+        assert [event.type for event in events if event.type is RuntimeEventType.ERROR] == []
+        reported = "".join(str(event.data["content"]) for event in events if event.type is RuntimeEventType.TEXT_DELTA)
+        assert reported == "[permission] cancelled"
+        assert [event.data["stop_reason"] for event in events if event.type is RuntimeEventType.DONE] == ["cancelled"]

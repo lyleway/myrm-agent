@@ -8,7 +8,7 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 - toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
 - toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
-- toolkits.acp.runtime.acp.callback::AcpCallbackHandler (POS: ACP callback handler for the AcpRuntime backend.)
+- toolkits.acp.runtime.acp.callback::AcpCallbackHandler, client_capabilities (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
 - toolkits.acp.runtime.acp.stalled_agent::cancel_session, leave_transport (POS: Bounded stop of an ACP agent that has stopped reading its stdin)
 
@@ -22,6 +22,7 @@ The host's policy answers every permission request the agent makes, so a known a
 entry args (the flag that makes it ask the host included) and without the configured flags that let it skip asking
 (``--yolo``, ``--approval-mode``). In ``safe`` mode a session that the agent reports in a mode that never asks is put
 back in the mode that asks, or the turn is refused: the agent's own report is the only authority on what it will do.
+A cancel answers the permission requests still waiting as cancelled, so the agent can end its prompt.
 A refused login (JSON-RPC ``auth_required``) ends the turn as ``AUTH_FAILED`` with the agent's own words.
 A silent agent (one long tool call) is reported as still working at a fixed interval, as ``CliRuntime`` does, and a
 missing ACP SDK (the optional ``acp`` extra) ends the turn with a ``BACKEND_NOT_FOUND`` error that says how to install it.
@@ -51,7 +52,7 @@ from myrm_agent_harness.toolkits.acp.runtime._base import (
     build_safe_env,
     working_status,
 )
-from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler
+from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler, client_capabilities
 from myrm_agent_harness.toolkits.acp.runtime.acp.stalled_agent import cancel_session, leave_transport
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock, load_image_blocks
 from myrm_agent_harness.toolkits.acp.types import (
@@ -254,6 +255,10 @@ class AcpRuntime(BaseRuntime):
     async def _do_cancel(self, session_id: str) -> None:
         if self._conn is None or self._session_id is None:
             return
+        # An agent that waits for the answer to a request does not end its prompt on ``session/cancel`` alone: the
+        # requests still waiting are answered as cancelled, which ACP asks of a client that cancels.
+        if self._handler is not None:
+            self._handler.end_turn()
         await cancel_session(self._conn, self._session_id, self._process, self._name)
 
     async def _do_resume(self, session_id: str) -> bool:
@@ -301,11 +306,7 @@ class AcpRuntime(BaseRuntime):
         await self._do_close()
 
         from acp import PROTOCOL_VERSION, spawn_agent_process
-        from acp.schema import (
-            ClientCapabilities,
-            FileSystemCapabilities,
-            Implementation,
-        )
+        from acp.schema import Implementation
 
         self._handler = AcpCallbackHandler(self._config, session_id="", agent=self._name, workspace=self._workspace)
         safe_env = build_safe_env(self._config)
@@ -339,10 +340,7 @@ class AcpRuntime(BaseRuntime):
 
         init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
-            client_capabilities=ClientCapabilities(
-                fs=FileSystemCapabilities(read_text_file=True, write_text_file=True),
-                terminal=False,
-            ),
+            client_capabilities=client_capabilities(),
             client_info=Implementation(name="myrm-acp-client", version="1.0.0"),
         )
         agent_caps = init_response.agent_capabilities

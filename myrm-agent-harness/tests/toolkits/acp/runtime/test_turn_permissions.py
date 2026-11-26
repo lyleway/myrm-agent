@@ -79,6 +79,20 @@ class TestTheTurnEnding:
         assert "turn ended" in (verdict.message or "")
         assert (broker.asked, broker.cancelled) == (1, 1)
 
+    async def test_a_request_that_ends_after_the_turns_clock_was_left_is_still_refused(self) -> None:
+        """The request wakes up after the turn: it must not try to set the clock the turn has already left."""
+        broker = _Broker(wait=True)
+        async with asyncio.timeout(30) as clock:
+            permissions = TurnPermissions(broker, clock)
+            waiting = asyncio.create_task(permissions.decide(_REQUEST))
+            await asyncio.sleep(0.05)
+            permissions.close()
+
+        verdict = await asyncio.wait_for(waiting, 5)
+
+        assert verdict.allowed is False
+        assert "turn ended" in (verdict.message or "")
+
     async def test_a_request_after_the_turn_ended_is_refused_without_asking_anyone(self) -> None:
         broker = _Broker()
         async with asyncio.timeout(None) as clock:

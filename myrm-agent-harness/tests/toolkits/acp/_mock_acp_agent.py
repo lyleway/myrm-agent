@@ -6,14 +6,16 @@ with a prefix to verify the full ACP roundtrip. With ``--images`` it advertises
 ``promptCapabilities.image`` and reports every image block it received as
 ``[images] <mimeType>:<base64 length>:<sha256 prefix>``.
 
-A prompt that starts with ``/permission``, ``/write``, ``/read`` or ``/edit`` followed by a JSON object makes the agent call
+A prompt that starts with ``/permission``, ``/write`` or ``/edit`` followed by a JSON object makes the agent call
 the client the way a real agent does, over the real SDK, and report what came back:
 ``/permission {"kind", "title", "raw_input", "locations", "diff_path"}`` -> ``[permission] <outcome> <option id>``;
 ``/write {"path", "content"}`` -> ``[write] ok`` or ``[write] error <code> <message> <data as JSON>``;
-``/read {"path", "line", "limit"}`` -> ``[read] <content as JSON>`` or ``[read] error <code> <message> <data as JSON>``;
 ``/edit {"path", "content"}`` asks permission to edit the file, then writes it: both reports, joined.
 ``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``;
-``/mode`` -> ``[mode] <the session's current mode>``.
+``/mode`` -> ``[mode] <the session's current mode>``;
+``/capabilities`` -> ``[capabilities] <the capabilities the client offered in initialize, as JSON>``.
+A ``session/cancel`` makes the prompt that is running end with stop reason ``cancelled`` once what it waits for is
+answered, as the real agents do.
 
 Session modes: ``--mode <id>`` makes ``session/new`` report that current mode (offered with ``--modes a,b``, default
 ``default,yolo``), ``set_session_mode`` switches it unless the agent was started with ``--keep-mode``. ``--login-required``
@@ -34,6 +36,7 @@ import acp
 from acp.schema import (
     AgentCapabilities,
     AgentMessageChunk,
+    ClientCapabilities,
     CloseSessionResponse,
     FileEditToolCallContent,
     ImageContentBlock,
@@ -77,6 +80,8 @@ class MockAcpAgent:
         self._conn: object | None = None
         self._sessions: dict[str, str] = {}
         self._modes: dict[str, str] = {}
+        self._cancelled: set[str] = set()
+        self._client_capabilities: ClientCapabilities | None = None
 
     def on_connect(self, conn: object) -> None:
         self._conn = conn
@@ -84,11 +89,12 @@ class MockAcpAgent:
     async def initialize(
         self,
         protocol_version: int,
-        client_capabilities: object | None = None,
+        client_capabilities: ClientCapabilities | None = None,
         client_info: object | None = None,
         **kwargs: Any,
     ) -> InitializeResponse:
         advertise_images = "--images" in sys.argv[1:]
+        self._client_capabilities = client_capabilities
         return InitializeResponse(
             protocol_version=protocol_version,
             agent_capabilities=AgentCapabilities(prompt_capabilities=PromptCapabilities(image=advertise_images)),
@@ -151,6 +157,7 @@ class MockAcpAgent:
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(block["text"])
         user_text = " ".join(text_parts)
+        self._cancelled.discard(session_id)
 
         if self._conn is not None:
             scripted = await self._run_script(session_id, user_text)
@@ -169,16 +176,20 @@ class MockAcpAgent:
                     update=AgentMessageChunk(content=TextContentBlock(text=f"[images] {' '.join(received)}")),
                 )
 
-        return PromptResponse(stop_reason="end_turn")
+        return PromptResponse(stop_reason="cancelled" if session_id in self._cancelled else "end_turn")
 
     async def _run_script(self, session_id: str, text: str) -> str | None:
-        """The report of a ``/permission``, ``/write``, ``/read`` or ``/edit`` prompt, or None for any other prompt."""
+        """The report of a ``/permission``, ``/write``, ``/edit`` or introspection prompt, or None for any other prompt."""
         verb, _, rest = text.partition(" ")
         if verb == "/argv":
             return f"[argv] {json.dumps(sys.argv[1:])}"
         if verb == "/mode":
             return f"[mode] {self._modes.get(session_id)}"
-        if verb not in ("/permission", "/write", "/read", "/edit"):
+        if verb == "/capabilities":
+            offered = self._client_capabilities
+            dumped = None if offered is None else offered.model_dump(exclude_none=True)
+            return f"[capabilities] {json.dumps(dumped, sort_keys=True)}"
+        if verb not in ("/permission", "/write", "/edit"):
             return None
         args = json.loads(rest)
         try:
@@ -192,7 +203,6 @@ class MockAcpAgent:
                     session_id, {"kind": "edit", "title": f"Edit {args['path']}", "locations": [args["path"]]}
                 )
                 return f"{asked} {await self._write(session_id, args)}"
-            return await self._read(session_id, args)
         except Exception as error:
             # Reported instead of raised, so a test sees what broke rather than a bare JSON-RPC "Internal error".
             return f"[{verb[1:]}] crashed {type(error).__name__}: {error}"
@@ -218,15 +228,6 @@ class MockAcpAgent:
             return _failure("write", error)
         return "[write] ok"
 
-    async def _read(self, session_id: str, args: dict[str, Any]) -> str:
-        try:
-            response = await self._conn.read_text_file(
-                session_id=session_id, path=args["path"], line=args.get("line"), limit=args.get("limit")
-            )
-        except acp.RequestError as error:
-            return _failure("read", error)
-        return f"[read] {json.dumps(response.content)}"
-
     async def fork_session(self, cwd: str, session_id: str, **kwargs: Any) -> None:
         return None
 
@@ -238,7 +239,7 @@ class MockAcpAgent:
         return CloseSessionResponse()
 
     async def cancel(self, session_id: str, **kwargs: Any) -> None:
-        pass
+        self._cancelled.add(session_id)
 
     async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {}

@@ -12,11 +12,14 @@ Permission policy of the ACP runtime backend. ``allow_all`` answers every reques
 ``safe`` allows what only reads, and puts everything else to the turn's ``PermissionBroker``; with no broker nobody
 can say yes, so the answer is a refusal (the runtime's ``TurnPermissions`` already turns a failing broker into one).
 An edit a person allowed is remembered by the files it names, so the agent's following ``fs/write_text_file`` of
-those files is not asked a second time.
+those files is not asked a second time. A request still waiting for a person when the turn ends or is cancelled is
+answered as cancelled, the outcome ACP gives a cancelled turn: an agent waiting for the answer does not end its
+prompt on ``session/cancel`` alone, and the person is no longer asked.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Sequence
@@ -52,6 +55,7 @@ class AcpPermissionPolicy:
         self._broker: PermissionBroker | None = None
         self._session_id = ""
         self._allowed_files: set[str] = set()
+        self._asking: set[asyncio.Future[PermissionVerdict]] = set()
 
     def begin_turn(self, broker: PermissionBroker | None, session_id: str) -> None:
         """Start the turn ``session_id`` (the host's id for it): its broker replaces the last turn's, no file is allowed yet."""
@@ -60,8 +64,10 @@ class AcpPermissionPolicy:
         self._allowed_files.clear()
 
     def end_turn(self) -> None:
-        """End the turn: a request that still arrives finds nobody to ask, so it is refused."""
+        """End the turn: a request that still arrives finds nobody to ask, so it is refused; one that waits is cancelled."""
         self.begin_turn(None, "")
+        for asking in tuple(self._asking):
+            asking.cancel()
 
     async def answer(self, tool_call: ToolCallUpdate, options: Sequence[PermissionOption]) -> RequestPermissionResponse:
         """The answer to one ``session/request_permission``: one of the agent's own options, or a cancel."""
@@ -70,6 +76,8 @@ class AcpPermissionPolicy:
             return _choose(options, _ALLOW_OPTIONS)
         request = self._request(tool_call, kind)
         verdict = await self._ask(request)
+        if verdict is None:
+            return _cancelled()
         if verdict.allowed and kind in _WRITE_KINDS:
             self._allowed_files.update(request.paths)
         return _choose(options, _ALLOW_OPTIONS if verdict.allowed else _REFUSE_OPTIONS)
@@ -88,16 +96,28 @@ class AcpPermissionPolicy:
             paths=(path,),
         )
         verdict = await self._ask(request)
-        if verdict.allowed:
+        allowed = verdict is not None and verdict.allowed
+        if allowed:
             self._allowed_files.add(path)
-        return verdict.allowed
+        return allowed
 
-    async def _ask(self, request: PermissionRequest) -> PermissionVerdict:
+    async def _ask(self, request: PermissionRequest) -> PermissionVerdict | None:
+        """The turn's broker's verdict, or ``None`` when the turn ended or was cancelled while the request waited."""
         broker = self._broker
         if broker is None:
             logger.info("acp_permission_refused_unattended agent=%s tool=%s", self._agent, request.tool_name)
             return PermissionVerdict(allowed=False)
-        return await broker.decide(request)
+        asking = asyncio.ensure_future(broker.decide(request))
+        self._asking.add(asking)
+        try:
+            return await asking
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+            return None
+        finally:
+            self._asking.discard(asking)
 
     def _request(self, tool_call: ToolCallUpdate, kind: str) -> PermissionRequest:
         tool_name = tool_call.name or tool_call.title or "tool"
@@ -126,11 +146,18 @@ class AcpPermissionPolicy:
 
 def _choose(options: Sequence[PermissionOption], kinds: tuple[str, ...]) -> RequestPermissionResponse:
     """The agent's first option of the wanted kinds (in the order of ``kinds``), or a cancel when it offers none."""
-    from acp.schema import AllowedOutcome, DeniedOutcome, RequestPermissionResponse
+    from acp.schema import AllowedOutcome, RequestPermissionResponse
 
     for kind in kinds:
         for option in options:
             if option.kind == kind:
                 return RequestPermissionResponse(outcome=AllowedOutcome(option_id=option.option_id))
     logger.warning("acp_permission_no_matching_option wanted=%s offered=%s", kinds, [option.kind for option in options])
+    return _cancelled()
+
+
+def _cancelled() -> RequestPermissionResponse:
+    """The answer that selects no option: the request was not decided (the turn was cancelled)."""
+    from acp.schema import DeniedOutcome, RequestPermissionResponse
+
     return RequestPermissionResponse(outcome=DeniedOutcome())

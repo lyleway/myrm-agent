@@ -2,8 +2,8 @@
 
 Implements the acp.Client callback interface: streams RuntimeEvent instances
 through an asyncio.Queue for real-time consumption by AcpRuntime._do_run_turn.
-Also answers permission requests (``permission_policy``) and serves the agent's file reads and
-writes inside the workspace, reporting every refusal and failure to the agent as a JSON-RPC error.
+Also answers permission requests (``permission_policy``) and serves the agent's file writes
+inside the workspace, reporting every refusal and failure to the agent as a JSON-RPC error.
 
 [INPUT]
 - toolkits.acp.types::PermissionBroker, RuntimeConfig, RuntimeEvent, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
@@ -12,18 +12,19 @@ writes inside the workspace, reporting every refusal and failure to the agent as
 
 [OUTPUT]
 - AcpCallbackHandler: Implements acp.Client callbacks for the ACP runtime.
+- client_capabilities: What the host offers the agent in ``initialize``: exactly what the handler serves.
 
 [POS]
-ACP callback handler for the AcpRuntime backend. It receives the SDK's own typed objects. A file is read and
-written as bytes, so what the agent writes is what lands on disk (line endings included), and a file that is not
-valid UTF-8 is refused instead of being read lossily and written back damaged.
+ACP callback handler for the AcpRuntime backend. It receives the SDK's own typed objects. A file is written as
+bytes, so what the agent writes is what lands on disk (line endings included). It serves no file reads: the
+runtime does not offer them, because the agent shares the host's disk and a refusal to read a file that does not
+exist yet (the way a new file is told apart from an existing one) is not understood by every agent.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,8 +42,8 @@ from myrm_agent_harness.toolkits.acp.types import (
 
 if TYPE_CHECKING:
     from acp.schema import (
+        ClientCapabilities,
         PermissionOption,
-        ReadTextFileResponse,
         RequestPermissionResponse,
         ToolCallUpdate,
         WriteTextFileResponse,
@@ -52,8 +53,18 @@ logger = logging.getLogger(__name__)
 
 # JSON-RPC implementation-defined error: the user (or the absence of anyone to ask) refused the write.
 _PERMISSION_DENIED_CODE = -32001
-# A line with its terminator; the last line may have none. Only CR, LF and CRLF end a line, as in an editor.
-_LINE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
+
+
+def client_capabilities() -> ClientCapabilities:
+    """What the host offers an agent in ``initialize``: the one file operation it governs, a write.
+
+    No file reads. The agent shares the host's disk, so a read offered here is only a second reader that can disagree
+    with the agent's own, and not every agent understands its refusal: Gemini (0.71.1) tells a new file from an
+    existing one by reading it, takes the error for "not found" for a failure, and then cannot create the file at all.
+    """
+    from acp.schema import ClientCapabilities, FileSystemCapabilities
+
+    return ClientCapabilities(fs=FileSystemCapabilities(read_text_file=False, write_text_file=True), terminal=False)
 
 
 def _resolve_safe_path(path_str: str, cwd: str) -> Path | None:
@@ -107,15 +118,6 @@ def _tool_output_text(content: object) -> str:
     return "\n".join(lines)
 
 
-def _slice_lines(content: str, line: int | None, limit: int | None) -> str:
-    """The ``limit`` lines of ``content`` from 1-based ``line`` (the rest of the file when no limit is given)."""
-    if line is None and limit is None:
-        return content
-    start = max((line or 1) - 1, 0)
-    stop = None if limit is None else start + max(limit, 0)
-    return "".join(_LINE.findall(content)[start:stop])
-
-
 class AcpCallbackHandler:
     """Implements acp.Client callbacks for the ACP runtime.
 
@@ -162,7 +164,7 @@ class AcpCallbackHandler:
         self._policy.begin_turn(permissions, session_id)
 
     def end_turn(self) -> None:
-        """End the turn: nobody is asked for what the agent still does after it."""
+        """End the turn: nobody is asked for what the agent still does after it, and a request that waits is cancelled."""
         self._policy.end_turn()
 
     def mark_done(self, stop_reason: str) -> None:
@@ -237,34 +239,6 @@ class AcpCallbackHandler:
     ) -> RequestPermissionResponse:
         """Answer the agent's request for permission to run a tool call, by the backend's permission mode."""
         return await self._policy.answer(tool_call, options)
-
-    async def read_text_file(
-        self,
-        session_id: str,
-        path: str,
-        line: int | None = None,
-        limit: int | None = None,
-        **kwargs: object,
-    ) -> ReadTextFileResponse:
-        """Read a UTF-8 file inside the workspace; anything else is an error the agent is told about."""
-        from acp import RequestError
-        from acp.schema import ReadTextFileResponse
-
-        resolved = _resolve_safe_path(path, self._cwd)
-        if resolved is None:
-            raise RequestError.invalid_params({"path": path, "reason": "the path is outside the workspace"})
-        try:
-            data = resolved.read_bytes()
-        except FileNotFoundError as exc:
-            raise RequestError.resource_not_found(path) from exc
-        except OSError as exc:
-            logger.warning("acp_file_read_failed path=%s error=%s", path, exc)
-            raise RequestError.internal_error({"path": path, "reason": exc.strerror or type(exc).__name__}) from exc
-        try:
-            content = data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise RequestError.invalid_params({"path": path, "reason": "the file is not UTF-8 text"}) from exc
-        return ReadTextFileResponse(content=_slice_lines(content, line, limit))
 
     async def write_text_file(
         self,

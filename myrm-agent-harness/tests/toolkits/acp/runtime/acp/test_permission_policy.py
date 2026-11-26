@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -18,7 +19,12 @@ from acp.schema import (
 )
 
 from myrm_agent_harness.toolkits.acp.runtime.acp.permission_policy import AcpPermissionPolicy
-from myrm_agent_harness.toolkits.acp.types import PermissionMode, PermissionRequest, PermissionVerdict
+from myrm_agent_harness.toolkits.acp.types import (
+    PermissionBroker,
+    PermissionMode,
+    PermissionRequest,
+    PermissionVerdict,
+)
 
 _ALL_OPTIONS = [
     PermissionOption(option_id="always-allow", name="Always", kind="allow_always"),
@@ -38,7 +44,26 @@ class _Broker:
         return PermissionVerdict(allowed=self.allowed)
 
 
-def _policy(workspace: Path, mode: PermissionMode = "safe", broker: _Broker | None = None) -> AcpPermissionPolicy:
+class _WaitingBroker:
+    """A person who has not answered: the request waits until the turn withdraws it."""
+
+    def __init__(self) -> None:
+        self.asked = asyncio.Event()
+        self.withdrawn = False
+
+    async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+        self.asked.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.withdrawn = True
+            raise
+        raise AssertionError("unreachable")
+
+
+def _policy(
+    workspace: Path, mode: PermissionMode = "safe", broker: PermissionBroker | None = None
+) -> AcpPermissionPolicy:
     policy = AcpPermissionPolicy(mode, "gemini", str(workspace))
     policy.begin_turn(broker, "chat-1")
     return policy
@@ -132,6 +157,55 @@ class TestTheAnswer:
 
         assert response.outcome == AllowedOutcome(outcome="selected", option_id="reject")
         assert broker.asked == []
+
+
+class TestARequestThatWaitsWhenTheTurnEnds:
+    """An agent waiting for the answer does not end its prompt on ``session/cancel`` alone."""
+
+    async def test_it_is_answered_as_cancelled_and_the_person_is_no_longer_asked(self, tmp_path: Path) -> None:
+        broker = _WaitingBroker()
+        policy = _policy(tmp_path, broker=broker)
+        answering = asyncio.create_task(policy.answer(_call(), _ALL_OPTIONS))
+        await asyncio.wait_for(broker.asked.wait(), 5)
+
+        policy.end_turn()
+        response = await asyncio.wait_for(answering, 5)
+
+        assert response.outcome == DeniedOutcome(outcome="cancelled")
+        assert broker.withdrawn
+
+    async def test_a_file_write_that_waits_is_refused(self, tmp_path: Path) -> None:
+        broker = _WaitingBroker()
+        policy = _policy(tmp_path, broker=broker)
+        writing = asyncio.create_task(policy.allows_write(str((tmp_path / "a.txt").resolve())))
+        await asyncio.wait_for(broker.asked.wait(), 5)
+
+        policy.end_turn()
+
+        assert await asyncio.wait_for(writing, 5) is False
+        assert broker.withdrawn
+
+    async def test_requests_waiting_side_by_side_are_all_cancelled(self, tmp_path: Path) -> None:
+        broker = _WaitingBroker()
+        policy = _policy(tmp_path, broker=broker)
+        answering = [asyncio.create_task(policy.answer(_call(), _ALL_OPTIONS)) for _ in range(3)]
+        await asyncio.sleep(0.05)
+
+        policy.end_turn()
+        responses = await asyncio.wait_for(asyncio.gather(*answering), 5)
+
+        assert [response.outcome for response in responses] == [DeniedOutcome(outcome="cancelled")] * 3
+
+    async def test_a_caller_that_is_cancelled_is_not_turned_into_an_answer(self, tmp_path: Path) -> None:
+        broker = _WaitingBroker()
+        answering = asyncio.create_task(_policy(tmp_path, broker=broker).answer(_call(), _ALL_OPTIONS))
+        await asyncio.wait_for(broker.asked.wait(), 5)
+
+        answering.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await answering
+        assert broker.withdrawn
 
 
 class TestTheRequestTheBrokerSees:

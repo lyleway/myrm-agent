@@ -17,10 +17,10 @@ from pathlib import Path
 
 import pytest
 from acp import PROTOCOL_VERSION, RequestError, spawn_agent_process
-from acp.schema import ClientCapabilities, FileSystemCapabilities, Implementation
+from acp.schema import Implementation
 
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
-from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler
+from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler, client_capabilities
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, RuntimeConfig, RuntimeEventType
 from tests.toolkits.acp.cli_contract import cli_binary, probe_env
@@ -93,9 +93,7 @@ async def _session_mode(agent: str, args: list[str], tmp_path: Path, *, settings
         ) as (connection, _):
             await connection.initialize(
                 protocol_version=PROTOCOL_VERSION,
-                client_capabilities=ClientCapabilities(
-                    fs=FileSystemCapabilities(read_text_file=True, write_text_file=True), terminal=False
-                ),
+                client_capabilities=client_capabilities(),
                 client_info=Implementation(name="myrm-acp-client", version="1.0.0"),
             )
             session = await connection.new_session(cwd=str(workspace), mcp_servers=[])

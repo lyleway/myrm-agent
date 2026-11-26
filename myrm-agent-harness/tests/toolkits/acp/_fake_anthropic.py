@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from types import TracebackType
+from dataclasses import dataclass
 
 from aiohttp import web
+
+from tests.toolkits.acp._loopback_api import LoopbackApi
 
 
 def _sse(event: str, data: Mapping[str, object]) -> bytes:
@@ -22,19 +23,12 @@ def _sse(event: str, data: Mapping[str, object]) -> bytes:
 
 
 @dataclass
-class FakeAnthropicApi:
+class FakeAnthropicApi(LoopbackApi):
     """The model: calls ``tool_name`` with ``tool_input`` once, then says ``final_text``."""
 
     tool_name: str
     tool_input: Mapping[str, object]
     final_text: str = "finished"
-    requests: list[dict[str, object]] = field(default_factory=list)
-    _runner: web.AppRunner | None = None
-    _port: int = 0
-
-    @property
-    def base_url(self) -> str:
-        return f"http://127.0.0.1:{self._port}"
 
     @property
     def tool_results(self) -> list[dict[str, object]]:
@@ -50,25 +44,8 @@ class FakeAnthropicApi:
                 )
         return results
 
-    async def __aenter__(self) -> FakeAnthropicApi:
-        app = web.Application()
+    def _register(self, app: web.Application) -> None:
         app.router.add_post("/v1/messages", self._messages)
-        app.router.add_route("*", "/{tail:.*}", self._anything_else)
-        self._runner = web.AppRunner(app)
-        await self._runner.setup()
-        await web.TCPSite(self._runner, "127.0.0.1", 0).start()
-        (host_and_port,) = self._runner.addresses
-        self._port = int(host_and_port[1])
-        return self
-
-    async def __aexit__(
-        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
-    ) -> None:
-        if self._runner is not None:
-            await self._runner.cleanup()
-
-    async def _anything_else(self, request: web.Request) -> web.Response:
-        return web.json_response({"ok": True})
 
     async def _messages(self, request: web.Request) -> web.StreamResponse:
         body = await request.json()
