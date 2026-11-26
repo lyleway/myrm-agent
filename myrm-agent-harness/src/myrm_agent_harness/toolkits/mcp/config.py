@@ -139,7 +139,9 @@ class MCPConfig(BaseModel):
         default=False,
         description=(
             "Host-level serial execution policy. When true, none of this server's tools runs alongside "
-            "another tool call, whatever the server declares about its tools."
+            "another tool call the model issues, whatever the server declares about its tools. Calls made "
+            "from a script are not covered: they queue one at a time on this server's session but may "
+            "overlap calls to other servers."
         ),
     )
     cache_ttl_seconds: int | None = Field(
