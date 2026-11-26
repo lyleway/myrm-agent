@@ -234,11 +234,6 @@ ignore_missing_imports = true
 module = "app.database.models.*"
 follow_imports = "silent"
 
-[[tool.mypy.overrides]]
-# pydantic types a field definition as ``TypeForm``, which the runtime-built annotations of this schema cannot match.
-module = "app.ai_agents.media_tools.video_schema"
-disable_error_code = ["call-overload"]
-
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "basic"
