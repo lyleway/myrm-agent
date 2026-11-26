@@ -4,68 +4,32 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 
 import pytest
 
 from app.ai_agents.general_agent.stream_pipeline import execute_stream_pipeline
+from tests.support.forced_delegate_agent import DELEGATED, forced_delegate_agent, saved_security
 
-_ALLOWED = {
-    "capabilities": [{"permission": "*", "pattern": "*"}],
-    "permissions": {
-        "spawn_subagent": "allow",
-        "invoke_external_agent": "allow",
-        "file_write": "ask",
-        "shell_exec": "ask",
-    },
-    "yoloModeEnabled": False,
-    "autoModeEnabled": False,
-}
-_ASK = {**_ALLOWED, "permissions": {**_ALLOWED["permissions"], "invoke_external_agent": "ask"}}
-_DELEGATED = {"type": "tasks_steps", "data": "delegated"}
+_ALLOW = {"permissions": {"invoke_external_agent": "allow"}}
+_DENY = {"permissions": {"invoke_external_agent": "deny"}}
 
 
 def _agent(
     *,
     backends: list[str] | None,
     locale: str | None = "en",
-    security: dict[str, object] | None = None,
-    channel: str | None = None,
+    channel: str | None = "web_chat",
     breaks_with: Exception | None = None,
 ) -> SimpleNamespace:
-    """A ``GeneralAgent`` stand-in with only what the forced-delegate branch reads.
+    return forced_delegate_agent(backends=backends, locale=locale, channel=channel, breaks_with=breaks_with)
 
-    ``backends`` is the pool the agent ends up with (None: no pool could be built); ``breaks_with`` makes the
-    delegated turn raise after its first event. The stand-in has no ``jit_subagents`` or any other normal-path
-    attribute, so a fall-through to the normal agent raises.
-    """
-    agent = SimpleNamespace(
-        channel_name=channel,
-        security_config_raw=_ALLOWED if security is None else security,
-        locale=locale,
-        _runtime_pool=None,
-        delegated=[],
-        queries=[],
-        pool_requests=0,
-    )
 
-    async def ensure_pool() -> None:
-        agent.pool_requests += 1
-        agent._runtime_pool = SimpleNamespace(available_backends=backends) if backends is not None else None
-
-    async def delegate(
-        name: str, query: object, *, cancel_token: object = None, chat_id: str | None = None
-    ) -> AsyncGenerator[dict[str, object]]:
-        agent.delegated.append(name)
-        agent.queries.append(query)
-        yield _DELEGATED
-        if breaks_with is not None:
-            raise breaks_with
-
-    agent._ensure_runtime_pool = ensure_pool
-    agent._direct_delegate_stream = delegate
-    return agent
+@pytest.fixture(autouse=True)
+def _saved_policy_allows_the_agent():
+    """Every turn here meets a saved policy that allows the agent, unless a test saves another one."""
+    with saved_security(_ALLOW):
+        yield
 
 
 async def _run(agent: SimpleNamespace, query: object = "hi") -> list[dict[str, object]]:
@@ -75,7 +39,7 @@ async def _run(agent: SimpleNamespace, query: object = "hi") -> list[dict[str, o
 async def test_an_available_agent_gets_the_turn() -> None:
     agent = _agent(backends=["echo-cli"])
 
-    assert await _run(agent) == [_DELEGATED]
+    assert await _run(agent) == [DELEGATED]
     assert agent.delegated == ["echo-cli"]
 
 
@@ -113,9 +77,10 @@ async def test_a_session_without_a_language_gets_english() -> None:
 
 
 async def test_a_turn_the_security_policy_does_not_allow_is_sent_to_the_settings_and_never_reaches_the_agent() -> None:
-    agent = _agent(backends=["echo-cli"], security=_ASK, locale="zh-CN")
+    agent = _agent(backends=["echo-cli"], locale="zh-CN")
 
-    events = await _run(agent)
+    with saved_security(_DENY):
+        events = await _run(agent)
 
     assert [event["type"] for event in events] == ["error"]
     assert events[0]["diagnostic_result"]["error_type"] == "external_agent_denied"
@@ -125,12 +90,12 @@ async def test_a_turn_the_security_policy_does_not_allow_is_sent_to_the_settings
 
 
 async def test_the_refusal_shows_what_to_change_and_logs_the_policy_reason(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.WARNING, logger="app.ai_agents.general_agent.forced_delegate"):
-        events = await _run(_agent(backends=["echo-cli"], security=_ASK))
+    with saved_security(_DENY), caplog.at_level(logging.WARNING, logger="app.ai_agents.general_agent.forced_delegate"):
+        events = await _run(_agent(backends=["echo-cli"]))
 
     shown = json.dumps(events)
     assert "invoke_external_agent" not in shown and "denied by" not in shown.lower()
-    assert "blocked by security policy" in caplog.text and "invoke_external_agent" in caplog.text
+    assert "blocked by security policy" in caplog.text and "invoke_acp_agent_tool" in caplog.text
 
 
 async def test_a_delegation_that_breaks_midway_ends_with_guidance_and_not_with_the_exception(
@@ -141,7 +106,7 @@ async def test_a_delegation_that_breaks_midway_ends_with_guidance_and_not_with_t
     with caplog.at_level(logging.ERROR, logger="app.ai_agents.general_agent.forced_delegate"):
         events = await _run(agent)
 
-    assert events[0] == _DELEGATED
+    assert events[0] == DELEGATED
     assert [event["type"] for event in events] == ["tasks_steps", "error"]
     assert events[1]["diagnostic_result"]["error_type"] == "external_agent_failed"
     assert "10.0.0.7" not in json.dumps(events)

@@ -67,7 +67,7 @@ CAPABILITY_SURFACE_PERMISSIONS: dict[CapabilitySurface, tuple[str, ...]] = {
     CapabilitySurface.KNOWLEDGE_WRITE: ("knowledge_write", "wiki_apply_tool", "wiki_ingest_tool"),
     CapabilitySurface.WEB_EGRESS: ("net_fetch", "web_fetch", "web_search_tool", "browser_navigate"),
     CapabilitySurface.CANDIDATE_CREATE: ("candidate_create", "todo_write"),
-    CapabilitySurface.REMOTE_TOOLS: ("mcp_invoke",),
+    CapabilitySurface.REMOTE_TOOLS: ("mcp_invoke", "invoke_external_agent"),
     CapabilitySurface.LOCAL_FILESYSTEM: ("file_read", "file_write", "shell_exec", "code_interpreter"),
 }
 

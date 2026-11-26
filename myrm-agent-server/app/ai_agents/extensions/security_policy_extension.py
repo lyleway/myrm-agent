@@ -134,21 +134,40 @@ class SecurityPolicyExtension(AgentExtension):
         return None
 
 
-async def sync_wrapper_security_from_store(agent_wrapper: "GeneralAgent") -> None:
+async def sync_wrapper_security_from_store(agent_wrapper: "GeneralAgent") -> dict[str, object] | None:
     """Reload persisted securityConfig onto the wrapper before each stream turn.
 
     The request's own overlays (session preset, remote admission, /learn authoring) are layered back on top,
-    so a saved config takes effect mid-session without loosening them.
+    so a saved config takes effect mid-session without loosening them. Returns the saved config as it was
+    read, before the overlays (None: nothing is saved and the wrapper keeps the config it was built with).
     """
     from app.core.channel_bridge.config_cache import invalidate_user_configs_cache
     from app.core.channel_bridge.config_loader import load_user_configs
 
     invalidate_user_configs_cache()
     configs = await load_user_configs()
-    if configs and configs.security_config_dict is not None:
-        stored = dict(configs.security_config_dict)
-        overlay = agent_wrapper.security_overlay
-        agent_wrapper.security_config_raw = overlay.apply(stored) if overlay is not None else stored
+    if not configs or configs.security_config_dict is None:
+        return None
+    stored = dict(configs.security_config_dict)
+    overlay = agent_wrapper.security_overlay
+    agent_wrapper.security_config_raw = overlay.apply(stored) if overlay is not None else stored
+    return stored
+
+
+async def sync_wrapper_security_inputs(agent_wrapper: "GeneralAgent") -> dict[str, object] | None:
+    """Reload what a turn's effective security policy is made of, so a Settings change applies to the next message.
+
+    That is the agent's own overrides (re-read from its profile) and the saved securityConfig; every turn that
+    judges a call, the model's and the user's own alike, starts from this. Returns the saved config as
+    ``sync_wrapper_security_from_store`` does.
+    """
+    if agent_wrapper.agent_id:
+        from app.services.agent.profile.profile_resolver import get_agent_profile_resolver
+
+        resolved_profile = await get_agent_profile_resolver().resolve(agent_wrapper.agent_id)
+        if resolved_profile is not None and resolved_profile.security_overrides:
+            agent_wrapper.agent_security_raw = dict(resolved_profile.security_overrides)
+    return await sync_wrapper_security_from_store(agent_wrapper)
 
 
 def refresh_wrapper_security_config(agent_wrapper: "GeneralAgent") -> None:
