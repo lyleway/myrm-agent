@@ -52,6 +52,9 @@ def _pin_deterministic_lane_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MYRM_E2E_PHASE_C_BURST_LANES", raising=False)
     monkeypatch.delenv("E2E_PARALLEL_RAMP_PYTEST_TIMEOUT_SEC", raising=False)
     monkeypatch.setattr("e2e_core.stack_mutation_policy.wave_active_lease_count", lambda path: 0)
+    # A LIVE floor also grows with the pytest sessions running on this machine right now, so a Chrome E2E batch
+    # started beside this gate would otherwise move the expected value.
+    monkeypatch.setattr("e2e_core.peer_count_ssot.parallel_active_test_count_ssot", lambda: 0)
 
 
 def test_r43_caps_high_desktop_timeout_mark_to_600(monkeypatch: pytest.MonkeyPatch) -> None:
