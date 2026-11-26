@@ -10,7 +10,7 @@
 
 [OUTPUT]
 - ExternalAgentsMixin: 外部 Agent 初始化与直接委托流式执行的 Mixin；两个入口（模型发起的工具、用户直连）共用同一个委派工作区（`_delegation_workspace`），回合启动目录只来自它
-- should_mount_invoke_acp_agent_tool(): direct-only 路径是否跳过 invoke_acp_agent_tool 挂载
+- should_mount_invoke_acp_agent_tool(): CLI Visual 内置 Agent 直接驱动外部 CLI，不给模型挂 invoke_acp_agent_tool
 - needs_runtime_pool(): factory 是否 eager 初始化 RuntimePool（与 stream lazy path 对齐）
 - BUILTIN_CLI_VISUAL_AGENT_ID: CLI Visual 内置 Agent 标识
 - chat scope 路径：ChatRuntimePoolRegistry + ChatScopedRuntimePoolFacade 接线；池带 ChatCliSessionStore，CLI 会话 id 随 chat 落库
@@ -50,27 +50,14 @@ _resolve_external_agent_cfgs = _runtime_cfg_helpers._resolve_external_agent_cfgs
 _register_backends_on_pool = _runtime_cfg_helpers._register_backends_on_pool
 
 
-def should_mount_invoke_acp_agent_tool(*, agent_id: str | None, force_external_agent: str | None) -> bool:
-    """Return False when direct-delegate routing makes the LLM tool redundant."""
-    if force_external_agent:
-        return False
-    if agent_id == BUILTIN_CLI_VISUAL_AGENT_ID:
-        return False
-    return True
+def should_mount_invoke_acp_agent_tool(*, agent_id: str | None) -> bool:
+    """Return False for the agent that drives its external CLI directly, so the model has no tool for it."""
+    return agent_id != BUILTIN_CLI_VISUAL_AGENT_ID
 
 
-def needs_runtime_pool(
-    *,
-    enable_external_cli: bool,
-    agent_id: str | None,
-    force_external_agent: str | None,
-) -> bool:
+def needs_runtime_pool(*, enable_external_cli: bool, agent_id: str | None) -> bool:
     """Return True when factory should eagerly init RuntimePool (not lazy stream path)."""
-    if force_external_agent:
-        return True
-    if agent_id == BUILTIN_CLI_VISUAL_AGENT_ID:
-        return True
-    return enable_external_cli
+    return enable_external_cli or agent_id == BUILTIN_CLI_VISUAL_AGENT_ID
 
 
 def _runtime_pool_scope_id(agent: object) -> str | None:
@@ -102,7 +89,6 @@ class ExternalAgentsMixin:
         declared_allowed_roots: tuple[str, ...]
         chat_id: str | None
         agent_id: str | None
-        force_external_agent: str | None
         locale: str | None
         quote: str | None
 
@@ -122,10 +108,7 @@ class ExternalAgentsMixin:
         Failures are caught and logged — they never block Agent initialization.
         """
         if mount_invoke_acp_agent_tool is None:
-            mount_invoke_acp_agent_tool = should_mount_invoke_acp_agent_tool(
-                agent_id=getattr(self, "agent_id", None),
-                force_external_agent=getattr(self, "force_external_agent", None),
-            )
+            mount_invoke_acp_agent_tool = should_mount_invoke_acp_agent_tool(agent_id=getattr(self, "agent_id", None))
         try:
             await self._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool)
         except Exception as e:

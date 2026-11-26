@@ -81,7 +81,6 @@ async def delegating_agent(fake_claude: _FakeClaude) -> AsyncIterator[AgentBuild
         mixin._runtime_pool_from_registry = False
         mixin._owned_runtime_pool = None
         mixin.agent_id = "general"
-        mixin.force_external_agent = None
         mixin.locale = "en"
         mixin.quote = None
         mixin.declared_allowed_roots = roots

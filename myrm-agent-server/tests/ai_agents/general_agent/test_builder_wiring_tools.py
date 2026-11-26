@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from myrm_agent_harness.toolkits.storage.local import LocalStorageBackend
 
+from app.ai_agents.general_agent.external_agents import BUILTIN_CLI_VISUAL_AGENT_ID
 from app.ai_agents.general_agent.mount_resolver import ResolvedMountPlan
 from app.core.skills.creation.version_persisting_backend import VersionPersistingSkillWriteBackend
 from app.core.skills.marketplace.market_service import market_service
@@ -203,10 +204,8 @@ class TestExternalAgents:
         assert kwargs == {"mount_invoke_acp_agent_tool": True}
         assert wrapper._runtime_pool_scope_id == CHAT_ID  # noqa: SLF001
 
-    async def test_a_forced_external_agent_gets_the_pool_without_the_redundant_delegate_tool(
-        self, harness: BuilderHarness
-    ) -> None:
-        await harness.build(harness.wrapper(force_external_agent="claude-code"))
+    async def test_the_cli_visual_agent_gets_the_pool_without_a_delegate_tool(self, harness: BuilderHarness) -> None:
+        await harness.build(harness.wrapper(agent_id=BUILTIN_CLI_VISUAL_AGENT_ID))
 
         ((_, kwargs),) = harness.calls["external_agents"]
         assert kwargs == {"mount_invoke_acp_agent_tool": False}

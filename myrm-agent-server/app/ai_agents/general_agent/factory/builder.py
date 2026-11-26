@@ -122,15 +122,10 @@ async def build_general_agent(
     )
 
     mount_invoke_acp_agent_tool = agent_wrapper.enable_external_cli and should_mount_invoke_acp_agent_tool(
-        agent_id=agent_wrapper.agent_id,
-        force_external_agent=agent_wrapper.force_external_agent,
+        agent_id=agent_wrapper.agent_id
     )
     agent_wrapper._runtime_pool_scope_id = effective_chat_id
-    if needs_runtime_pool(
-        enable_external_cli=agent_wrapper.enable_external_cli,
-        agent_id=agent_wrapper.agent_id,
-        force_external_agent=agent_wrapper.force_external_agent,
-    ):
+    if needs_runtime_pool(enable_external_cli=agent_wrapper.enable_external_cli, agent_id=agent_wrapper.agent_id):
         await agent_wrapper._setup_external_agents(tools, mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool)
 
     from app.services.agent.goals.goal_registry import GoalRegistry

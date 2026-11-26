@@ -41,7 +41,6 @@ def _new_mixin(*, chat_scope_id: str) -> ExternalAgentsMixin:
     mixin._runtime_pool_from_registry = False
     mixin._owned_runtime_pool = None
     mixin.agent_id = "general"
-    mixin.force_external_agent = None
     mixin.locale = None
     mixin.quote = None
     mixin.declared_allowed_roots = (_WORKSPACE,)
@@ -148,7 +147,6 @@ async def test_ephemeral_scope_skips_registry_facade() -> None:
     mixin._runtime_pool_from_registry = False
     mixin._owned_runtime_pool = None
     mixin.agent_id = "general"
-    mixin.force_external_agent = None
 
     await mixin._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
 
@@ -341,7 +339,6 @@ async def test_live_general_agent_close_release_preserves_pool() -> None:
     agent._runtime_pool_from_registry = False
     agent._owned_runtime_pool = None
     agent.agent_id = "general"
-    agent.force_external_agent = None
     agent._browser_session = None
     agent._executor = None
     agent._current_chat_id = None
@@ -361,7 +358,6 @@ async def test_live_general_agent_close_release_preserves_pool() -> None:
     agent2._runtime_pool_from_registry = False
     agent2._owned_runtime_pool = None
     agent2.agent_id = "general"
-    agent2.force_external_agent = None
     agent2._browser_session = None
     agent2._executor = None
     agent2._current_chat_id = None

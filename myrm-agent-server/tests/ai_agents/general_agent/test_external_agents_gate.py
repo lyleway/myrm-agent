@@ -245,44 +245,15 @@ async def test_do_setup_returns_early_without_configs() -> None:
 
 
 def test_should_mount_invoke_acp_agent_tool_matrix() -> None:
-    assert should_mount_invoke_acp_agent_tool(agent_id="general", force_external_agent=None) is True
-    assert should_mount_invoke_acp_agent_tool(agent_id=BUILTIN_CLI_VISUAL_AGENT_ID, force_external_agent=None) is False
-    assert should_mount_invoke_acp_agent_tool(agent_id="general", force_external_agent="claude") is False
+    assert should_mount_invoke_acp_agent_tool(agent_id="general") is True
+    assert should_mount_invoke_acp_agent_tool(agent_id=None) is True
+    assert should_mount_invoke_acp_agent_tool(agent_id=BUILTIN_CLI_VISUAL_AGENT_ID) is False
 
 
 def test_needs_runtime_pool_matrix() -> None:
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id="builtin-writer",
-            force_external_agent=None,
-        )
-        is False
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=True,
-            agent_id="builtin-developer",
-            force_external_agent=None,
-        )
-        is True
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id=BUILTIN_CLI_VISUAL_AGENT_ID,
-            force_external_agent=None,
-        )
-        is True
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id="builtin-writer",
-            force_external_agent="claude",
-        )
-        is True
-    )
+    assert needs_runtime_pool(enable_external_cli=False, agent_id="builtin-writer") is False
+    assert needs_runtime_pool(enable_external_cli=True, agent_id="builtin-developer") is True
+    assert needs_runtime_pool(enable_external_cli=False, agent_id=BUILTIN_CLI_VISUAL_AGENT_ID) is True
 
 
 @pytest.mark.asyncio
