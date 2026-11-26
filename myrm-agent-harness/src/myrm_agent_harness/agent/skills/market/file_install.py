@@ -1,6 +1,7 @@
 """Skill file-tree installation: quarantine, security gates and transactional promotion.
 
 [INPUT]
+- agent.plugins.rules::DocumentTooLargeError (POS: Refusal of a plugin document over its decode ceiling)
 - backends.skills.market_protocols::SkillInstallResult (POS: Typed install outcome)
 - backends.skills.scanning::compute_scan_summary (POS: Security score of a scan)
 - backends.skills.scanning.archive_security::classify_archive_security_issue, format_archive_security_user_message (POS: Canonical archive-security contract for typed/untyped ZIP guard errors.)
@@ -27,6 +28,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from myrm_agent_harness.agent.plugins.rules import DocumentTooLargeError
 from myrm_agent_harness.backends.skills.local_skill_id import local_skill_id_from_path
 from myrm_agent_harness.backends.skills.market_protocols import SkillInstallResult
 from myrm_agent_harness.backends.skills.scanning import compute_scan_summary
@@ -62,11 +64,6 @@ def is_safe_skill_dir_name(name: str) -> bool:
 
 
 def resolve_install_error(error: Exception) -> tuple[str, str]:
-    from myrm_agent_harness.backends.skills.scanning.path_security import (
-        CategoryBucketCollisionError,
-        PathRedirectSecurityError,
-    )
-
     if isinstance(error, CategoryBucketCollisionError):
         return (
             str(error),
@@ -77,6 +74,8 @@ def resolve_install_error(error: Exception) -> tuple[str, str]:
             str(error),
             "PATH_REDIRECT_ATTACK",
         )
+    if isinstance(error, DocumentTooLargeError):
+        return str(error), "DOCUMENT_TOO_LARGE"
 
     violation = classify_archive_security_issue(error)
     if violation is None:
@@ -103,8 +102,9 @@ async def install_skill_files(
 
     Rejection pipeline (each returns a failed SkillInstallResult, never
     raises): invalid directory name → lifecycle script guard → security
-    score gate → version downgrade guard → unsafe install target
-    (symlink/junction or category bucket). Unexpected errors propagate.
+    score gate → version downgrade guard → refusals found while promoting
+    (unsafe install target: symlink/junction or category bucket; an Agent
+    Plugin document over its decode ceiling). Unexpected errors propagate.
     """
 
     def _emit(stage: str, msg: str) -> None:
@@ -328,11 +328,11 @@ async def install_skill_files(
             declared_mcp_servers=declared_mcp_servers,
             receipt=receipt,
         )
-    except (CategoryBucketCollisionError, PathRedirectSecurityError) as exc:
-        # 安装目标是符号链接/分类桶等不安全路径：属于可预期的安全拒绝，
-        # 转成结构化失败结果，避免调用方收到不透明的 500
+    except (CategoryBucketCollisionError, PathRedirectSecurityError, DocumentTooLargeError) as exc:
+        # 安装目标是符号链接/分类桶等不安全路径，或 Agent Plugin 包内有文档超过解码上限：
+        # 都是可预期的拒绝，转成结构化失败结果，避免调用方收到不透明的 500
         resolved_error, error_code = resolve_install_error(exc)
-        logger.warning("Skill '%s' install target rejected: %s", name, resolved_error)
+        logger.warning("Skill '%s' install rejected: %s", name, resolved_error)
         _emit("rejected", resolved_error)
         return SkillInstallResult(
             success=False,

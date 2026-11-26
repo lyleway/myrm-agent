@@ -520,12 +520,12 @@ Scanner（编排器）
 | 2 | 生命周期脚本门禁：`package.json` 里裸 `npm install` 会执行的脚本任一非空、含安装时自动执行的钩子文件（`binding.gyp`、npm 扩展、pnpmfile），或清单本身无法审计，即拒绝（§9.4） | `LIFECYCLE_SCRIPT_BLOCKED` |
 | 3 | 安全评分低于 50 分 | `SECURITY_SCORE_BELOW_THRESHOLD` |
 | 4 | 版本降级保护（`allow_downgrade=True` 可放行，§9.5） | `DOWNGRADE_BLOCKED` |
-| 5 | 安装目标是符号链接 / junction，或是装着其他子技能的分类桶 | `PATH_REDIRECT_ATTACK` / `CATEGORY_BUCKET_COLLISION` |
+| 5 | 提升阶段才发现的拒绝：安装目标是符号链接 / junction，或是装着其他子技能的分类桶；Agent Plugin 包里的 `plugin.json` / `mcp.json` 超过 1 MiB，或技能 / 智能体文件的 YAML 头超过 64 Ki 字符（整包拒绝） | `PATH_REDIRECT_ATTACK` / `CATEGORY_BUCKET_COLLISION` / `DOCUMENT_TOO_LARGE` |
 
 **事务式提升**：文件先写入系统临时目录下的隔离目录（`skill-quarantine-*`），门禁全部通过后由 `SkillInstallTransaction.stage_replace` 复制到安装目录；目标已存在时先把旧目录快照备份，随后写入 `origin.json` 与 `receipt.json`（§10.1），最后 `commit` 清理备份。任何一步异常都回滚到旧目录的快照，新建的目录被删除；Agent Plugin 包内的技能与主目录在同一个事务里提升，要么全部生效，要么全部回滚。隔离目录在 `finally` 里一律删除。
 
 **设计决策**：
-- 门禁在提升之前执行；提升阶段才发现的拒绝（目标不安全）由事务回滚，被拒绝的包不会留下痕迹
+- 门禁在提升之前执行；提升阶段才发现的拒绝（目标不安全、包内文档超过解码上限）由事务回滚，被拒绝的包不会留下痕迹
 - 先快照后覆盖，升级失败时用户的旧版本原样保留
 - 评分通过但带有告警的技能照常安装，告警写入 `SkillInstallResult.scan_summary`，回执的 `security_verified` 记为 `false`
 - 安装根是 `<状态根>/skills`（`LOCAL_INSTALL_DIR`）；安装流水线不决定信任级别，由宿主载入技能时赋予（§5）
