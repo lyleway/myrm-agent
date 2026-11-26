@@ -214,9 +214,9 @@ def audit_skill_directory(skill_dir: str | Path) -> list[PackageAuditFinding]:
     ``node_modules`` is not entered (see ``tree_walk``). What the audit cannot look at in full is a high finding: a
     folder it cannot list, a tree of more than ``tree_walk.MAX_ENTRIES`` entries, the manifest after the first
     ``_MAX_MANIFESTS``, which is not audited, and a symbolic link to a folder outside the skill, which a package manager
-    can follow (a workspace glob or a ``file:`` dependency through it) to manifests the audit cannot see; one finding
-    names the first such link. A package manager starts from a manifest, so in a skill without one such a link is not a
-    finding.
+    can follow (through a workspace glob or entry, or a ``file:`` dependency, as each manager allows) to manifests the
+    audit cannot see; one finding names the first such link. In a skill without a ``package.json`` such a link is not
+    a finding: a skill that only links shared files stays clean.
 
     Args:
         skill_dir: Path to the skill directory
