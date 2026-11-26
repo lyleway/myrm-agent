@@ -1,7 +1,8 @@
 """Unit tests for MCP stdio environment variable security guard (MCPStdioEnvInjectionGuard).
 
 Verifies:
-1. is_dangerous_env_key detects dynamic linker, runtime hook, proxy, TLS bypass, package manager redirection, git hijacking
+1. is_dangerous_env_key detects dynamic linker, runtime hook, proxy, TLS bypass, package manager redirection, git hijacking,
+   git environment configuration
 2. is_dangerous_env_key handles case-insensitive variants (e.g. ld_preload, Node_Options)
 3. is_dangerous_env_key allows safe business variables (e.g. DB_URL, API_KEY, PORT)
 4. is_dangerous_env_key allows spec-reserved variables (PLUGIN_ROOT, PLUGIN_DATA)
@@ -64,6 +65,13 @@ class TestMCPStdioEnvGuard:
             # Git command hijacking
             "GIT_SSH_COMMAND",
             "GIT_EDITOR",
+            # Git environment configuration: a numbered key/value pair or a config file path runs a program
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_CONFIG_KEY_0",
+            "git_config_value_0",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_SYSTEM",
             # Vault master key
             "MYRM_VAULT_MASTER_KEY",
             "CUSTOM_VAULT_MASTER_KEY_OVERRIDE",
@@ -88,6 +96,7 @@ class TestMCPStdioEnvGuard:
             "REGION",
             "OPENAI_BASE_URL",
             "ANTHROPIC_API_KEY",
+            "GIT_AUTHOR_NAME",
             "PLUGIN_ROOT",
             "PLUGIN_DATA",
         ],
@@ -126,6 +135,19 @@ class TestMCPStdioEnvGuard:
             "PLUGIN_DATA": "/data/my-plugin",
         }
 
+    def test_sanitize_mcp_env_strips_the_git_configuration_group(self) -> None:
+        raw_env = {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.sshCommand",
+            "GIT_CONFIG_VALUE_0": "/tmp/hook.sh",
+            "GIT_AUTHOR_NAME": "Ada",
+        }
+
+        sanitized, blocked = sanitize_mcp_env(raw_env)
+
+        assert blocked == ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]
+        assert sanitized == {"GIT_AUTHOR_NAME": "Ada"}
+
     def test_resolve_stdio_launch_sanitizes_environment(self) -> None:
         extra_params = {
             "env": {
@@ -138,7 +160,7 @@ class TestMCPStdioEnvGuard:
             "data_root": "/opt/data/test",
         }
 
-        command, args, env, cwd = resolve_stdio_launch(
+        command, args, env, _cwd = resolve_stdio_launch(
             command="python3",
             args=["run.py"],
             extra_params=extra_params,
@@ -172,10 +194,28 @@ class TestMCPStdioEnvGuard:
         scan_result = scan_mcp_config(config)
 
         # Verify dangerous env injection findings
-        env_findings = [
-            f for f in scan_result.findings if f.threat_type == "dangerous_env_injection"
-        ]
+        env_findings = [f for f in scan_result.findings if f.threat_type == "dangerous_env_injection"]
         assert len(env_findings) == 2
         assert all(f.severity == MCPScanSeverity.CRITICAL for f in env_findings)
         assert any("LD_PRELOAD" in f.description for f in env_findings)
         assert any("NODE_OPTIONS" in f.description for f in env_findings)
+
+    def test_config_scan_flags_the_git_configuration_group(self) -> None:
+        config = MCPConfig(
+            name="git_config_mcp",
+            type="stdio",
+            command="uvx",
+            args=["mcp-server-git"],
+            extra_params={
+                "env": {
+                    "GIT_CONFIG_COUNT": "1",
+                    "GIT_CONFIG_KEY_0": "core.sshCommand",
+                    "GIT_CONFIG_VALUE_0": "/tmp/hook.sh",
+                }
+            },
+        )
+
+        env_findings = [f for f in scan_mcp_config(config).findings if f.threat_type == "dangerous_env_injection"]
+
+        assert len(env_findings) == 3
+        assert all(f.severity == MCPScanSeverity.CRITICAL for f in env_findings)

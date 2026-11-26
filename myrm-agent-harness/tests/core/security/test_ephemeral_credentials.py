@@ -28,7 +28,11 @@ def test_validate_credential_key_success_and_blocked() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", sorted(CODE_INJECTION_ENV_VARS | {"LD_ANYTHING", "dyld_whatever", "git_external_diff"})
+    "name",
+    sorted(
+        CODE_INJECTION_ENV_VARS
+        | {"LD_ANYTHING", "dyld_whatever", "git_external_diff", "GIT_CONFIG_KEY_0", "git_config_value_0"}
+    ),
 )
 def test_a_credential_cannot_be_named_after_a_variable_that_makes_a_program_run_its_value(name: str) -> None:
     """A staged variable reaches every command it is bound to, including one the risk classifier judged read-only.
@@ -44,6 +48,12 @@ def test_a_credential_cannot_be_named_after_a_variable_that_makes_a_program_run_
 _PINNED_BLOCKED_NAMES = (
     "DYLD_FRAMEWORK_PATH",
     "GIT_ASKPASS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_KEY_0",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_VALUE_0",
     "GIT_EDITOR",
     "GIT_EXEC_PATH",
     "GIT_EXTERNAL_DIFF",

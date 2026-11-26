@@ -69,7 +69,7 @@ def is_dangerous_env_key(key: str) -> tuple[bool, str]:
     if normalized in _NORMALIZED_DANGEROUS_KEYS:
         return True, f"Environment variable '{key}' is a prohibited high-risk system variable"
 
-    # 2. Dangerous prefix match (e.g. LD_*, DYLD_*, GIT_SSL_*)
+    # 2. Dangerous prefix match (e.g. LD_*, DYLD_*, GIT_CONFIG_*, GIT_SSL_*)
     for prefix in _NORMALIZED_DANGEROUS_PREFIXES:
         if normalized.startswith(prefix):
             return True, f"Environment variable '{key}' matches prohibited prefix '{prefix}'"

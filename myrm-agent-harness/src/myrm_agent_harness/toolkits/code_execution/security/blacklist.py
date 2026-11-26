@@ -13,7 +13,7 @@ is handled by ``myrm_agent_harness.toolkits.code_execution.security.shell_comman
 
 [OUTPUT]
 - get_dangerous_modules: Get dangerous modules based on network configuration.
-- DANGEROUS_ENV_VARS / DANGEROUS_ENV_PREFIXES: Variables a child process or an MCP server must not receive.
+- DANGEROUS_ENV_VARS / DANGEROUS_ENV_PREFIXES: Variable names an MCP server's environment must not carry.
 
 [POS]
 Security blacklists for code execution.

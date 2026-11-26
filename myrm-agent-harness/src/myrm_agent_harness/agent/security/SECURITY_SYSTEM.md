@@ -202,7 +202,7 @@ class SSRFResult:
 
 **危险环境变量**（`DANGEROUS_ENV_VARS` + `DANGEROUS_ENV_PREFIXES` + `DANGEROUS_ENV_WILDCARDS`）：
 
-覆盖以下攻击向量：动态链接器注入（`LD_PRELOAD` 等）、运行时劫持/模块注入（`PYTHONPATH`、`PYTHONSTARTUP` 等）、代理注入（`HTTP_PROXY`/`FTP_PROXY` 等）、TLS/证书绕过（`GIT_SSL_NO_VERIFY`、`NODE_TLS_REJECT_UNAUTHORIZED` 等）、包管理器重定向（`PIP_INDEX_URL`、`UV_INDEX_URL` 等）、Git 命令劫持（`GIT_SSH_COMMAND`、`GIT_EDITOR` 等）、编译器劫持（`CC`、`CXX`）。`sanitize_env()`（`core/security/process_env/env_isolation.py`）在执行前按自己的名单（`env_name_tables.py`）过滤：敏感名与模式、动态链接器与运行时注入、`GIT_SSL_*`、git 环境配置组（`GIT_CONFIG_COUNT`、`GIT_CONFIG_KEY_<n>`、`GIT_CONFIG_VALUE_<n>`、`GIT_CONFIG_PARAMETERS`，整组丢弃：它们覆盖所有配置文件，一条 `alias.x=!cmd` 或 `core.sshCommand` 就能让 git 运行程序，半组残留则让每次 git 调用都以 128 退出）与 `OTEL_*`；`CORE` 策略只保留放行名单；子进程环境的构造规则见 3.2.2。清洗管的是宿主传入的变量：bash 工具的注入头随后在命令自己的 shell 里写入的那一条固定 git 配置（GitHub 凭证助手，见 `toolkits/code_execution/EXECUTION_SYSTEM.md`）发生在清洗之后，其文本是常量，不含宿主输入。
+覆盖以下攻击向量：动态链接器注入（`LD_PRELOAD` 等）、运行时劫持/模块注入（`PYTHONPATH`、`PYTHONSTARTUP` 等）、代理注入（`HTTP_PROXY`/`FTP_PROXY` 等）、TLS/证书绕过（`GIT_SSL_NO_VERIFY`、`NODE_TLS_REJECT_UNAUTHORIZED` 等）、包管理器重定向（`PIP_INDEX_URL`、`UV_INDEX_URL` 等）、Git 命令劫持（`GIT_SSH_COMMAND`、`GIT_EDITOR` 等）、Git 环境配置注入（整个 `GIT_CONFIG_*` 家族）、编译器劫持（`CC`、`CXX`）。这些名单由 MCP 环境守卫（`toolkits/mcp/env_guard.py`，插件扫描同用）读取；其中代码注入类的名字与前缀（链接器、语言运行时、shell 启动、git 程序钩子、`GIT_CONFIG_*`）只在 `core/security/process_env/code_injection_env.py` 定义一份，一次性凭据与 skill 机密的变量名校验读同一份。`sanitize_env()`（`core/security/process_env/env_isolation.py`）在执行前按自己的名单（`env_name_tables.py`）过滤：敏感名与模式、动态链接器与运行时注入、`GIT_SSL_*`、git 环境配置组（`GIT_CONFIG_COUNT`、`GIT_CONFIG_KEY_<n>`、`GIT_CONFIG_VALUE_<n>`、`GIT_CONFIG_PARAMETERS`，整组丢弃：它们覆盖所有配置文件，一条 `alias.x=!cmd` 或 `core.sshCommand` 就能让 git 运行程序，半组残留则让每次 git 调用都以 128 退出）与 `OTEL_*`；`CORE` 策略只保留放行名单；子进程环境的构造规则见 3.2.2。清洗管的是宿主传入的变量：bash 工具的注入头随后在命令自己的 shell 里写入的那一条固定 git 配置（GitHub 凭证助手，见 `toolkits/code_execution/EXECUTION_SYSTEM.md`）发生在清洗之后，其文本是常量，不含宿主输入。
 
 ### 3.2.1 Shell Command Analyzer
 
@@ -214,7 +214,7 @@ class SSRFResult:
 |------|---------|---------|
 | Layer 1: 二进制/Unicode | BLOCK | `\r`, `\0`, 12 种不可见 Unicode 字符（零宽空格、方向控制等）；与语言无关，shell 命令和 Python 源码都检（`analyze_hidden_characters`） |
 | Layer 1.5: 编码绕过 | BLOCK | ANSI-C quoting `$'...'`、locale quoting `$"..."`；只检 shell 读取的文本 |
-| Layer 2: 注入/危险命令 | BLOCK | 5 注入向量（`$()`, `` ` ``, `${}`, `<()`, `>()`）+ 70+ 危险命令模式；向持久 shell 导出代码注入变量（`BASH_ENV`、`LD_PRELOAD`、`GIT_EXTERNAL_DIFF` 等，读 shell 词，引号不能掩盖变量名） |
+| Layer 2: 注入/危险命令 | BLOCK | 5 注入向量（`$()`, `` ` ``, `${}`, `<()`, `>()`）+ 70+ 危险命令模式 |
 | Layer 2.5: SQL 语句守卫 | ESCALATE | 数据库客户端命令（`psql`/`mysql`/`sqlite3`/`sqlcmd`/`mongosh`）中的破坏性 SQL；作用于引号剥离前的原始命令，以捕获单引号内的 SQL（`sql_statement_guard.py`） |
 | Layer 3: 可疑模式 | ESCALATE | `curl \| sh`, `eval`, `base64 -d`, `kill`/`pkill`/`killall` 等 |
 | Layer 3c: 受保护指令文件改写 | ESCALATE | 重定向写入，或 `sed -i`、`tee`、`cp`、`mv`、`rm`、`truncate`（及其 PowerShell / cmd 写法：`Set-Content`、`Remove-Item`、`copy`、`del` 等）点名，或解释器（`python`/`node`/`ruby`/`perl`）在同一条命令里以写方式打开 `AGENTS.md`、`CLAUDE.md`、`SOUL.md`、`.cursor/rules` 等受保护指令文件（bash 工具里按 Python 源码运行的文本不在此列，见下）；只读分类器判为 SAFE 的命令不算改写；作用于原始命令，证据是匹配到的名字（`protected_instruction_command.py`） |
