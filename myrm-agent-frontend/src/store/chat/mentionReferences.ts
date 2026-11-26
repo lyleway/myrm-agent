@@ -1,7 +1,7 @@
 /**
  * [INPUT]
  * @/store/useAgentStore::useAgentStore (POS: Agent catalog store, resolves inline @agent tokens)
- * ./inSessionMentionDeduplicator (POS: Per-chat record of the files already injected)
+ * ./inSessionMentionDeduplicator (POS: Per-chat record of the reference paths already put into a request)
  *
  * [OUTPUT]
  * buildMentionPayload: The request fields a turn's mention references become.
@@ -160,8 +160,8 @@ export const mergeMentionReferences = (
 };
 
 /**
- * The request fields a turn's mention references become: file-like references (a file already injected into this
- * chat is sent again without its content) and the ids of the mentioned agents.
+ * The request fields a turn's mention references become: each non-agent reference as a `mention_references` entry
+ * (a repeated file reference drops its inline `content`) and the mentioned agents' ids as `mentioned_agent_ids`.
  */
 export const buildMentionPayload = (
   state: Pick<ChatActionsState, 'chatId' | 'mentionReferences'>,

@@ -184,10 +184,10 @@ const Chat = ({
     }
   }, [messages, tMeta]);
 
-  // 计算消息内容的哈希值，用于检测消息内容变化
+  // Message list summary (id, content length, source count), recomputed only when `messages` gets a new reference.
   const messagesContentHash = useMemo(() => buildMessageRenderFingerprint(messages), [messages]);
 
-  // The fingerprint invalidates the memo when message content changes without a new array reference.
+  // Rebuilt when `messages`, `loading`, the summary or the highlighted message changes.
   const messageBoxElements = useMemo(() => {
     const elements = messages.map((msg, i) => {
       if (msg.isCompactedSummaryView) {
