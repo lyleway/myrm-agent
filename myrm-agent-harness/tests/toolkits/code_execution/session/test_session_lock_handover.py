@@ -49,11 +49,13 @@ async def test_a_command_stopped_as_the_shell_is_handed_to_it_leaves_the_shell_f
     assert follow_up.success, "the stopped command took the shell with it"
 
 
-async def test_a_request_stopped_before_its_command_asked_for_the_shell_leaves_the_shell_free() -> None:
+@pytest.mark.parametrize("ambient", [True, False], ids=["ambient-token", "explicit-token-only"])
+async def test_a_request_stopped_before_its_command_asked_for_the_shell_leaves_the_shell_free(ambient: bool) -> None:
     session = GatedSession()
     token = CancellationToken("req-stopped")
     token.cancel(CancelReason.USER_CANCELLED)
-    set_cancel_token(token)
+    # An ambient token ends the wait for the shell at once; one that is only passed in is read once the command has it.
+    set_cancel_token(token if ambient else None)
     try:
         dropped = await session.execute("second", cancel_token=token)
     finally:
@@ -61,6 +63,7 @@ async def test_a_request_stopped_before_its_command_asked_for_the_shell_leaves_t
     await let_the_loop_run(_QUEUED_TICKS)
 
     assert dropped.error == CANCELLED_BEFORE_START
+    assert session.ran == [], "the dropped command was run"
     async with asyncio.timeout(_SETTLE_S):
         follow_up = await session.execute("third")
     assert follow_up.success, "the dropped command took the shell with it"

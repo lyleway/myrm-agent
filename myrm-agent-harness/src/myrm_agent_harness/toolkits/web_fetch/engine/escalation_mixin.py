@@ -14,14 +14,11 @@ from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
 
-from myrm_agent_harness.core.security.guards.ssrf import SSRFSecurityError
-
 from ..escalation.content_validator import is_valid_escalation_content
 from ..fetchers.protocols import FetcherType, FetchResult
 from ..fetchers.target_guard import assert_not_blocklisted
 
 if TYPE_CHECKING:
-    from ..escalation.protocols import FetchEscalationProvider
     from ..fetchers.http_fetcher import HttpFetcher
     from ..processing.pipeline import ContentPipeline
 
@@ -31,7 +28,6 @@ logger = logging.getLogger(__name__)
 class FetchEngineEscalationMixin:
     if TYPE_CHECKING:
         _http_fetcher: HttpFetcher
-        _escalation_providers: list[FetchEscalationProvider] | None
         _network_blocklist: tuple[str, ...]
         _pipeline: ContentPipeline
 
@@ -49,16 +45,12 @@ class FetchEngineEscalationMixin:
             return None
 
     async def _try_escalation(self, url: str) -> tuple[Document | None, FetchResult | None]:
-        """Try injected remote providers after local L1 HTTP failure."""
+        """Try the remote providers bound to the current run after local L1 HTTP failure."""
         from ..escalation.context import get_bound_escalation_providers
 
-        providers = get_bound_escalation_providers() or self._escalation_providers
+        providers = get_bound_escalation_providers()
         if not providers:
             return None, None
-
-        from ..escalation.metrics import web_fetch_escalation_metrics
-
-        web_fetch_escalation_metrics.record_triggered()
 
         for provider in providers:
             try:
@@ -88,11 +80,7 @@ class FetchEngineEscalationMixin:
                 )
                 continue
 
-            try:
-                assert_not_blocklisted(escalation_result.url or url, self._network_blocklist)
-            except SSRFSecurityError:
-                web_fetch_escalation_metrics.record_failure()
-                raise
+            assert_not_blocklisted(escalation_result.url or url, self._network_blocklist)
 
             doc: Document | None
             if escalation_result.is_markdown:
@@ -115,9 +103,8 @@ class FetchEngineEscalationMixin:
                     continue
                 doc.metadata["escalation_provider"] = provider.provider_id
 
-            web_fetch_escalation_metrics.record_success()
             logger.info("Escalation provider %s succeeded for %s", provider.provider_id, url)
             return doc, None
 
-        web_fetch_escalation_metrics.record_failure()
+        logger.info("Escalation found no usable content for %s (%d provider(s) tried)", url, len(providers))
         return None, None

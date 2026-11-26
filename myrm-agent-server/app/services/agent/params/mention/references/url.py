@@ -22,8 +22,6 @@ from ..xml import _MENTION_MAX_TOTAL_BYTES, _format_size, _xml_error, _xml_metad
 
 logger = logging.getLogger(__name__)
 
-_URL_FETCH_TIMEOUT = 30
-
 
 async def _fetch_url_content(url: str) -> str:
     """Fetch URL content using FetchEngine.

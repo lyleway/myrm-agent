@@ -12,7 +12,7 @@ the raw bytes to the appropriate file parser for extraction.
 
 [OUTPUT]
 - MAX_BINARY_SIZE: the largest file body the router parses; a larger one is dropped
-- MAX_PARSED_CHARS: the most parsed text a Document keeps; a longer text is cut and the Document carries SOURCE_TRUNCATED_KEY
+- MAX_PARSED_CHARS: the most parsed text a Document keeps unless the caller sets its own cap; a longer text is cut and the Document carries SOURCE_TRUNCATED_KEY
 - route_binary_content: Detect and parse binary content from a FetchResult
 
 [POS]
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 MAX_BINARY_SIZE = 20 * 1024 * 1024  # 20 MB safety limit
 # A parsed file can hold far more text than a prompt can use; the Document keeps the beginning and says it was cut.
+# A caller that can read the rest from elsewhere passes a larger ``max_chars`` to route_binary_content.
 MAX_PARSED_CHARS = 100_000
 
 _CONTENT_TYPE_MAP: dict[str, str] = {
@@ -95,8 +96,13 @@ async def route_binary_content(
     raw_body: bytes,
     headers: dict[str, str],
     url: str,
+    *,
+    max_chars: int | None = None,
 ) -> Document | None:
     """Route binary content to appropriate parser and return a Document.
+
+    The parsed text is cut at ``max_chars`` (``MAX_PARSED_CHARS`` when ``None``): a caller that can read the rest from
+    a stored copy asks for more than one that puts the text into a prompt as it is.
 
     Returns None if the content type is unrecognized, no parser supports it, a ZIP container is over the unpacking
     budget, or parsing fails.
@@ -141,11 +147,12 @@ async def route_binary_content(
             "source_type": f"binary_{ext.lstrip('.')}",
             "extension": ext,
         }
-        if len(result) > MAX_PARSED_CHARS:
-            logger.info("Parsed text cut at %d of %d characters: %s", MAX_PARSED_CHARS, len(result), url[:100])
+        limit = MAX_PARSED_CHARS if max_chars is None else max_chars
+        if len(result) > limit:
+            logger.info("Parsed text cut at %d of %d characters: %s", limit, len(result), url[:100])
             metadata[SOURCE_TRUNCATED_KEY] = True
 
-        return Document(page_content=result[:MAX_PARSED_CHARS], metadata=metadata)
+        return Document(page_content=result[:limit], metadata=metadata)
     except Exception as e:
         logger.warning("Failed to parse binary content from %s: %s", url[:100], e)
         return None

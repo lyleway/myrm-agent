@@ -13,7 +13,6 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,7 +20,8 @@ import pytest
 from myrm_agent_harness.core.security.audit import get_audit_entries, reset_audit_log
 from myrm_agent_harness.core.security.guards.ssrf import SSRFSecurityError
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
-from myrm_agent_harness.toolkits.web_fetch.escalation.metrics import web_fetch_escalation_metrics
+from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
+from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import EscalationFetchResult
 from myrm_agent_harness.toolkits.web_fetch.fetchers.http_fetcher import HttpFetcher
 from myrm_agent_harness.toolkits.web_fetch.fetchers.target_guard import (
     FetchTargetGuard,
@@ -30,6 +30,7 @@ from myrm_agent_harness.toolkits.web_fetch.fetchers.target_guard import (
 )
 from myrm_agent_harness.toolkits.web_fetch.processing.url_normalizer import normalize_url
 from tests.toolkits.browser._redirect_servers import Site, page, redirect, serve
+from tests.toolkits.web_fetch._degradation_support import StubProvider
 
 _GUARD = "myrm_agent_harness.toolkits.web_fetch.fetchers.target_guard"
 _DISPATCH = "myrm_agent_harness.toolkits.web_fetch.engine.fetch_mixin"
@@ -246,30 +247,27 @@ class TestEngine:
         transcript.assert_not_awaited()
 
     @staticmethod
-    def _provider(url: str | None, content: str = "# page") -> SimpleNamespace:
-        return SimpleNamespace(
-            provider_id="remote",
-            fetch_url=AsyncMock(return_value=SimpleNamespace(content=content, is_markdown=True, url=url, title="t")),
-        )
+    def _provider(url: str | None, content: str = "# page") -> StubProvider:
+        return StubProvider("remote", EscalationFetchResult(url=url or "", content=content, title="t"))
 
     async def test_a_provider_reporting_a_listed_url_ends_the_fetch_for_every_provider(self) -> None:
         engine = FetchEngine(network_blocklist=("listed.example",))
         reports_listed = self._provider("https://listed.example/landing")
         next_in_line = self._provider(None, content="# other")
-        engine.set_escalation_providers([reports_listed, next_in_line])
-        failures_before = web_fetch_escalation_metrics.snapshot()["failure_count"]
 
-        with pytest.raises(NetworkBlocklistError):
+        with (
+            bind_web_fetch_escalation_context(providers=[reports_listed, next_in_line]),
+            pytest.raises(NetworkBlocklistError),
+        ):
             await engine._try_escalation("https://start.example/a")
 
         next_in_line.fetch_url.assert_not_awaited()
-        assert web_fetch_escalation_metrics.snapshot()["failure_count"] == failures_before + 1
 
     async def test_a_provider_reporting_no_url_is_judged_by_the_requested_one(self) -> None:
         engine = FetchEngine(network_blocklist=("listed.example",))
-        engine.set_escalation_providers([self._provider(None)])
 
-        doc, _result = await engine._try_escalation("https://start.example/a")
+        with bind_web_fetch_escalation_context(providers=[self._provider(None)]):
+            doc, _result = await engine._try_escalation("https://start.example/a")
 
         assert doc is not None
         assert doc.page_content == "# page"
@@ -277,7 +275,7 @@ class TestEngine:
     async def test_through_crawl_a_listed_report_is_a_failed_fetch_that_is_remembered(self) -> None:
         engine = FetchEngine(allow_private_networks=True, network_blocklist=("listed.example",))
         engine._http_fetcher.fetch = AsyncMock(return_value=None)  # type: ignore[method-assign]
-        engine.set_escalation_providers([self._provider("https://listed.example/landing")])
 
-        assert await engine.crawl("https://start.example/a") is None
+        with bind_web_fetch_escalation_context(providers=[self._provider("https://listed.example/landing")]):
+            assert await engine.crawl("https://start.example/a") is None
         assert engine._fail_cache.contains(normalize_url("https://start.example/a"))

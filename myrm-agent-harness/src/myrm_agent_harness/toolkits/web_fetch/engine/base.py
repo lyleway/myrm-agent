@@ -68,9 +68,6 @@ from .types import (
 )
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
-        FetchEscalationProvider,
-    )
     from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetchResult
 
     from .types import FailureKind
@@ -160,15 +157,9 @@ class FetchEngine(
         self._coalescing_timeout = coalescing_timeout
         self._crawl_timeout = crawl_timeout
 
-        self._escalation_providers: list[FetchEscalationProvider] | None = None
-
     def set_session_vault(self, session_vault: SessionVault) -> None:
         """Inject SessionVault dynamically (e.g. from server layer)."""
         self._http_fetcher._session_vault = session_vault
-
-    def set_escalation_providers(self, providers: list[FetchEscalationProvider] | None) -> None:
-        """Inject optional L4 remote fetch providers (server layer implements httpx vendors)."""
-        self._escalation_providers = providers
 
     def get_failure_reason(self, url: str) -> tuple[FailureKind, str] | None:
         """Return the last recorded ``(kind, reason)`` for a failed URL, if any."""
@@ -189,8 +180,14 @@ class FetchEngine(
         *,
         force_refresh: bool = False,
         allow_escalation: bool = True,
+        max_parsed_chars: int | None = None,
     ) -> Document | None:
-        """Crawl a single URL, return Document or None."""
+        """Crawl a single URL, return Document or None.
+
+        ``max_parsed_chars`` is where the parsed text of a PDF or Office file is cut (``None``: the router's
+        default). The cached page and the fetch in flight are kept per cap, so a caller never gets text cut at
+        another caller's length; what is remembered of a failure is per URL.
+        """
         from ..processing.github_blob_url import github_blob_to_raw
         from ..processing.url_normalizer import normalize_url
 
@@ -212,7 +209,10 @@ class FetchEngine(
         # The policy checks above judged the URL as given; the rewrite stays on the same host, and the redirect it
         # leads to is judged hop by hop in the fetch. A blob link then shares the cache entry of its raw link.
         url = github_blob_to_raw(url)
-        cache_key = normalize_url(url)
+        url_key = normalize_url(url)
+        # normalize_url rebuilds the URL from its parsed parts and urlparse drops every newline, so no URL can spell
+        # the key of a capped entry.
+        cache_key = url_key if max_parsed_chars is None else f"{url_key}\n{max_parsed_chars}"
 
         # A leader that ended without a result (cancelled) sends its waiters round again: the first becomes the
         # new leader and the rest coalesce on it, so one fetch still serves them all.
@@ -227,8 +227,8 @@ class FetchEngine(
 
         if force_refresh:
             self._crawl_cache.delete(cache_key)
-            self._fail_cache.delete(cache_key)
-            self._failure_reasons.delete(cache_key)
+            self._fail_cache.delete(url_key)
+            self._failure_reasons.delete(url_key)
 
         cached_item, is_expired = self._crawl_cache.get_with_expiry(cache_key)
         if cached_item is not None and not force_refresh:
@@ -236,7 +236,7 @@ class FetchEngine(
             if result is not None:
                 return result
 
-        if self._fail_cache.contains(cache_key):
+        if self._fail_cache.contains(url_key):
             logger.info(f"Fail cache hit (skipping): {url}")
             return None
 
@@ -252,6 +252,7 @@ class FetchEngine(
                 etag=etag,
                 last_modified=last_modified,
                 allow_escalation=allow_escalation,
+                max_parsed_chars=max_parsed_chars,
             )
 
             if fetch_result and fetch_result.status_code == 304 and cached_item:
@@ -279,14 +280,14 @@ class FetchEngine(
                 if cached_item is not None:
                     logger.warning("Cache revalidation failed; not serving stale entry: %s", url)
                     self._crawl_cache.delete(cache_key)
-                self._fail_cache.set(cache_key, True)
+                self._fail_cache.set(url_key, True)
 
             if not future.done():
                 future.set_result(doc)
 
             return doc
         except Exception as e:
-            return await self._handle_fetch_error(url, cache_key, future, e)
+            return await self._handle_fetch_error(url, url_key, future, e)
         finally:
             self._pending_requests.pop(cache_key, None)
             if not future.done():  # cancelled mid-fetch: let the waiters fetch for themselves, not wait out the timeout
