@@ -100,7 +100,10 @@ def _print_to_redirected_stdout(tmp_path: Path, hook: Path | None) -> tuple[int,
 
 
 def test_a_legacy_codepage_cannot_print_the_startup_banner(tmp_path: Path) -> None:
-    """The premise of the encoding half: if Python stops defaulting to the ANSI code page, drop that half."""
+    """Negative control: with a legacy code page forced, the banner raises without the hook, so the hook test can fail.
+
+    The code page is forced rather than inherited, so a change of Python's default encoding does not turn this red.
+    """
     returncode, stderr, _ = _print_to_redirected_stdout(tmp_path, hook=None)
 
     assert returncode != 0
