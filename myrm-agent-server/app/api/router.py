@@ -21,6 +21,7 @@ from app.api.agents import (
 )
 from app.api.api_keys import router as api_keys_router
 from app.api.approvals import router as approvals_router
+from app.api.artifact_apps import router as artifact_apps_router
 from app.api.audit.bash_router import router as audit_router
 from app.api.background_tasks.router import router as background_tasks_router
 from app.api.batch_directory import router as batch_directory_router
@@ -206,6 +207,7 @@ api_router.include_router(context_bundle_router, tags=["context-bundle"])
 api_router.include_router(wiki_router, prefix="/wiki", tags=["wiki"])
 api_router.include_router(faq_router, prefix="/faq", tags=["faq"])
 api_router.include_router(widget_storage_router, tags=["widget-storage"])
+api_router.include_router(artifact_apps_router, tags=["artifact-apps"])
 api_router.include_router(kanban_router)
 api_router.include_router(kanban_pipeline_router)
 

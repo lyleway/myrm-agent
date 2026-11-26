@@ -53,6 +53,7 @@
 | `mascot/` | ✅ 辅助 | 流式事件到桌宠动画状态的映射（见上方术语表） | [_ARCH.md](mascot/_ARCH.md) |
 | `context/` | ✅ 核心 | Shared Context / Context Bundle 业务编排 | [_ARCH.md](context/_ARCH.md) |
 | `artifacts/` | ✅ 核心 | 产物业务编排与 API 侧用例 | [_ARCH.md](artifacts/_ARCH.md) |
+| `artifact_apps/` | ✅ 核心 | 已安装产物应用：安装登记、按能力授权、活动日志、宿主 fetch 代理 | [_ARCH.md](artifact_apps/_ARCH.md) |
 | `audit/` | ✅ 辅助 | 审计日志业务服务 | [_ARCH.md](audit/_ARCH.md) |
 | `integrations/` | ✅ 核心 | 集成连接编排与用户配置 | [_ARCH.md](integrations/_ARCH.md) |
 | `providers/` | ✅ 核心 | 服务提供商与实时余额探测业务服务 | [_ARCH.md](providers/_ARCH.md) |

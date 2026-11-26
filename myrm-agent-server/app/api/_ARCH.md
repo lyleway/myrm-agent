@@ -18,6 +18,7 @@ FastAPI HTTP/WebSocket 入口层。`router.py` 聚合子路由挂载到 `/api/v1
 |----|------|------|
 | Agent 对话 | [agents/](agents/_ARCH.md) · [agents/general_agent/](agents/general_agent/_ARCH.md) | 流式对话、模板、子 Agent、Harness 桥 |
 | 审批 | [approvals/](approvals/_ARCH.md) | 全局 HITL Drawer recovery |
+| 产物应用 | [artifact_apps/](artifact_apps/_ARCH.md) | 已安装 HTML 产物：授权、活动日志、宿主 fetch 代理 |
 | 聊天/项目 | [chats/](chats/_ARCH.md) · [projects/](projects/_ARCH.md) | 会话 CRUD、项目归属 |
 | 看板 | [kanban/](kanban/_ARCH.md) | Board/Task、Specify/Decompose、Pipeline |
 | 批量目录 | [batch_directory/](batch_directory/_ARCH.md) | 同一 prompt × N 目录并行批次（创建/聚合/取消/重试/重跑） |
