@@ -6,15 +6,17 @@
 
 [OUTPUT]
 - isolated_backend_url / requires_live_model: the guards every live test starts with
-- create_agent / create_chat / stream_turn: a skill-only agent, its chat, and one streamed turn
+- create_agent / create_chat / stream_turn: a skill-only agent, its chat, and one streamed turn (optionally under a
+  session security preset)
 - user_request / rewrite_request / patch_request / delete_request: the plain requests the model is given
 - batch_id_of / announced_batch / announced_batches / persisted_skill_steps / stored_batch_ids / catalog_skill_id /
   skill_md / wait_for: what the tests read back from the stream and the API
 
 [POS]
-Support module of ``test_skill_manage_undo_live_api_e2e.py``. The harness completion guard reads freshness words
-(live, latest, current, ...) in the request as a demand for web evidence, which a skill-only agent can never produce;
-the request and system-prompt wording stays free of them so a turn ends on its own.
+Support module of ``test_skill_manage_undo_live_api_e2e.py`` and ``test_learn_command_live_api_e2e.py``. The harness
+completion guard reads freshness words (live, latest, current, ...) in the request as a demand for web evidence, which
+a skill-only agent can never produce; the request and system-prompt wording stays free of them so a turn ends on its
+own.
 """
 
 from __future__ import annotations
@@ -144,8 +146,19 @@ def create_chat(client: httpx.Client, backend_url: str, chat_id: str, agent_id: 
     assert response.json().get("success") is True, response.text
 
 
-def stream_turn(client: httpx.Client, backend_url: str, agent_id: str, chat_id: str, query: str) -> list[dict[str, object]]:
-    """Every event the stream delivered, in arrival order, until the server closes it; prints the model it ran on."""
+def stream_turn(
+    client: httpx.Client,
+    backend_url: str,
+    agent_id: str,
+    chat_id: str,
+    query: str,
+    *,
+    security_preset: str | None = None,
+) -> list[dict[str, object]]:
+    """Every event the stream delivered, in arrival order, until the server closes it; prints the model it ran on.
+
+    *security_preset* is the chat session's preset (``hitl``, ``accept_edits``, ``explore``); ``None`` sends none.
+    """
     request_data: dict[str, object] = {
         "messageId": f"live-skill-{uuid.uuid4().hex[:10]}",
         "chatId": chat_id,
@@ -157,6 +170,8 @@ def stream_turn(client: httpx.Client, backend_url: str, agent_id: str, chat_id: 
         "memoryRequireConfirmation": False,
         "enableMemoryAutoExtraction": False,
     }
+    if security_preset is not None:
+        request_data["securityPreset"] = security_preset
     events: list[dict[str, object]] = []
     with client.stream("POST", f"{backend_url}/api/v1/agents/agent-stream", json=request_data, timeout=600.0) as response:
         response.raise_for_status()
@@ -243,7 +258,7 @@ def catalog_skill_id(client: httpx.Client, backend_url: str, name: str) -> str |
     return None
 
 
-def wait_for[T](check: Callable[[], T], *, timeout_sec: float, what: str) -> T:
+def wait_for[T](check: Callable[[], T | None], *, timeout_sec: float, what: str) -> T:
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         value = check()
