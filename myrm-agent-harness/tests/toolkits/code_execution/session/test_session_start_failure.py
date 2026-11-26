@@ -14,20 +14,21 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import sys
+import threading
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 
+import psutil
 import pytest
 
-from myrm_agent_harness.toolkits.code_execution.session import LocalPersistentSession
+from myrm_agent_harness.toolkits.code_execution.session import LocalPersistentSession, process_tree
 from myrm_agent_harness.toolkits.code_execution.session.models import SessionState
 from tests.support.marked_processes import wait_until
-from tests.toolkits.code_execution._session_helpers import let_the_loop_run, make_config
+from tests.toolkits.code_execution._session_helpers import make_config
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="drives a real bash shell")
 
 _SETTLE_S = 5.0
-_TICKS = 20
 _SANDBOX_MODES = ["disable", "auto"]
 
 _Starter = Callable[[LocalPersistentSession], Coroutine[object, object, None]]
@@ -131,8 +132,20 @@ async def test_a_start_whose_initialisation_fails_leaves_no_shell(
 
 @pytest.mark.parametrize("sandbox_mode", _SANDBOX_MODES)
 async def test_a_start_cancelled_again_while_its_shell_is_being_stopped_still_leaves_no_shell(
-    tmp_path: Path, sandbox_mode: str
+    tmp_path: Path, sandbox_mode: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The kill of a shell tree takes a snapshot of its descendants before it signals anything. Parking that snapshot
+    # holds the kill at the one point where a second cancel stops it for good unless the kill is shielded.
+    snapshot_taken = threading.Event()
+    release_snapshot = threading.Event()
+    real_snapshot = process_tree._descendants
+
+    def parked_snapshot(pid: int) -> list[psutil.Process]:
+        snapshot_taken.set()
+        release_snapshot.wait(_SETTLE_S)
+        return real_snapshot(pid)
+
+    monkeypatch.setattr(process_tree, "_descendants", parked_snapshot)
     session = _InitStopsSession(str(tmp_path), sandbox_mode)
     try:
         starting = asyncio.create_task(session.start())
@@ -141,13 +154,15 @@ async def test_a_start_cancelled_again_while_its_shell_is_being_stopped_still_le
         assert shell is not None
 
         starting.cancel()
-        await let_the_loop_run(_TICKS)  # the start is now stopping the shell it spawned
+        await wait_until(snapshot_taken.is_set)  # the start is now stopping the shell it spawned
         starting.cancel()
         with pytest.raises(asyncio.CancelledError):
             await starting
+        release_snapshot.set()
 
         assert await _ends_within_settle_time(shell), "the second cancel left the shell running"
     finally:
+        release_snapshot.set()
         await session.close()
 
 
