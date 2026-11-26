@@ -1,5 +1,7 @@
 """[INPUT]
 - .common (POS: shared constants and helpers)
+- .config_store::ConfigStoreMixin (POS: reads and changes the stored topic map of a channel)
+- .topic_map (POS: pure operations on the stored topic map)
 
 [OUTPUT]
 - PolicyMixin
@@ -14,18 +16,33 @@ from .common import (
     SEARCH_AGENT_CHANNEL_BIND_MSG,
     logger,
 )
+from .config_store import ConfigStoreMixin
+from .topic_map import drop_bindings_of
 
 
-class PolicyMixin:
+class PolicyMixin(ConfigStoreMixin):
     async def get_all_topics(self, channel: str) -> dict[str, object]:
         """Get all topics for a channel (used by API).
 
         Strips legacy Search-track bindings so Settings never shows ghost binds.
         """
         config = await self._load_config(channel)
-        if await self._sanitize_unbindable_bindings(channel, config):
-            await self._save_config(channel, config)
-        return config
+        unbindable = await self._unbindable_agent_ids(config)
+        if not unbindable:
+            return config
+
+        removed = await self._mutate_config(
+            channel, lambda stored: drop_bindings_of(stored, unbindable) or None, best_effort=True
+        )
+        for chat_id, storage_key, agent_id in removed or []:
+            logger.info(
+                "SqlTopicManager: unbindable agent %s binding %s/%s/%s auto-removed",
+                agent_id,
+                channel,
+                chat_id,
+                storage_key,
+            )
+        return await self._load_config(channel)
 
     async def _resolve_agent_id(self, agent_id_or_name: str) -> str:
         """Resolve agent by UUID or name. Returns the canonical UUID.
@@ -51,20 +68,6 @@ class PolicyMixin:
 
         return agent_id_or_name
 
-    @staticmethod
-    def _delete_binding_keys(
-        config: dict[str, object],
-        chat_id: str,
-        storage_key: str,
-    ) -> bool:
-        group_topics = config.get(chat_id)
-        if not isinstance(group_topics, dict) or storage_key not in group_topics:
-            return False
-        del group_topics[storage_key]
-        if not group_topics:
-            del config[chat_id]
-        return True
-
     async def _is_channel_bindable_agent(self, agent_id: str) -> bool:
         """Return False for Search-track or missing agents (Channel/IM = General-only)."""
         from app.services.agent.agent_service import AgentService
@@ -81,30 +84,17 @@ class PolicyMixin:
             return False
         return str(meta.get("prompt_mode", "full")) == "search"
 
-    async def _sanitize_unbindable_bindings(self, channel: str, config: dict[str, object]) -> bool:
-        changed = False
-        for chat_id, group_topics in list(config.items()):
+    async def _unbindable_agent_ids(self, config: dict[str, object]) -> set[str]:
+        """The agents the stored bindings name that a channel cannot be served by (Search-track or missing)."""
+        named: set[str] = set()
+        for group_topics in config.values():
             if not isinstance(group_topics, dict):
                 continue
-            chat_id_str = str(chat_id)
-            for storage_key, topic_cfg in list(group_topics.items()):
-                if not isinstance(topic_cfg, dict):
-                    continue
-                raw_agent_id = topic_cfg.get("agentId")
-                if not isinstance(raw_agent_id, str) or not raw_agent_id:
-                    continue
-                if await self._is_channel_bindable_agent(raw_agent_id):
-                    continue
-                self._delete_binding_keys(config, chat_id_str, str(storage_key))
-                logger.info(
-                    "SqlTopicManager: unbindable agent %s binding %s/%s/%s auto-removed",
-                    raw_agent_id,
-                    channel,
-                    chat_id_str,
-                    storage_key,
-                )
-                changed = True
-        return changed
+            for entry in group_topics.values():
+                agent_id = entry.get("agentId") if isinstance(entry, dict) else None
+                if isinstance(agent_id, str) and agent_id:
+                    named.add(agent_id)
+        return {agent_id for agent_id in named if not await self._is_channel_bindable_agent(agent_id)}
 
     async def _assert_channel_bindable_agent(self, agent_id: str) -> None:
         """Reject Search-track agents — Channel/IM always runs General CORE."""

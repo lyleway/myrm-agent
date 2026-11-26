@@ -1,7 +1,9 @@
 import uuid
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.channel_bridge.topic_config import (
@@ -22,23 +24,21 @@ async def _ensure_builtin_agents_seeded() -> None:
 async def _seed_legacy_search_global_bind(channel: str) -> None:
     from app.core.channel_bridge.topic_config import SqlTopicManager
 
-    manager = SqlTopicManager()
-    await manager._save_config(
-        channel,
-        {
-            "__global__": {
-                _CHANNEL_LEVEL_KEY: {
-                    "agentId": "builtin-fast-search",
-                    "enabled": True,
-                    "boundAt": "2020-01-01T00:00:00+00:00",
-                }
+    def seed(config: dict[str, object]) -> bool:
+        config["__global__"] = {
+            _CHANNEL_LEVEL_KEY: {
+                "agentId": "builtin-fast-search",
+                "enabled": True,
+                "boundAt": "2020-01-01T00:00:00+00:00",
             }
-        },
-    )
+        }
+        return True
+
+    await SqlTopicManager()._mutate_config(channel, seed)
 
 
 @asynccontextmanager
-async def _db_lifespan(app):
+async def _db_lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.database.connection import init_database
 
     await init_database()
@@ -46,7 +46,7 @@ async def _db_lifespan(app):
 
 
 @pytest.fixture
-def client():
+def client() -> Iterator[TestClient]:
     original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = _db_lifespan
     with TestClient(app, raise_server_exceptions=False) as c:
@@ -54,7 +54,7 @@ def client():
     app.router.lifespan_context = original_lifespan
 
 
-def test_topic_binding_e2e(client):
+def test_topic_binding_e2e(client: TestClient) -> None:
     """End-to-end test for channel topic binding without mocks."""
 
     unique_id = str(uuid.uuid4())[:8]
@@ -149,7 +149,7 @@ def test_topic_binding_e2e(client):
     print("E2E Test Passed Successfully (Including Edge Cases)!")
 
 
-def test_search_agent_channel_bind_rejected_e2e(client):
+def test_search_agent_channel_bind_rejected_e2e(client: TestClient) -> None:
     """Real DB: Search-track agents cannot bind to channels; legacy binds are purged on read."""
     import asyncio
 
@@ -185,7 +185,7 @@ def test_search_agent_channel_bind_rejected_e2e(client):
     assert sanitized.json()["globalAgentId"] is None
 
 
-def test_topic_team_identity_e2e(client):
+def test_topic_team_identity_e2e(client: TestClient) -> None:
     """End-to-end test for team-shared identity bind/scope/revoke lifecycle."""
 
     unique_id = str(uuid.uuid4())[:8]
@@ -246,7 +246,7 @@ def test_topic_team_identity_e2e(client):
     assert restored.json()["identityRevoked"] is False
 
 
-def test_topic_follow_up_policy_e2e(client):
+def test_topic_follow_up_policy_e2e(client: TestClient) -> None:
     """End-to-end test for proactive follow-up policy fields."""
 
     unique_id = str(uuid.uuid4())[:8]
@@ -292,7 +292,7 @@ def test_topic_follow_up_policy_e2e(client):
     assert rows[0]["stallNudge"] is True
 
 
-def test_stall_nudge_fires_on_pending_with_stale_thread(client):
+def test_stall_nudge_fires_on_pending_with_stale_thread(client: TestClient) -> None:
     """Real DB + real scan: stale thread with stall opt-in and open approval gets one nudge."""
     import asyncio
     import time
@@ -359,7 +359,7 @@ def test_stall_nudge_fires_on_pending_with_stale_thread(client):
     get_stall_tracker().drop(f"{channel_name}:{chat_id}:")
 
 
-def test_cron_delivery_revoked_identity_fails_closed(client):
+def test_cron_delivery_revoked_identity_fails_closed(client: TestClient) -> None:
     """Real DB: cron delivery into a revoked-identity chat raises instead of sending."""
     import asyncio
 
