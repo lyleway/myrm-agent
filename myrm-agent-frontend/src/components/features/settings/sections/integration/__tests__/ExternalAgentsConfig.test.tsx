@@ -8,6 +8,7 @@ const stableT = (key: string) => key;
 const mocks = vi.hoisted(() => ({
   saved: undefined as unknown,
   set: vi.fn(),
+  statuses: [] as unknown[],
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -18,7 +19,7 @@ vi.mock('next-intl', () => ({
 vi.mock('@/services/config', () => ({
   getConfigSyncManager: () => ({ get: () => mocks.saved, set: mocks.set }),
 }));
-vi.mock('@/services/external-agents', () => ({ getExternalAgentAuthStatus: async () => [] }));
+vi.mock('@/services/external-agents', () => ({ getExternalAgentAuthStatus: async () => mocks.statuses }));
 vi.mock('@/lib/api', () => ({ apiRequest: vi.fn() }));
 vi.mock('@/lib/deploy-mode', () => ({ isLocalMode: () => false }));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
@@ -52,6 +53,7 @@ const savedAgent = () => {
 
 describe('ExternalAgentsConfig environment variables', () => {
   beforeEach(() => {
+    mocks.statuses = [];
     mocks.set.mockClear();
     mocks.toast.error.mockClear();
     mocks.saved = { agents: [agent({ env: { ANTHROPIC_API_KEY: 'sk-old', HTTPS_PROXY: 'http://proxy:8080' } })] };
@@ -152,3 +154,58 @@ describe('ExternalAgentsConfig environment variables', () => {
     expect(screen.getByDisplayValue('claude-code')).toBeInTheDocument();
   });
 });
+
+describe('ExternalAgentsConfig auth mode', () => {
+  const status = (backend: string, subscriptionLoginAllowed: boolean) => ({
+    backend,
+    installed: true,
+    path: `/usr/bin/${backend}`,
+    version: '1.0.0',
+    authenticated: false,
+    authStatus: 'not_authenticated',
+    loginStrategy: 'device_code',
+    scriptableLogin: true,
+    needsCodeInput: false,
+    subscriptionLoginAllowed,
+  });
+
+  beforeEach(() => {
+    mocks.set.mockClear();
+    mocks.saved = { agents: [agent({ authMode: 'subscription' })] };
+  });
+
+  const openAuthModeSelect = async () => {
+    await openEditor();
+    // The server's answer arrives after the first render.
+    await vi.waitFor(() => expect(screen.getByText('authModeHostedHint', { exact: false })).toBeTruthy());
+  };
+
+  const authModeOptions = async () => {
+    const trigger = screen.getAllByRole('combobox').find((select) => /^authMode/.test(select.textContent ?? ''));
+    await userEvent.click(trigger as HTMLElement);
+    return screen.getAllByRole('option').map((option) => option.textContent);
+  };
+
+  it('offers subscription and API key where login is allowed', async () => {
+    mocks.statuses = [status('claude', true), status('codex', true)];
+    await openEditor();
+
+    expect(await screen.findByText('authModeHint')).toBeInTheDocument();
+    expect(screen.queryByText('authModeHostedHint')).not.toBeInTheDocument();
+    expect(await authModeOptions()).toEqual(['authModeSubscription', 'authModeApiKey']);
+  });
+
+  it('offers only the API key where the deployment keeps no subscription login, and stores it', async () => {
+    mocks.statuses = [status('claude', false), status('codex', false)];
+    await openAuthModeSelect();
+
+    expect(screen.queryByText('authModeHint')).not.toBeInTheDocument();
+    expect(await authModeOptions()).toEqual(['authModeApiKey']);
+    await userEvent.keyboard('{Escape}');
+
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent().authMode).toBe('api_key');
+  });
+});
+

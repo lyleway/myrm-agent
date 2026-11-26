@@ -6,14 +6,19 @@
  * - DEFAULT_AGENT, AGENT_PRESETS: the blank entry and the one-click presets of the add form
  * - PERMISSION_MODE_OPTIONS, PERMISSION_MODE_HINTS, normalizePermissionMode: the modes each backend type can honour
  * - backendKeyFromCommand: command → known login backend
- * - ExternalAgentDraft, EnvRow, toDraft, newEnvRow, envRowProblems, cleanAgent: the editable form of an agent
- *   and the rules for turning it back into what is stored
+ * - ExternalAgentDraft, EnvRow, toDraft, newEnvRow, envRowProblems, effectiveAuthMode, cleanAgent: the editable
+ *   form of an agent and the rules for turning it back into what is stored
  *
  * [POS]
  * Pure data and rules of the external agent editor; no React, so every rule is unit-testable.
  */
 
-import type { ExternalAgentConfig, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
+import type {
+  ExternalAgentAuthMode,
+  ExternalAgentConfig,
+  ExternalAgentPermissionMode,
+  ExternalAgentType,
+} from '@/services/config';
 
 export const DEFAULT_AGENT: ExternalAgentConfig = {
   name: '',
@@ -154,12 +159,20 @@ export function envRowProblems(rows: readonly EnvRow[]): Map<string, EnvRowProbl
   return problems;
 }
 
+/** The auth mode the form shows and stores: a deployment without subscription login only has the API key. */
+export function effectiveAuthMode(
+  authMode: ExternalAgentAuthMode | undefined,
+  subscriptionLoginAllowed: boolean,
+): ExternalAgentAuthMode {
+  return subscriptionLoginAllowed ? (authMode ?? 'subscription') : 'api_key';
+}
+
 /**
  * The agent as it is stored: trimmed text, no blank arguments, a permission mode its type can honour
- * (otherwise switching type could persist a mode the form never showed), and an `env` only when it has
- * entries. The environment lines must have passed `envRowProblems`.
+ * (otherwise switching type could persist a mode the form never showed), the auth mode the deployment
+ * supports, and an `env` only when it has entries. The environment lines must have passed `envRowProblems`.
  */
-export function cleanAgent(draft: ExternalAgentDraft): ExternalAgentConfig {
+export function cleanAgent(draft: ExternalAgentDraft, subscriptionLoginAllowed = true): ExternalAgentConfig {
   const { envRows, ...rest } = draft;
   const env = Object.fromEntries(envRows.filter((row) => !isBlankRow(row)).map((row) => [row.name.trim(), row.value]));
   const cleaned: ExternalAgentConfig = {
@@ -169,6 +182,9 @@ export function cleanAgent(draft: ExternalAgentDraft): ExternalAgentConfig {
     args: (draft.args ?? []).filter((a) => a.trim() !== ''),
     permissionMode: normalizePermissionMode(draft.type, draft.permissionMode),
   };
+  if (!subscriptionLoginAllowed) {
+    cleaned.authMode = 'api_key';
+  }
   if (Object.keys(env).length > 0) {
     cleaned.env = env;
   }

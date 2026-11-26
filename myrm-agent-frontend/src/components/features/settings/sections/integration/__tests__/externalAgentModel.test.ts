@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT,
   backendKeyFromCommand,
   cleanAgent,
+  effectiveAuthMode,
   envRowProblems,
   newEnvRow,
   normalizePermissionMode,
@@ -79,6 +80,29 @@ describe('cleanAgent', () => {
     });
 
     expect(cleaned).toMatchObject({ name: 'claude-code', command: 'claude', args: ['-p'], permissionMode: 'safe' });
+  });
+
+  it('keeps the chosen auth mode where subscription login is allowed', () => {
+    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), true).authMode).toBe('subscription');
+    expect(cleanAgent(toDraft(stored({ authMode: 'api_key' })), true).authMode).toBe('api_key');
+    expect(cleanAgent(toDraft(stored({ authMode: undefined }))).authMode).toBeUndefined();
+  });
+
+  it('stores an API key as the auth mode where subscription login is not allowed', () => {
+    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), false).authMode).toBe('api_key');
+    expect(cleanAgent(toDraft(stored({ authMode: undefined })), false).authMode).toBe('api_key');
+  });
+});
+
+describe('effectiveAuthMode', () => {
+  it('defaults to subscription where login is allowed', () => {
+    expect(effectiveAuthMode(undefined, true)).toBe('subscription');
+    expect(effectiveAuthMode('api_key', true)).toBe('api_key');
+  });
+
+  it('is always the API key where login is not allowed', () => {
+    expect(effectiveAuthMode(undefined, false)).toBe('api_key');
+    expect(effectiveAuthMode('subscription', false)).toBe('api_key');
   });
 });
 

@@ -1,20 +1,25 @@
 """External agent subscription-auth endpoints.
 
-GUI/SaaS-driven authentication for delegated CLI agents (Codex / Claude Code /
+GUI-driven authentication for delegated CLI agents (Codex / Claude Code /
 Gemini / Qwen): query login status for badges, drive an interactive login over
 SSE (surfacing the login URL / device code), feed a pasted code, import a
-credential captured elsewhere, or log out. Mounted globally (local + SaaS) since
-subscription auth is an agent-config concern, not channel management.
+credential captured elsewhere, or log out. Mounted globally since subscription
+auth is an agent-config concern, not channel management. Login and import store
+the user's own subscription credential on the host, so they are refused where the
+host is not the user's machine (a managed sandbox runs delegated CLIs on an API
+key); status and logout stay available so a leftover credential can be removed.
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.auth (POS: ACP subscription auth subsystem)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
+- app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
+- app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
 
 [OUTPUT]
 - router: external agent auth endpoints under /external-agents
 
 [POS]
-外部 Agent 订阅鉴权 HTTP API 层。让 GUI/SaaS 用户用自有订阅驱动外部 CLI。
+外部 Agent 订阅鉴权 HTTP API 层。让用户在自己的机器上用自有订阅驱动外部 CLI；托管部署不开放登录与导入。
 """
 
 from __future__ import annotations
@@ -23,9 +28,12 @@ import json
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from app.api.external_agents._deploy_capability import require_subscription_login_capability
+from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +118,7 @@ async def external_agent_auth_status() -> dict[str, object]:
         )
     )
 
+    subscription_login_allowed = get_deployment_capabilities().allows_subscription_login
     backends: list[dict[str, object]] = []
     for name, state in zip(names, states, strict=True):
         profile = profile_for(name)
@@ -127,6 +136,7 @@ async def external_agent_auth_status() -> dict[str, object]:
                 "loginStrategy": profile.login_strategy.value,
                 "scriptableLogin": profile.scriptable_login,
                 "needsCodeInput": profile.needs_code_input,
+                "subscriptionLoginAllowed": subscription_login_allowed,
             }
         )
     return {"backends": backends}
@@ -164,7 +174,7 @@ async def external_agent_install(backend: str) -> StreamingResponse:
     )
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_login(
     body: ExternalAgentLoginRequest,
 ) -> StreamingResponse:
@@ -211,7 +221,7 @@ async def external_agent_auth_login(
     )
 
 
-@router.post("/auth/login/{session_id}/feed")
+@router.post("/auth/login/{session_id}/feed", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_feed(session_id: str, body: ExternalAgentFeedRequest) -> dict[str, bool]:
     """Forward a user-supplied line (e.g. a pasted auth code) to a live login session."""
     from myrm_agent_harness.toolkits.acp.auth import CliLoginSession
@@ -223,16 +233,22 @@ async def external_agent_auth_feed(session_id: str, body: ExternalAgentFeedReque
     return {"ok": True}
 
 
-@router.post("/auth/import")
+@router.post("/auth/import", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_import(
     body: ExternalAgentImportRequest,
 ) -> dict[str, object]:
-    """Persist a credential blob captured on another machine (universal fallback)."""
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore
+    """Persist a credential blob captured on another machine (universal fallback).
 
-    store = CredentialStore()
+    The store is built from the same capability as the route gate, so a deployment that keeps no subscription
+    credentials has the store itself refuse the write even if a route were ever exposed without the gate.
+    """
+    from myrm_agent_harness.toolkits.acp.auth import CredentialStorageDisabledError, CredentialStore
+
+    store = CredentialStore(accepts_new_credentials=get_deployment_capabilities().allows_subscription_login)
     try:
         state = store.import_credential(body.backend, body.content, filename=body.filename)
+    except CredentialStorageDisabledError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

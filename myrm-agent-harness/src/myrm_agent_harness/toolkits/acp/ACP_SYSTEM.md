@@ -222,7 +222,7 @@ RuntimeConfig (frozen dataclass)
 - 方言默认环境：CLI 方言的 `env_defaults` 垫在宿主与配置环境之下（后两者可覆盖）；Claude 的 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` 让无头回合不留后台任务（后台任务期间 `claude -p` 不会退出）
 - `subscription`（默认）：剥离所有 provider 密钥 **并丢弃** `env` 中注入的密钥，强制委托 CLI 走自身订阅登录态（用户的 ChatGPT Plus / Claude Max / Gemini 订阅），绝不静默回退按量计费的 API Key
 - `api_key`：业务层经 `env` 注入该后端应计费的单一 provider 密钥，剥离基线后重新应用
-- 价值：让 GUI/SaaS 用户用已购订阅驱动外部 CLI，无需重复购买 API Key（详见 3.10 auth 子系统）
+- 价值：让用户在自己的机器上用已购订阅驱动外部 CLI，无需重复购买 API Key；托管部署不保存订阅登录，只用 API Key（详见 3.10 auth 子系统）
 
 ### 3.9 _base.py（RuntimeBackend 基类）
 
@@ -236,7 +236,7 @@ RuntimeConfig (frozen dataclass)
 
 ### 3.10 auth 子系统（订阅鉴权）
 
-**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动 GUI/SaaS 登录、状态徽章与凭据持久化。
+**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动 GUI 登录、状态徽章与凭据持久化，并判定当前部署是否允许保存订阅凭据。
 
 ```
 auth/
@@ -250,6 +250,7 @@ auth/
 - **登录态检测**（`resolve_login_state`）：该后端是否已登录？有状态命令的 CLI（`claude auth status`、`codex login status`）问 CLI 自己并以它的回答为准，没有的（gemini、qwen）与 CLI 无回应时退回 `CredentialStore.state` 的文件判断；驱动状态徽章；鉴权态从不缓存（用户随时登录/登出）
 - **交互式登录**（`CliLoginSession`）：spawn `<cli> <login_args>`，并发读 stdout/stderr，URL/设备码 → 可操作 PROMPT 事件，进程退出后用 `CredentialStore` 校验落地 → SUCCESS/ERROR；`needs_code_input` 时经 `feed()` 回填用户粘贴的 code
 - **凭据导入兜底**（`CredentialStore.import_credential`）：登录不可脚本化（gemini/qwen 浏览器流）或不便时的**通用路径**——用户在有浏览器的机器登录后粘贴 `auth.json`，原子安全写入对应路径
+- **拒绝保存凭据**（`CredentialStore(accepts_new_credentials=False)`）：订阅登录会把用户自己的凭据留在宿主上，订阅条款只允许这发生在用户自己控制的机器上；业务层在不属于用户的宿主（托管沙箱）上以该开关构造存储，导入在写任何文件之前抛 `CredentialStorageDisabledError`，而检测与清除照常可用，使开关生效之前留下的凭据仍能被移除。登录会话本身由 CLI 自己落盘，harness 无法拦截，业务层必须在启动 `CliLoginSession` 之前拒绝
 
 **设计铁律**：
 - 鉴权态**绝不进入** Turn1 工具描述；`create_invoke_acp_agent_tool` 使用**固定 schema**（backend 列表仅在运行时 KeyError 返回值中暴露），不破坏提示词前缀缓存

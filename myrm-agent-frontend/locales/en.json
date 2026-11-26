@@ -14824,6 +14824,7 @@
         "authModeSubscription": "Subscription",
         "authModeApiKey": "API Key",
         "authModeHint": "Subscription uses the agent's own login (ChatGPT Plus, Claude Max, etc.) — no API key needed. API Key passes the key you add under Environment variables.",
+        "authModeHostedHint": "This workspace is hosted, so agents run on your own API key. Subscription sign-in is only available when Myrm runs on your own computer.",
         "env": "Environment variables",
         "envAdd": "Add variable",
         "envRemove": "Remove variable",

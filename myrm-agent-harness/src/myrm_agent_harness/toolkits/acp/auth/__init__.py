@@ -10,13 +10,13 @@ mechanisms, all GUI/SaaS-driven by the business layer:
 
 [INPUT]
 - toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, known_backends, profile_for, cli_launch_args (POS: Authentication profile registry.)
-- toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStore (POS: Credential persistence and detection.)
+- toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.login_session::AuthEvent, AuthEventType, CliLoginSession (POS: CLI login session management.)
 - toolkits.acp.auth.login_state::LoginReport, probe_login, resolve_login_state (POS: Login state a CLI reports about itself.)
 
 [OUTPUT]
 - LoginStrategy, AuthProfile, profile_for, known_backends, cli_launch_args
-- AuthStatus, CredentialState, CredentialStore
+- AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore
 - AuthEventType, AuthEvent, CliLoginSession
 - LoginReport, probe_login, resolve_login_state
 
@@ -36,6 +36,7 @@ from myrm_agent_harness.toolkits.acp.auth._profiles import (
 from myrm_agent_harness.toolkits.acp.auth.credential_store import (
     AuthStatus,
     CredentialState,
+    CredentialStorageDisabledError,
     CredentialStore,
 )
 from myrm_agent_harness.toolkits.acp.auth.login_session import (
@@ -52,6 +53,7 @@ __all__ = [
     "AuthStatus",
     "CliLoginSession",
     "CredentialState",
+    "CredentialStorageDisabledError",
     "CredentialStore",
     "LoginReport",
     "LoginStrategy",

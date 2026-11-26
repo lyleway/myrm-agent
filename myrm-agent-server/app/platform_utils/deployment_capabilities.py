@@ -22,9 +22,16 @@ from app.config.deploy_mode import DeployMode, get_deploy_mode, is_local_mode, i
 
 @dataclass(frozen=True, slots=True)
 class DeploymentCapabilities:
-    """What this server instance is allowed to do in the current deploy mode."""
+    """What this server instance is allowed to do in the current deploy mode.
+
+    ``allows_subscription_login`` is true only where the machine belongs to the user (desktop, local WebUI, and a
+    WebUI the user exposes remotely from their own machine). A delegated CLI's subscription login leaves the user's
+    own credential on the host, which the subscription terms allow only on a machine the user controls; a managed
+    sandbox runs delegated CLIs on an API key instead. No environment variable overrides it.
+    """
 
     allows_local_skills: bool
+    allows_subscription_login: bool
     requires_api_key_auth: bool
     uses_platform_budget: bool
     validates_mcp_response_size: bool
@@ -55,6 +62,7 @@ def get_deployment_capabilities() -> DeploymentCapabilities:
 
     return DeploymentCapabilities(
         allows_local_skills=allows_local,
+        allows_subscription_login=local,
         requires_api_key_auth=sandbox or remote,
         uses_platform_budget=sandbox,
         validates_mcp_response_size=sandbox,

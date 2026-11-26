@@ -34,6 +34,7 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   loginStrategy: 'device_code',
   scriptableLogin: true,
   needsCodeInput: false,
+  subscriptionLoginAllowed: true,
   ...overrides,
 });
 
@@ -114,6 +115,54 @@ describe('ExternalAgentAuthControls', () => {
 
     expect(mocks.toast.error).toHaveBeenCalledWith('loginFailed');
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  describe('in a hosted deployment', () => {
+    const hosted = (overrides: Partial<ExternalAgentAuthStatus> = {}) =>
+      status({ subscriptionLoginAllowed: false, ...overrides });
+
+    it('offers no login for an installed agent, since agents run on an API key there', () => {
+      const { container } = render(<ExternalAgentAuthControls command="codex" status={hosted()} onChanged={vi.fn()} />);
+
+      expect(screen.queryByRole('button', { name: 'login' })).not.toBeInTheDocument();
+      expect(screen.queryByText('badgeLoggedOut')).not.toBeInTheDocument();
+      expect(screen.queryByText('login-dialog:codex')).not.toBeInTheDocument();
+      expect(container.querySelector('button')).toBeNull();
+    });
+
+    it('still offers installation of a missing agent', async () => {
+      render(
+        <ExternalAgentAuthControls
+          command="codex"
+          status={hosted({ installed: false, path: null, version: null })}
+          onChanged={vi.fn()}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'install' }));
+
+      expect(screen.getByText('install-dialog:codex')).toBeInTheDocument();
+    });
+
+    it('shows a login left from before with a way to remove it, and no way to log in again', async () => {
+      const onChanged = vi.fn();
+      mocks.logout.mockResolvedValue({ backend: 'codex', authenticated: false, authStatus: 'not_authenticated' });
+      render(
+        <ExternalAgentAuthControls
+          command="codex"
+          status={hosted({ authenticated: true, authStatus: 'authenticated' })}
+          onChanged={onChanged}
+        />,
+      );
+
+      expect(screen.getByText('badgeLoggedIn')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'login' })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'logout' }));
+
+      expect(mocks.logout).toHaveBeenCalledWith('codex');
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('keeps the install dialog mounted across the installed transition so a finished install is not cut short', async () => {

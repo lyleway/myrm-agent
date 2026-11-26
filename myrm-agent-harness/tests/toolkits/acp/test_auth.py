@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -17,6 +18,7 @@ from myrm_agent_harness.toolkits.acp.auth import (
     AuthProfile,
     AuthStatus,
     CliLoginSession,
+    CredentialStorageDisabledError,
     CredentialStore,
     LoginStrategy,
     known_backends,
@@ -244,6 +246,41 @@ class TestCredentialStore:
 
         state = store.clear("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
+
+
+class TestCredentialStoreThatKeepsNothing:
+    """A deployment that must not hold a user's subscription credentials builds a store that refuses them."""
+
+    @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
+    def test_import_is_refused_before_anything_is_written(self, tmp_path: Path, backend: str) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential(backend, '{"x": 1}')
+
+        assert list(tmp_path.iterdir()) == []
+        assert store.is_authenticated(backend) is False
+
+    def test_refusal_does_not_depend_on_the_content_being_valid(self, tmp_path: Path) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential("codex", "")
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential("mystery", "x")
+
+    def test_a_credential_stored_before_the_policy_applied_can_still_be_seen_and_removed(self, tmp_path: Path) -> None:
+        CredentialStore({"HOME": str(tmp_path)}).import_credential("codex", '{"x": 1}')
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        assert store.is_authenticated("codex") is True
+        assert store.clear("codex").status is AuthStatus.NOT_AUTHENTICATED
+        assert store.is_authenticated("codex") is False
+
+    def test_the_default_store_keeps_credentials(self, tmp_path: Path) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)})
+
+        assert store.import_credential("codex", '{"x": 1}').authenticated is True
 
 
 class TestBuildSafeEnvAuthMode:
