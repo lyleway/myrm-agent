@@ -8,12 +8,15 @@
 - myrm_agent_harness...summarize_circuit_guard::is_summarize_circuit_open (POS: circuit breaker)
 - myrm_agent_harness...compression_anti_thrash_guard (POS: streak guard + outcome record)
 - compact._types::CompactReason, CompactResult (POS: closed decline reasons + outcome)
+- app.database.factory::acquire_write_lock (POS: write lock before a read-then-write unit)
 
 [OUTPUT]
 - compact_chat: transactional compaction entry (``for_idle_stale`` idle predicate; ``request_tokens_for_guard`` aligns idle anti-thrash with gate; ``explicit_request`` marks a person's request, which the anti-thrash guard does not stop and which counts toward its streak only up to the guard limit)
 
 [POS]
-Server compaction orchestration; called by stale gate, /compact API, channel handler, idle worker.
+Server compaction orchestration; called by stale gate, /compact API, channel handler, idle worker. It reads in one
+transaction, calls the model with none open, then writes in a fresh one, so what the model call takes (seconds to
+minutes) never holds a database snapshot and a failed call still leaves its cooldown behind.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import logging
 from myrm_agent_harness.utils.text_utils import get_token_count
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.factory import acquire_write_lock
 from app.services.chat.compact._lock import get_compaction_lock
 from app.services.chat.compact._types import CompactReason, CompactResult
 from app.services.chat.compact.idle_estimate import resolve_min_messages_to_compact
@@ -135,6 +139,12 @@ async def compact_chat(
                     reason=CompactReason.ANTI_THRASH_ACTIVE,
                 )
 
+        # The reads above hold a snapshot of the whole database until the transaction ends. Any commit during the model
+        # call (another chat's message, a background job) would then abort this compaction's own write with
+        # SQLITE_BUSY_SNAPSHOT, which busy_timeout does not cover, and the summary would be paid for and thrown away.
+        # Sessions of this app keep loaded rows readable after a commit, which the backup and the persist below rely on.
+        await db.commit()
+
         try:
             _, summary = await guarded_compact_summarize(
                 lc_messages=lc_messages,
@@ -145,7 +155,10 @@ async def compact_chat(
                 max_context_tokens=max_context_tokens,
             )
         except asyncio.TimeoutError as timeout_exc:
+            # The cooldown is committed here: a session that closes without a commit rolls it back, and the next idle turn
+            # would then pay for the same failing summary again.
             await record_compaction_failure_cooldown(db, chat_id, f"timeout: {timeout_exc}")
+            await db.commit()
             return CompactResult(
                 compacted=False,
                 original_tokens=original_tokens,
@@ -154,6 +167,7 @@ async def compact_chat(
             )
         except Exception as summarize_exc:
             await record_compaction_failure_cooldown(db, chat_id, str(summarize_exc))
+            await db.commit()
             raise
 
         summary_tokens = get_token_count(summary.to_json())
@@ -164,6 +178,9 @@ async def compact_chat(
 
         last_msg = db_messages[-1]
 
+        # The persist reads the stored compaction boundary before it writes: taking the write lock first leaves no
+        # moment between the read and the write for another writer to commit in.
+        await acquire_write_lock(db)
         try:
             await do_persist_to_db(
                 db=db,
