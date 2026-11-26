@@ -6,6 +6,7 @@ the raw bytes to the appropriate file parser for extraction.
 
 [INPUT]
 - toolkits.file_parsers (POS: File parsers toolkit entry point.)
+- toolkits.file_parsers.archive_budget::check_zip_budget (POS: Unpacking budget for ZIP containers)
 - utils.content_sniff::magic_extension (POS: Format signature to file extension)
 - web_fetch.processing.pipeline::SOURCE_TRUNCATED_KEY (POS: Document metadata flag for a source cut short)
 
@@ -17,10 +18,13 @@ the raw bytes to the appropriate file parser for extraction.
 [POS]
 Binary content detection and routing for non-HTML URLs (PDF, images, documents).
 Three-layer detection: Content-Type → Content-Disposition → Magic Bytes.
+A body that is a ZIP container is measured before any parser opens it: the page controls the sizes inside the
+archive, so the 20 MB body cap does not bound what it unpacks to.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import tempfile
@@ -94,13 +98,15 @@ async def route_binary_content(
 ) -> Document | None:
     """Route binary content to appropriate parser and return a Document.
 
-    Returns None if the content type is unrecognized, no parser supports it, or parsing fails.
+    Returns None if the content type is unrecognized, no parser supports it, a ZIP container is over the unpacking
+    budget, or parsing fails.
     """
     if len(raw_body) > MAX_BINARY_SIZE:
         logger.warning("Binary content too large (%d bytes), skipping: %s", len(raw_body), url[:100])
         return None
 
-    ext = detect_binary_extension(headers, raw_body)
+    # The last detection layer opens a ZIP's central directory, whose size the page controls: keep it off the loop.
+    ext = await asyncio.to_thread(detect_binary_extension, headers, raw_body)
     if not ext:
         logger.info("Unrecognized binary format for %s, skipping", url[:100])
         return None
@@ -119,7 +125,11 @@ async def route_binary_content(
         tmp_file.close()
 
         from myrm_agent_harness.toolkits.file_parsers import get_parser
+        from myrm_agent_harness.toolkits.file_parsers.archive_budget import check_zip_budget
 
+        # By content, not by label: whatever the headers say, a ZIP reaches a ZIP parser (get_parser sniffs the
+        # bytes), and the 20 MB cap above counts compressed bytes only. A refusal raises into the handler below.
+        await asyncio.to_thread(check_zip_budget, tmp_file.name)
         parser = get_parser(tmp_file.name)
         result = await parser.parse(tmp_file.name)
 
