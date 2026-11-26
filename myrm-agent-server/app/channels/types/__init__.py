@@ -47,10 +47,14 @@ from .notification import (
     with_final_notify,
 )
 from .session import (
+    METADATA_NEW_CONVERSATION_KEY,
     SessionKey,
     SessionPolicy,
     SessionResetMode,
     compute_daily_epoch,
+    is_started_session_key,
+    started_key_time,
+    started_session_key,
 )
 from .status import (
     ChannelActivity,
@@ -87,6 +91,7 @@ __all__ = [
     "METADATA_CONTEXT_DOCUMENT_KEY",
     "METADATA_EXPLICIT_MENTION_KEY",
     "METADATA_GUEST_TURN_KEY",
+    "METADATA_NEW_CONVERSATION_KEY",
     "METADATA_NOTIFY_KEY",
     "METADATA_RESUME_SESSION_KEY",
     "ActionButton",
@@ -140,10 +145,13 @@ __all__ = [
     "compute_daily_epoch",
     "extract_cron_context",
     "guess_media_type",
+    "is_started_session_key",
     "parse_notification_mode",
     "reaction_key",
     "render_components_as_text",
     "render_quick_replies_as_text",
     "should_notify",
+    "started_key_time",
+    "started_session_key",
     "with_final_notify",
 ]

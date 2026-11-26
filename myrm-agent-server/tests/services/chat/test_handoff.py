@@ -6,41 +6,38 @@ Covers: handoff_chat, _build_target_session_key
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.channels.types.session import SessionPolicy, SessionResetMode
+from app.channels.types import is_started_session_key, started_session_key
 from app.services.chat.handoff import HandoffResult, _build_target_session_key, handoff_chat
+
+_MOMENT = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
 # ─── _build_target_session_key ──────────────────────────────────
 
 
 class TestBuildTargetSessionKey:
-    def test_persistent_policy(self) -> None:
-        policy = SessionPolicy(mode=SessionResetMode.PERSISTENT)
-        key = _build_target_session_key("telegram", "user123", policy)
-        assert key == "telegram:dm:user123"
+    """The handed chat is stored as a conversation opened on the target peer, whatever the peer's reset policy is."""
 
-    def test_persistent_with_agent(self) -> None:
-        policy = SessionPolicy(mode=SessionResetMode.PERSISTENT)
-        key = _build_target_session_key("telegram", "u1", policy, agent_id="agent-x")
-        assert key == "telegram:dm:u1:agent:agent-x"
+    def test_the_key_is_a_conversation_opened_now_on_the_target_peer(self) -> None:
+        with patch("app.services.chat.handoff.datetime") as clock:
+            clock.now.return_value = _MOMENT
+            key = _build_target_session_key("telegram", "user123")
+        assert key == "telegram:dm:user123:e=s20260101T120000"
+        assert key == started_session_key("telegram:dm:user123", _MOMENT)
 
-    def test_daily_policy_default(self) -> None:
-        """SessionPolicy defaults to DAILY; key must include epoch suffix."""
-        key = _build_target_session_key("feishu", "peer1", SessionPolicy())
-        assert key.startswith("feishu:dm:peer1:e=")
-        epoch_part = key.split(":e=")[1]
-        assert len(epoch_part) > 0
+    def test_the_agent_of_the_chat_is_part_of_the_key(self) -> None:
+        key = _build_target_session_key("telegram", "u1", agent_id="agent-x")
+        assert key.startswith("telegram:dm:u1:agent:agent-x:e=s")
+        assert is_started_session_key(key)
 
-    def test_idle_policy(self) -> None:
-        policy = SessionPolicy(mode=SessionResetMode.IDLE)
-        key = _build_target_session_key("slack", "peer2", policy)
-        assert key.startswith("slack:dm:peer2:e=")
-        epoch_part = key.split(":e=")[1]
-        assert "T" in epoch_part
+    def test_a_peer_id_is_sanitised_the_way_the_resolver_does(self) -> None:
+        assert _build_target_session_key("slack", "Peer 2!").startswith("slack:dm:peer_2_:e=s")
 
 
 # ─── handoff_chat ───────────────────────────────────────────────
@@ -53,7 +50,7 @@ def _make_mock_channel(connected: bool = True) -> MagicMock:
 
 
 async def _seed_chat(
-    session_factory_fn,
+    session_factory_fn: Callable[[], async_sessionmaker[AsyncSession]],
     chat_id: str,
     source: str = "web",
     channel_session_key: str | None = None,
@@ -77,7 +74,7 @@ async def _seed_chat(
 
 
 async def _seed_pairing(
-    session_factory_fn,
+    session_factory_fn: Callable[[], async_sessionmaker[AsyncSession]],
     channel: str,
     sender_id: str,
     status: str = "active",
@@ -183,14 +180,11 @@ async def test_handoff_success() -> None:
 
     with patch(_GATEWAY_PATCH) as mock_gw:
         mock_gw.bus.get_channel.return_value = _make_mock_channel()
-        result = await handoff_chat(
-            chat_id,
-            chan,
-            policy=SessionPolicy(mode=SessionResetMode.PERSISTENT),
-        )
+        result = await handoff_chat(chat_id, chan)
         assert result.success
         assert result.target_channel == chan
-        assert result.target_session_key == f"{chan}:dm:tg_user_123"
+        assert result.target_session_key.startswith(f"{chan}:dm:tg_user_123:e=s")
+        assert is_started_session_key(result.target_session_key)
 
     factory = get_session_factory()
     async with factory() as db:
@@ -200,7 +194,7 @@ async def test_handoff_success() -> None:
 
         chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one()
         assert chat.source == chan
-        assert chat.channel_session_key == f"{chan}:dm:tg_user_123"
+        assert chat.channel_session_key == result.target_session_key
 
 
 @pytest.mark.asyncio
@@ -209,7 +203,7 @@ async def test_handoff_resolves_unique_conflict() -> None:
     from app.platform_utils import get_session_factory
 
     chan = f"fs_conflict_{uuid.uuid4().hex[:8]}"
-    target_key = f"{chan}:dm:fs_user_1"
+    target_key = started_session_key(f"{chan}:dm:fs_user_1", _MOMENT)
 
     old_chat_id = str(uuid.uuid4())
     await _seed_chat(
@@ -223,14 +217,12 @@ async def test_handoff_resolves_unique_conflict() -> None:
     await _seed_chat(get_session_factory, new_chat_id, source="web")
     await _seed_pairing(get_session_factory, chan, "fs_user_1")
 
-    with patch(_GATEWAY_PATCH) as mock_gw:
+    with patch(_GATEWAY_PATCH) as mock_gw, patch("app.services.chat.handoff.datetime") as clock:
         mock_gw.bus.get_channel.return_value = _make_mock_channel()
-        result = await handoff_chat(
-            new_chat_id,
-            chan,
-            policy=SessionPolicy(mode=SessionResetMode.PERSISTENT),
-        )
+        clock.now.return_value = _MOMENT
+        result = await handoff_chat(new_chat_id, chan)
         assert result.success
+        assert result.target_session_key == target_key
 
     factory = get_session_factory()
     async with factory() as db:
@@ -258,13 +250,9 @@ async def test_handoff_preserves_agent_id() -> None:
 
     with patch(_GATEWAY_PATCH) as mock_gw:
         mock_gw.bus.get_channel.return_value = _make_mock_channel()
-        result = await handoff_chat(
-            chat_id,
-            chan,
-            policy=SessionPolicy(mode=SessionResetMode.PERSISTENT),
-        )
+        result = await handoff_chat(chat_id, chan)
         assert result.success
-        assert ":agent:skill-writer" in result.target_session_key
+        assert ":agent:skill-writer:e=s" in result.target_session_key
 
 
 @pytest.mark.asyncio
@@ -296,13 +284,9 @@ async def test_handoff_same_source_but_no_key_allowed() -> None:
 
     with patch(_GATEWAY_PATCH) as mock_gw:
         mock_gw.bus.get_channel.return_value = _make_mock_channel()
-        result = await handoff_chat(
-            chat_id,
-            chan,
-            policy=SessionPolicy(mode=SessionResetMode.PERSISTENT),
-        )
+        result = await handoff_chat(chat_id, chan)
         assert result.success
-        assert result.target_session_key == f"{chan}:dm:tg_rehandoff"
+        assert result.target_session_key.startswith(f"{chan}:dm:tg_rehandoff:e=s")
 
 
 @pytest.mark.asyncio
@@ -322,30 +306,9 @@ async def test_handoff_same_source_mismatched_key_allowed() -> None:
 
     with patch(_GATEWAY_PATCH) as mock_gw:
         mock_gw.bus.get_channel.return_value = _make_mock_channel()
-        result = await handoff_chat(
-            chat_id,
-            chan,
-            policy=SessionPolicy(mode=SessionResetMode.PERSISTENT),
-        )
-        assert result.success
-        assert result.target_session_key == f"{chan}:dm:tg_mismatch_user"
-
-
-@pytest.mark.asyncio
-async def test_handoff_with_default_policy() -> None:
-    """Handoff without explicit policy uses default DAILY SessionPolicy."""
-    from app.platform_utils import get_session_factory
-
-    chan = f"dc_policy_{uuid.uuid4().hex[:8]}"
-    chat_id = str(uuid.uuid4())
-    await _seed_chat(get_session_factory, chat_id, source="web")
-    await _seed_pairing(get_session_factory, chan, "dc_user_policy")
-
-    with patch(_GATEWAY_PATCH) as mock_gw:
-        mock_gw.bus.get_channel.return_value = _make_mock_channel()
         result = await handoff_chat(chat_id, chan)
         assert result.success
-        assert result.target_session_key.startswith(f"{chan}:dm:dc_user_policy:e=")
+        assert result.target_session_key.startswith(f"{chan}:dm:tg_mismatch_user:e=s")
 
 
 @pytest.mark.asyncio

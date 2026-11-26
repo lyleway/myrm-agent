@@ -68,7 +68,6 @@ class RouterLifecycleHost(Protocol):
     """Structural contract for ``RouterLifecycleMixin`` (consume loop, janitor, stuck-task watchdog)."""
 
     _SESSION_STATE_TTL: float
-    _NEW_SESSION_PEER_TTL: float
     _bus: MessageBus
     _fx: MessageEffects
     _gate: SessionGate
@@ -78,7 +77,6 @@ class RouterLifecycleHost(Protocol):
     _pending_approvals: PendingApprovals
     _stream_coordinator: StreamCoordinator
     _progress_estimator: ProgressEstimator
-    _new_session_peers: dict[str, float]
     _session_yolo: dict[str, tuple[float, int | None]]
     _session_personality: dict[str, str]
     _seen_messages: dict[str, float]
@@ -98,7 +96,7 @@ class RouterLifecycleHost(Protocol):
 
     async def _janitor_sweep(self) -> None: ...
 
-    def _cleanup_stale_session_state(self, now_monotonic: float) -> None: ...
+    def _cleanup_stale_session_state(self) -> None: ...
 
     async def _reap_stuck_tasks(self, now: float) -> None: ...
 
@@ -121,6 +119,8 @@ class RouterInboundHost(Protocol):
     _seen_messages: dict[str, float]
 
     async def _enrich_message_locale(self, msg: InboundMessage) -> InboundMessage: ...
+
+    async def _open_requested_conversation(self, msg: InboundMessage) -> InboundMessage | None: ...
 
     def _note_group_activity(self, msg: InboundMessage) -> None: ...
 
@@ -175,7 +175,6 @@ class RouterCommandDispatchHost(Protocol):
     _gate: SessionGate
     _registry: CommandRegistry
     _skill_command_handler: SkillCommandHandler | None
-    _new_session_peers: dict[str, float]
 
     async def _check_admin_permission(self, msg: InboundMessage) -> bool: ...
 
@@ -321,7 +320,6 @@ class RouterExecutionHost(Protocol):
     _resolver: PolicyResolver
     _gate: SessionGate
     _active_tasks: dict[str, _ActiveTask]
-    _new_session_peers: dict[str, float]
     _topic_resolver: TopicManager | None
 
     async def _consume_executor_stream(

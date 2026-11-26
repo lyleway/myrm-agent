@@ -34,7 +34,7 @@ class RouterCommandsSessionMixin:
     """Mixin: /new, /compact, /retry, /undo, and topic commands."""
 
     async def _handle_new_session(self: RouterCommandsHost, msg: InboundMessage) -> None:
-        """Handle /new command: cancel running task, flush pending queue, start fresh."""
+        """Handle /new command: cancel running task, flush pending queue, open a new conversation."""
         chat_id = msg.chat_id or msg.sender_id
         state_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
 
@@ -54,7 +54,7 @@ class RouterCommandsSessionMixin:
         self._session_yolo.pop(state_key, None)
         self._session_personality.pop(state_key, None)
 
-        await handle_new_session(msg, self._bus, self._new_session_peers)
+        await handle_new_session(msg, self._bus)
 
     async def _handle_compact(self: RouterCommandsHost, msg: InboundMessage, raw_args: str = "") -> None:
         """Handle /compact command: compress chat context to reduce token cost."""

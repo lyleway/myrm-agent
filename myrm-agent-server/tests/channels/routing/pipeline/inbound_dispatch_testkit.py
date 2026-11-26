@@ -4,6 +4,7 @@ the helpers that read what a dispatch published or handed to the session gate.""
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 from myrm_agent_harness.utils.runtime.cancellation import CancellationToken
@@ -46,14 +47,18 @@ def inbound_msg(
 def dispatch_router() -> AgentRouter:
     """A router whose sender checks are decided, whose gate is a recorder, and whose handlers record their calls."""
     router = make_router()
-    router._is_sender_admitted = AsyncMock(return_value=False)
-    router._check_admin_permission = AsyncMock(return_value=False)
+    recorders = {
+        "_is_sender_admitted": AsyncMock(return_value=False),
+        "_check_admin_permission": AsyncMock(return_value=False),
+        "_handle_action_button_approval": AsyncMock(),
+        "_handle_approval_command": AsyncMock(),
+        "_dispatch_resolved": AsyncMock(return_value=True),
+        "_handle_bang_command": AsyncMock(),
+        "_handle_delegation_inbound": AsyncMock(return_value=True),
+    }
+    for name, recorder in recorders.items():
+        setattr(router, name, recorder)
     router._gate = MagicMock()
-    router._handle_action_button_approval = AsyncMock()
-    router._handle_approval_command = AsyncMock()
-    router._dispatch_resolved = AsyncMock(return_value=True)
-    router._handle_bang_command = AsyncMock()
-    router._handle_delegation_inbound = AsyncMock(return_value=True)
     router._delegation_coordinator = MagicMock()
     router._delegation_coordinator.find_active_task.return_value = None
     return router
@@ -76,12 +81,19 @@ def running_turn(router: AgentRouter, *, thread_id: str | None = None, requester
     return token
 
 
+def command_dispatch(router: AgentRouter) -> AsyncMock:
+    """The recorder that stands in for the command dispatch of ``dispatch_router``."""
+    return cast(AsyncMock, router._dispatch_resolved)
+
+
 def published_messages(router: AgentRouter) -> list[OutboundMessage]:
-    return [call.args[0] for call in router._bus.publish_outbound.await_args_list]
+    publish = cast(AsyncMock, router._bus.publish_outbound)
+    return [call.args[0] for call in publish.await_args_list]
 
 
 def gate_submissions(router: AgentRouter) -> list[InboundMessage]:
-    return [call.args[0] for call in router._gate.submit.call_args_list]
+    submit = cast(MagicMock, router._gate.submit)
+    return [call.args[0] for call in submit.call_args_list]
 
 
 async def run_dispatch(router: AgentRouter, msg: InboundMessage) -> None:

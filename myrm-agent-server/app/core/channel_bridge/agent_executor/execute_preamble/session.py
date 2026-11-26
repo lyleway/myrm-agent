@@ -9,7 +9,8 @@ resolve_channel_session_context(): session_key、历史、冷启动标记与 res
 
 [POS]
 preamble 子模块：会话键解析、backfill、历史加载与 auto-reset 通知。审批续跑回合不重算会话键：沿用提问回合的会话
-（``METADATA_RESUME_SESSION_KEY``），不落库、不 backfill、不播报 reset；该会话的聊天已不存在时如实答复。
+（``METADATA_RESUME_SESSION_KEY``），不落库、不 backfill、不播报 reset；该会话的聊天已不存在时如实答复。按请求开出的会话
+（``/new``）是人选定的空白起点，同样不 backfill、不播报 reset。
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from app.channels.types import (
     SessionPolicy,
     SessionResetMode,
     TopicContext,
+    is_started_session_key,
 )
 from app.core.channel_bridge.config_parsers import session_policy_from_agent_dict
 from app.core.channel_bridge.executor_helpers import (
@@ -83,24 +85,20 @@ async def resolve_channel_session_context(
             msg, asked_session_key, query=query, topic_context=topic_context, session_policy=session_policy
         )
 
-    force_new = bool(msg.metadata.get("force_new_epoch"))
-    session_key = await resolve_session_key(
-        msg,
-        session_policy,
-        agent_id=resolved_agent_id,
-        force_new_epoch=force_new,
-    )
+    session_key = await resolve_session_key(msg, session_policy, agent_id=resolved_agent_id)
 
-    is_cold_start = await _detect_cold_start(session_key)
+    # A conversation the person opened on request (``/new``) is empty on purpose: it is neither a reset to announce nor
+    # a gap to fill with the platform's recent messages, which belong to the conversation they chose to leave.
+    is_fresh_start = not is_started_session_key(session_key) and await _detect_cold_start(session_key)
     await maybe_backfill_channel_history(
         executor,
         msg,
         session_key=session_key,
-        is_cold_start=is_cold_start,
+        is_cold_start=is_fresh_start,
         resolved_agent_id=resolved_agent_id,
     )
 
-    session_was_auto_reset = is_cold_start and not force_new and session_policy.mode != SessionResetMode.PERSISTENT
+    session_was_auto_reset = is_fresh_start and session_policy.mode != SessionResetMode.PERSISTENT
     working_query: str | list[dict[str, object]] = query
     if session_was_auto_reset and session_policy.notify_on_reset:
         context_note = (

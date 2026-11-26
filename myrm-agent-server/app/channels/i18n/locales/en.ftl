@@ -196,6 +196,7 @@ cron_notice_interrupted_message =
     The app stopped while it was running, so this run did not finish.
 cron_system_job_heartbeat = Agent Auto-Check
 new_session_started =  New conversation started. Your next message begins a fresh session.
+new_session_failed =  Could not start a new conversation. Send /new again to retry.
 compact_not_configured = ℹ Compaction not configured.
 compact_success =  Context compacted: { $message_count } messages summarized, ~{ $tokens_saved } tokens saved.{ $topic_hint }
 compact_topic_hint = (focus: { $topic })
