@@ -678,7 +678,7 @@ SessionNotesProcessor    ← 笔记就绪时零 API 压缩；未就绪时自然�
        ↓
 SummarizeProcessor       ← 超大上下文 → 结构化摘要（最后手段）；未到 90% 窗口时缓存热或签名块在途则让位
        ↓
-PostCompactionRereadProcessor ← 压缩后自动重读最近修改的文件注入上下文
+PostCompactionRereadProcessor ← 压缩(compress / session_notes / summarize)自己节省了 token 后,把最近修改的文件重读后追加到请求尾部
        ↓
 PostCompactionRefetchGuardProcessor ← 压缩后反复回读同一归档路径时，在尾部注入一次提示
        ↓

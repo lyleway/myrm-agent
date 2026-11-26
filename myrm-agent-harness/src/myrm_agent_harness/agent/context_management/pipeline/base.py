@@ -47,6 +47,7 @@ class ProcessorContext:
         is_resume: Resume 状态标志(从 interrupt() 恢复时为 True)
         merged_context: Agent merged context(用于访问 hitl_session_active 等标记)
         tokens_saved: 累计节省的 token 数
+        tokens_saved_by: 各处理器自己节省的 token 数(引擎按处理器名累加,执行失败的处理器不计)
         operations: 已执行的操作列表
         metadata: 处理器间共享的元数据(如压缩边界、模型信息等)
         structured_summary: SummarizeProcessor 产生的摘要(供 Middleware 持久化)
@@ -66,6 +67,7 @@ class ProcessorContext:
 
     # 统计信息
     tokens_saved: int = 0
+    tokens_saved_by: dict[str, int] = field(default_factory=dict)
     operations: list[str] = field(default_factory=list)
 
     # 处理器间共享的元数据

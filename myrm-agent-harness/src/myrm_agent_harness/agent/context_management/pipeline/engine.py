@@ -98,10 +98,14 @@ class ContextPipeline:
 
         for processor in self.processors:
             if await processor.should_process(context):
+                saved_before = context.tokens_saved
                 try:
                     context = await processor.process(context)
                     context.operations.append(processor.name)
                     executed.append(processor.name)
+                    if (gained := context.tokens_saved - saved_before) > 0:
+                        credited = context.tokens_saved_by
+                        credited[processor.name] = credited.get(processor.name, 0) + gained
                 except Exception as exc:
                     logger.error("Processor %s failed: %s", processor.name, exc)
                     failed.append(processor.name)
@@ -276,7 +280,7 @@ def build_default_processors(
     processors.extend(
         [
             summarize_processor,
-            PostCompactionRereadProcessor(),
+            PostCompactionRereadProcessor(max_context_tokens=max_context),
             PostCompactionRefetchGuardProcessor(),
             NormalizeProcessor(),
             MediaResolverProcessor(file_content_reader=file_content_reader),

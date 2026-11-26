@@ -13,7 +13,7 @@ Pipeline processor that discourages repeated archive restores for the same path 
 
 from __future__ import annotations
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage
 
 from myrm_agent_harness.utils.logger_utils import get_agent_logger
 
@@ -69,7 +69,9 @@ class PostCompactionRefetchGuardProcessor(BaseProcessor):
             f"Prefer the existing summary or a single targeted range read for `{sample_path}` "
             "instead of restoring the same archive again."
         )
-        context.messages = [*context.messages, SystemMessage(content=hint)]
+        # A user message, not a system one: several providers fold a late system message into the request's system
+        # field, which rewrites the cached prefix.
+        context.messages = [*context.messages, HumanMessage(content=hint)]
         context.metadata[_REFETCH_GUARD_METADATA_KEY] = True
         logger.info("[PostCompactionRefetchGuard] injected hint for %s", sample_path)
         return context
