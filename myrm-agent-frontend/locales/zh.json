@@ -6824,7 +6824,7 @@
         },
         "fetch": {
           "title": "联网访问",
-          "description": "只会从以下站点读取数据："
+          "description": "只会与以下站点收发数据："
         },
         "activity": {
           "title": "最近活动",

@@ -5,8 +5,8 @@
  * - ../AppPermissionsDialog::AppPermissionsDialog
  *
  * [OUTPUT]
- * - Tests: what is stored when the user saves (decision per capability, the scope shown, the version), first-time vs
- *   standing mode, and that nothing is stored when the user dismisses the question.
+ * - Tests: what is stored when the user saves (decision per capability, the scope shown, the version), review vs
+ *   manage mode, and that nothing is stored when the user dismisses the question.
  *
  * [POS]
  * The dialog is the only place a decision is made; the scope it stores must be exactly what it displayed.
@@ -164,7 +164,7 @@ describe('AppPermissionsDialog', () => {
     expect(screen.getByText('activity.title')).toBeInTheDocument();
   });
 
-  it('does not show the activity list in the first-time question', () => {
+  it('does not show the activity list in the review question', () => {
     renderDialog({ mode: 'review' });
 
     expect(screen.queryByText('activity.title')).not.toBeInTheDocument();
