@@ -11,32 +11,7 @@ import { cn } from '@/lib/utils/classnameUtils';
 import { searchChatHistory, type SearchResult } from '@/services/chatHistorySearch';
 import useChatStore from '@/store/useChatStore';
 import { SearchResultCard } from './SearchResultCard';
-
-type TimePreset = 'today' | 'week' | 'month' | 'quarter' | null;
-
-function computePresetRange(preset: TimePreset): { since?: string; until?: string } {
-  if (!preset) {
-    return {};
-  }
-  const now = new Date();
-  const until = now.toISOString();
-  const start = new Date(now);
-  switch (preset) {
-    case 'today':
-      start.setHours(0, 0, 0, 0);
-      break;
-    case 'week':
-      start.setDate(start.getDate() - 7);
-      break;
-    case 'month':
-      start.setMonth(start.getMonth() - 1);
-      break;
-    case 'quarter':
-      start.setMonth(start.getMonth() - 3);
-      break;
-  }
-  return { since: start.toISOString(), until };
-}
+import { computePresetRange, type TimePreset } from './search-time-presets';
 
 interface SearchDialogProps {
   open: boolean;

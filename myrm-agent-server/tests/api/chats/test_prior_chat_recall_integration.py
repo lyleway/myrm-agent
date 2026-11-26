@@ -2,13 +2,13 @@
 
 [INPUT]
 tests.support.minimal_app::build_minimal_app (POS: 按需挂载 API 路由的测试 app)
-app.api.chats.test_fixtures.prior_chat::seed_prior_chat_fixture (POS: @chat E2E seed)
+app.api.chats.test_fixtures.prior_chat::seed_prior_chat_fixture (POS: @chat E2E seed with a pinnable message time)
 
 [OUTPUT]
-TestPriorChatRecallIntegration: HTTP recall search matches seeded prior chat index.
+TestPriorChatRecallIntegration: HTTP recall search matches seeded prior chat index; the seed pins the message send time, tags its messages with a marker, and is 404 outside local mode.
 
 [POS]
-Chats API 集成测。验证 @chat picker SSOT（/recall/search）与 inject 共用 recall 索引（真 DB，无 mock）。
+Chats API 集成测。验证 @chat picker SSOT（/recall/search）与 inject 共用 recall 索引，以及 seed 的 sent_at / marker 参数与非 local 模式的 404（真 DB，无 mock）。
 """
 
 from __future__ import annotations
@@ -103,3 +103,59 @@ class TestPriorChatRecallIntegration:
         assert "Alpha project" in context or "Redis" in context
         assert warnings == []
         assert tokens > 0
+
+    def test_seed_stamps_messages_at_the_pinned_instant(self, client: TestClient) -> None:
+        agent_id = f"agent_{uuid.uuid4().hex[:8]}"
+        asyncio.run(_seed_visible_agent(agent_id, display_name="Prior Chat Pinned Instant Agent"))
+
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=True):
+            seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"sent_at": "2026-03-15T23:30:00Z"})
+
+        assert seed_resp.status_code == 200
+        prior_chat_id = str(seed_resp.json()["prior_chat_id"])
+        search_resp = client.get("/api/v1/chats/search", params={"q": "Alpha", "limit": 20})
+        assert search_resp.status_code == 200
+        hits = [item for item in search_resp.json()["data"]["items"] if item["chat_id"] == prior_chat_id]
+        assert [hit["sent_at"] for hit in hits] == ["2026-03-15T23:30:00+00:00"] * 2
+
+    def test_seed_rejects_a_pinned_instant_without_an_offset(self, client: TestClient) -> None:
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=True):
+            seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"sent_at": "2026-03-15T23:30:00"})
+
+        assert seed_resp.status_code == 422
+        assert "UTC offset" in seed_resp.text
+
+    def test_seed_marker_makes_each_seed_searchable_by_itself(self, client: TestClient) -> None:
+        agent_id = f"agent_{uuid.uuid4().hex[:8]}"
+        asyncio.run(_seed_visible_agent(agent_id, display_name="Prior Chat Marker Agent"))
+
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=True):
+            first = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"marker": "e2emarkeraaa"})
+            second = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"marker": "e2emarkerbbb"})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        search_resp = client.get("/api/v1/chats/search", params={"q": "e2emarkeraaa", "limit": 20})
+        assert search_resp.status_code == 200
+        items = search_resp.json()["data"]["items"]
+        assert {item["chat_id"] for item in items} == {first.json()["prior_chat_id"]}
+        assert len(items) == 2
+
+    def test_seed_rejects_a_marker_that_is_not_one_alphanumeric_token(self, client: TestClient) -> None:
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=True):
+            seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"marker": "not a token"})
+
+        assert seed_resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "params",
+        [{}, {"marker": "not a token"}, {"sent_at": "not an instant"}, {"sent_at": "2026-03-15T23:30:00"}],
+        ids=["plain", "bad-marker", "bad-instant", "no-offset"],
+    )
+    def test_seed_is_not_found_outside_local_mode_whatever_the_query_holds(
+        self, client: TestClient, params: dict[str, str]
+    ) -> None:
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=False):
+            seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params=params)
+
+        assert seed_resp.status_code == 404

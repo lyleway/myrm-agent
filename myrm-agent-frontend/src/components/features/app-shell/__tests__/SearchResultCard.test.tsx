@@ -62,3 +62,33 @@ describe('SearchResultCard snippet', () => {
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });
+
+// The server writes `sent_at` with its UTC offset, so the card shows the day on the viewer's own calendar. Each pair
+// straddles local midnight: a card that shows the UTC day, reads the stored time as local, or is an hour off in either
+// direction gets one of each pair wrong.
+describe('SearchResultCard date', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ['Asia/Shanghai', '2026-11-19T15:00:00.123456+00:00', 19],
+    ['Asia/Shanghai', '2026-11-19T16:00:00.123456+00:00', 20],
+    ['America/Los_Angeles', '2026-11-20T07:00:00.123456+00:00', 19],
+    ['America/Los_Angeles', '2026-11-20T08:00:00.123456+00:00', 20],
+    ['America/New_York', '2026-11-20T04:00:00.123456+00:00', 19],
+    ['America/New_York', '2026-11-20T05:00:00.123456+00:00', 20],
+  ] as const)('in %s a message sent at %s shows November %i', (timeZone, sentAt, day) => {
+    vi.stubEnv('TZ', timeZone);
+
+    render(<SearchResultCard item={{ ...hit('user'), sent_at: sentAt }} onOpen={vi.fn()} onCite={vi.fn()} />);
+
+    // Built from the viewer's own calendar day, so the check holds in whatever locale the runner defaults to.
+    const shown = new Date(2026, 10, day).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    expect(screen.getByText(shown)).toBeTruthy();
+  });
+});

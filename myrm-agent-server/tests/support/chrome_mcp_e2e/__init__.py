@@ -24,6 +24,9 @@ Submodules, primitives first: each imports only modules listed before it, except
   session.
 - ``settings_open``: Open a settings sub-route, or the wiki settings page, on a page that is ready for it.
 - ``chat``: Chat page helpers: route readiness, agent binding, the security preset trigger and the send-idle wait.
+- ``chat_search``: Drive the Cmd+K history search and the shared-context history panel, and read the dates and times
+  they show.
+- ``time_zone``: Pin the time zone of one page for the length of a block, through a DevTools session of its own.
 - ``plan_api``: Dynamic-workflow plan and stream state read and confirmed through the HTTP API.
 - ``workflow_plan``: Wait for the workflow plan card and confirm the plan in the UI or through the API.
 - ``patching``: Monkeypatch helper for the per-concern layout of this package.
@@ -50,6 +53,7 @@ from cdp_chat.support import (
 )
 from chrome_mcp.client import ChromeMcpClient, McpPage
 
+from . import chat_search
 from .api import (
     get_first_enabled_model,
     guarded_httpx_request,
@@ -70,6 +74,7 @@ from .probe_result import _coerce_evaluate_result
 from .reload import _reapply_shpoib_runtime_after_reload, navigate_mcp_page, reload_mcp_page
 from .settings_open import open_settings_subroute, open_wiki_settings_mcp_page
 from .settings_wait import wait_for_agent_settings_editor, wait_for_settings_layout, wait_for_wiki_settings_shell
+from .time_zone import emulated_time_zone
 from .wait_state import wait_for_state
 from .warm_ui import _trigger_attach_client_warmup_once, warm_ui_route
 from .workflow_plan import wait_for_workflow_plan_card
@@ -90,9 +95,11 @@ __all__ = [
     "_trigger_attach_client_warmup_once",
     "_warm_ui_parallel_wait_sec",
     "attach_chat_and_wait_agent_binding",
+    "chat_search",
     "dismiss_blocking_modals",
     "e2e_runtime_binding",
     "e2e_runtime_bootstrap_apply_js",
+    "emulated_time_zone",
     "ensure_chat_route",
     "ensure_desktop_viewport",
     "get_e2e_api_url",
