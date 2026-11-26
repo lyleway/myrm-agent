@@ -5,14 +5,16 @@
 
 [OUTPUT]
 - CODE_INJECTION_ENV_VARS: The exact names (dynamic linker, language runtimes, shell startup, git program hooks).
-- CODE_INJECTION_ENV_PREFIXES: The name families that steer the dynamic loader (``LD_*``, ``DYLD_*``).
+- CODE_INJECTION_ENV_PREFIXES: The name families: ``LD_*`` and ``DYLD_*`` steer the dynamic loader, ``GIT_CONFIG_*``
+  hands git its configuration.
 - is_code_injection_env_name: Whether a name is one of them, case-insensitively.
 
 [POS]
-The one definition of "this variable makes a later program run foreign code". Every place that must refuse such a
-name reads it from here: the child-process and MCP environment blacklists (``DANGEROUS_ENV_VARS`` is built from it)
-and the names a person may stage as a one-command credential. Proxies, TLS and package-source names are not part of
-it: they redirect traffic, and a person may legitimately set them.
+The one definition of "this variable makes a later program run foreign code". Every check on a name that comes from a
+configuration, a plugin or a credential reads it from here: the MCP environment guard and the plugin scan
+(``DANGEROUS_ENV_VARS`` is built from it), the names a person may stage as a one-command credential and the settings
+a skill hands to its command as secrets. Proxies, TLS and package-source names are not part of it: they redirect
+traffic, and a person may legitimately set them.
 """
 
 from __future__ import annotations
@@ -70,8 +72,11 @@ CODE_INJECTION_ENV_VARS: frozenset[str] = (
     _LINKER_INJECTION_ENV_VARS | _RUNTIME_INJECTION_ENV_VARS | _SHELL_STARTUP_ENV_VARS | _GIT_PROGRAM_ENV_VARS
 )
 
-# Whole families of the same kind: every ``LD_*`` and ``DYLD_*`` variable steers the dynamic loader.
-CODE_INJECTION_ENV_PREFIXES: tuple[str, ...] = ("LD_", "DYLD_")
+# Whole families of the same kind: every ``LD_*`` and ``DYLD_*`` variable steers the dynamic loader, and every
+# ``GIT_CONFIG_*`` variable (the numbered key/value pairs, the parameters, the global and system file) hands git
+# configuration, where one ``alias.x=!cmd`` or ``core.sshCommand`` entry runs a program. The whole family is refused,
+# so a name git adds to it needs no edit here.
+CODE_INJECTION_ENV_PREFIXES: tuple[str, ...] = ("LD_", "DYLD_", "GIT_CONFIG_")
 
 
 def is_code_injection_env_name(name: str) -> bool:

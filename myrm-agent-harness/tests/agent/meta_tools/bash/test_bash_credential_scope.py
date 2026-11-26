@@ -83,6 +83,14 @@ def test_skill_secret_env_refuses_the_names_that_run_foreign_code() -> None:
     assert skill_secret_env({"LD_PRELOAD": "/tmp/x.so", "NODE_OPTIONS": "--require x", "LD_DEBUG": "all"}) == {}
 
 
+def test_skill_secret_env_refuses_the_git_configuration_group() -> None:
+    """A shell never takes these names as environment, so they would be handed over as secrets; one key/value pair
+    (``core.sshCommand``, ``alias.x=!cmd``) makes every ``git`` the command starts run a program."""
+    group = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.sshCommand", "GIT_CONFIG_VALUE_0": "/tmp/hook.sh"}
+
+    assert skill_secret_env(group) == {}
+
+
 def test_command_env_hands_skill_secrets_to_the_command_only() -> None:
     command_env = build_command_env(
         {"EMAIL_IMAP_HOST": "h", "EMAIL_IMAP_PASSWORD": "pw"},
