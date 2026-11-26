@@ -12,12 +12,14 @@ mechanisms, all GUI/SaaS-driven by the business layer:
 - toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, known_backends, profile_for, cli_launch_args (POS: Authentication profile registry.)
 - toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.login_session::AuthEvent, AuthEventType, CliLoginSession (POS: CLI login session management.)
+- toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI agent starts from.)
 - toolkits.acp.auth.login_state::LoginReport, probe_login, resolve_login_state (POS: Login state a CLI reports about itself.)
 
 [OUTPUT]
 - LoginStrategy, AuthProfile, profile_for, known_backends, cli_launch_args
 - AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore
 - AuthEventType, AuthEvent, CliLoginSession
+- cli_base_env
 - LoginReport, probe_login, resolve_login_state
 
 [POS]
@@ -39,6 +41,7 @@ from myrm_agent_harness.toolkits.acp.auth.credential_store import (
     CredentialStorageDisabledError,
     CredentialStore,
 )
+from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.auth.login_session import (
     AuthEvent,
     AuthEventType,
@@ -57,6 +60,7 @@ __all__ = [
     "CredentialStore",
     "LoginReport",
     "LoginStrategy",
+    "cli_base_env",
     "cli_launch_args",
     "known_backends",
     "probe_login",

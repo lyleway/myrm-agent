@@ -95,11 +95,11 @@ async def external_agent_auth_status() -> dict[str, object]:
 
     from myrm_agent_harness.toolkits.acp.auth import (
         CredentialStore,
+        cli_base_env,
         known_backends,
         profile_for,
         resolve_login_state,
     )
-    from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 
     detector = BackendDetector()
