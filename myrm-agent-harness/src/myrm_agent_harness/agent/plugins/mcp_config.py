@@ -12,10 +12,12 @@ config with ``enabled: false`` (the default in ``mcp_migration_item_to_config_di
 [INPUT]
 -- .models::PluginMcpServer (POS: shared parser output dataclasses)
 -- utils.clean_json::load_clean_json (POS: Parse step for the plugin.json and mcp.json of a plugin package that comes from an archive the user uploaded or a market supplied.)
+-- .rules::MAX_PLUGIN_JSON_BYTES, ensure_document_size (POS: the decode ceiling of a JSON document and the refusal of one over it)
 
 [OUTPUT]
 -- decode_mcp_json / parse_mcp_servers / validate_mcp_top_level: per-server
    variant validation → normalized PluginMcpServer records; every decoded string is UTF-8 encodable, nesting at most 64 levels.
+-- decode_mcp_json: a payload over ``MAX_PLUGIN_JSON_BYTES`` is refused undecoded (``DocumentTooLargeError``).
 
 [POS]
 Per-server mcp.json variant parser for the framework-level plugin parser.
@@ -34,6 +36,7 @@ from myrm_agent_harness.utils.clean_json import load_clean_json
 
 from .manifest import MCP_SCHEMA, schema_version
 from .models import PluginMcpServer
+from .rules import MAX_PLUGIN_JSON_BYTES, ensure_document_size
 
 # Placeholders recognized in stdio args/env/cwd (§9.2). Expansion is a single,
 # non-recursive textual replacement performed by the launching client, not here.
@@ -57,11 +60,13 @@ class McpConfigError(ValueError):
 def decode_mcp_json(raw: bytes | None) -> dict[str, Any] | None:
     """Decode mcp.json bytes into its top-level dict; every string, key or value, is UTF-8 encodable.
 
-    Returns ``None`` when absent. Raises ``McpConfigError`` when the payload is not valid
-    JSON or not a top-level object.
+    Returns ``None`` when absent. Raises ``DocumentTooLargeError`` when the payload is over
+    ``MAX_PLUGIN_JSON_BYTES``, before any of it is decoded, and ``McpConfigError`` when it is not
+    valid JSON or not a top-level object.
     """
     if raw is None:
         return None
+    ensure_document_size("mcp.json", len(raw), MAX_PLUGIN_JSON_BYTES, "bytes")
     text = raw.decode("utf-8", errors="replace")
     if text.startswith("\ufeff"):
         text = text[1:]

@@ -8,9 +8,9 @@
 
 [OUTPUT]
 - Fails when a manifest is skipped for its depth or folder, when a file a package manager runs at install without a script
-  reads as clean, when a manifest beyond the audit's cap, a manifest over 1 MB, a folder it cannot list, a tree over its
-  entry budget or a symbolic link out of a skill that has a manifest reads as clean, or when an ordinary skill tree, or
-  one that links to shared files and has no manifest, stops reading as clean.
+  reads as clean, when a manifest beyond the audit's cap, a manifest over 1 MB (on disk or in an archive), a folder it
+  cannot list, a tree over its entry budget or a symbolic link out of a skill that has a manifest reads as clean, or when
+  an ordinary skill tree, or one that links to shared files and has no manifest, stops reading as clean.
 
 [POS]
 ``test_package_audit.py`` and ``test_package_audit_unauditable.py`` cover a single manifest; this file pins what the audit
@@ -193,6 +193,24 @@ def test_a_manifest_of_exactly_the_size_limit_is_audited(tmp_path: Path) -> None
     _write(tmp_path, "package.json", _manifest_of_chars(_LIMIT))
 
     assert audit_skill_directory(tmp_path) == []
+
+
+def test_a_manifest_over_the_size_limit_reads_the_same_in_an_archive_as_on_disk(tmp_path: Path) -> None:
+    manifest = _manifest_of_chars(_LIMIT + 1)
+    _write(tmp_path, "package.json", manifest)
+
+    in_archive = check_lifecycle_scripts({"package.json": manifest.encode()})
+
+    assert in_archive == audit_skill_directory(tmp_path)
+    assert _summary(in_archive) == [("invalid_manifest", "high", "package.json")]
+
+
+def test_the_size_limit_counts_the_characters_of_an_archive_manifest_not_its_bytes() -> None:
+    prefix, suffix = '{"pad": "', '"}'
+    manifest = prefix + "é" * (_LIMIT - len(prefix) - len(suffix)) + suffix
+
+    assert len(manifest.encode()) > _LIMIT
+    assert check_lifecycle_scripts({"package.json": manifest.encode()}) == []
 
 
 def test_a_manifest_that_is_not_a_regular_file_by_the_time_it_is_read_is_unauditable(tmp_path: Path) -> None:

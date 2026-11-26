@@ -130,6 +130,10 @@ def _unauditable_finding(reason: str, file_path: str) -> PackageAuditFinding:
     )
 
 
+def _too_long_finding(file_path: str) -> PackageAuditFinding:
+    return _unauditable_finding(f"it is longer than {_MAX_MANIFEST_CHARS:,} characters", file_path)
+
+
 def _is_manifest_name(name: str) -> bool:
     """Case-insensitive: a case-insensitive file system resolves ``Package.json`` to the manifest."""
     return name.lower() == _MANIFEST_NAME
@@ -184,12 +188,19 @@ def audit_package_manifest_dict(pkg: dict[str, object], file_path: str = "") -> 
 
 
 def check_lifecycle_scripts(files: dict[str, bytes]) -> list[PackageAuditFinding]:
-    """Audit every package.json and install-time hook file of an in-memory file map (an archive before extraction)."""
+    """Audit every package.json and install-time hook file of an in-memory file map (an archive before extraction).
+
+    A package.json longer than ``_MAX_MANIFEST_CHARS`` is not parsed: it is the same high finding as on disk.
+    """
     findings: list[PackageAuditFinding] = []
     for filename, content in files.items():
         name = Path(filename).name
         if _is_manifest_name(name):
-            findings.extend(audit_package_json(content.decode("utf-8", errors="replace"), filename))
+            text = content.decode("utf-8", errors="replace")
+            if len(text) > _MAX_MANIFEST_CHARS:
+                findings.append(_too_long_finding(filename))
+            else:
+                findings.extend(audit_package_json(text, filename))
         elif _is_hook_file_name(name):
             findings.append(_hook_file_finding(name, filename))
     return findings
@@ -277,7 +288,7 @@ def _audit_manifest_file(manifest: WalkedFile) -> list[PackageAuditFinding]:
         return [_unauditable_finding("it cannot be read", manifest.relative)]
     if read.text is None:
         if read.refusal is ReadRefusal.TOO_LARGE:
-            return [_unauditable_finding(f"it is longer than {_MAX_MANIFEST_CHARS:,} characters", manifest.relative)]
+            return [_too_long_finding(manifest.relative)]
         return [_unauditable_finding("it is not a regular file", manifest.relative)]
     return _audit_manifest_text(read.text, manifest.relative, manifest.path.parent)
 
