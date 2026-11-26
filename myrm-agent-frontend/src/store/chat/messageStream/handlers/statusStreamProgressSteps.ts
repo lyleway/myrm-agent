@@ -20,7 +20,12 @@ import { AgentEventType } from '../../types/agentStream/part1';
 import type { StatusStreamEvent } from '../../types/agentStream/part2';
 import * as H from './handlerDeps';
 import { LOOP_GUARD_BREAK_TOAST_KEY, isLoopGuardStep, loopGuardProgressStepKey } from './loopGuardStepKey';
-import { formatCompactionItemText, formatMoaSkipReason, formatMoaTriggerReason } from './statusStreamItemText';
+import {
+  formatCompactionItemText,
+  formatMoaSkipReason,
+  formatMoaTriggerReason,
+  formatTokensSaved,
+} from './statusStreamItemText';
 
 function requireStatusStreamEvent(event: StreamCtx['data']): StatusStreamEvent {
   if (event.type !== AgentEventType.STATUS) {
@@ -150,7 +155,7 @@ export async function applyStatusProgressStep(ctx: StreamCtx, stepKey: string): 
       : stepKey === 'context_compaction' && data.data?.phase
         ? formatCompactionItemText(data.data as Record<string, unknown>)
         : (stepKey === 'memory_archived' || stepKey === 'context_pruned') && data.tokens_saved
-          ? `(Tokens saved: ${data.tokens_saved})`
+          ? formatTokensSaved(data.tokens_saved)
           : (stepKey === 'context_preflight_compact' ||
                 stepKey === 'context_preflight_truncation' ||
                 stepKey === 'context_presumed_overflow') &&

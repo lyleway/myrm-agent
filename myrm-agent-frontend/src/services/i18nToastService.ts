@@ -31,12 +31,15 @@ export const setGlobalTranslator = (translator: TranslatorFunction) => {
   globalTranslator = translator;
 };
 
-/** Resolve a locale key outside React; before the translator is installed the key itself is returned. */
-export const translateI18nKey = (key: string, fallback: string = key): string => {
+/**
+ * Resolve a locale key outside React; before the translator is installed `fallback` (the key itself by default) is
+ * returned. `values` fill the `{name}` placeholders of the message.
+ */
+export const translateI18nKey = (key: string, fallback: string = key, values?: TranslationValues): string => {
   if (!globalTranslator) {
     return fallback;
   }
-  return globalTranslator(key);
+  return globalTranslator(key, values);
 };
 
 /** A segment named like an `Object` member (`constructor`, `toString`): next-intl's `has` finds those on any message object. */

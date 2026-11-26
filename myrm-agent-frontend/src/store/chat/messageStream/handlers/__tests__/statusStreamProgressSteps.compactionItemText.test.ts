@@ -1,11 +1,13 @@
 /**
  * The detail text of a `context_compaction` step comes from what the event carries: the elapsed seconds while
  * compaction runs inside a turn, the tokens saved once it completes. An event that carries no figure leaves the step
- * without a detail instead of showing one the stream never sent.
+ * without a detail instead of showing one the stream never sent. The pruning and archiving steps word their saving the
+ * same way.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { ProgressItem } from '@/store/chat/types';
+import { installGlobalTranslator } from '@/test-utils/globalTranslator';
 import { applyStatusEvent } from './statusStepTestKit';
 
 /** Feed the handler one `context_compaction` event and return the detail items of the step it produced. */
@@ -40,9 +42,21 @@ describe('context_compaction detail text', () => {
   });
 
   describe('tokens saved', () => {
+    beforeEach(async () => {
+      await installGlobalTranslator('en');
+    });
+
     it('shows what a completed event reports in its payload', async () => {
       expect(await detailOf({ data: { phase: 'completed', tokens_saved: 4200 } })).toEqual([
         { text: '(Tokens saved: 4200)' },
+      ]);
+    });
+
+    it('words it in the language of the moment', async () => {
+      await installGlobalTranslator('zh');
+
+      expect(await detailOf({ data: { phase: 'completed', tokens_saved: 4200 } })).toEqual([
+        { text: '(节省 token：4200)' },
       ]);
     });
 
@@ -50,6 +64,30 @@ describe('context_compaction detail text', () => {
       'shows nothing for a completed payload that saved no tokens: %o',
       async (saved) => {
         expect(await detailOf({ data: { phase: 'completed', ...saved } })).toEqual([]);
+      },
+    );
+  });
+
+  describe('tokens saved by pruning and archiving', () => {
+    beforeEach(async () => {
+      await installGlobalTranslator('zh');
+    });
+
+    it.each(['context_pruned', 'memory_archived'])(
+      'shows what the %s event reports, in the language of the moment',
+      async (stepKey) => {
+        const message = await applyStatusEvent(stepKey, {}, { tokens_saved: 900 });
+
+        expect(message.progressSteps?.[0].items).toEqual([{ text: '(节省 token：900)' }]);
+      },
+    );
+
+    it.each(['context_pruned', 'memory_archived'])(
+      'shows no detail when the %s event reports no saving',
+      async (stepKey) => {
+        const message = await applyStatusEvent(stepKey, {}, { tokens_saved: 0 });
+
+        expect(message.progressSteps?.[0].items).toEqual([]);
       },
     );
   });
