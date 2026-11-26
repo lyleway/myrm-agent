@@ -59,7 +59,6 @@ async def stream_forced_delegate(
     agent_name: str,
     *,
     cancel_token: CancellationToken | None,
-    chat_id: str | None,
 ) -> AsyncGenerator[dict[str, object]]:
     """Run the turn on ``agent_name`` and stream its events; any failure ends it with one guided error event."""
     locale = agent_wrapper.locale or "en"
@@ -84,10 +83,10 @@ async def stream_forced_delegate(
         yield agent_unavailable_event(agent_name, locale)
         return
 
-    logger.info("Direct routing to external agent: agent=%s chat_id=%s", agent_name, chat_id or "")
+    logger.info("Direct routing to external agent: agent=%s chat_id=%s", agent_name, agent_wrapper._runtime_pool_scope_id or "")
     try:
         async with aclosing(
-            agent_wrapper._direct_delegate_stream(agent_name, query, cancel_token=cancel_token, chat_id=chat_id)
+            agent_wrapper._direct_delegate_stream(agent_name, query, cancel_token=cancel_token)
         ) as delegate_events:
             async for event in delegate_events:
                 yield event

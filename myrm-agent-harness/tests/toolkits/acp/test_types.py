@@ -10,6 +10,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     create_event,
     create_permission_request,
+    delegation_session_id,
     normalize_workspace,
 )
 
@@ -89,6 +90,20 @@ class TestNormalizeWorkspace:
         # A relative path would silently resolve against whatever directory the host process happens to be in.
         with pytest.raises(ValueError, match="absolute path"):
             normalize_workspace(relative)
+
+
+class TestDelegationSessionId:
+    def test_a_scope_names_the_session_of_that_scope(self) -> None:
+        assert delegation_session_id("claude", "chat-1") == "claude-chat-1"
+
+    @pytest.mark.parametrize("no_scope", [None, ""])
+    def test_without_a_scope_the_agent_has_one_default_session(self, no_scope: str | None) -> None:
+        assert delegation_session_id("claude", no_scope) == "claude-default"
+        assert delegation_session_id("claude") == "claude-default"
+
+    def test_agents_and_scopes_never_share_a_session(self) -> None:
+        names = {delegation_session_id(agent, scope) for agent in ("claude", "codex") for scope in ("a", "b", None)}
+        assert len(names) == 6
 
 
 class TestRuntimeEvent:

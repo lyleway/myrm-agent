@@ -70,51 +70,38 @@ async def test_live_setup_reuses_registry_pool_and_wraps_facade() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_live_guard_turn_serializes_concurrent_run_turn() -> None:
-    """Concurrent run_turn on same chat must not overlap (real Facade + registry)."""
+async def test_live_concurrent_turns_of_one_agent_queue_on_the_real_pool() -> None:
+    """Two turns of one agent in one chat never overlap: the pool queues them on the agent's one backend."""
     mixin = _new_mixin(chat_scope_id="live-int-chat-serialize")
     await mixin._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    assert mixin._runtime_pool is not None
+    pool = mixin._runtime_pool
+    assert isinstance(pool, ChatScopedRuntimePoolFacade)
 
     order: list[str] = []
     gate = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_run(
-        name: str,
-        prompt: str,
-        session_id: str,
-        *,
-        workspace: str,
-        mode: str = "persistent",
-        mcp_servers: object = None,
-        images: object = None,
-    ):
-        order.append(f"{name}_start")
+    async def slow_run(prompt: str, session_id: str, *, mcp_servers: object = None, images: object = None):
+        order.append(f"{prompt}_start")
         gate.set()
         await release.wait()
+        order.append(f"{prompt}_end")
         yield MagicMock()
 
-    pool = mixin._runtime_pool
-    assert isinstance(pool, ChatScopedRuntimePoolFacade)
-    original_run_turn = pool._pool.run_turn
-    pool._pool.run_turn = slow_run  # type: ignore[method-assign]
+    pool._pool.get("echo-cli", _WORKSPACE).run_turn = slow_run  # type: ignore[method-assign]
 
     async def consume(label: str) -> None:
         async for _ in pool.run_turn("echo-cli", label, f"s-{label}", workspace=_WORKSPACE):
             pass
 
-    try:
-        task1 = asyncio.create_task(consume("first"))
-        await asyncio.wait_for(gate.wait(), timeout=2.0)
-        task2 = asyncio.create_task(consume("second"))
-        await asyncio.sleep(0.05)
-        assert order == ["echo-cli_start"]
-        release.set()
-        await asyncio.gather(task1, task2)
-        assert order == ["echo-cli_start", "echo-cli_start"]
-    finally:
-        pool._pool.run_turn = original_run_turn
+    task1 = asyncio.create_task(consume("first"))
+    await asyncio.wait_for(gate.wait(), timeout=2.0)
+    task2 = asyncio.create_task(consume("second"))
+    await asyncio.sleep(0.05)
+    assert order == ["first_start"]
+    release.set()
+    await asyncio.gather(task1, task2)
+    assert order == ["first_start", "first_end", "second_start", "second_end"]
 
 
 @pytest.mark.integration
@@ -211,7 +198,7 @@ async def test_live_facade_cancel_during_active_run_turn() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_live_fingerprint_replace_deferred_while_turn_locked() -> None:
+async def test_live_fingerprint_replace_deferred_while_turn_in_flight() -> None:
     """Config fingerprint change during active run_turn must defer pool replace."""
     chat_id = "live-int-chat-fp-defer"
     get_chat_runtime_pool_registry()
@@ -275,7 +262,7 @@ async def test_live_fingerprint_replace_deferred_while_turn_locked() -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_live_parallel_run_turn_different_chats() -> None:
-    """Different chats must not block each other's run_turn (independent turn locks)."""
+    """Different chats must not block each other's run_turn (each chat has its own pool)."""
     mixin_a = _new_mixin(chat_scope_id="live-int-chat-a")
     mixin_b = _new_mixin(chat_scope_id="live-int-chat-b")
     await mixin_a._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
@@ -414,7 +401,6 @@ async def test_live_direct_delegate_stream_cancel_propagates() -> None:
             "echo-cli",
             "hello",
             cancel_token=token,
-            chat_id="live-int-direct-cancel",
         ):
             events.append(event)
 

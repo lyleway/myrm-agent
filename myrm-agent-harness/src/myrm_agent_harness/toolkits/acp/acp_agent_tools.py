@@ -8,7 +8,7 @@ interface via the unified RuntimePool.
 - myrm_agent_harness.core.events.types::AgentEventType (POS: streaming event types and enums, framework-agnostic)
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
 - myrm_agent_harness.toolkits.acp.runtime.cli.dialect::has_native_turn_limit (POS: Per-CLI launch knowledge of CliRuntime)
-- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
+- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
 - myrm_agent_harness.toolkits.acp.types::DelegationPool (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
 - myrm_agent_harness.utils.runtime.cancel_hook::on_token_cancelled (POS: Cancellation bridge for streams that must be stopped from outside)
@@ -37,7 +37,13 @@ from pydantic import BaseModel, Field
 from myrm_agent_harness.core.events.types import AgentEventType
 from myrm_agent_harness.toolkits.acp.runtime._base import truncate_response
 from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import has_native_turn_limit
-from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, ContinuityStatus, RuntimeEventType, normalize_workspace
+from myrm_agent_harness.toolkits.acp.types import (
+    AcpErrorCode,
+    ContinuityStatus,
+    RuntimeEventType,
+    delegation_session_id,
+    normalize_workspace,
+)
 from myrm_agent_harness.utils.runtime.cancel_hook import on_token_cancelled
 from myrm_agent_harness.utils.runtime.cancellation import get_cancel_token
 from myrm_agent_harness.utils.runtime.progress_sink import ToolProgressSink, get_tool_progress_sink
@@ -255,12 +261,9 @@ async def _run_turn_and_collect(
     Supports cancellation propagation: if the parent Agent's CancellationToken
     fires, the external agent process is terminated via pool.cancel().
     """
-    if mode == "oneshot":
-        session_id = f"{agent_name}-oneshot-{uuid4().hex}"
-    elif session_scope:
-        session_id = f"{agent_name}-{session_scope}"
-    else:
-        session_id = f"{agent_name}-default"
+    session_id = (
+        f"{agent_name}-oneshot-{uuid4().hex}" if mode == "oneshot" else delegation_session_id(agent_name, session_scope)
+    )
 
     config = pool.get_config(agent_name)
     max_turns = config.max_turns if config else _DEFAULT_MAX_TURNS

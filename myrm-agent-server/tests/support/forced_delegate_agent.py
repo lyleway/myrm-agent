@@ -52,6 +52,7 @@ def forced_delegate_agent(
         declared_allowed_roots=(),
         locale=locale,
         _runtime_pool=None,
+        _runtime_pool_scope_id=None,
         delegated=[],
         queries=[],
         pool_requests=0,
@@ -61,9 +62,7 @@ def forced_delegate_agent(
         agent.pool_requests += 1
         agent._runtime_pool = SimpleNamespace(available_backends=backends) if backends is not None else None
 
-    async def delegate(
-        name: str, query: object, *, cancel_token: object = None, chat_id: str | None = None
-    ) -> AsyncGenerator[dict[str, object]]:
+    async def delegate(name: str, query: object, *, cancel_token: object = None) -> AsyncGenerator[dict[str, object]]:
         agent.delegated.append(name)
         agent.queries.append(query)
         yield DELEGATED

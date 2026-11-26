@@ -5,14 +5,14 @@
 
 [OUTPUT]
 - ChatRuntimePoolRegistry: reuse RuntimePool per conversation for CLI --resume across messages
-- ChatScopedRuntimePoolFacade: per-chat single-flight guard around pool.run_turn (cancel lock-exempt); keeps its pool registered
+- ChatScopedRuntimePoolFacade: the DelegationPool a chat's delegation entries share; counts its turns as in flight and keeps its pool registered
 - get_chat_runtime_pool_registry(): process-wide singleton accessor
 - close_runtime_pool_bounded(): close a RuntimePool within a hard time limit, never raising
 
 [POS]
-Server 业务层外部 Agent 运行时池生命周期。按 chat 复用 harness RuntimePool，
-支持 per-chat turn lock 串行化 CLI run_turn；cancel 为 lock-exempt 中断语义。
-idle 计时在 acquire / release / 每次委托 turn 结束时刷新；持 turn lock 的在途委托与正在 acquire 的 chat 不参与 idle 回收。
+Server 业务层外部 Agent 运行时池生命周期。按 chat 复用 harness RuntimePool；同一后端（agent + 工作区）的 turn 由 RuntimePool 串行，
+同一 chat 里不同 agent 的 turn 并行，registry 只记录在途 turn 数；cancel 不计入在途。
+idle 计时在 acquire / release / 每次委托 turn 结束时刷新；有在途委托的 chat 与正在 acquire 的 chat 不参与 idle 回收。
 idle 超时只释放池里的常驻进程（ACP），池本身与 CLI 后端的 --resume 会话 id 保留：CLI 回合之间没有进程，
 整池关闭不释放任何资源，只丢内存里的会话 id（落在 chat 行里的那份由下一个后端续接）。池只在配置变更、删 chat（close_chat）、服务关闭（close_all）时被 close。
 关闭后仍握着该池的旧 facade 再委托时，已关闭的 RuntimePool 会懒重建后端；facade 每个委托 turn 先
@@ -88,25 +88,31 @@ class ChatRuntimePoolRegistry:
     def __init__(self, *, idle_seconds: float = _DEFAULT_IDLE_SECONDS) -> None:
         self._idle_seconds = idle_seconds
         self._entries: dict[str, _ChatPoolEntry] = {}
-        self._turn_locks: dict[str, asyncio.Lock] = {}
+        self._active_turns: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
-    async def guard_turn(self, chat_scope_id: str | None) -> AsyncGenerator[None, None]:
-        """Serialize external CLI turns for one chat (one CliRuntime subprocess).
+    async def track_turn(self, chat_scope_id: str | None) -> AsyncGenerator[None, None]:
+        """Count a delegation turn of this chat as in flight for the length of the block.
 
-        The idle clock restarts when the turn ends, so a delegation that outlived the
+        While any turn is in flight the chat's pool is neither released as idle nor replaced by a changed config.
+        Turns are not serialized here: the pool queues the ones that share a backend, and turns of different
+        agents run side by side. The idle clock restarts when the turn ends, so a delegation that outlived the
         idle window does not get its processes released the moment it finishes.
         """
         if not chat_scope_id:
             yield
             return
-        turn_lock = self._turn_locks.setdefault(chat_scope_id, asyncio.Lock())
-        async with turn_lock:
-            try:
-                yield
-            finally:
-                self._touch(chat_scope_id)
+        self._active_turns[chat_scope_id] = self._active_turns.get(chat_scope_id, 0) + 1
+        try:
+            yield
+        finally:
+            remaining = self._active_turns[chat_scope_id] - 1
+            if remaining:
+                self._active_turns[chat_scope_id] = remaining
+            else:
+                del self._active_turns[chat_scope_id]
+            self._touch(chat_scope_id)
 
     async def acquire(
         self,
@@ -164,8 +170,8 @@ class ChatRuntimePoolRegistry:
         """
         entry = self._entries.get(chat_scope_id)
         if entry is not None and entry.pool is pool:
-            # Lock-free: a turn must not wait behind another chat's slow pool close. The caller holds the
-            # chat's turn lock, and the idle release never takes the entry of a chat with an active turn.
+            # Lock-free: a turn must not wait behind another chat's slow pool close. The caller's turn is
+            # in flight, and the idle release never takes the entry of a chat with an active turn.
             return pool
         async with self._lock:
             entry = self._entries.get(chat_scope_id)
@@ -183,7 +189,6 @@ class ChatRuntimePoolRegistry:
         """Explicitly tear down a chat pool (e.g. conversation deleted)."""
         async with self._lock:
             entry = self._entries.pop(chat_scope_id, None)
-            self._turn_locks.pop(chat_scope_id, None)
             if entry is not None:
                 await close_runtime_pool_bounded(entry.pool, scope=chat_scope_id)
                 logger.info("runtime_pool_closed chat=%s", chat_scope_id)
@@ -193,13 +198,11 @@ class ChatRuntimePoolRegistry:
         async with self._lock:
             entries = list(self._entries.items())
             self._entries.clear()
-            self._turn_locks.clear()
             await _close_entries(entries)
 
     def _is_turn_active(self, chat_scope_id: str) -> bool:
-        """True while a delegation turn holds the chat's turn lock."""
-        turn_lock = self._turn_locks.get(chat_scope_id)
-        return turn_lock is not None and turn_lock.locked()
+        """True while any delegation turn of the chat is in flight."""
+        return self._active_turns.get(chat_scope_id, 0) > 0
 
     def _touch(self, chat_scope_id: str) -> None:
         """Restart the idle clock of a chat pool (no-op once the pool is gone)."""
@@ -244,10 +247,10 @@ class ChatRuntimePoolRegistry:
 
 
 class ChatScopedRuntimePoolFacade:
-    """Wraps a RuntimePool with per-chat turn serialization for shared CliRuntime.
+    """Wraps a RuntimePool so the registry knows which of its chat's turns are in flight.
 
     Exposes exactly the ``DelegationPool`` surface: anything else (``prompt``, ``get``) would
-    bypass the turn lock, so it is deliberately not forwarded.
+    run turns the registry cannot see, so it is deliberately not forwarded.
     """
 
     def __init__(
@@ -280,10 +283,11 @@ class ChatScopedRuntimePoolFacade:
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
-        async with self._registry.guard_turn(self._chat_scope_id):
+        async with self._registry.track_turn(self._chat_scope_id):
             self._pool = await self._registry.ensure_tracked(self._chat_scope_id, self._config_fingerprint, self._pool)
-            # Closing this generator closes the pool's turn before the lock is released, so the next turn of the
-            # chat never starts while the previous external process is still being stopped.
+            # Closing this generator closes the pool's turn before the turn stops counting as in flight, and the
+            # pool holds the backend until its external process has stopped, so the next turn on that backend never
+            # starts early.
             async with aclosing(
                 self._pool.run_turn(
                     name, prompt, session_id, workspace=workspace, mode=mode, mcp_servers=mcp_servers, images=images
@@ -293,7 +297,7 @@ class ChatScopedRuntimePoolFacade:
                     yield event
 
     async def cancel(self, name: str, session_id: str) -> None:
-        # Lock-exempt: callers invoke cancel from inside an active run_turn loop.
+        # Not a turn: callers invoke cancel from inside an active run_turn loop.
         await self._pool.cancel(name, session_id)
 
 

@@ -21,7 +21,7 @@
 以及绕过 LangChain 直接向前端流式转发外部 Agent 事件。
 Settings auth/status 仅报告安装/登录态。
 有 chat scope 时经 ChatRuntimePoolRegistry 跨消息复用 pool（CLI --resume，会话 id 落在 chat 行，服务重启后仍续接），
-ChatScopedRuntimePoolFacade 对 run_turn 做 per-chat single-flight 串行化。
+ChatScopedRuntimePoolFacade 让 registry 知道哪些委托 turn 在途（同一后端的 turn 由 RuntimePool 串行，不同 agent 并行）。
 """
 
 from __future__ import annotations
@@ -214,13 +214,15 @@ class ExternalAgentsMixin:
         query: object,
         *,
         cancel_token: CancellationToken | None = None,
-        chat_id: str | None = None,
     ) -> AsyncGenerator[dict[str, object]]:
         """Stream one turn of an external agent straight to the frontend, bypassing the LangChain Agent.
 
-        The turn's images are staged as files the CLI can read for the length of the turn; they are removed once
-        the turn stream is closed, which has stopped the external process by then.
+        The turn continues the agent's session of this chat, the one the delegate tool names for the same agent
+        and chat. The turn's images are staged as files the CLI can read for the length of the turn; they are
+        removed once the turn stream is closed, which has stopped the external process by then.
         """
+        from myrm_agent_harness.toolkits.acp.types import delegation_session_id
+
         from app.services.external_agents.delegation import delegation_prompt, stage_images, stream_direct_delegate
 
         assert self._runtime_pool is not None
@@ -229,7 +231,7 @@ class ExternalAgentsMixin:
                 self._runtime_pool,
                 agent_name,
                 delegation_prompt(staged.query, self.quote),
-                session_id=f"{agent_name}-{chat_id}" if chat_id else f"{agent_name}-default",
+                session_id=delegation_session_id(agent_name, _runtime_pool_scope_id(self)),
                 workspace=self._delegation_workspace(),
                 images=staged.paths,
                 cancel_token=cancel_token,

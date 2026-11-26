@@ -177,3 +177,33 @@ async def test_flushing_the_chat_makes_the_external_agent_start_over(fake_claude
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
+
+
+@pytest.mark.parametrize("entries", [("direct", "tool"), ("tool", "direct")])
+async def test_a_conversation_begun_through_one_entry_is_continued_through_the_other(
+    entries: tuple[str, str], fake_claude: _FakeClaude
+) -> None:
+    """The user's own turn and the model's call name the same session, so each resumes what the other began."""
+    chat_id = await _create_chat()
+    mixin = _new_mixin(fake_claude, chat_id)
+    mixin.locale = "en"
+    mixin.quote = None
+    mixin.declared_allowed_roots = (str(fake_claude.workdir),)
+    tools: list[object] = []
+    await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
+    delegate_tool = next(t for t in tools if getattr(t, "name", None) == "invoke_acp_agent_tool")
+
+    async def the_user_addresses_the_agent() -> None:
+        async for _ in mixin._direct_delegate_stream("claude", "prompt"):
+            pass
+
+    async def the_model_calls_the_tool() -> None:
+        await delegate_tool.ainvoke({"agent_name": "claude", "task": "prompt"})  # type: ignore[attr-defined]
+
+    turns = {"direct": the_user_addresses_the_agent, "tool": the_model_calls_the_tool}
+    for entry in entries:
+        await turns[entry]()
+
+    began, continued = fake_claude.resume_args()
+    assert began is None
+    assert continued, "the second entry opened a new external session instead of resuming the first one's"

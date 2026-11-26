@@ -13,7 +13,7 @@ resident ACP processes of an idle pool while CLI backends keep their resume stat
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer)
-- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
+- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime (POS: runtime backend implementations)
 
 [OUTPUT]
@@ -40,6 +40,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
+    delegation_session_id,
     images_not_sent_event,
     normalize_workspace,
 )
@@ -162,7 +163,7 @@ class RuntimePool:
         if mode == "oneshot":
             session_id = f"{name}-oneshot-{uuid4().hex}"
         elif mode == "persistent":
-            session_id = f"{name}-default"
+            session_id = delegation_session_id(name)
         else:
             msg = f"Invalid mode: {mode}"
             raise ValueError(msg)

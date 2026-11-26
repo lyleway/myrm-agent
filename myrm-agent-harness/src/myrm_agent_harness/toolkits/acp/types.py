@@ -17,6 +17,7 @@ no - Base type definition module
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
 - RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
+- delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
 - CliSessionRecord: a CLI-native session id bound to the working directory that created it
 - CliSessionStore: protocol a host implements to keep CLI session records across process restarts
 - PermissionMode: Permission pattern type
@@ -305,6 +306,15 @@ def normalize_workspace(workspace: str) -> str:
         msg = f"workspace must be an absolute path, got {workspace!r}"
         raise ValueError(msg)
     return os.path.normpath(workspace)
+
+
+def delegation_session_id(agent_name: str, session_scope: str | None = None) -> str:
+    """The session id of the persistent conversation with ``agent_name`` in one scope (a chat).
+
+    Every entry into the same agent in the same scope names this session, so a conversation that moves between
+    entries continues one external session instead of opening a second.
+    """
+    return f"{agent_name}-{session_scope or 'default'}"
 
 
 def create_event(

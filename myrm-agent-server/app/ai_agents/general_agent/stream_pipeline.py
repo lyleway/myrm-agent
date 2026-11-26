@@ -74,7 +74,6 @@ async def execute_stream_pipeline(
                 query,
                 force_external_agent,
                 cancel_token=cancel_token,
-                chat_id=chat_id,
             )
         ) as forced_events:
             async for event in forced_events:

@@ -196,7 +196,7 @@ RuntimePool(*, max_concurrent: int = 4, event_bus: EventBus | None = None, cli_s
 - **空闲释放 `release_resident()`**：宿主在会话空闲时调用，只关闭并摘除常驻进程型（`backend_type == "acp"`）后端，下一回合惰性重建；CLI 后端回合之间没有进程，只持有 `--resume` 会话 id，原样保留，所以空闲回收不会让 CLI 会话断档。调用方须保证此刻池上没有在跑的回合（与 `close_all()` 同一约定）
 - **CLI 会话持久化 `cli_session_store`**：宿主可注入 `CliSessionStore`（`load` / `save`，键为 harness session id，一个 store 服务一个会话作用域），让 CLI 后端的 `--resume` id 跨宿主进程重启存活。只注入共享的 persistent 后端；oneshot 私有后端是回合结束即消失的全新会话，既不读也不写 store。store 的任何异常只记 warning 并降级（丢连续性，不丢回合）；harness 在回合收尾处直接 await store 且不设超时，调用时延由实现方自己约束；harness 本身不依赖任何存储实现
 - **进程生命周期**：不做周期性存活巡检。`CliRuntime` 每回合一个进程，回合之间没有进程是正常空闲态；`AcpRuntime` 常驻进程退出后，下一次 `run_turn` 发现 `is_alive` 为假就重新拉起进程（`_ensure_connection`）。进程是否卡住不属于存活检测，由 `timeout_seconds` 兜底；CLI / ACP 回合静默期间 `CliRuntime` 与 `AcpRuntime` 每 15 s 发一个 `working` 状态（见 §6 “静默心跳”），宿主的空闲看门狗据此知道它还活着
-- **委托窄协议 `DelegationPool`（`types.py`）**：委托调用方只依赖 `available_backends` / `get_config` / `run_turn`（必带 `workspace`）/ `cancel`；`RuntimePool` 与宿主侧包装器（如按会话串行化回合的 facade）都满足它，`create_invoke_acp_agent_tool` 接受它
+- **委托窄协议 `DelegationPool`（`types.py`）**：委托调用方只依赖 `available_backends` / `get_config` / `run_turn`（必带 `workspace`）/ `cancel`；`RuntimePool` 与宿主侧包装器（如按会话登记在途回合的 facade）都满足它，`create_invoke_acp_agent_tool` 接受它
 - **MCP 注入能力守卫**：`run_turn()` 在转发 `mcp_servers` 前检查 `backend.capabilities.supports_mcp`，不支持的 backends（如 `CliRuntime`）收到 `None` 而非原始配置，杜绝向不支持 MCP 注入的后端传递配置引发会话崩溃；跳过时记录 `pool_mcp_skipped` WARNING 便于观测
 - **图片能力守卫**：`run_turn(images=[本地图片文件…])` 与 MCP 同形——只有声明 `supports_images` 的后端才收到文件列表，其余收到 `None`（记 `pool_images_skipped` INFO，不是告警：宿主提示词里仍有图片路径一行作为兜底；回合以一条 `images_not_sent` status_update 开头，让宿主能如实告诉用户这张图没有直接交给 agent）；直接调用 `CliRuntime` 传入它不接收的图片会记 `cli_runtime_images_ignored` WARNING；`AcpRuntime` 面对没有声明图片提示能力的 agent，只发文本块并记 `acp_runtime_images_skipped` INFO，回合以同一条 `images_not_sent` status_update 开头
 
@@ -399,7 +399,7 @@ acp/
 - **增量文本与工具事件**：Claude 以 `--include-partial-messages` 启动（仅 stream-json 输出），文本逐段到达，随后重复的完整消息按 API message id 去重；assistant 消息里的 `tool_use` 与 user 消息里的 `tool_result` 映射为 `TOOL_START`（含一行摘要）/ `TOOL_RESULT`
 - **大输出行**：stdout 单行上限 16 MiB（一条工具结果可以是整个文件，asyncio 默认的 64 KiB 会让整回合失败）；stderr 只保留末尾 8 KiB 用于错误摘录
 - **Delegate 元数据 TypedDict**：`DelegateUsage` / `DelegateMeta` 提供精确的类型提示
-- **直连模式 Session 隔离**：基于 `chat_id` 生成独立 `session_id`，不同对话的外部 Agent 上下文互不干扰
+- **直连模式 Session 隔离**：基于 `chat_id` 生成独立 `session_id`，不同对话的外部 Agent 上下文互不干扰；用户直接指名的回合与模型调用工具的回合经 `types.delegation_session_id(agent, scope)` 取同一个 session id，对话从任一入口开始都能被另一入口续接
 - **直连模式工具步骤**：外部 Agent 的每次工具调用是一个带 `tool_call_id` 的独立步骤（`delegation_<agent>_tool`，步骤文本为一行「agent: 工具 — 摘要」），对应的 TOOL_RESULT 更新同一步骤的状态（失败时带 CLI 原文的前 300 个字符），而不是覆盖上一个步骤；前端以这一行作标题，不再重复渲染
 - **直连模式收尾与错误处理**：直连路径不重跑整个回合；`CANCELLED`（含用户停止、令牌被取消）只发出 CANCELLED 事件、不发完成状态，`MAX_TURNS`（外部 Agent 到了自己的轮次上限）按「已停止」收尾而不是错误横幅，其余 ERROR 转成前端 error 事件并以 failed 状态步骤收尾。唯一的自动重来是 `CliRuntime` 对被 CLI 拒绝的续接在同一回合内改开新会话（见「CLI Session 复用」，用户看到一条只带标题的提示）；`invoke_acp_agent_tool` 工具路径另有对 `retryable` 错误的一次重试
 

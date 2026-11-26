@@ -96,7 +96,7 @@ async def delegating_agent(fake_claude: _FakeClaude) -> AsyncIterator[AgentBuild
 
 
 async def _the_user_addresses_the_agent(mixin: ExternalAgentsMixin, _tools: list[object]) -> None:
-    async for _ in mixin._direct_delegate_stream("claude", _TASK, chat_id="chat-1"):
+    async for _ in mixin._direct_delegate_stream("claude", _TASK):
         pass
 
 

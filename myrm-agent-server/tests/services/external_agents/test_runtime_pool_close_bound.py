@@ -88,24 +88,24 @@ async def test_close_all_closes_pools_concurrently_and_continues_past_hung_pools
     for pool in hung_pools:
         pool.close_all.assert_awaited_once()
     assert registry._entries == {}
-    assert registry._turn_locks == {}
+    assert registry._active_turns == {}
     # Sequential closes would take 3 * timeout; concurrent ones stay near a single timeout.
     assert elapsed < _TEST_CLOSE_TIMEOUT * 2.5
 
 
 @pytest.mark.asyncio
-async def test_close_chat_with_hung_pool_returns_and_cleans_entry_and_turn_lock() -> None:
+async def test_close_chat_with_hung_pool_returns_and_cleans_its_entry() -> None:
     registry = ChatRuntimePoolRegistry(idle_seconds=3600.0)
     hung = _hung_pool()
     await registry.acquire("chat-1", "fp-a", _pool_builder(hung))
-    async with registry.guard_turn("chat-1"):
+    async with registry.track_turn("chat-1"):
         pass
 
     await asyncio.wait_for(registry.close_chat("chat-1"), timeout=2.0)
 
     hung.close_all.assert_awaited_once()
     assert registry._entries == {}
-    assert registry._turn_locks == {}
+    assert registry._active_turns == {}
 
 
 @pytest.mark.asyncio

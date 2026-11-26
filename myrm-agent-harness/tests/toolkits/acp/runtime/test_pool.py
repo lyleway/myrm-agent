@@ -236,6 +236,36 @@ class TestRuntimePoolConcurrency:
 
         assert backend.max_concurrent <= 2
 
+    @pytest.mark.asyncio
+    async def test_a_turn_closed_early_has_stopped_its_backend_before_the_next_turn_starts(self) -> None:
+        """The backend stays held until its external process has stopped, so the next turn never overlaps it."""
+        pool = RuntimePool()
+        pool.register("a", RuntimeConfig(backend_type="cli", command="a"))
+        order: list[str] = []
+
+        class _Backend(self._SlowBackend):
+            async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None):
+                order.append(f"{prompt} started")
+                try:
+                    while prompt == "first":  # the first turn never ends by itself
+                        yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="x")
+                    yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+                finally:
+                    await asyncio.sleep(0.01)  # stopping the external process takes a moment
+                    order.append(f"{prompt} stopped")
+
+        with patch.object(pool, "get", return_value=_Backend("a")):
+            first = pool.run_turn("a", "first", session_id="s1", workspace=_WORKSPACE)
+            await anext(first)
+            second = asyncio.create_task(pool.prompt("a", "second", workspace=_WORKSPACE))
+            await asyncio.sleep(0.02)
+            assert order == ["first started"]
+
+            await first.aclose()
+            await asyncio.wait_for(second, timeout=1.0)
+
+        assert order == ["first started", "first stopped", "second started", "second stopped"]
+
 
 class TestRuntimePoolCancel:
     @pytest.mark.asyncio
