@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
 
 from myrm_agent_harness.agent.context_management.pipeline import ProcessorContext
+from myrm_agent_harness.agent.context_management.pipeline.processors import ExplicitCacheProcessor
 from myrm_agent_harness.agent.middlewares.context_pipeline.context_pipeline_middleware import (
     create_context_pipeline_middleware,
 )
@@ -62,3 +63,11 @@ async def test_without_an_auxiliary_model_the_main_model_summarizes() -> None:
     seen = await _context_the_processors_see(main, None)
 
     assert seen.summarizer_llm is main
+
+
+async def test_explicit_cache_markers_follow_the_main_model_not_the_auxiliary_one() -> None:
+    markers_on = await _context_the_processors_see(_model(_CLAUDE), _model(_DEEPSEEK))
+    markers_off = await _context_the_processors_see(_model(_DEEPSEEK), _model(_CLAUDE))
+
+    assert await ExplicitCacheProcessor().should_process(markers_on) is True
+    assert await ExplicitCacheProcessor().should_process(markers_off) is False
