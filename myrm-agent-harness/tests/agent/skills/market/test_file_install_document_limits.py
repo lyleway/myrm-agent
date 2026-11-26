@@ -1,23 +1,25 @@
 """Tests that a plugin document over its decode ceiling is a refused install, not an exception.
 
 [INPUT]
-- agent.skills.market.file_install::install_skill_files, resolve_install_error (POS: the install entry and the error mapping under test)
+- agent.skills.market.file_install::DOCUMENT_TOO_LARGE_MESSAGE, install_skill_files, resolve_install_error (POS: the install entry, the error mapping and the fixed user sentence under test)
 - agent.skills.market.service::BaseSkillMarketService (POS: the market install a user reaches the pipeline through)
 - agent.plugins.rules::MAX_PLUGIN_JSON_BYTES, MAX_FRONTMATTER_CHARS, DocumentTooLargeError (POS: the decode ceilings and their refusal)
 
 [OUTPUT]
 - Fails when a document at its ceiling is refused, when a document over it escapes the install as an exception, loses its
-  error code, leaves anything on disk or in the quarantine, or touches the version already installed.
+  error code, shows the user the parser's text instead of the fixed sentence, keeps that text out of the log, leaves
+  anything on disk or in the quarantine, or touches the version already installed.
 
 [POS]
 The parse of a plugin package runs inside the install transaction, so a refusal there must reach the caller as a failed
-SkillInstallResult like every other gate; an exception would surface as an HTTP 500.
+SkillInstallResult like every other gate; an exception would surface as an HTTP 500. The user sees one fixed sentence
+(no file name, no number); the parser's own text goes to the log.
 """
 
 from __future__ import annotations
 
 import json
-import tempfile
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,11 +28,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from myrm_agent_harness.agent.plugins.rules import MAX_FRONTMATTER_CHARS, MAX_PLUGIN_JSON_BYTES, DocumentTooLargeError
-from myrm_agent_harness.agent.skills.market.file_install import install_skill_files, resolve_install_error
+from myrm_agent_harness.agent.skills.market.file_install import (
+    DOCUMENT_TOO_LARGE_MESSAGE,
+    install_skill_files,
+    resolve_install_error,
+)
 from myrm_agent_harness.agent.skills.market.installers.base import InstalledSkillFiles
 from myrm_agent_harness.agent.skills.market.service import BaseSkillMarketService
 from myrm_agent_harness.backends.skills.market_protocols import SkillInstallResult, SkillSearchResult
 
+INSTALL_LOGGER = "myrm_agent_harness.agent.skills.market.file_install"
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 DESCRIPTION_KEY = "description: "
@@ -97,19 +104,17 @@ def _files_on_disk(root: Path) -> dict[str, bytes]:
     return {str(path.relative_to(root)): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
-@pytest.fixture
-def quarantine_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Redirect the system temp directory, where the install pipeline stages its quarantines, to an empty directory."""
-    root = tmp_path / "tmp"
-    root.mkdir()
-    monkeypatch.setattr(tempfile, "tempdir", str(root))
-    return root
-
-
-def test_resolve_install_error_gives_an_oversize_document_its_own_code() -> None:
+def test_resolve_install_error_gives_an_oversize_document_its_own_code_and_the_fixed_sentence() -> None:
     reason = "plugin.json is larger than 1,048,576 bytes (it has 1,048,577)"
 
-    assert resolve_install_error(DocumentTooLargeError(reason)) == (reason, "DOCUMENT_TOO_LARGE")
+    assert resolve_install_error(DocumentTooLargeError(reason)) == (DOCUMENT_TOO_LARGE_MESSAGE, "DOCUMENT_TOO_LARGE")
+
+
+def test_the_fixed_sentence_names_no_file_and_no_number() -> None:
+    assert not any(character.isdigit() for character in DOCUMENT_TOO_LARGE_MESSAGE)
+    assert not any(
+        name in DOCUMENT_TOO_LARGE_MESSAGE for name in ("plugin.json", "mcp.json", "SKILL.md", "front matter")
+    )
 
 
 @pytest.mark.asyncio
@@ -129,9 +134,25 @@ async def test_a_document_over_its_ceiling_is_a_refused_install(
 
     result = await install_skill_files(install_root, "demo-id", "demo", kind.package_of(kind.ceiling + 1))
 
-    assert (result.success, result.error_code, result.error) == (False, "DOCUMENT_TOO_LARGE", kind.refusal())
+    assert (result.success, result.error_code, result.error) == (
+        False,
+        "DOCUMENT_TOO_LARGE",
+        DOCUMENT_TOO_LARGE_MESSAGE,
+    )
     assert not install_root.exists()
     assert list(quarantine_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", KINDS, ids=lambda kind: kind.name)
+async def test_the_log_keeps_the_parser_text_the_user_does_not_see(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, kind: Kind
+) -> None:
+    with caplog.at_level(logging.WARNING, logger=INSTALL_LOGGER):
+        await install_skill_files(tmp_path / "skills", "demo-id", "demo", kind.package_of(kind.ceiling + 1))
+
+    rejection = [record.getMessage() for record in caplog.records if "install rejected" in record.getMessage()]
+    assert [kind.refusal() in line for line in rejection] == [True]
 
 
 @pytest.mark.asyncio
@@ -193,5 +214,9 @@ async def test_the_market_answers_an_oversize_skill_header_with_a_failed_result(
 
     result = await _market_install(entry, SKILL_HEADER.package_of(MAX_FRONTMATTER_CHARS + 1), install_root)
 
-    assert (result.success, result.error_code, result.error) == (False, "DOCUMENT_TOO_LARGE", SKILL_HEADER.refusal())
+    assert (result.success, result.error_code, result.error) == (
+        False,
+        "DOCUMENT_TOO_LARGE",
+        DOCUMENT_TOO_LARGE_MESSAGE,
+    )
     assert not install_root.exists()
