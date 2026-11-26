@@ -9,6 +9,8 @@ FastAPI 全局 HTTP 中间件。提供文本清洗、认证和缓存控制。
 执行顺序见 `app/server/middlewares.py`（LIFO）：TextSanitizer → HostAllowlist → SessionIdle → **Auth（内层注册）→ E2EE（外层注册）→ …**  
 **实际请求顺序**：… → **E2EE → Auth** → SessionIdle → …（E2EE 必须先解密 pair/body，Auth 才能读取 `e2ee_pair_token`）
 
+**请求体边界**：改写请求体的中间件（E2EE 解密、文本清洗）一律是纯 ASGI，改写在 `receive` 通道上完成（`asgi_body.py`），下面的每一层（含 BaseHTTPMiddleware）与路由读到的都是改写后的正文；`BaseHTTPMiddleware` 子类不得读取或替换请求体、不得触碰 `receive`、不得处理 websocket，由 `tests/architecture/test_middleware_body_boundary.py` 守住。其余 BaseHTTPMiddleware（HostAllowlist、SessionIdle、Auth、CacheControl、Tracing）不碰请求体，保持原样。
+
 在 Agent-in-Sandbox 架构下，Server 层作为沙箱内的单用户服务实例运行，
 安全防护（防重放、限流等）由控制平台或反向代理在网络层处理。
 
@@ -19,12 +21,13 @@ FastAPI 全局 HTTP 中间件。提供文本清洗、认证和缓存控制。
 | 文件 | 地位 | 职责 |
 |------|------|------|
 | `max_body_size.py` | ✅ 核心 | 全局 ASGI 熔断器：包装底层 `receive` 函数，在 ASGI 层面限制请求体总大小（`MAX_REQUEST_BODY_BYTES`，15MB），防止超大文件上传导致的 OOM 和磁盘耗尽攻击；该常量同时是 wiki clip 表单文本字段的解析上限。 |
-| `text_sanitizer_middleware.py` | ✅ 核心 | 入站用户文本清洗：对 query 参数、JSON body（`application/json` 与 `application/*+json`，含参数/大小写变体，任意嵌套）、urlencoded 表单调用 harness `strip_control_chars`，仅移除 C0/C1 控制字符、孤立 surrogate、U+FFFD 与模型控制 token `<\|…\|>`；`<think>`、`<function_calls>` 等标记属于用户内容，原样保留（推理/工具协议标签过滤属于模型输出管线）。无法解析的 JSON（截断、超长整数、过深嵌套）原样放行交由路由校验。 |
+| `asgi_body.py` | ✅ 核心 | 纯 ASGI 请求体改写原语：`read_request_body`（从 `receive` 收齐整个请求体，客户端中途离开抛 `ClientDisconnect`，由最外层的 `MaxBodySizeMiddleware` 结束请求）、`replay_request_body`（先把替换后的正文作为整个请求体交出，之后交还真实的 `receive`，使断连探测与流式响应的断连监听保持真实）、`describe_replaced_body`（返回头部与替换正文一致的 scope 副本：长度、去掉分块、必要时换内容类型；调用方的 scope 不被改动）。 | ✅ |
+| `text_sanitizer_middleware.py` | ✅ 核心 | 纯 ASGI；入站用户文本清洗：对 query 参数、JSON body（`application/json` 与 `application/*+json`，含参数/大小写变体，任意嵌套）、urlencoded 表单调用 harness `strip_control_chars`，仅移除 C0/C1 控制字符、孤立 surrogate、U+FFFD 与模型控制 token `<\|…\|>`；`<think>`、`<function_calls>` 等标记属于用户内容，原样保留（推理/工具协议标签过滤属于模型输出管线）。无法解析的 JSON（截断、超长整数、过深嵌套）原样放行交由路由校验。query 的清洗落在 scope 副本上，外层看到的 scope 保持原样。 |
 | `webhook_security.py` | ✅ 核心 | Webhook 安全加固中间件（原始字节防线）：在反序列化 JSON 之前强制校验请求体大小（默认 1MB），防止超大 Payload 导致单机沙箱 OOM 崩溃。 |
 | `ingress.py` | ✅ 核心 | Public Ingress 强制代理纠偏中间件：监听 `/api/` 路由，将 Scheme/Host 覆写为 `get_public_ingress_base_url()`；loopback 与 RFC1918 私有 LAN Host 跳过覆写，避免本地/内网 WebUI 被 stale 公网 URL 劫持。 |
 | `host_allowlist.py` | ✅ 核心 | WebUI 远程暴露时 Host 头 allowlist（DNS rebinding 防护） | ✅ |
 | `session_idle.py` | ✅ 核心 | 远程暴露路径滑动刷新 WebUI session cookie（30min idle） | ✅ |
-| `e2ee.py` | ✅ 核心 | mobile remote E2EE 请求解密（pair token / JSON body）；活跃请求 sliding refresh session TTL | ✅ |
+| `e2ee.py` | ✅ 核心 | 纯 ASGI；mobile remote E2EE 请求解密（pair token / JSON body）：解密后的正文经 `receive` 交给下游，内容类型改为 `application/json`、长度与明文一致；会话与配对令牌放入 `scope["state"]`（路由里读作 `request.state`）；解密失败 400；活跃请求 sliding refresh session TTL | ✅ |
 | `auth.py` | ✅ 核心 | HTTP 单租户认证；local loopback 跳过 ingress DB；注入 admission_path/trust_zone/pair token/`pair_bound_chat_id` | ✅ |
 | `ws_auth.py` | ✅ 核心 | WebSocket ASGI 握手鉴权，注入 `scope.state.user_id` 与 pair 绑定 | ✅ |
 | `auth_audit.py` | ✅ 核心 | Auth 审计 JSONL（`auth.py` 在非回环认证时写入）；建目录、轮转、写入任一步失败只记 ERROR 日志、从不抛出（审计故障不得改变认证结果，也不得把锁定上报变成 500） | ✅ |

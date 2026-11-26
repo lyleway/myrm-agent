@@ -46,6 +46,7 @@ Server 层架构约束测试：禁止新增 harness 深导入、禁止 `uv.lock`
 | `test_app_package_init_layout.py` | `app/**` 含 `.py` 的目录须声明 `__init__.py`（禁止隐式 namespace 包） |
 | `test_conversation_recall_layout.py` | Conversation Recall 仓储须位于 `app/database/repositories/conversation_recall/` 子包，禁止 repositories 根 legacy 平铺文件复活 |
 | `test_e2ee_layout.py` | Mobile remote E2EE 须位于 `app/remote_access/e2ee/` 子包，禁止 remote_access 根 legacy 平铺文件复活 |
+| `test_middleware_body_boundary.py` | 触碰请求体、`receive` 或 websocket 的中间件必须是纯 ASGI：`app/` 下定义 `BaseHTTPMiddleware` 子类的模块不得读取或替换请求体、不得触碰 `receive`、不得处理 websocket；附判官自身的反例用例 |
 | `test_builtin_agent_i18n_parity.py` | 前端 `builtin-agent-i18n-data.ts` 的 key 集合须与 server `_BUILTIN_AGENTS` id 严格同构 |
 | `test_hidden_builtin_agent_parity.py` | 前端 `product-surface.ts` 的 `HIDDEN_BUILTIN_AGENT_IDS` 须与 server `product_surface.py` 的同名集合完全一致（任一侧单独增删都会让已下线的预置体在另一侧重新出现）；含对折行 Set 字面量的解析用例 |
 | `test_blueprint_template_tools_parity.py` | 前端聊天配置面板 `BLUEPRINT_TEMPLATES`（JIT 一键编队）里每个成员的 `tools` 必须非空（空 = 继承父级全部工具）且都是 harness 注册的工具全名（`web_search` 这类界面名不会匹配任何工具，子智能体最后零工具）；自带扫描校准用例 |

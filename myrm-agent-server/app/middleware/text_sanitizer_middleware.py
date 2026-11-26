@@ -9,18 +9,23 @@ Only the harness ``strip_control_chars`` primitive runs here. Markup such as
 ``<think>`` or ``<function_calls>`` is user content (a pasted parser snippet, a
 system prompt) and passes through unchanged; the tag filters of
 ``sanitize_text`` belong to the model-output pipeline.
+
+Pure ASGI: the sanitized body is served on ``receive`` (``app.middleware.asgi_body``), so every layer below
+reads it, and the caller's scope is never modified.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import Request, Response
 from myrm_agent_harness.utils.text_sanitizer import strip_control_chars
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from app.middleware.asgi_body import METHODS_WITH_BODY, describe_replaced_body, read_request_body, replay_request_body
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +62,34 @@ def _sanitize_urlencoded(raw: bytes) -> bytes:
     return urlencode(cleaned, doseq=True).encode("utf-8")
 
 
-class TextSanitizerMiddleware(BaseHTTPMiddleware):
+def _sanitize_json_body(raw: bytes) -> bytes:
+    """The body with every string cleaned; bodies that are not JSON containers pass through as they are."""
+    if not raw:
+        return raw
+    try:
+        data: JsonValue = json.loads(raw)
+        if not isinstance(data, dict | list):
+            return raw
+        return json.dumps(_sanitize_json(data)).encode("utf-8")
+    except (ValueError, RecursionError) as exc:
+        # Malformed, over-long integer or too deeply nested: the route's own validation reports it.
+        logger.warning("Skipping JSON body sanitization: %s", exc)
+        return raw
+
+
+def _sanitize_form_body(raw: bytes) -> bytes:
+    return _sanitize_urlencoded(raw) if raw else raw
+
+
+def _body_sanitizer(media_type: str) -> Callable[[bytes], bytes] | None:
+    if _is_json_media_type(media_type):
+        return _sanitize_json_body
+    if media_type == _FORM_MEDIA_TYPE:
+        return _sanitize_form_body
+    return None
+
+
+class TextSanitizerMiddleware:
     """Strip control characters from query strings and JSON / form bodies before routing.
 
     Defense in depth against corrupted input that would break JSON
@@ -66,36 +98,24 @@ class TextSanitizerMiddleware(BaseHTTPMiddleware):
     (``<|…|>``); everything else, tags included, is left as the user wrote it.
     """
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        query_string = request.scope.get("query_string", b"")
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        query_string = scope.get("query_string", b"")
         if query_string:
-            request.scope["query_string"] = _sanitize_urlencoded(query_string)
+            scope = {**scope, "query_string": _sanitize_urlencoded(query_string)}
 
-        if request.method in ("POST", "PUT", "PATCH"):
-            media_type = _media_type(request.headers.get("content-type", ""))
-            if _is_json_media_type(media_type):
-                await self._sanitize_json_body(request)
-            elif media_type == _FORM_MEDIA_TYPE:
-                body = await request.body()
-                if body:
-                    request._body = _sanitize_urlencoded(body)
+        sanitize = _body_sanitizer(_media_type(Headers(scope=scope).get("content-type", "")))
+        if sanitize is not None and scope["method"] in METHODS_WITH_BODY:
+            raw = await read_request_body(receive)
+            cleaned = sanitize(raw)
+            if cleaned != raw:
+                scope = describe_replaced_body(scope, cleaned)
+            receive = replay_request_body(cleaned, receive)
 
-        return await call_next(request)
-
-    @staticmethod
-    async def _sanitize_json_body(request: Request) -> None:
-        """Replace the cached request body with its sanitized JSON; bodies that are not JSON containers pass through."""
-        body = await request.body()
-        if not body:
-            return
-        try:
-            data: JsonValue = json.loads(body)
-            if not isinstance(data, dict | list):
-                return
-            cleaned = json.dumps(_sanitize_json(data)).encode("utf-8")
-        except (ValueError, RecursionError) as exc:
-            # Malformed, over-long integer or too deeply nested: the route's own validation reports it.
-            logger.warning("Skipping JSON body sanitization: %s", exc)
-            return
-        # Starlette caches the body on the request, so downstream parsers read the sanitized payload.
-        request._body = cleaned
+        await self.app(scope, receive, send)
