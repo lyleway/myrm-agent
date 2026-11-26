@@ -160,6 +160,7 @@
 | `__tests__/MemoryCard.ttl.test.tsx`                 | procedural 卡片 TTL 显示：未锁定显示过期天数、用户锁定（is_user_locked）隐藏 | ✅    |
 | `__tests__/PendingMemoryList.test.tsx`              | 待审批记忆列表批量操作测试                                                   | ✅    |
 | `__tests__/SharedContextPanel.test.tsx`             | 共享上下文面板测试（含历史搜索框限长 200）                                   | ✅    |
+| `__tests__/formatSharedContextDate.test.ts`         | 共享上下文面板的时间显示：带偏移的 `sent_at` 在上海、洛杉矶、纽约显示各自时区的月、日与时分 | ✅    |
 | `__tests__/SharedContextTargetBinding.test.tsx`     | 共享上下文目标绑定测试                                                       | ✅    |
 | `__tests__/memoryLiveStream.test.ts`                | 记忆实时流测试                                                               | ✅    |
 | `__tests__/replayTimeline.test.ts`                  | 记忆回放时间线测试                                                           | ✅    |
