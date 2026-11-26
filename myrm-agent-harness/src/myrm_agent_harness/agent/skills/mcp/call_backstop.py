@@ -11,7 +11,9 @@
 Each MCP session actor already ends a tool call at the server's ``execute_timeout`` and answers with a failure.
 This bound exists for the actor that does not answer at all (a wedged connection), so the script gets a named
 error instead of waiting for the host to kill it. It wraps the call alone, never the connect phase: a cold server
-start has its own budget and is not part of a call that is within its limit.
+start has its own budget and is not part of a call that is within its limit. The bound runs from the moment the request
+is issued, so it also counts the wait behind earlier calls queued on the same server's actor: gathering many slow calls
+to one server can time out the tail while the server is healthy, and the error reads as a server timeout.
 """
 
 import asyncio

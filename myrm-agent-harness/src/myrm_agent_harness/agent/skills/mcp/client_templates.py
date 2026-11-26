@@ -8,7 +8,7 @@ Agent-in-Sandbox 模式下，代码通过 subprocess 执行，需要 IPC 回调�
 - tools.xxx.yyy() → 内置工具（skill_name = "__builtin__"）
 
 特性：
-- 异步调用，支持 asyncio.gather() 并发
+- 每次调用各开一条 IPC 连接，gather 可并发发起；同一服务器的调用由其会话 actor 先进先出逐个执行，不同服务器互不等待
 - 统一错误处理
 - 请求只发一次、失败即抛出，从不重放：连接可能在请求到达服务端之后才断开，重放会让写操作重复生效，
   而工具自称"只读"无法核实
