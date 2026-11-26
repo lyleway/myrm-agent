@@ -20,6 +20,8 @@ from myrm_agent_harness.utils.runtime.cancellation import CancellationToken
 
 # The line that closes the command block of ``BashFlavor.build_wrapped_command`` and seals its stdin.
 BASH_BLOCK_CLOSE = "} </dev/null"
+# The last line of a wrapped bash command: the signal traps live only while the command runs.
+BASH_TRAP_RESET = "trap - TERM HUP INT"
 
 
 # Every session writes its tee logs under ``<work_dir>/.myrm/tee``. A test that reads that directory must pass a

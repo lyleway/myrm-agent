@@ -21,7 +21,7 @@ from myrm_agent_harness.toolkits.code_execution.session.shell_flavor import (
     ShellFlavor,
     WindowsFlavor,
 )
-from tests.toolkits.code_execution._session_helpers import split_bash_wrapper
+from tests.toolkits.code_execution._session_helpers import BASH_TRAP_RESET, split_bash_wrapper
 
 _TRICKY = "a\"b\\c d$HOME `whoami` $(echo pwned) 'q'\nsecond-line"
 
@@ -155,7 +155,7 @@ class TestWrappedCommand:
         _, block, after = split_bash_wrapper(wrapped)
 
         assert block == ["export ORG=$'o'", "export TOKEN_A=$'t'", "echo hi", "__myrm_rc__=$?"]
-        assert after == ["echo 'EX'\"$__myrm_rc__\"", "echo 'END'", "unset TOKEN_A"]
+        assert after == ["echo 'EX'\"$__myrm_rc__\"", "echo 'END'", "unset TOKEN_A", BASH_TRAP_RESET]
 
     def test_powershell_sets_before_the_block_and_removes_after_the_end_marker(self) -> None:
         wrapped = PowerShellFlavor().build_wrapped_command(
