@@ -15,7 +15,7 @@ config with ``enabled: false`` (the default in ``mcp_migration_item_to_config_di
 
 [OUTPUT]
 -- decode_mcp_json / parse_mcp_servers / validate_mcp_top_level: per-server
-   variant validation → normalized PluginMcpServer records; every decoded string is UTF-8 encodable.
+   variant validation → normalized PluginMcpServer records; every decoded string is UTF-8 encodable, nesting at most 64 levels.
 
 [POS]
 Per-server mcp.json variant parser for the framework-level plugin parser.

@@ -13,7 +13,7 @@ self-report-and-ignore semantics:
 
 [OUTPUT]
 -- decode_manifest_json / parse_manifest: validate plugin.json under the closed
-   schema with $schema version negotiation; every decoded string is UTF-8 encodable.
+   schema with $schema version negotiation; every decoded string is UTF-8 encodable, nesting at most 64 levels.
 
 [POS]
 Closed-schema plugin.json manifest validator for the framework parser.

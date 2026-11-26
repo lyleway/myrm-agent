@@ -21,7 +21,7 @@ import json
 import pytest
 
 from myrm_agent_harness.utils import clean_json
-from myrm_agent_harness.utils.clean_json import load_clean_json
+from myrm_agent_harness.utils.clean_json import MAX_NESTING, load_clean_json
 from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 LONE = r"\ud800"  # the escape as it appears in the JSON text; json.loads decodes it to one lone surrogate
@@ -124,8 +124,8 @@ def test_keys_and_nested_values_are_repaired() -> None:
     }
 
 
-def test_nesting_is_followed_by_the_parser_and_not_by_the_repair() -> None:
-    depth = 300
+def test_a_string_at_the_deepest_level_accepted_is_repaired() -> None:
+    depth = MAX_NESTING
     parsed = load_clean_json('{"a":' * depth + f'"x{LONE}"' + "}" * depth)
 
     for _ in range(depth):

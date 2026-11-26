@@ -21,8 +21,8 @@ Client-specific data (agent profiles, workspace templates, entry agent) lives un
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | `__init__.py` | Package | Agent Plugins parsing & exporting module. | ✅ |
-| `manifest.py` | Core | `AgentPluginManifest` + strict spec 1.0.0 validation (closed schema, name constraints, `$schema` version negotiation); `decode_manifest_json` loads plugin.json through `load_clean_json`, so every string of the manifest is UTF-8 encodable. | ✅ |
-| `mcp_config.py` | Core | `AgentPluginMcpConfig` + per-server variant parsing (stdio / streamable-http / sse), placeholder scanning and containment; `decode_mcp_json` loads mcp.json through `load_clean_json`, so every string of the config is UTF-8 encodable. | ✅ |
+| `manifest.py` | Core | `AgentPluginManifest` + strict spec 1.0.0 validation (closed schema, name constraints, `$schema` version negotiation); `decode_manifest_json` loads plugin.json through `load_clean_json`, so every string of the manifest is UTF-8 encodable and a manifest nested deeper than 64 levels is invalid JSON (`manifest_invalid_json`, fatal to the plugin). | ✅ |
+| `mcp_config.py` | Core | `AgentPluginMcpConfig` + per-server variant parsing (stdio / streamable-http / sse), placeholder scanning and containment; `decode_mcp_json` loads mcp.json through `load_clean_json`, so every string of the config is UTF-8 encodable and a config nested deeper than 64 levels is invalid JSON (`mcp_invalid_json`: MCP is off, the skills stay). | ✅ |
 | `parser.py` | Core | `AgentPluginParser.parse_zip` orchestrating discovery (skills/, mcp.json, then client-specific agents/workspace via `agents.py`) with per-component failure isolation. Retains non-skill files on `PluginParseResult.files` for the business layer to persist into the plugin root; reports hidden files dropped by the archive filter as an INFO diagnostic. Reads both archive shapes: `plugin.json` at the archive root (flat) or one wrapper directory around the plugin (dropped). | ✅ |
 | `agents.py` | Core | `discover_agents` / `discover_workspace_files`: `ai.myrm/` namespace first, community layout as inbound fallback; entry agent from `extensions["ai.myrm"].entryAgent`. | ✅ |
 | `frontmatter.py` | Core | `split_frontmatter`: `---` YAML header + body split shared by skill and agent files; the header loads through `load_clean_yaml`, so every string of it is UTF-8 encodable. | ✅ |
@@ -56,7 +56,7 @@ Client-specific data (agent profiles, workspace templates, entry agent) lives un
 - `backends.skills.scanning.zip_extract::safe_extract_zip` — secure extraction.
 - `backends.skills.scanning.archive_security` — typed archive security errors.
 - `backends.skills.types_enums` — `SkillTrust` (business maps INSTALLED trust layer).
-- `utils.clean_json::load_clean_json` / `utils.clean_yaml::load_clean_yaml` — decode plugin.json, mcp.json and the YAML header of a skill or agent file so that every string is UTF-8 encodable.
+- `utils.clean_json::load_clean_json` / `utils.clean_yaml::load_clean_yaml` — decode plugin.json, mcp.json and the YAML header of a skill or agent file so that every string is UTF-8 encodable; the JSON loader also refuses nesting deeper than `MAX_NESTING` (64) levels.
 
 ## Design Principles (spec-conformant)
 
@@ -71,7 +71,11 @@ Client-specific data (agent profiles, workspace templates, entry agent) lives un
    paths, oversized files and non-portable MCP servers are errors), so what the caller
    asked to ship is exactly what ships; secrets are never carried (env/headers are
    placeholders supplied by the caller).
-6. **Encodable text**: an archive is text the user did not write, and its strings reach
-   the preview response, the staged session and the stores. Every decoder (plugin.json,
-   mcp.json, the YAML header of a skill or agent file) therefore turns a lone surrogate
-   escape into `U+FFFD` at decode, so no record the parser returns can fail an encode later.
+6. **Encodable text, bounded nesting**: an archive is text the user did not write, and its
+   strings reach the preview response, the staged session and the stores. Every decoder
+   (plugin.json, mcp.json, the YAML header of a skill or agent file) therefore turns a lone
+   surrogate escape into `U+FFFD` at decode, so no record the parser returns can fail an
+   encode later. The two JSON decoders also refuse a document nested deeper than 64 levels,
+   as invalid input and not as an exception: the JSON parser reads about ten thousand levels,
+   but the staged session is pickled and the result walked recursively, which gives out after
+   a few thousand.
