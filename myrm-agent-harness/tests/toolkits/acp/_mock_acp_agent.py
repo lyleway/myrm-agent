@@ -12,6 +12,7 @@ the client the way a real agent does, over the real SDK, and report what came ba
 ``/write {"path", "content"}`` -> ``[write] ok`` or ``[write] error <code> <message> <data as JSON>``;
 ``/read {"path", "line", "limit"}`` -> ``[read] <content as JSON>`` or ``[read] error <code> <message> <data as JSON>``;
 ``/edit {"path", "content"}`` asks permission to edit the file, then writes it: both reports, joined.
+``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``.
 """
 
 from __future__ import annotations
@@ -144,6 +145,8 @@ class MockAcpAgent:
     async def _run_script(self, session_id: str, text: str) -> str | None:
         """The report of a ``/permission``, ``/write``, ``/read`` or ``/edit`` prompt, or None for any other prompt."""
         verb, _, rest = text.partition(" ")
+        if verb == "/argv":
+            return f"[argv] {json.dumps(sys.argv[1:])}"
         if verb not in ("/permission", "/write", "/read", "/edit"):
             return None
         args = json.loads(rest)

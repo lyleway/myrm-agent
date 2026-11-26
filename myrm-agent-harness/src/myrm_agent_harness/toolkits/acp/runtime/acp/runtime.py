@@ -5,6 +5,7 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.auth._profiles::without_approval_flags (POS: Authentication profile registry; sole owner of per-CLI launch and permission arguments.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
@@ -16,6 +17,8 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 [POS]
 ACP protocol runtime backend. Sends `session/close` only when the agent advertises it (ACP capability
 negotiation) and bounds it, so a silent agent cannot skip the transport teardown that terminates its process.
+The host's policy answers every permission request the agent makes, so a known agent is started without the flags that let it skip
+asking (``--yolo``, ``--approval-mode``); its sandbox flags stay.
 A silent agent (one long tool call) is reported as still working at a fixed interval, as ``CliRuntime`` does, and a
 missing ACP SDK (the optional ``acp`` extra) ends the turn with a ``BACKEND_NOT_FOUND`` error that says how to install it.
 
@@ -36,6 +39,7 @@ from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
+from myrm_agent_harness.toolkits.acp.auth._profiles import without_approval_flags
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -302,13 +306,23 @@ class AcpRuntime(BaseRuntime):
             msg = "AcpRuntime requires 'command' in RuntimeConfig"
             raise ValueError(msg)
 
+        # The host's policy answers this agent's permission requests; a flag that makes the agent skip asking
+        # (``--yolo``) would walk past it, whatever mode the host selected.
+        args = without_approval_flags(command, self._config.args)
+        if len(args) != len(self._config.args):
+            logger.warning(
+                "acp_approval_flags_dropped name=%s flags=%s",
+                self._name,
+                [arg for arg in self._config.args if arg.startswith("-") and arg not in args],
+            )
+
         # AcpCallbackHandler implements the acp.Client callbacks used here
         # (permission/session/file); terminal & elicitation callbacks are never
         # invoked because the connection declares terminal=False.
         ctx = spawn_agent_process(
             self._handler,  # type: ignore[arg-type]
             command,
-            *self._config.args,
+            *args,
             env=safe_env,
             cwd=self._workspace,
         )
