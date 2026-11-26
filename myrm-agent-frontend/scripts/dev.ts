@@ -1,6 +1,7 @@
 /**
  * [INPUT]
  * - dev-lock::tryAttachToHealthyDevServer / acquireDevLock / isDistDirInUse (POS: dev-server lock gate)
+ * - dev-env-local::syncDevEnvLocal (POS: `.env.local` upkeep; an isolated lane only creates the file, never rewrites it)
  * - frontend-dev-pause-gate::probeFrontendDevPause / enforceFrontendDevNotPaused (POS: TS pause gate SSOT)
  * - port-cleanup::APP_DEV_PORT / killListenersOnPort / foreignListenersOnPort (POS: LISTEN-only port cleanup; never another runtime's listener)
  * - node-runtime::ensureNodeRuntime / nodeEnv (POS: the real Node.js Next runs on; Bun is only the launcher)
@@ -25,6 +26,7 @@ import {
   releaseDevLock,
   tryAttachToHealthyDevServer,
 } from './dev-lock';
+import { syncDevEnvLocal } from './dev-env-local';
 import { isFrontendDevPaused, probeFrontendDevPause } from './frontend-dev-pause-gate';
 import { ensureNodeRuntime, nodeEnv } from './node-runtime';
 import { footprintProbe, type NextSupervisor, superviseNext } from './next-supervisor';
@@ -32,7 +34,8 @@ import { APP_DEV_PORT, foreignListenersOnPort, killListenersOnPort } from './por
 import { ensureDevPython } from './python-runtime';
 
 const ENV_LOCAL = path.join(process.cwd(), '.env.local');
-const ENV_LOCAL_HEADER = '# Auto-managed by bun run dev — local split-dev defaults\n';
+/** Dist dirs of isolated runtimes (lanes) that run side by side from this directory. */
+const ISOLATED_DIST_PREFIX = '.next-isolated-';
 
 const SPLIT_LOCALE_SCRIPT = path.join(__dirname, 'split-locale-namespaces.mjs');
 
@@ -64,29 +67,6 @@ function watchLocaleSources(): void {
   });
 }
 
-function ensureDevEnvLocal(): void {
-  const apiPort = process.env.API_PORT?.trim() || '8080';
-  const apiLine = `API_PORT=${apiPort}`;
-  if (!fs.existsSync(ENV_LOCAL)) {
-    fs.writeFileSync(ENV_LOCAL, `${ENV_LOCAL_HEADER}${apiLine}\nNEXT_PUBLIC_DEPLOY_MODE=local\n`, 'utf8');
-    console.log(`📝 Created ${ENV_LOCAL} with ${apiLine}`);
-    return;
-  }
-  const content = fs.readFileSync(ENV_LOCAL, 'utf8');
-  if (content.startsWith(ENV_LOCAL_HEADER)) {
-    const updated = content.replace(/^API_PORT\s*=.*$/m, apiLine);
-    if (updated !== content) {
-      fs.writeFileSync(ENV_LOCAL, updated, 'utf8');
-      console.log(`📝 Updated ${ENV_LOCAL} with ${apiLine}`);
-    }
-    return;
-  }
-  if (!/\bAPI_PORT\s*=/.test(content)) {
-    fs.appendFileSync(ENV_LOCAL, `\n${apiLine}\n`, 'utf8');
-    console.log(`📝 Appended ${apiLine} to ${ENV_LOCAL}`);
-  }
-}
-
 const args = process.argv.slice(2);
 const clean = args.includes('--clean');
 const nextDistDir = process.env.MYRM_NEXT_DIST_DIR?.trim() || '.next-dev';
@@ -94,14 +74,21 @@ const STALE_ISOLATED_NEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 ensureLocaleNamespaces();
 watchLocaleSources();
-ensureDevEnvLocal();
+const devEnvNote = syncDevEnvLocal(
+  ENV_LOCAL,
+  process.env.API_PORT?.trim() || '8080',
+  nextDistDir.startsWith(ISOLATED_DIST_PREFIX),
+);
+if (devEnvNote) {
+  console.log(devEnvNote);
+}
 
 function pruneStaleIsolatedNextDirs(): void {
   const activeDistName = path.basename(nextDistDir);
   const now = Date.now();
   let removed = 0;
   for (const entry of fs.readdirSync(process.cwd(), { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.startsWith('.next-isolated-')) {
+    if (!entry.isDirectory() || !entry.name.startsWith(ISOLATED_DIST_PREFIX)) {
       continue;
     }
     if (entry.name === activeDistName) {
