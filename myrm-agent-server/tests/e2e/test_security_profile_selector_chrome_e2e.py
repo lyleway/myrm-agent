@@ -316,6 +316,10 @@ def test_activating_a_profile_deleted_meanwhile_reports_the_failure_and_changes_
             assert _listing(api_url).get("activeKey") == "readonly", "the failed pick moved the active profile"
             assert fetch_config_value(_SECURITY_CONFIG, api_url=api_url) == held_config, "the failed pick rewrote the config"
             assert {name: _probe(api_url).get(name) for name in _POLICY_KEYS} == held_policy
-            print(f"E2E_PROFILE_STALE: failure toast shown, still {readonly_name!r} (policy={held_policy['action']})", flush=True)
+            # Not "...STALE": the lane reads an `E2E_*STALE` line as an infrastructure verdict and would mislabel a red assertion.
+            print(
+                f"E2E_PROFILE_DELETED_MEANWHILE: failure toast shown, still {readonly_name!r} (policy={held_policy['action']})",
+                flush=True,
+            )
         finally:
             http_json_once("DELETE", f"{api_url}{_PROFILES_PATH}/{stale_key}")

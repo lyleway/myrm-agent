@@ -106,7 +106,8 @@ def test_explore_preset_refuses_a_plain_skill_save_but_lets_learn_save_one() -> 
         assert denials, (
             f"the explore preset never refused the plain save with a policy denial; stream: {stream_digest(refused_turn)}"
         )
-        print(f"E2E_PLAIN_SAVE_DENIED: {denials[0]}", flush=True)
+        # Not "...DENIED": the lane reads an `E2E_*DENIED` line as an infrastructure verdict and would mislabel a red assertion.
+        print(f"E2E_PLAIN_SAVE_REFUSED: {denials[0]}", flush=True)
         assert catalog_skill_id(client, backend_url, refused_name) is None, "the explore preset let a plain turn save a skill"
         assert not announced_batches(refused_turn), "a refused save must not announce a committed batch"
 
