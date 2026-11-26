@@ -5,8 +5,8 @@
  * - ../AppHostView::AppHostView
  *
  * [OUTPUT]
- * - Tests: loading states, the first-time permission question, the menu (permissions, uninstall), and that the page is
- *   embedded with the client injected.
+ * - Tests: loading states, the first-time permission question, the menu (permissions, uninstall), that the page is
+ *   embedded with the client injected, and that it fills the window exactly when no shell is shown.
  *
  * [POS]
  * Behaviour of `/apps/[artifactId]`: what the user sees and which decisions and registry changes it leads to.
@@ -114,6 +114,16 @@ describe('AppHostView', () => {
     expect(content).toContain('<h1>Weather</h1>');
     expect([storageNamespace, chatId]).toEqual(['art-1', 'chat-1']);
     expect(fetch).toHaveBeenCalledWith('/storage/vault://o1');
+  });
+
+  it('leaves room for the shell top bar while the shell is shown', async () => {
+    mocks.fetchAppDetail.mockResolvedValue(detail());
+
+    render(<AppHostView artifactId="art-1" />);
+
+    const root = await screen.findByTestId('app-host');
+    expect(root).toHaveClass('h-[calc(100vh-4rem)]');
+    expect(root).not.toHaveClass('h-dvh');
   });
 
   it('asks about the declared permissions the first time the app is opened', async () => {
@@ -299,6 +309,14 @@ describe('AppHostView', () => {
       mocks.fetchAppDetail.mockResolvedValue(detail(ALLOWED));
       mocks.closeAppWindow.mockResolvedValue(true);
       mocks.setAppWindowAlwaysOnTop.mockResolvedValue(true);
+    });
+
+    it('fills the whole window since no shell sits above it', async () => {
+      render(<AppHostView artifactId="art-1" />);
+
+      const root = await screen.findByTestId('app-host');
+      await waitFor(() => expect(root).toHaveClass('h-dvh'));
+      expect(root).not.toHaveClass('h-[calc(100vh-4rem)]');
     });
 
     it('offers keep-on-top, and applies the choice to the window', async () => {

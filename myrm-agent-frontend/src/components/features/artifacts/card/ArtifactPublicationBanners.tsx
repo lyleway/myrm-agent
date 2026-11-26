@@ -2,7 +2,7 @@
 
 /**
  * [INPUT]
- * - ./artifactUtils::deploymentHostname / isPublicationStale (POS: publication display helpers)
+ * - ../artifactUtils::deploymentHostname / isPublicationStale (POS: publication display helpers)
  * - @/services/hosting::ArtifactPublication (POS: a published copy of an artifact on one hosting target)
  *
  * [OUTPUT]
@@ -17,7 +17,7 @@ import { useTranslations } from 'next-intl';
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/primitives/button';
 import { type ArtifactPublication } from '@/services/hosting';
-import { deploymentHostname, isPublicationStale } from './artifactUtils';
+import { deploymentHostname, isPublicationStale } from '../artifactUtils';
 
 interface ArtifactPublicationBannersProps {
   publications: ArtifactPublication[];

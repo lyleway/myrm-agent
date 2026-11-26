@@ -1,5 +1,5 @@
 /**
- * [INPUT] PinWidgetPayload, colSpan, refreshInterval, reorder indices
+ * [INPUT] PinWidgetPayload, colSpan, reorder indices
  * [OUTPUT] useDashboardWorkspaceStore (Zustand persistent store for dashboard widgets)
  * [POS] Features -> Dashboard Workspace -> Store
  */
