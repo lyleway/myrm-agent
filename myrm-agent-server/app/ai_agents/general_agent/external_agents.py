@@ -3,12 +3,13 @@
 [INPUT]
 - myrm_agent_harness.toolkits.acp (POS: 外部 Agent 委托协议框架)
 - app.config.deploy_mode (POS: 部署模式检测)
+- app.platform_utils.workspace_root::get_workspace_root (POS: 进程默认工作区，聊天没有声明工作区时的落点) [lazy]
 - .external_agents_runtime_config (POS: 外部 Agent 配置归一化层)
 - app.services.external_agents.cli_session_store::ChatCliSessionStore (POS: chat 行持久化的外部 CLI 会话 id，服务重启后续接同一外部对话) [lazy]
 - app.services.external_agents.delegation::delegation_prompt, stage_images, stream_direct_delegate (POS: 外部 Agent 直连委托：用户回合 → CLI 提示词与图片文件、CLI 回合 → 前端 SSE 事件流) [lazy]
 
 [OUTPUT]
-- ExternalAgentsMixin: 外部 Agent 初始化与直接委托流式执行的 Mixin
+- ExternalAgentsMixin: 外部 Agent 初始化与直接委托流式执行的 Mixin；两个入口（模型发起的工具、用户直连）共用同一个委派工作区（`_delegation_workspace`），回合启动目录只来自它
 - should_mount_invoke_acp_agent_tool(): direct-only 路径是否跳过 invoke_acp_agent_tool 挂载
 - needs_runtime_pool(): factory 是否 eager 初始化 RuntimePool（与 stream lazy path 对齐）
 - BUILTIN_CLI_VISUAL_AGENT_ID: CLI Visual 内置 Agent 标识
@@ -98,6 +99,7 @@ class ExternalAgentsMixin:
         _runtime_pool_scope_id: str | None
         _runtime_pool_from_registry: bool
         _owned_runtime_pool: RuntimePool | None
+        declared_allowed_roots: tuple[str, ...]
         chat_id: str | None
         agent_id: str | None
         force_external_agent: str | None
@@ -109,7 +111,6 @@ class ExternalAgentsMixin:
         tools: list[object],
         *,
         mount_invoke_acp_agent_tool: bool | None = None,
-        external_agent_workdir: str | None = None,
     ) -> None:
         """Set up external agent delegation via RuntimePool.
 
@@ -126,11 +127,7 @@ class ExternalAgentsMixin:
                 force_external_agent=getattr(self, "force_external_agent", None),
             )
         try:
-            await self._do_setup_external_agents(
-                tools,
-                mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool,
-                external_agent_workdir=external_agent_workdir,
-            )
+            await self._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool)
         except Exception as e:
             logger.warning("External agent setup failed (degraded): %s", e)
 
@@ -139,7 +136,6 @@ class ExternalAgentsMixin:
         tools: list[object],
         *,
         mount_invoke_acp_agent_tool: bool = True,
-        external_agent_workdir: str | None = None,
     ) -> None:
         agent_cfgs = await _resolve_external_agent_cfgs(self.external_agents_config)
         if not agent_cfgs:
@@ -189,7 +185,7 @@ class ExternalAgentsMixin:
                 chat_scope = _runtime_pool_scope_id(self)
                 delegate_tool = create_invoke_acp_agent_tool(
                     pool,
-                    cwd=external_agent_workdir,
+                    workspace=self._delegation_workspace(),
                     session_scope=chat_scope,
                 )
                 tools.append(delegate_tool)
@@ -202,6 +198,18 @@ class ExternalAgentsMixin:
                     "RuntimePool ready (%d backends), delegate tool skipped [direct-only]",
                     len(pool.available_backends),
                 )
+
+    def _delegation_workspace(self) -> str:
+        """The directory every delegated turn of this agent starts in, whichever entry started it.
+
+        The chat's declared workspace root (project binding, the chat's own choice or its default sandbox); a run
+        with none declared works in the process workspace, as the agent's other tools do.
+        """
+        if self.declared_allowed_roots:
+            return str(self.declared_allowed_roots[0])
+        from app.platform_utils.workspace_root import get_workspace_root
+
+        return str(get_workspace_root())
 
     async def _ensure_runtime_pool(self) -> None:
         """Initialize RuntimePool without creating the full LangChain Agent.
@@ -239,6 +247,7 @@ class ExternalAgentsMixin:
                 agent_name,
                 delegation_prompt(staged.query, self.quote),
                 session_id=f"{agent_name}-{chat_id}" if chat_id else f"{agent_name}-default",
+                workspace=self._delegation_workspace(),
                 images=staged.paths,
                 cancel_token=cancel_token,
                 locale=self.locale or "en",

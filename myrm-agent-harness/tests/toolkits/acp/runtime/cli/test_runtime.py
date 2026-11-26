@@ -33,7 +33,7 @@ def _argv(fake_cli: FakeCli, index: int = 0) -> list[str]:
 class TestProperties:
     def test_claude_and_codex_resume_conversations_and_other_clis_do_not(self) -> None:
         def capabilities(command: str):
-            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command)).capabilities
+            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws").capabilities
 
         for command in ("claude", "codex"):
             caps = capabilities(command)
@@ -45,7 +45,7 @@ class TestProperties:
         assert capabilities("/opt/custom/agent").supports_resume is False
 
     def test_is_alive_without_a_process_and_name(self) -> None:
-        runtime = CliRuntime("my-cli", RuntimeConfig(backend_type="cli", command="claude"))
+        runtime = CliRuntime("my-cli", RuntimeConfig(backend_type="cli", command="claude"), workspace="/tmp/ws")
 
         assert runtime.is_alive is False
         assert runtime.name == "my-cli"
@@ -54,7 +54,7 @@ class TestProperties:
 class TestRunTurn:
     @pytest.mark.asyncio
     async def test_requires_command(self) -> None:
-        runtime = CliRuntime("test", RuntimeConfig(backend_type="cli", command=None))
+        runtime = CliRuntime("test", RuntimeConfig(backend_type="cli", command=None), workspace="/tmp/ws")
 
         with pytest.raises(ValueError, match="requires 'command'"):
             async for _ in runtime._do_run_turn("hello", "s1"):

@@ -15,7 +15,8 @@ no - Base type definition module
 - AcpErrorCode: ACP error enum
 - ContinuityStatus: status_update statuses for a CLI conversation that could not be continued
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
-- RuntimeConfig: Runtime configuration
+- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace)
+- normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
 - CliSessionRecord: a CLI-native session id bound to the working directory that created it
 - CliSessionStore: protocol a host implements to keep CLI session records across process restarts
 - PermissionMode: Permission pattern type
@@ -29,6 +30,7 @@ structures, serving as the foundation for the entire ACP module.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -76,6 +78,8 @@ class ContinuityStatus(StrEnum):
     @classmethod
     def of(cls, status: object) -> ContinuityStatus | None:
         """The continuity status that ``status`` stands for, or None for any other status."""
+        if not isinstance(status, str):
+            return None
         try:
             return cls(status)
         except ValueError:
@@ -173,7 +177,6 @@ class RuntimeConfig:
     command: str | None = None
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
-    cwd: str | None = None
     timeout_seconds: int = 300
     permission_mode: PermissionMode = "allow_all"
     auth_mode: AuthMode = "subscription"
@@ -263,6 +266,7 @@ class DelegationPool(Protocol):
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
@@ -288,6 +292,19 @@ class CliSessionStore(Protocol):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def normalize_workspace(workspace: str) -> str:
+    """The directory a delegated turn starts in, as a normalized absolute path.
+
+    Raises:
+        ValueError: ``workspace`` is not an absolute path. A relative one would be resolved against whatever
+            directory the host process happens to run in, the ambient inference a turn must not depend on.
+    """
+    if not os.path.isabs(workspace):
+        msg = f"workspace must be an absolute path, got {workspace!r}"
+        raise ValueError(msg)
+    return os.path.normpath(workspace)
 
 
 def create_event(

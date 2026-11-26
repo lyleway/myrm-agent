@@ -14,6 +14,8 @@ from app.services.external_agents.runtime_pool_registry import (
     get_chat_runtime_pool_registry,
 )
 
+_WORKSPACE = "/work/repo"
+
 
 @pytest.fixture(autouse=True)
 async def _reset_registry_singleton() -> None:
@@ -191,6 +193,7 @@ async def test_facade_cancel_does_not_deadlock_during_run_turn() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list | None = None,
         images: list[str] | None = None,
@@ -210,7 +213,7 @@ async def test_facade_cancel_does_not_deadlock_during_run_turn() -> None:
     facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, "fp-a")
 
     async def consume() -> None:
-        async for _ in facade.run_turn("claude", "hi", "s1"):
+        async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
             pass
 
     task = asyncio.create_task(consume())
@@ -232,6 +235,7 @@ async def test_closing_a_facade_turn_closes_the_pool_turn_before_the_next_turn_s
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list | None = None,
         images: list[str] | None = None,
@@ -256,7 +260,7 @@ async def test_closing_a_facade_turn_closes_the_pool_turn_before_the_next_turn_s
         async with registry.guard_turn("chat-1"):
             order.append("next turn started")
 
-    turn = facade.run_turn("claude", "hi", "s1")
+    turn = facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE)
     await anext(turn)
     waiting = asyncio.create_task(next_turn())
     await asyncio.sleep(0.01)
@@ -365,7 +369,9 @@ async def test_close_external_agent_pool_for_chat_swallows_registry_errors() -> 
 def _build_turn_pool(label: str, ran_on: list[str]) -> MagicMock:
     """A pool whose run_turn records which pool served the turn."""
 
-    async def run_turn(name: str, prompt: str, session_id: str, *, mode: str = "persistent", mcp_servers=None, images=None):
+    async def run_turn(
+        name: str, prompt: str, session_id: str, *, workspace: str, mode: str = "persistent", mcp_servers=None, images=None
+    ):
         ran_on.append(label)
         yield MagicMock()
 
@@ -443,7 +449,7 @@ async def test_facade_run_turn_readopts_pool_closed_while_the_unit_stayed_cached
     facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, "fp-a")
     await _close_chat_one(registry, pool)
 
-    async for _ in facade.run_turn("claude", "hi", "s1"):
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
         pass
 
     assert ran_on == ["p"]
@@ -465,7 +471,7 @@ async def test_facade_follows_the_registered_pool_for_turns_and_cancel() -> None
     await registry.acquire("chat-1", "fp-a", build_pool)
     facade = ChatScopedRuntimePoolFacade(stale, "chat-1", registry, "fp-a")
 
-    async for _ in facade.run_turn("claude", "hi", "s1"):
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
         pass
     await facade.cancel("claude", "s1")
 
@@ -487,12 +493,33 @@ async def test_facade_hands_the_turn_images_to_the_pool() -> None:
     pool.run_turn = run_turn
     facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, "fp-a")
 
-    async for _ in facade.run_turn("claude", "hi", "s1", images=["/state/a.png"]):
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE, images=["/state/a.png"]):
         pass
-    async for _ in facade.run_turn("claude", "hi", "s1"):
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
         pass
 
     assert seen == [["/state/a.png"], None]
+
+
+@pytest.mark.asyncio
+async def test_facade_hands_the_turn_workspace_to_the_pool() -> None:
+    registry = ChatRuntimePoolRegistry(idle_seconds=3600.0)
+    seen: list[str] = []
+    pool = _build_turn_pool("p", [])
+
+    async def run_turn(name: str, prompt: str, session_id: str, *, workspace: str, **_: object):
+        seen.append(workspace)
+        yield MagicMock()
+
+    pool.run_turn = run_turn
+    facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, "fp-a")
+
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace="/work/a"):
+        pass
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace="/work/b"):
+        pass
+
+    assert seen == ["/work/a", "/work/b"]
 
 
 @pytest.mark.asyncio
@@ -520,7 +547,7 @@ async def test_turn_arriving_during_an_idle_release_waits_for_it() -> None:
     await _wait_for(lambda: "release_begin" in events)
 
     async def deliver() -> None:
-        async for _ in facade.run_turn("claude", "hi", "s1"):
+        async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
             pass
 
     turn = asyncio.create_task(deliver())

@@ -35,6 +35,7 @@ async def test_invoke_acp_agent_tool_mounts_in_tools_not_deferred() -> None:
     mixin.agent_id = "general"
     mixin.force_external_agent = None
     mixin._runtime_pool_scope_id = "chat-1"
+    mixin.declared_allowed_roots = ("/work/repo",)
 
     tools: list[object] = []
 

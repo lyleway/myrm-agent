@@ -43,7 +43,7 @@ class TestClaudeConversation:
         self, fake_cli: FakeCli, work: Path
     ) -> None:
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         first = await run_turn(runtime)
         second = await run_turn(runtime)
@@ -60,7 +60,7 @@ class TestClaudeConversation:
     ) -> None:
         """Stop pressed before the CLI finishes its first turn: the conversation already exists and is kept."""
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
         fake_cli.set_scenario({"hang_after_init": True})
         turn = asyncio.create_task(run_turn(runtime))
         await _until(lambda: "s1" in store.records)
@@ -80,7 +80,7 @@ class TestClaudeConversation:
         self, fake_cli: FakeCli, work: Path
     ) -> None:
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
         session = text_of(await run_turn(runtime))
         fake_cli.set_scenario({"fail": "max_turns"})
 
@@ -97,7 +97,7 @@ class TestClaudeConversation:
     async def test_a_resumed_turn_that_fails_after_announcing_is_not_taken_for_a_forgotten_conversation(
         self, fake_cli: FakeCli, work: Path
     ) -> None:
-        runtime = make_runtime(fake_cli, store=RecordingStore(), cwd=str(work))
+        runtime = make_runtime(fake_cli, store=RecordingStore(), workspace=str(work))
         session = text_of(await run_turn(runtime))
         fake_cli.set_scenario({"text": "", "fail": "crash"})
 
@@ -112,9 +112,9 @@ class TestClaudeConversation:
         self, fake_cli: FakeCli, work: Path
     ) -> None:
         store = RecordingStore()
-        session = text_of(await run_turn(make_runtime(fake_cli, store=store, cwd=str(work))))
+        session = text_of(await run_turn(make_runtime(fake_cli, store=store, workspace=str(work))))
 
-        restarted = await run_turn(make_runtime(fake_cli, store=store, cwd=str(work)))
+        restarted = await run_turn(make_runtime(fake_cli, store=store, workspace=str(work)))
 
         assert text_of(restarted) == session
         assert fake_cli.resume_args() == [None, session]
@@ -130,9 +130,9 @@ class TestWorkspaceChange:
         work_a.mkdir()
         work_b.mkdir()
         store = RecordingStore()
-        in_a = text_of(await run_turn(make_runtime(fake_cli, store=store, cwd=str(work_a))))
+        in_a = text_of(await run_turn(make_runtime(fake_cli, store=store, workspace=str(work_a))))
 
-        moved = await run_turn(make_runtime(fake_cli, store=store, cwd=str(work_b)))
+        moved = await run_turn(make_runtime(fake_cli, store=store, workspace=str(work_b)))
 
         in_b = text_of(moved)
         assert in_b != in_a
@@ -149,8 +149,8 @@ class TestWorkspaceChange:
         work_a.mkdir()
         work_b.mkdir()
         store = RecordingStore()
-        await run_turn(make_runtime(fake_cli, store=store, cwd=str(work_a)))
-        runtime_b = make_runtime(fake_cli, store=store, cwd=str(work_b))
+        await run_turn(make_runtime(fake_cli, store=store, workspace=str(work_a)))
+        runtime_b = make_runtime(fake_cli, store=store, workspace=str(work_b))
         in_b = text_of(await run_turn(runtime_b))
 
         again = await run_turn(runtime_b)
@@ -167,7 +167,7 @@ class TestStaleSession:
     ) -> None:
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord(_DEAD, str(work))
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         events = await run_turn(runtime)
 
@@ -182,7 +182,7 @@ class TestStaleSession:
     async def test_the_dead_id_is_never_replayed_again(self, fake_cli: FakeCli, work: Path) -> None:
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord(_DEAD, str(work))
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         fresh = text_of(await run_turn(runtime))
         await run_turn(runtime)
@@ -196,7 +196,7 @@ class TestStaleSession:
         """The retry fails too (say, the CLI is not logged in): nothing proves the old conversation is gone."""
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord(_DEAD, str(work))
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
         fake_cli.set_scenario([{}, {"fail_before_output": True, "stderr": "not logged in"}])
 
         events = await run_turn(runtime)
@@ -214,7 +214,7 @@ class TestStaleSession:
         self, fake_cli: FakeCli, work: Path
     ) -> None:
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
         session = text_of(await run_turn(runtime))
         fake_cli.set_scenario({"hang_before_output": True, "exit_on_sigterm": 143})
         turn = asyncio.create_task(run_turn(runtime))
@@ -236,7 +236,7 @@ class TestStaleSession:
     async def test_a_malformed_stored_id_is_never_handed_to_the_cli(self, fake_cli: FakeCli, work: Path) -> None:
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord("--dangerously-skip-permissions", str(work))
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         events = await run_turn(runtime)
 
@@ -249,7 +249,7 @@ class TestStaleSession:
 class TestCodexConversation:
     @staticmethod
     def _runtime(fake_cli: FakeCli, work: Path, store: RecordingStore | None = None) -> CliRuntime:
-        return make_runtime(fake_cli, "codex", store=store, cwd=str(work), args=["exec", "--json"])
+        return make_runtime(fake_cli, "codex", store=store, workspace=str(work), args=["exec", "--json"])
 
     @pytest.mark.asyncio
     async def test_the_thread_codex_announces_is_continued_with_exec_resume(
@@ -304,7 +304,7 @@ class TestStore:
         self, fake_cli: FakeCli, work: Path
     ) -> None:
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         for _ in range(3):
             await run_turn(runtime)
@@ -317,7 +317,7 @@ class TestStore:
     ) -> None:
         store = RecordingStore()
         store.failing = {"load", "save"}
-        runtime = make_runtime(fake_cli, store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, store=store, workspace=str(work))
 
         first = await run_turn(runtime)
         second = await run_turn(runtime)
@@ -331,7 +331,7 @@ class TestStore:
     @pytest.mark.asyncio
     async def test_clis_without_resume_support_never_touch_the_store(self, fake_cli: FakeCli, work: Path) -> None:
         store = RecordingStore()
-        runtime = make_runtime(fake_cli, "gemini", store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, "gemini", store=store, workspace=str(work))
 
         await run_turn(runtime)
         await run_turn(runtime)
@@ -341,15 +341,15 @@ class TestStore:
 
     @pytest.mark.asyncio
     async def test_without_a_store_a_restart_starts_a_new_conversation(self, fake_cli: FakeCli, work: Path) -> None:
-        first = text_of(await run_turn(make_runtime(fake_cli, cwd=str(work))))
-        second = text_of(await run_turn(make_runtime(fake_cli, cwd=str(work))))
+        first = text_of(await run_turn(make_runtime(fake_cli, workspace=str(work))))
+        second = text_of(await run_turn(make_runtime(fake_cli, workspace=str(work))))
 
         assert second != first
         assert fake_cli.resume_args() == [None, None]
 
     @pytest.mark.asyncio
     async def test_conversations_are_kept_per_session_id(self, fake_cli: FakeCli, work: Path) -> None:
-        runtime = make_runtime(fake_cli, cwd=str(work))
+        runtime = make_runtime(fake_cli, workspace=str(work))
 
         a = text_of(await run_turn(runtime, session_id="chat-a"))
         b = text_of(await run_turn(runtime, session_id="chat-b"))

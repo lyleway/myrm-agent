@@ -275,6 +275,7 @@ class ChatScopedRuntimePoolFacade:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
@@ -284,7 +285,9 @@ class ChatScopedRuntimePoolFacade:
             # Closing this generator closes the pool's turn before the lock is released, so the next turn of the
             # chat never starts while the previous external process is still being stopped.
             async with aclosing(
-                self._pool.run_turn(name, prompt, session_id, mode=mode, mcp_servers=mcp_servers, images=images)
+                self._pool.run_turn(
+                    name, prompt, session_id, workspace=workspace, mode=mode, mcp_servers=mcp_servers, images=images
+                )
             ) as events:
                 async for event in events:
                     yield event

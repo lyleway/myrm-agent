@@ -16,6 +16,7 @@ def _mixin(pool: MagicMock, *, locale: str = "en") -> ExternalAgentsMixin:
     mixin._runtime_pool = pool
     mixin.locale = locale
     mixin.quote = None
+    mixin.declared_allowed_roots = ("/work/repo",)
     return mixin
 
 

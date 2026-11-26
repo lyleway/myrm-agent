@@ -81,7 +81,6 @@ def _new_mixin(cli: _FakeClaude, scope_id: str | None) -> ExternalAgentsMixin:
             "type": "cli",
             "command": str(cli.command),
             "args": ["-p", "--output-format", "stream-json"],
-            "cwd": str(cli.workdir),
             "permissionMode": "safe",
             "timeout": 20,
         }
@@ -95,11 +94,11 @@ def _new_mixin(cli: _FakeClaude, scope_id: str | None) -> ExternalAgentsMixin:
     return mixin
 
 
-async def _turn(mixin: ExternalAgentsMixin, session_id: str) -> str:
-    """Run one delegation turn and return the session id the fake CLI answered with."""
+async def _turn(mixin: ExternalAgentsMixin, session_id: str, workspace: Path) -> str:
+    """Run one delegation turn in ``workspace`` and return the session id the fake CLI answered with."""
     assert mixin._runtime_pool is not None
     text: list[str] = []
-    async for event in mixin._runtime_pool.run_turn("claude", "prompt", session_id):
+    async for event in mixin._runtime_pool.run_turn("claude", "prompt", session_id, workspace=str(workspace)):
         assert event.type != RuntimeEventType.ERROR, event.data
         if event.type == RuntimeEventType.TEXT_DELTA:
             text.append(str(event.data.get("content")))
@@ -119,10 +118,10 @@ async def test_a_restarted_server_resumes_the_external_session_of_the_chat(fake_
     session_id = f"claude-{chat_id}"
     first_server = _new_mixin(fake_claude, chat_id)
     await first_server._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(first_server, session_id)
+    first = await _turn(first_server, session_id, fake_claude.workdir)
 
     restarted = await _restart_server(fake_claude, chat_id)
-    second = await _turn(restarted, session_id)
+    second = await _turn(restarted, session_id, fake_claude.workdir)
 
     assert first
     assert second == first
@@ -135,10 +134,10 @@ async def test_an_incognito_chat_starts_a_new_external_session_after_a_restart(f
     session_id = f"claude-{chat_id}"
     first_server = _new_mixin(fake_claude, chat_id)
     await first_server._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(first_server, session_id)
+    first = await _turn(first_server, session_id, fake_claude.workdir)
 
     restarted = await _restart_server(fake_claude, chat_id)
-    second = await _turn(restarted, session_id)
+    second = await _turn(restarted, session_id, fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
@@ -147,11 +146,11 @@ async def test_an_incognito_chat_starts_a_new_external_session_after_a_restart(f
 async def test_without_a_chat_scope_nothing_is_persisted(fake_claude: _FakeClaude) -> None:
     ephemeral = _new_mixin(fake_claude, None)
     await ephemeral._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(ephemeral, "claude-ephemeral")
+    first = await _turn(ephemeral, "claude-ephemeral", fake_claude.workdir)
 
     again = _new_mixin(fake_claude, None)
     await again._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    second = await _turn(again, "claude-ephemeral")
+    second = await _turn(again, "claude-ephemeral", fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
@@ -169,13 +168,13 @@ async def test_flushing_the_chat_makes_the_external_agent_start_over(fake_claude
     session_id = f"claude-{chat_id}"
     before = _new_mixin(fake_claude, chat_id)
     await before._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(before, session_id)
+    first = await _turn(before, session_id, fake_claude.workdir)
 
     assert await ChatService.focus_flush_session(chat_id) is True
 
     after = _new_mixin(fake_claude, chat_id)
     await after._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    second = await _turn(after, session_id)
+    second = await _turn(after, session_id, fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]

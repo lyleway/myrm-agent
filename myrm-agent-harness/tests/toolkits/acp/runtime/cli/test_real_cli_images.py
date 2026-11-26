@@ -184,12 +184,11 @@ def _claude(tmp_path: Path, base_url: str, permission_mode: str, extra_args: tup
             "DISABLE_TELEMETRY": "1",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         },
-        cwd=str(tmp_path),
         permission_mode=permission_mode,  # type: ignore[arg-type]
         auth_mode="api_key",
         timeout_seconds=90,
     )
-    return CliRuntime("claude", config)
+    return CliRuntime("claude", config, workspace=str(tmp_path))
 
 
 async def _run(runtime: CliRuntime, prompt: str, images: list[str] | None = None, session: str = "s1") -> None:

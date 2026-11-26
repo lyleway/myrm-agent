@@ -10,6 +10,8 @@ from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus
 from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler
 from myrm_agent_harness.toolkits.acp.types import PermissionDecision, RuntimeConfig, RuntimeEvent
 
+_WORKSPACE = "/tmp/ws"
+
 
 class TestAcpCallbackHandlerPermission:
     @pytest.mark.asyncio
@@ -18,6 +20,7 @@ class TestAcpCallbackHandlerPermission:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="ask"),
             "test-session",
+            workspace=_WORKSPACE,
             event_bus=bus,
             permission_request_timeout=0.5,
         )
@@ -46,6 +49,7 @@ class TestAcpCallbackHandlerPermission:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="ask"),
             "test-session",
+            workspace=_WORKSPACE,
             event_bus=bus,
             permission_request_timeout=0.001,
         )
@@ -66,6 +70,7 @@ class TestAcpCallbackHandlerPermission:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="ask"),
             "test-session",
+            workspace=_WORKSPACE,
         )
         options = [{"kind": "allow_once", "optionId": "allow_once"}]
         result = await handler.request_permission(options, "test-session", {"name": "Write", "path": "/tmp"})
@@ -79,6 +84,7 @@ class TestAcpCallbackHandlerPermissionModes:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="safe"),
             "s1",
+            workspace=_WORKSPACE,
         )
         options = [
             {"kind": "allow_once", "optionId": "allow_once"},
@@ -92,6 +98,7 @@ class TestAcpCallbackHandlerPermissionModes:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="safe"),
             "s1",
+            workspace=_WORKSPACE,
         )
         options = [
             {"kind": "allow_once", "optionId": "allow_once"},
@@ -105,6 +112,7 @@ class TestAcpCallbackHandlerPermissionModes:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="bypass"),
             "s1",
+            workspace=_WORKSPACE,
         )
         options = [{"kind": "allow_always", "optionId": "allow_always"}]
         result = await handler.request_permission(options, "s1", {"name": "Write"})
@@ -115,6 +123,7 @@ class TestAcpCallbackHandlerPermissionModes:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="allow_all"),
             "s1",
+            workspace=_WORKSPACE,
         )
         options = [
             {"kind": "allow_once", "optionId": "allow_once"},
@@ -128,6 +137,7 @@ class TestAcpCallbackHandlerPermissionModes:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode="safe"),
             "s1",
+            workspace=_WORKSPACE,
         )
         options = [{"kind": "allow_once", "optionId": "allow_once"}]
         result = await handler.request_permission(options, "s1", {"name": "Write"})

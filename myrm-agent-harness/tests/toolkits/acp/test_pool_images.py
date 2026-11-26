@@ -17,6 +17,8 @@ from myrm_agent_harness.toolkits.acp.types import (
     create_event,
 )
 
+_WORKSPACE = "/tmp/ws"
+
 
 def _pool_with_backend(
     supports_images: bool, captured: list[list[str] | None], *, event_bus: MagicMock | None = None
@@ -42,7 +44,9 @@ def _pool_with_backend(
 
 
 async def _events(pool: RuntimePool, *, images: list[str] | None) -> list[RuntimeEvent]:
-    return [event async for event in pool.run_turn("claude", "look", session_id="s1", images=images)]
+    return [
+        event async for event in pool.run_turn("claude", "look", session_id="s1", images=images, workspace=_WORKSPACE)
+    ]
 
 
 @pytest.mark.asyncio

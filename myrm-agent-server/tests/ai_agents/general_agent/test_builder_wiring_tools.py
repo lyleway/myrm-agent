@@ -200,7 +200,7 @@ class TestExternalAgents:
         await harness.build(wrapper)
 
         ((_, kwargs),) = harness.calls["external_agents"]
-        assert kwargs == {"mount_invoke_acp_agent_tool": True, "external_agent_workdir": "/work/space"}
+        assert kwargs == {"mount_invoke_acp_agent_tool": True}
         assert wrapper._runtime_pool_scope_id == CHAT_ID  # noqa: SLF001
 
     async def test_a_forced_external_agent_gets_the_pool_without_the_redundant_delegate_tool(
@@ -209,7 +209,7 @@ class TestExternalAgents:
         await harness.build(harness.wrapper(force_external_agent="claude-code"))
 
         ((_, kwargs),) = harness.calls["external_agents"]
-        assert kwargs == {"mount_invoke_acp_agent_tool": False, "external_agent_workdir": None}
+        assert kwargs == {"mount_invoke_acp_agent_tool": False}
 
     async def test_an_agent_without_external_cli_gets_no_pool(self, harness: BuilderHarness) -> None:
         wrapper = harness.wrapper()

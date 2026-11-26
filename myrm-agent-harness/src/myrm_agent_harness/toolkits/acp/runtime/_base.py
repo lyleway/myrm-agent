@@ -4,12 +4,12 @@ Encapsulates common logic shared by AcpRuntime and CliRuntime:
 environment variable sanitization, timeout control, and response truncation.
 
 [INPUT]
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
 - toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
 
 [OUTPUT]
-- BaseRuntime: Abstract base for RuntimeBackend implementations.
+- BaseRuntime: Abstract base for RuntimeBackend implementations; a runtime belongs to one workspace for its whole life.
 - build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the system trust store while enterprise network compatibility is on.
 - truncate_response: Truncate response text if it exceeds the configured limit.
 - KEEPALIVE_SECONDS / working_status: how long a turn may be silent, and the ``working`` status it reports then.
@@ -40,6 +40,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEvent,
     RuntimeEventType,
     create_event,
+    normalize_workspace,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,10 +151,13 @@ class BaseRuntime:
     ``_do_close``, and ``_do_get_status``.
     """
 
-    def __init__(self, runtime_name: str, config: RuntimeConfig, backend_type: BackendType) -> None:
+    def __init__(self, runtime_name: str, config: RuntimeConfig, backend_type: BackendType, *, workspace: str) -> None:
         self._name = runtime_name
         self._config = config
         self._backend_type: BackendType = backend_type
+        # The directory the agent starts in and the root its file access is confined to; fixed at creation so a
+        # runtime never serves a second workspace (the pool keeps one runtime per backend and workspace).
+        self._workspace = normalize_workspace(workspace)
         self._alive = False
 
     # -- Properties (satisfy RuntimeBackend Protocol) --

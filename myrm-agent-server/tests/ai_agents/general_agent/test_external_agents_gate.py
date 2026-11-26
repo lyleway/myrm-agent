@@ -87,7 +87,6 @@ def test_config_fingerprint_changes_when_runtime_fields_change() -> None:
         "args": ["-p"],
         "authMode": "subscription",
         "env": {"FOO": "bar"},
-        "cwd": "/workspace",
         "timeout": 300,
         "maxResponseChars": 50000,
         "permissionMode": "allow_all",
@@ -109,9 +108,10 @@ def test_config_fingerprint_changes_when_runtime_fields_change() -> None:
     changed_max_turns["maxTurns"] = 12
     assert _config_fingerprint([changed_max_turns]) != baseline
 
-    changed_cwd = dict(base_cfg)
-    changed_cwd["cwd"] = "/workspace/subdir"
-    assert _config_fingerprint([changed_cwd]) != baseline
+    stored_cwd = dict(base_cfg)
+    stored_cwd["cwd"] = "/workspace/subdir"
+    # A directory stored with the agent decides nothing: the turn names where it runs.
+    assert _config_fingerprint([stored_cwd]) == baseline
 
 
 @pytest.mark.asyncio
@@ -291,6 +291,7 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = None
     mixin._runtime_pool_scope_id = None
+    mixin.declared_allowed_roots = ("/workspace/root",)
 
     mock_pool = MagicMock()
     mock_pool.available_backends = ["test-cli"]
@@ -308,18 +309,14 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
         ) as mock_create,
     ):
         tools: list[object] = []
-        await mixin._do_setup_external_agents(
-            tools,
-            mount_invoke_acp_agent_tool=True,
-            external_agent_workdir="/workspace/root",
-        )
+        await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
 
     assert mixin._owned_runtime_pool is mock_pool
     assert mixin._runtime_pool_from_registry is False
     assert tools == [mock_tool]
     mock_create.assert_called_once_with(
         mock_pool,
-        cwd="/workspace/root",
+        workspace="/workspace/root",
         session_scope=None,
     )
 
@@ -330,6 +327,7 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = " chat-scope-1 "
     mixin._runtime_pool_scope_id = None
+    mixin.declared_allowed_roots = ("/workspace/chat-scope-1",)
 
     mock_pool = MagicMock()
     mock_pool.available_backends = ["test-cli"]
@@ -357,16 +355,12 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
         ) as mock_create,
     ):
         tools: list[object] = []
-        await mixin._do_setup_external_agents(
-            tools,
-            mount_invoke_acp_agent_tool=True,
-            external_agent_workdir="/workspace/chat-scope-1",
-        )
+        await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
 
     assert tools == [mock_tool]
     mock_create.assert_called_once_with(
         mock_pool,
-        cwd="/workspace/chat-scope-1",
+        workspace="/workspace/chat-scope-1",
         session_scope="chat-scope-1",
     )
 

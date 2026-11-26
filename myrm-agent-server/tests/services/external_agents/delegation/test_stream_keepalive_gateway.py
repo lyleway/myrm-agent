@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
 from myrm_agent_harness.api import AgentEventType
@@ -42,7 +43,7 @@ async def pool() -> AsyncGenerator[RuntimePool]:
     await pool.close_all()
 
 
-async def _through_the_gateway(pool: RuntimePool) -> list[dict[str, object]]:
+async def _through_the_gateway(pool: RuntimePool, workspace: Path) -> list[dict[str, object]]:
     gateway = AgentGateway(
         GatewayConfig(
             max_global=2,
@@ -52,16 +53,16 @@ async def _through_the_gateway(pool: RuntimePool) -> list[dict[str, object]]:
             execution_hard_ceiling=30.0,
         )
     )
-    turn = stream_direct_delegate(pool, "quiet", "go", session_id="quiet-chat")
+    turn = stream_direct_delegate(pool, "quiet", "go", session_id="quiet-chat", workspace=str(workspace))
     return [event async for event in gateway.execute_stream(turn, agent_type="test", session_id="quiet-chat")]
 
 
 async def test_a_cli_silent_past_the_idle_limit_finishes_because_it_keeps_saying_it_is_working(
-    pool: RuntimePool, monkeypatch: pytest.MonkeyPatch
+    pool: RuntimePool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(cli_runtime, "KEEPALIVE_SECONDS", 0.1)
 
-    events = await _through_the_gateway(pool)
+    events = await _through_the_gateway(pool, tmp_path)
 
     # The status step shows how long the CLI has been working ("12s", "1m 05s"), in no language of ours.
     lines = [
@@ -76,9 +77,9 @@ async def test_a_cli_silent_past_the_idle_limit_finishes_because_it_keeps_saying
 
 
 async def test_without_the_keepalive_the_same_silence_is_cut_by_the_idle_limit(
-    pool: RuntimePool, monkeypatch: pytest.MonkeyPatch
+    pool: RuntimePool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(cli_runtime, "KEEPALIVE_SECONDS", 60.0)
 
     with pytest.raises(AgentExecutionTimeout):
-        await _through_the_gateway(pool)
+        await _through_the_gateway(pool, tmp_path)

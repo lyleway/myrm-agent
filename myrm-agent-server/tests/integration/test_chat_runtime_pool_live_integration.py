@@ -23,6 +23,9 @@ _ECHO_AGENT_CFG: list[dict[str, object]] = [
 ]
 
 
+_WORKSPACE = "/work/repo"
+
+
 @pytest.fixture(autouse=True)
 async def _reset_registry() -> None:
     await get_chat_runtime_pool_registry().close_all()
@@ -41,6 +44,7 @@ def _new_mixin(*, chat_scope_id: str) -> ExternalAgentsMixin:
     mixin.force_external_agent = None
     mixin.locale = None
     mixin.quote = None
+    mixin.declared_allowed_roots = (_WORKSPACE,)
     return mixin
 
 
@@ -82,6 +86,7 @@ async def test_live_guard_turn_serializes_concurrent_run_turn() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: object = None,
@@ -97,7 +102,7 @@ async def test_live_guard_turn_serializes_concurrent_run_turn() -> None:
     pool._pool.run_turn = slow_run  # type: ignore[method-assign]
 
     async def consume(label: str) -> None:
-        async for _ in pool.run_turn("echo-cli", label, f"s-{label}"):
+        async for _ in pool.run_turn("echo-cli", label, f"s-{label}", workspace=_WORKSPACE):
             pass
 
     try:
@@ -172,6 +177,7 @@ async def test_live_facade_cancel_during_active_run_turn() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: object = None,
@@ -191,7 +197,7 @@ async def test_live_facade_cancel_during_active_run_turn() -> None:
     pool._pool.cancel = track_cancel  # type: ignore[method-assign]
 
     async def consume() -> None:
-        async for _ in pool.run_turn("echo-cli", "hi", "sess-1"):
+        async for _ in pool.run_turn("echo-cli", "hi", "sess-1", workspace=_WORKSPACE):
             pass
 
     task = asyncio.create_task(consume())
@@ -226,6 +232,7 @@ async def test_live_fingerprint_replace_deferred_while_turn_locked() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: object = None,
@@ -238,7 +245,7 @@ async def test_live_fingerprint_replace_deferred_while_turn_locked() -> None:
     pool._pool.run_turn = slow_run  # type: ignore[method-assign]
 
     async def consume() -> None:
-        async for _ in pool.run_turn("echo-cli", "hold", "sess-hold"):
+        async for _ in pool.run_turn("echo-cli", "hold", "sess-hold", workspace=_WORKSPACE):
             pass
 
     task = asyncio.create_task(consume())
@@ -290,6 +297,7 @@ async def test_live_parallel_run_turn_different_chats() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: object = None,
@@ -308,7 +316,7 @@ async def test_live_parallel_run_turn_different_chats() -> None:
     pool_b._pool.run_turn = slow_run  # type: ignore[method-assign]
 
     async def consume(pool: ChatScopedRuntimePoolFacade, label: str) -> None:
-        async for _ in pool.run_turn("echo-cli", label, f"sess-{label}"):
+        async for _ in pool.run_turn("echo-cli", label, f"sess-{label}", workspace=_WORKSPACE):
             pass
 
     task_a = asyncio.create_task(consume(pool_a, "a"))
@@ -383,6 +391,7 @@ async def test_live_direct_delegate_stream_cancel_propagates() -> None:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: object = None,

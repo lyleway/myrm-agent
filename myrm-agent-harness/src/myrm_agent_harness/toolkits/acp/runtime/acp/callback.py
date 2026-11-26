@@ -5,9 +5,8 @@ through an asyncio.Queue for real-time consumption by AcpRuntime._do_run_turn.
 Also handles permission requests and file read/write with path safety checks.
 
 [INPUT]
-- toolkits.acp.types::PermissionDecision, RuntimeConfig, RuntimeEvent (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::PermissionDecision, RuntimeConfig, RuntimeEvent, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer. Provides decoupled event dispatch mechanism for the Runtime system with session isolation and type filtering.)
-- toolkits.code_execution.utils.workspace_path::WorkspacePathResolver (POS: Workspace path resolver with intelligent auto-detection.)
 
 [OUTPUT]
 - AcpCallbackHandler: Implements acp.Client callbacks for the ACP runtime.
@@ -31,6 +30,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     create_event,
     create_permission_request,
+    normalize_workspace,
 )
 
 logger = logging.getLogger(__name__)
@@ -125,16 +125,13 @@ class AcpCallbackHandler:
         config: RuntimeConfig,
         session_id: str,
         *,
+        workspace: str,
         event_bus: EventBus | None = None,
         permission_request_timeout: float = _PERMISSION_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
-        from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import (
-            WorkspacePathResolver,
-        )
-
         self._config = config
         self._session_id = session_id
-        self._cwd = config.cwd or str(WorkspacePathResolver.resolve_workspace_root())
+        self._cwd = normalize_workspace(workspace)
         self._event_bus = event_bus
         self._permission_request_timeout = permission_request_timeout
         self._text_parts: list[str] = []

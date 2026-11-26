@@ -14,7 +14,6 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 - toolkits.acp.runtime.cli.process::CliLaunchError, CliProcess, spawn_cli_process (POS: Process ownership of CliRuntime)
 - toolkits.acp.runtime.cli.session::CliSessionBook (POS: Session continuity state of CliRuntime)
 - toolkits.acp.runtime.cli.turn_parser::CliResult, TurnParser (POS: Output parsing of CliRuntime)
-- toolkits.code_execution.utils.workspace_path::WorkspacePathResolver (POS: Workspace path resolver with intelligent auto-detection.) [lazy]
 
 [OUTPUT]
 - CliRuntime: RuntimeBackend that runs a CLI agent process per turn and continues its conversation across turns
@@ -124,9 +123,10 @@ class CliRuntime(BaseRuntime):
         runtime_name: str,
         config: RuntimeConfig,
         *,
+        workspace: str,
         session_store: CliSessionStore | None = None,
     ) -> None:
-        super().__init__(runtime_name, config, backend_type="cli")
+        super().__init__(runtime_name, config, backend_type="cli", workspace=workspace)
         self._process: CliProcess | None = None
         self._stop_requested = False
         self._sessions = CliSessionBook(runtime_name, session_store)
@@ -170,9 +170,7 @@ class CliRuntime(BaseRuntime):
         self._stop_requested = False
         yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting")
 
-        from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import WorkspacePathResolver
-
-        cwd = self._config.cwd or str(WorkspacePathResolver.resolve_workspace_root())
+        cwd = self._workspace
         dialect = dialect_for(command)
         if images and (dialect is None or not dialect.takes_images):
             # Same as MCP above: the pool already withholds what a backend did not declare it takes.

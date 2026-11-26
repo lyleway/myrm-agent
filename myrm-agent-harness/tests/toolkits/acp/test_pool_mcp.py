@@ -17,6 +17,8 @@ from myrm_agent_harness.toolkits.acp.types import (
     create_event,
 )
 
+_WORKSPACE = "/tmp/ws"
+
 
 @pytest.mark.asyncio
 async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
@@ -48,7 +50,9 @@ async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
     backend.run_turn = fake_run_turn
     pool.get = MagicMock(return_value=backend)
 
-    events = [event async for event in pool.run_turn("codex", "hello", session_id="codex-default")]
+    events = [
+        event async for event in pool.run_turn("codex", "hello", session_id="codex-default", workspace=_WORKSPACE)
+    ]
     assert events[-1].type == RuntimeEventType.DONE
 
 
@@ -80,6 +84,7 @@ async def test_run_turn_explicit_mcp_overrides_config() -> None:
         "hi",
         session_id="claude-default",
         mcp_servers=override,
+        workspace=_WORKSPACE,
     ):
         pass
 
@@ -120,7 +125,7 @@ async def test_run_turn_serializes_same_backend_concurrent_turns() -> None:
     pool.get = MagicMock(return_value=backend)
 
     async def consume(session_id: str) -> None:
-        async for _ in pool.run_turn("claude", "hello", session_id=session_id):
+        async for _ in pool.run_turn("claude", "hello", session_id=session_id, workspace=_WORKSPACE):
             pass
 
     await asyncio.gather(consume("s1"), consume("s2"))
@@ -163,11 +168,11 @@ async def test_run_turn_allows_parallel_different_backends() -> None:
     backend_a.run_turn = _make_fake_run_turn()  # type: ignore[method-assign]
     backend_b.run_turn = _make_fake_run_turn()  # type: ignore[method-assign]
     pool.get = MagicMock(  # type: ignore[method-assign]
-        side_effect=lambda name: {"claude": backend_a, "codex": backend_b}[name]
+        side_effect=lambda name, workspace: {"claude": backend_a, "codex": backend_b}[name]
     )
 
     async def consume(name: str) -> None:
-        async for _ in pool.run_turn(name, "hello", session_id=f"s-{name}"):
+        async for _ in pool.run_turn(name, "hello", session_id=f"s-{name}", workspace=_WORKSPACE):
             pass
 
     await asyncio.gather(consume("claude"), consume("codex"))
@@ -182,7 +187,7 @@ async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
     config = pool.get_config("codex")
     assert config is not None
 
-    rt = CliRuntime("codex", config)
+    rt = CliRuntime("codex", config, workspace=_WORKSPACE)
     captured: list[list[McpServerConfig] | None] = []
 
     async def fake_run_turn(
@@ -204,6 +209,7 @@ async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
         "hello",
         session_id="codex-default",
         mcp_servers=override,
+        workspace=_WORKSPACE,
     ):
         pass
 
@@ -225,7 +231,7 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
     config = pool.get_config("codex")
     assert config is not None
 
-    rt = CliRuntime("codex", config)
+    rt = CliRuntime("codex", config, workspace=_WORKSPACE)
     captured: list[list[McpServerConfig] | None] = []
 
     async def fake_run_turn(
@@ -241,7 +247,7 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
     rt.run_turn = fake_run_turn  # type: ignore[method-assign]
     pool.get = MagicMock(return_value=rt)
 
-    async for _ in pool.run_turn("codex", "hello", session_id="codex-default"):
+    async for _ in pool.run_turn("codex", "hello", session_id="codex-default", workspace=_WORKSPACE):
         pass
 
     assert captured == [None], "unsupported backend must not receive config mcp_servers"

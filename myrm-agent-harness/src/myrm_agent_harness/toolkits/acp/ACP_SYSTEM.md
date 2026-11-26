@@ -178,10 +178,10 @@ EventBus
 ```
 RuntimePool(*, max_concurrent: int = 4, event_bus: EventBus | None = None, cli_session_store: CliSessionStore | None = None)
 ├── register(name, config: RuntimeConfig) -> None
-├── get(name) -> RuntimeBackend
-├── prompt(name, task, *, mode) -> str      # 委托 run_turn()，收集 text_delta
-├── run_turn(name, prompt, session_id, *, mode, mcp_servers) -> AsyncGenerator[RuntimeEvent]  # Semaphore 并发控制
-├── cancel(name, session_id) -> None        # 级联取消 → backend.cancel()（在途 oneshot 优先）
+├── get(name, workspace) -> RuntimeBackend  # 按（名字, 工作区）惰性创建的共享后端
+├── prompt(name, task, *, workspace, mode) -> str   # 委托 run_turn()，收集 text_delta
+├── run_turn(name, prompt, session_id, *, workspace, mode, mcp_servers, images) -> AsyncGenerator[RuntimeEvent]  # Semaphore 并发控制
+├── cancel(name, session_id) -> None        # 级联取消 → 正在跑该会话回合的后端的 backend.cancel()；没有在跑的回合时什么也不做
 ├── available_backends -> list[str]
 ├── release_resident() -> None              # 只释放常驻进程型（ACP）后端，保留 CLI 后端及其 --resume 状态
 └── close_all() -> None                     # 关闭所有后端（含在途 oneshot）
@@ -191,11 +191,12 @@ RuntimePool(*, max_concurrent: int = 4, event_bus: EventBus | None = None, cli_s
 - `RuntimeConfig.backend_type` 选择 `AcpRuntime` / `CliRuntime`
 - `max_concurrent` 限制同时执行的委托任务数，避免进程与文件句柄耗尽
 - `prompt()` 委托给 `run_turn()`，并发控制统一在 `run_turn()` 层
-- **会话模式 `mode`**：`persistent`（默认）每个后端名共享一个后端实例，会话跨回合延续（CLI 的 `--resume` id、ACP 的常驻进程与会话）；`oneshot` 在**私有后端实例**上运行、回合结束即关闭（关闭失败只记 warning，不覆盖回合结果或回合异常）——总是全新会话，且不触碰 persistent 后端的会话与进程。在途 oneshot 后端按 `(name, session_id)` 登记，`cancel` 优先路由到它，`close_all` 一并关闭；同名后端的回合仍由 per-name 锁串行化（避免同一工作区同时跑两个同名 agent）
+- **回合的工作区 `workspace`**：调用方给每个回合一个启动目录（绝对路径，由 `types.normalize_workspace` 规整，相对路径当场 `ValueError`）；池、运行时与委派工具都不从进程目录或环境推断它，也不把它写进提示词。后端按 `(名字, 工作区)` 创建，并在整个生命周期内固定在该目录：同一个 agent 在两个目录里各有自己的后端、会话与进程，互不串用。`RuntimeConfig` 描述 agent 是谁，不带目录
+- **会话模式 `mode`**：`persistent`（默认）每个（后端名, 工作区）共享一个后端实例，会话跨回合延续（CLI 的 `--resume` id、ACP 的常驻进程与会话）；`oneshot` 在**私有后端实例**上运行、回合结束即关闭（关闭失败只记 warning，不覆盖回合结果或回合异常）——总是全新会话，且不触碰 persistent 后端的会话与进程。在跑的回合按 `(name, session_id)` 登记，`cancel` 只作用于登记里的回合（还在等后端的回合没有可停的东西，什么也不做），`close_all` 把登记里的私有后端一并关闭；同一（名字, 工作区）的回合由 per-backend 锁串行化（避免同一工作区同时跑两个同名 agent）
 - **空闲释放 `release_resident()`**：宿主在会话空闲时调用，只关闭并摘除常驻进程型（`backend_type == "acp"`）后端，下一回合惰性重建；CLI 后端回合之间没有进程，只持有 `--resume` 会话 id，原样保留，所以空闲回收不会让 CLI 会话断档。调用方须保证此刻池上没有在跑的回合（与 `close_all()` 同一约定）
 - **CLI 会话持久化 `cli_session_store`**：宿主可注入 `CliSessionStore`（`load` / `save`，键为 harness session id，一个 store 服务一个会话作用域），让 CLI 后端的 `--resume` id 跨宿主进程重启存活。只注入共享的 persistent 后端；oneshot 私有后端是回合结束即消失的全新会话，既不读也不写 store。store 的任何异常只记 warning 并降级（丢连续性，不丢回合）；harness 在回合收尾处直接 await store 且不设超时，调用时延由实现方自己约束；harness 本身不依赖任何存储实现
 - **进程生命周期**：不做周期性存活巡检。`CliRuntime` 每回合一个进程，回合之间没有进程是正常空闲态；`AcpRuntime` 常驻进程退出后，下一次 `run_turn` 发现 `is_alive` 为假就重新拉起进程（`_ensure_connection`）。进程是否卡住不属于存活检测，由 `timeout_seconds` 兜底；CLI / ACP 回合静默期间 `CliRuntime` 与 `AcpRuntime` 每 15 s 发一个 `working` 状态（见 §6 “静默心跳”），宿主的空闲看门狗据此知道它还活着
-- **委托窄协议 `DelegationPool`（`types.py`）**：委托调用方只依赖 `available_backends` / `get_config` / `run_turn` / `cancel`；`RuntimePool` 与宿主侧包装器（如按会话串行化回合的 facade）都满足它，`create_invoke_acp_agent_tool` 接受它
+- **委托窄协议 `DelegationPool`（`types.py`）**：委托调用方只依赖 `available_backends` / `get_config` / `run_turn`（必带 `workspace`）/ `cancel`；`RuntimePool` 与宿主侧包装器（如按会话串行化回合的 facade）都满足它，`create_invoke_acp_agent_tool` 接受它
 - **MCP 注入能力守卫**：`run_turn()` 在转发 `mcp_servers` 前检查 `backend.capabilities.supports_mcp`，不支持的 backends（如 `CliRuntime`）收到 `None` 而非原始配置，杜绝向不支持 MCP 注入的后端传递配置引发会话崩溃；跳过时记录 `pool_mcp_skipped` WARNING 便于观测
 - **图片能力守卫**：`run_turn(images=[本地图片文件…])` 与 MCP 同形——只有声明 `supports_images` 的后端才收到文件列表，其余收到 `None`（记 `pool_images_skipped` INFO，不是告警：宿主提示词里仍有图片路径一行作为兜底；回合以一条 `images_not_sent` status_update 开头，让宿主能如实告诉用户这张图没有直接交给 agent）；直接调用 `CliRuntime` 传入它不接收的图片会记 `cli_runtime_images_ignored` WARNING；`AcpRuntime` 面对没有声明图片提示能力的 agent，只发文本块并记 `acp_runtime_images_skipped` INFO，回合以同一条 `images_not_sent` status_update 开头
 
@@ -207,7 +208,6 @@ RuntimeConfig (frozen dataclass)
 ├── command: str | None                  # CLI/ACP 的可执行文件路径
 ├── args: list[str]                      # 命令行参数
 ├── env: dict[str, str] | None           # 额外环境变量
-├── cwd: str | None                      # 工作目录
 ├── timeout_seconds: int = 300           # 整个回合的时间上限（含 CLI 静默的时间），由宿主按场景设置
 ├── permission_mode: PermissionMode      # 权限模式
 ├── auth_mode: AuthMode = "subscription" # 鉴权模式：订阅登录态 / API Key

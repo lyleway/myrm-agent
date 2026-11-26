@@ -34,8 +34,8 @@ async def test_create_session_passes_mcp_servers_when_configured() -> None:
 
     from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 
-    config = RuntimeConfig(backend_type="acp", command="claude", cwd="/tmp/ws")
-    runtime = AcpRuntime("claude", config)
+    config = RuntimeConfig(backend_type="acp", command="claude")
+    runtime = AcpRuntime("claude", config, workspace="/tmp/ws")
     runtime._conn = MagicMock()
     runtime._conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1"))
     runtime._handler = MagicMock()
@@ -57,8 +57,8 @@ async def test_create_session_omits_mcp_when_not_configured() -> None:
 
     from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 
-    config = RuntimeConfig(backend_type="acp", command="claude", cwd="/tmp/ws")
-    runtime = AcpRuntime("claude", config)
+    config = RuntimeConfig(backend_type="acp", command="claude")
+    runtime = AcpRuntime("claude", config, workspace="/tmp/ws")
     runtime._conn = MagicMock()
     runtime._conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-2"))
 

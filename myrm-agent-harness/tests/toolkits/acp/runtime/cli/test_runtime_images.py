@@ -49,7 +49,9 @@ async def _turn(runtime: CliRuntime, prompt: str, images: list[str] | None = Non
 class TestCapability:
     def test_claude_and_codex_take_images_and_other_clis_do_not(self) -> None:
         def supports(command: str) -> bool:
-            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command)).capabilities.supports_images
+            return CliRuntime(
+                "t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws"
+            ).capabilities.supports_images
 
         assert supports("claude") is True
         assert supports("/usr/local/bin/codex") is True
@@ -102,7 +104,7 @@ class TestClaude:
         image = _png(tmp_path / "a.png")
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord(dead, str(work))
-        runtime = make_runtime(fake_cli, "claude", store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, "claude", store=store, workspace=str(work))
 
         events = await _turn(runtime, "look", [str(image)])
 

@@ -236,6 +236,7 @@ class _FailingPool:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: list[str] | None = None,
@@ -247,7 +248,8 @@ class _FailingPool:
 
 
 async def _errors(pool: _FailingPool, locale: str = "en", agent: str = "claude") -> tuple[list[SseEvent], list[SseEvent]]:
-    events = [event async for event in stream_direct_delegate(pool, agent, "do it", session_id=f"{agent}-chat-1", locale=locale)]
+    turn = stream_direct_delegate(pool, agent, "do it", session_id=f"{agent}-chat-1", workspace="/work/repo", locale=locale)
+    events = [event async for event in turn]
     return events, [event for event in events if event["type"] == AgentEventType.ERROR.value]
 
 

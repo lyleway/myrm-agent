@@ -9,6 +9,7 @@ process (no orphan) while keeping the pool reusable for the next message.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 from myrm_agent_harness.toolkits.acp.types import RuntimeEventType
@@ -55,8 +56,9 @@ def _new_mixin(*, chat_scope_id: str) -> ExternalAgentsMixin:
 
 
 @pytest.mark.asyncio
-async def test_real_cli_timeout_terminates_process_and_pool_reusable() -> None:
+async def test_real_cli_timeout_terminates_process_and_pool_reusable(tmp_path: Path) -> None:
     """A timed-out turn must kill the spawned process and keep the pool alive."""
+    workspace = str(tmp_path)
     chat_id = "live-int-timeout-cleanup"
     mixin = _new_mixin(chat_scope_id=chat_id)
     await mixin._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
@@ -64,9 +66,9 @@ async def test_real_cli_timeout_terminates_process_and_pool_reusable() -> None:
     pool = mixin._runtime_pool
     assert isinstance(pool, ChatScopedRuntimePoolFacade)
     raw_pool = pool._pool
-    cli = raw_pool.get("bash-sleep")
+    cli = raw_pool.get("bash-sleep", workspace)
 
-    events = [e async for e in raw_pool.run_turn("bash-sleep", "hi", "sess-1")]
+    events = [e async for e in raw_pool.run_turn("bash-sleep", "hi", "sess-1", workspace=workspace)]
 
     error_events = [e for e in events if e.type == RuntimeEventType.ERROR]
     assert error_events, "timeout must surface an ERROR event"
@@ -82,7 +84,7 @@ async def test_real_cli_timeout_terminates_process_and_pool_reusable() -> None:
     assert isinstance(mixin_b._runtime_pool, ChatScopedRuntimePoolFacade)
     assert mixin_b._runtime_pool._pool is raw_pool
 
-    events2 = [e async for e in raw_pool.run_turn("bash-sleep", "hi", "sess-1")]
+    events2 = [e async for e in raw_pool.run_turn("bash-sleep", "hi", "sess-1", workspace=workspace)]
     assert any(e.type == RuntimeEventType.ERROR for e in events2)
     assert cli._process is not None
     assert cli._process.returncode is not None

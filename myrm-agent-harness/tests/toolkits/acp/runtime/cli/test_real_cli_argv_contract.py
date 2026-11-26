@@ -43,7 +43,7 @@ def _png(path: Path) -> Path:
 def _launch(backend: str, binary: str, mode: PermissionMode, images: list[str]) -> tuple[CliDialect, list[str]]:
     """The command line ``CliRuntime`` builds for a turn in ``mode``, exactly as its own method assembles it."""
     config = RuntimeConfig(backend_type="cli", command=binary, permission_mode=mode, max_turns=3)
-    runtime = CliRuntime(backend, config)
+    runtime = CliRuntime(backend, config, workspace="/tmp/ws")
     dialect = dialect_for(binary)
     assert dialect is not None, f"{backend} has no dialect"
     return dialect, runtime._launch_args(binary, dialect, images)

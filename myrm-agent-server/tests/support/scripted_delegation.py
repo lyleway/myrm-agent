@@ -1,7 +1,8 @@
 """A scripted external-agent pool for tests of how a delegated turn's events reach the frontend.
 
 ``ScriptedPool`` answers ``run_turn`` with a canned event sequence and records how ``stream_direct_delegate`` drove
-it (turns started, cancels issued); the small helpers build events and read the frontend events it produced.
+it (turns started, the workspaces they ran in, cancels issued); the small helpers build events and read the frontend
+events it produced.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from app.services.external_agents.delegation.stream import SseEvent, stream_dire
 STEPS = AgentEventType.TASKS_STEPS.value
 CANCELLED = AgentEventType.CANCELLED.value
 MESSAGE_END = AgentEventType.MESSAGE_END.value
+WORKSPACE = "/work/repo"
 
 
 TurnScript = Callable[["ScriptedPool"], AsyncGenerator[RuntimeEvent]]
@@ -38,6 +40,7 @@ class ScriptedPool:
         self._turn = turn
         self._config = RuntimeConfig(backend_type="cli", auth_mode=auth_mode) if auth_mode else None
         self.turns: list[tuple[str, str, str]] = []
+        self.turn_workspaces: list[str] = []
         self.turn_images: list[list[str] | None] = []
         self.cancelled: list[tuple[str, str]] = []
         self.cancel_called = asyncio.Event()
@@ -55,11 +58,13 @@ class ScriptedPool:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: list[str] | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         self.turns.append((name, prompt, session_id))
+        self.turn_workspaces.append(workspace)
         self.turn_images.append(images)
         return self._turn(self)
 
@@ -90,7 +95,7 @@ async def stream_turn(
     return [
         event
         async for event in stream_direct_delegate(
-            pool, "claude", "do it", session_id="claude-chat-1", images=images, cancel_token=token
+            pool, "claude", "do it", session_id="claude-chat-1", workspace=WORKSPACE, images=images, cancel_token=token
         )
     ]
 

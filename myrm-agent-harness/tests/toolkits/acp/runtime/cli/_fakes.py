@@ -10,6 +10,8 @@ from pathlib import Path
 
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import (
+    AcpError,
+    AcpErrorCode,
     CliSessionRecord,
     CliSessionStore,
     RuntimeConfig,
@@ -218,6 +220,11 @@ class FakeCli:
 
     bin_dir: Path
 
+    @property
+    def workspace(self) -> Path:
+        """The directory a test starts its CLI turns in unless it names another."""
+        return self.bin_dir.parent
+
     def command(self, name: str = "claude") -> Path:
         """The executable that plays ``name``; its file name decides which CLI it imitates."""
         path = self.bin_dir / name
@@ -256,19 +263,27 @@ def make_runtime(
     name: str = "claude",
     *,
     store: CliSessionStore | None = None,
+    workspace: str | None = None,
     **overrides: object,
 ) -> CliRuntime:
-    """A ``CliRuntime`` for the stand-in that plays ``name``; ``overrides`` replace ``RuntimeConfig`` fields."""
+    """A ``CliRuntime`` for the stand-in that plays ``name``; ``overrides`` replace ``RuntimeConfig`` fields.
+
+    The runtime starts the CLI in ``workspace``, by default ``fake_cli.workspace``.
+    """
     settings: dict[str, object] = {
         "backend_type": "cli",
         "command": str(fake_cli.command(name)),
         "args": ["-p", "--output-format", "stream-json"] if name == "claude" else [],
         "permission_mode": "safe",
-        "cwd": str(fake_cli.bin_dir.parent),
         "timeout_seconds": 20,
     }
     settings.update(overrides)
-    return CliRuntime(name, RuntimeConfig(**settings), session_store=store)  # type: ignore[arg-type]
+    return CliRuntime(
+        name,
+        RuntimeConfig(**settings),  # type: ignore[arg-type]
+        workspace=workspace or str(fake_cli.workspace),
+        session_store=store,
+    )
 
 
 async def run_turn(runtime: CliRuntime, prompt: str = "hello", session_id: str = "s1") -> list[RuntimeEvent]:
@@ -285,6 +300,15 @@ def text_of(events: list[RuntimeEvent]) -> str:
 
 def errors_of(events: list[RuntimeEvent]) -> list[RuntimeEvent]:
     return [event for event in events if event.type == RuntimeEventType.ERROR]
+
+
+def error_codes_of(events: list[RuntimeEvent]) -> list[AcpErrorCode]:
+    codes: list[AcpErrorCode] = []
+    for event in errors_of(events):
+        error = event.data["error"]
+        assert isinstance(error, AcpError)
+        codes.append(error.code)
+    return codes
 
 
 def statuses_of(events: list[RuntimeEvent]) -> list[str]:

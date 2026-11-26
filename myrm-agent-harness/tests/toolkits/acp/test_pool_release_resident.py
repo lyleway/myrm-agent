@@ -20,6 +20,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 
 _POOL_FACTORY = "myrm_agent_harness.toolkits.acp.runtime.pool._create_runtime"
+_WORKSPACE = "/tmp/ws"
 
 
 class _FakeBackend:
@@ -59,7 +60,9 @@ class _Factory:
         self.created: dict[str, list[_FakeBackend]] = {}
         self._failing_close = failing_close
 
-    def __call__(self, name: str, config: RuntimeConfig, *, event_bus=None, cli_session_store=None) -> _FakeBackend:
+    def __call__(
+        self, name: str, config: RuntimeConfig, *, workspace: str, event_bus=None, cli_session_store=None
+    ) -> _FakeBackend:
         error = RuntimeError("close failed") if name in self._failing_close else None
         backend = _FakeBackend(close_error=error)
         self.created.setdefault(name, []).append(backend)
@@ -79,18 +82,32 @@ async def test_release_resident_closes_acp_backends_and_keeps_cli_backends() -> 
     factory = _Factory()
 
     with patch(_POOL_FACTORY, factory):
-        resident = pool.get("resident")
-        per_turn = pool.get("per_turn")
+        resident = pool.get("resident", _WORKSPACE)
+        per_turn = pool.get("per_turn", _WORKSPACE)
         await pool.release_resident()
 
         assert resident.closed
         assert not per_turn.closed
-        assert pool.get("per_turn") is per_turn
+        assert pool.get("per_turn", _WORKSPACE) is per_turn
         # The released ACP backend is recreated lazily by the next turn.
-        assert pool.get("resident") is not resident
+        assert pool.get("resident", _WORKSPACE) is not resident
 
     assert len(factory.created["resident"]) == 2
     assert len(factory.created["per_turn"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_release_resident_closes_the_acp_backend_of_every_workspace() -> None:
+    pool = _pool(resident="acp")
+    factory = _Factory()
+
+    with patch(_POOL_FACTORY, factory):
+        in_a = pool.get("resident", "/work/a")
+        in_b = pool.get("resident", "/work/b")
+        await pool.release_resident()
+
+    assert in_a.closed
+    assert in_b.closed
 
 
 @pytest.mark.asyncio
@@ -99,11 +116,11 @@ async def test_release_resident_leaves_a_cli_only_pool_untouched() -> None:
     factory = _Factory()
 
     with patch(_POOL_FACTORY, factory):
-        backends = [pool.get("first"), pool.get("second")]
+        backends = [pool.get("first", _WORKSPACE), pool.get("second", _WORKSPACE)]
         await pool.release_resident()
 
         assert not any(backend.closed for backend in backends)
-        assert [pool.get("first"), pool.get("second")] == backends
+        assert [pool.get("first", _WORKSPACE), pool.get("second", _WORKSPACE)] == backends
 
 
 @pytest.mark.asyncio
@@ -117,8 +134,8 @@ async def test_release_resident_swallows_a_failing_close_and_still_drops_the_bac
     factory = _Factory(failing_close=frozenset({"resident"}))
 
     with patch(_POOL_FACTORY, factory):
-        broken = pool.get("resident")
+        broken = pool.get("resident", _WORKSPACE)
         await pool.release_resident()
 
         assert broken.closed
-        assert pool.get("resident") is not broken
+        assert pool.get("resident", _WORKSPACE) is not broken

@@ -10,7 +10,6 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
 - toolkits.acp.runtime.acp.stalled_agent::cancel_session, leave_transport (POS: Bounded stop of an ACP agent that has stopped reading its stdin)
-- toolkits.code_execution.utils.workspace_path::WorkspacePathResolver (POS: Workspace path resolver with intelligent auto-detection.)
 
 [OUTPUT]
 - AcpRuntime: RuntimeBackend implementation using the ACP protocol (stdin/stdout JSON-RPC).
@@ -99,9 +98,10 @@ class AcpRuntime(BaseRuntime):
         runtime_name: str,
         config: RuntimeConfig,
         *,
+        workspace: str,
         event_bus: EventBus | None = None,
     ) -> None:
-        super().__init__(runtime_name, config, backend_type="acp")
+        super().__init__(runtime_name, config, backend_type="acp", workspace=workspace)
         self._conn: ClientSideConnection | None = None
         self._process: Process | None = None
         self._session_id: str | None = None
@@ -297,14 +297,10 @@ class AcpRuntime(BaseRuntime):
         self._handler = AcpCallbackHandler(
             self._config,
             session_id="",
+            workspace=self._workspace,
             event_bus=self._event_bus,
         )
         safe_env = build_safe_env(self._config)
-        from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import (
-            WorkspacePathResolver,
-        )
-
-        cwd = self._config.cwd or str(WorkspacePathResolver.resolve_workspace_root())
 
         command = self._config.command
         if command is None:
@@ -319,7 +315,7 @@ class AcpRuntime(BaseRuntime):
             command,
             *self._config.args,
             env=safe_env,
-            cwd=cwd,
+            cwd=self._workspace,
         )
         self._ctx_manager = ctx
         conn, process = await ctx.__aenter__()
@@ -348,16 +344,11 @@ class AcpRuntime(BaseRuntime):
             msg = "Cannot create session: connection not established"
             raise RuntimeError(msg)
 
-        from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import (
-            WorkspacePathResolver,
-        )
-
-        cwd = self._config.cwd or str(WorkspacePathResolver.resolve_workspace_root())
         acp_mcp = _mcp_configs_to_acp_stdio(mcp_servers)
         if acp_mcp:
-            response = await self._conn.new_session(cwd=cwd, mcp_servers=acp_mcp)
+            response = await self._conn.new_session(cwd=self._workspace, mcp_servers=acp_mcp)
         else:
-            response = await self._conn.new_session(cwd=cwd)
+            response = await self._conn.new_session(cwd=self._workspace)
         session_id = response.session_id
         self._session_id = session_id
         if self._handler is not None:

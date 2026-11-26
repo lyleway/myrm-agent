@@ -27,7 +27,7 @@ _HANDSHAKE_TIMEOUT_SECONDS = 90
 
 async def _initialize(agent: str, home: Path) -> InitializeResponse:
     binary = cli_binary(agent)
-    handler = AcpCallbackHandler(RuntimeConfig(backend_type="acp", command=binary), session_id="")
+    handler = AcpCallbackHandler(RuntimeConfig(backend_type="acp", command=binary), session_id="", workspace=str(home))
     async with asyncio.timeout(_HANDSHAKE_TIMEOUT_SECONDS):
         async with spawn_agent_process(
             handler,  # type: ignore[arg-type]

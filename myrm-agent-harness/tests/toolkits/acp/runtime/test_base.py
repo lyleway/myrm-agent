@@ -19,6 +19,8 @@ from myrm_agent_harness.toolkits.acp.types import (
     create_event,
 )
 
+_WORKSPACE = "/tmp/ws"
+
 
 class TestBuildSafeEnv:
     def test_strips_sensitive_keys(self) -> None:
@@ -133,7 +135,7 @@ class TestTruncateResponse:
 class TestBaseRuntime:
     @pytest.mark.asyncio
     async def test_get_info(self) -> None:
-        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp")
+        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp", workspace=_WORKSPACE)
         info = await rt.get_info()
         assert info.name == "test-rt"
         assert info.backend_type == "acp"
@@ -141,23 +143,23 @@ class TestBaseRuntime:
 
     @pytest.mark.asyncio
     async def test_close_sets_alive_false(self) -> None:
-        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp")
+        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp", workspace=_WORKSPACE)
         rt._alive = True
         await rt.close()
         assert rt.is_alive is False
 
     @pytest.mark.asyncio
     async def test_cancel_suppresses_errors(self) -> None:
-        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp")
+        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp", workspace=_WORKSPACE)
         await rt.cancel("s1")
 
     @pytest.mark.asyncio
     async def test_resume_returns_false(self) -> None:
-        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp")
+        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp", workspace=_WORKSPACE)
         assert await rt.resume("s1") is False
 
     def test_capabilities_default(self) -> None:
-        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp")
+        rt = BaseRuntime("test-rt", RuntimeConfig(backend_type="acp", command="test"), "acp", workspace=_WORKSPACE)
         caps = rt.capabilities
         assert caps.supports_resume is False
         assert caps.supports_streaming is True
@@ -167,7 +169,7 @@ class _ScriptedRuntime(BaseRuntime):
     """A runtime whose turn is the ``turn`` a test gives it; it records the sessions it was asked to cancel."""
 
     def __init__(self, name: str, config: RuntimeConfig, backend_type: BackendType) -> None:
-        super().__init__(name, config, backend_type)
+        super().__init__(name, config, backend_type, workspace=_WORKSPACE)
         self.cancel_calls: list[str] = []
 
     def turn(self, session_id: str) -> AsyncGenerator[RuntimeEvent]:
@@ -315,7 +317,7 @@ class TestBaseRuntimeStreamTruncation:
             async def _do_close(self) -> None:
                 raise RuntimeError("close boom")
 
-        rt = _FailClose("fail", RuntimeConfig(backend_type="cli", command="x"), "cli")
+        rt = _FailClose("fail", RuntimeConfig(backend_type="cli", command="x"), "cli", workspace=_WORKSPACE)
         rt._alive = True
         await rt.close()
         assert rt.is_alive is False
@@ -326,5 +328,5 @@ class TestBaseRuntimeStreamTruncation:
             async def _do_cancel(self, session_id: str) -> None:
                 raise RuntimeError("cancel boom")
 
-        rt = _FailCancel("fail", RuntimeConfig(backend_type="cli", command="x"), "cli")
+        rt = _FailCancel("fail", RuntimeConfig(backend_type="cli", command="x"), "cli", workspace=_WORKSPACE)
         await rt.cancel("s1")

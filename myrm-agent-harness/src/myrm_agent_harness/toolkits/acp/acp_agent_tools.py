@@ -8,12 +8,11 @@ interface via the unified RuntimePool.
 - myrm_agent_harness.core.events.types::AgentEventType (POS: streaming event types and enums, framework-agnostic)
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
 - myrm_agent_harness.toolkits.acp.runtime.cli.dialect::has_native_turn_limit (POS: Per-CLI launch knowledge of CliRuntime)
-- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
+- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
 - myrm_agent_harness.toolkits.acp.types::DelegationPool (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
 - myrm_agent_harness.utils.runtime.cancel_hook::on_token_cancelled (POS: Cancellation bridge for streams that must be stopped from outside)
 - myrm_agent_harness.utils.runtime.progress_sink::ToolProgressSink, get_tool_progress_sink (POS: Progress event push mechanism. Tools implicitly obtain a sink via ContextVar to push intermediate progress events to the Agent SSE stream)
-- myrm_agent_harness.toolkits.code_execution.utils.workspace_path::WorkspacePathResolver (POS: Workspace path resolver with intelligent auto-detection) [lazy]
 
 [OUTPUT]
 - DelegateUsage: Token usage statistics from an external agent delegation.
@@ -38,7 +37,7 @@ from pydantic import BaseModel, Field
 from myrm_agent_harness.core.events.types import AgentEventType
 from myrm_agent_harness.toolkits.acp.runtime._base import truncate_response
 from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import has_native_turn_limit
-from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, ContinuityStatus, RuntimeEventType
+from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, ContinuityStatus, RuntimeEventType, normalize_workspace
 from myrm_agent_harness.utils.runtime.cancel_hook import on_token_cancelled
 from myrm_agent_harness.utils.runtime.cancellation import get_cancel_token
 from myrm_agent_harness.utils.runtime.progress_sink import ToolProgressSink, get_tool_progress_sink
@@ -75,22 +74,23 @@ _DEFAULT_MAX_TURNS = 25
 def create_invoke_acp_agent_tool(
     pool: DelegationPool,
     *,
-    cwd: str | None = None,
+    workspace: str,
     session_scope: str | None = None,
 ) -> BaseTool:
     """Create the invoke_acp_agent tool.
 
     Args:
         pool: Pre-configured pool (a ``RuntimePool`` or any ``DelegationPool``) with registered backends.
-        cwd: Working directory injected as context into delegated tasks.
+        workspace: Absolute directory every delegated turn starts in; the host names it, the tool never infers it.
         session_scope: Optional chat/session id for stable CLI resume keys.
 
     Returns:
         A LangChain tool function.
-    """
-    from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import WorkspacePathResolver
 
-    effective_cwd = cwd or str(WorkspacePathResolver.resolve_workspace_root())
+    Raises:
+        ValueError: If ``workspace`` is not an absolute path.
+    """
+    workspace = normalize_workspace(workspace)
 
     tool_description = """Invoke an external ACP coding agent.
 
@@ -142,8 +142,6 @@ context and capabilities.
         if task_size > MAX_TASK_BYTES:
             return f"[error] Task too large ({task_size} bytes). Max: {MAX_TASK_BYTES} bytes."
 
-        enriched_task = f"{task}\n\n[Context: cwd={effective_cwd}]"
-
         logger.info("acp_invoke agent=%s mode=%s task_length=%d", agent_name, mode, len(task))
 
         t0 = time.monotonic()
@@ -152,7 +150,8 @@ context and capabilities.
                 result, meta = await _run_turn_and_collect(
                     pool,
                     agent_name,
-                    enriched_task,
+                    task,
+                    workspace=workspace,
                     mode=mode,
                     session_scope=session_scope,
                 )
@@ -243,6 +242,7 @@ async def _run_turn_and_collect(
     agent_name: str,
     task: str,
     *,
+    workspace: str,
     mode: str,
     session_scope: str | None = None,
 ) -> tuple[str, DelegateMeta]:
@@ -280,7 +280,7 @@ async def _run_turn_and_collect(
 
     # The watcher stops the delegated process the moment the token trips, even while its stream is silent.
     async with (
-        aclosing(pool.run_turn(agent_name, task, session_id=session_id, mode=mode)) as events,
+        aclosing(pool.run_turn(agent_name, task, session_id=session_id, workspace=workspace, mode=mode)) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:

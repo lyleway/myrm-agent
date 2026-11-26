@@ -18,6 +18,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 
 _TOOLS = "myrm_agent_harness.toolkits.acp.acp_agent_tools"
+_WORKSPACE = "/tmp/ws"
 
 
 def _pool(command: str, *, max_turns: int = 25, name: str = "agent") -> MagicMock:
@@ -39,14 +40,14 @@ class TestNativeTurnLimit:
         """One Claude turn can run several tool calls, so counting them would cut it off before its own limit."""
         pool = _pool("claude", max_turns=2)
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             for tool in ("Read", "Grep", "Bash"):
                 yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name=tool)
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="finished")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = stream
-        result, meta = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        result, meta = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert result == "finished"
         assert meta["tool_calls"] == 3
@@ -56,12 +57,12 @@ class TestNativeTurnLimit:
     async def test_the_cli_own_turn_limit_ends_the_delegation_with_the_work_it_did(self) -> None:
         pool = _pool("claude", max_turns=7)
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="partial findings")
             yield _error(session_id, AcpErrorCode.MAX_TURNS, "Reached maximum number of turns (7)")
 
         pool.run_turn = stream
-        result, meta = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        result, meta = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert result == "partial findings\n\n[stopped — max turns limit reached (7/7)]"
         assert meta["errors"] == 0
@@ -70,12 +71,12 @@ class TestNativeTurnLimit:
     async def test_a_cli_without_a_limit_of_its_own_is_still_counted(self) -> None:
         pool = _pool("gemini", max_turns=2)
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             for tool in ("a", "b", "c"):
                 yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name=tool)
 
         pool.run_turn = stream
-        result, _ = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        result, _ = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert result.endswith("[stopped — max turns limit reached (2/2)]")
         pool.cancel.assert_awaited()
@@ -87,12 +88,12 @@ class TestNativeTurnLimit:
         pool = _pool("claude")
         pool.get_config = MagicMock(return_value=config)
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             for tool in ("a", "b", "c"):
                 yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name=tool)
 
         pool.run_turn = stream
-        result, _ = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        result, _ = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert "max turns limit reached" in result
 
@@ -102,12 +103,12 @@ class TestStopping:
     async def test_a_cancelled_delegation_event_is_a_stop_not_a_failure(self) -> None:
         pool = _pool("claude")
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="so far")
             yield _error(session_id, AcpErrorCode.CANCELLED)
 
         pool.run_turn = stream
-        result, meta = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        result, meta = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert result == "so far\n\n[cancelled — user aborted delegation]"
         assert meta["errors"] == 0
@@ -125,7 +126,7 @@ class TestStopping:
 
         token = Token()
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             await released.wait()
             yield _error(session_id, AcpErrorCode.CANCELLED)
 
@@ -138,7 +139,7 @@ class TestStopping:
         with patch(f"{_TOOLS}.get_cancel_token", return_value=token):
             stopper = asyncio.create_task(press_stop())
             async with asyncio.timeout(10):
-                result, _ = await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+                result, _ = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
             await stopper
 
         assert result.endswith("[cancelled — user aborted delegation]")
@@ -150,7 +151,7 @@ class TestStopping:
         pool = _pool("codex", max_turns=1)
         closed = asyncio.Event()
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             try:
                 yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="a")
                 yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="never read")
@@ -158,7 +159,7 @@ class TestStopping:
                 closed.set()
 
         pool.run_turn = stream
-        await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+        await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert closed.is_set()
 
@@ -173,14 +174,14 @@ class TestProgressSteps:
         pool = _pool("claude")
         sink = AsyncMock()
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="Bash", summary="npm test")
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="Read", summary="")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = stream
         with patch(f"{_TOOLS}.get_tool_progress_sink", return_value=sink):
-            await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         steps = self._emitted(sink)
         assert [step["data"] for step in steps] == [[{"text": "agent: Bash — npm test"}], [{"text": "agent: Read"}]]
@@ -193,13 +194,13 @@ class TestProgressSteps:
         pool = _pool("claude")
         sink = AsyncMock()
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=status)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = stream
         with patch(f"{_TOOLS}.get_tool_progress_sink", return_value=sink):
-            await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert self._emitted(sink) == [
             {
@@ -216,13 +217,13 @@ class TestProgressSteps:
         pool = _pool("claude")
         sink = AsyncMock()
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = stream
         with patch(f"{_TOOLS}.get_tool_progress_sink", return_value=sink):
-            await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert self._emitted(sink) == [
             {
@@ -239,7 +240,7 @@ class TestErrors:
     async def test_a_real_error_still_fails_the_delegation_with_its_retry_hint(self) -> None:
         pool = _pool("claude")
 
-        async def stream(name, task, session_id, mode="persistent"):
+        async def stream(name, task, session_id, *, workspace, mode="persistent"):
             yield create_event(
                 RuntimeEventType.ERROR,
                 session_id,
@@ -248,6 +249,6 @@ class TestErrors:
 
         pool.run_turn = stream
         with pytest.raises(RuntimeError, match="slow down") as raised:
-            await _run_turn_and_collect(pool, "agent", "task", mode="persistent")
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert raised.value.retryable is True  # type: ignore[attr-defined]

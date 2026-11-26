@@ -29,12 +29,11 @@ async def _turn(stub_agent: Path) -> list[RuntimeEvent]:
     pool = RuntimePool(max_concurrent=1)
     pool.register(
         "stub",
-        RuntimeConfig(
-            backend_type="acp", command=sys.executable, args=[str(stub_agent)], cwd=str(Path.cwd()), timeout_seconds=60
-        ),
+        RuntimeConfig(backend_type="acp", command=sys.executable, args=[str(stub_agent)], timeout_seconds=60),
     )
     try:
-        return [event async for event in pool.run_turn("stub", _PROMPT, session_id="fresh-install-smoke")]
+        turn = pool.run_turn("stub", _PROMPT, session_id="fresh-install-smoke", workspace=str(Path.cwd()))
+        return [event async for event in turn]
     finally:
         await pool.close_all()
 

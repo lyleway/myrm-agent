@@ -10,6 +10,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     create_event,
     create_permission_request,
+    normalize_workspace,
 )
 
 
@@ -19,7 +20,6 @@ class TestRuntimeConfig:
         assert cfg.command == "claude"
         assert cfg.args == []
         assert cfg.env is None
-        assert cfg.cwd is None
         assert cfg.timeout_seconds == 300
         assert cfg.permission_mode == "allow_all"
         assert cfg.max_response_chars == 50_000
@@ -30,7 +30,6 @@ class TestRuntimeConfig:
             command="codex",
             args=["--acp"],
             env={"MY_VAR": "1"},
-            cwd="/workspace",
             timeout_seconds=120,
             permission_mode="safe",
         )
@@ -65,6 +64,31 @@ class TestRuntimeConfig:
         cfg = RuntimeConfig(backend_type="acp", command="test")
         with pytest.raises(AttributeError):
             cfg.command = "other"  # type: ignore[misc]
+
+    def test_a_config_carries_no_directory(self) -> None:
+        # The directory a turn runs in belongs to the turn, so the same config can serve any number of workspaces.
+        with pytest.raises(TypeError):
+            RuntimeConfig(backend_type="cli", command="claude", cwd="/work")  # type: ignore[call-arg]
+
+
+class TestNormalizeWorkspace:
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("/work/repo", "/work/repo"),
+            ("/work/repo/", "/work/repo"),
+            ("/work//repo/./sub/..", "/work/repo"),
+        ],
+    )
+    def test_equal_directories_get_one_spelling(self, given: str, expected: str) -> None:
+        # The pool keys its backends by this spelling, so two spellings of one directory must not split them.
+        assert normalize_workspace(given) == expected
+
+    @pytest.mark.parametrize("relative", ["", ".", "repo", "../repo", "~/repo"])
+    def test_relative_paths_are_rejected(self, relative: str) -> None:
+        # A relative path would silently resolve against whatever directory the host process happens to be in.
+        with pytest.raises(ValueError, match="absolute path"):
+            normalize_workspace(relative)
 
 
 class TestRuntimeEvent:

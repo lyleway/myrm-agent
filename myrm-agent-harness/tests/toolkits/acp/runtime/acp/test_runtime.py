@@ -17,9 +17,11 @@ from myrm_agent_harness.toolkits.acp.runtime.acp import runtime as acp_runtime
 from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEventType
 
+_WORKSPACE = "/tmp/ws"
+
 
 def _make_config(**overrides: object) -> RuntimeConfig:
-    defaults: dict[str, object] = {"backend_type": "acp", "command": "claude", "cwd": "/tmp/ws"}
+    defaults: dict[str, object] = {"backend_type": "acp", "command": "claude"}
     defaults.update(overrides)
     return RuntimeConfig(**defaults)  # type: ignore[arg-type]
 
@@ -39,7 +41,7 @@ def _live_process() -> MagicMock:
 
 class TestAcpRuntimeProperties:
     def test_capabilities(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         caps = rt.capabilities
         assert caps.supports_resume is True
         assert caps.supports_mcp is True
@@ -47,16 +49,16 @@ class TestAcpRuntimeProperties:
         assert caps.supports_tools is True
 
     def test_is_alive_no_process(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         assert rt.is_alive is False
 
     def test_is_alive_with_live_process(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         rt._process = _live_process()
         assert rt.is_alive is True
 
     def test_is_alive_with_exited_process(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         proc = MagicMock()
         proc.returncode = 0
         rt._process = proc
@@ -67,7 +69,7 @@ class TestAcpRuntimeTurn:
     @pytest.mark.asyncio
     async def test_do_run_turn_full_lifecycle(self) -> None:
         """Spawn -> session -> prompt -> DONE event in a single turn."""
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.initialize = AsyncMock()
         conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1"))
@@ -87,7 +89,7 @@ class TestAcpRuntimeTurn:
     @pytest.mark.asyncio
     async def test_do_run_turn_reuses_session(self) -> None:
         """Connection and session survive across turns; prompt runs per turn."""
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.initialize = AsyncMock()
         conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1"))
@@ -105,7 +107,7 @@ class TestAcpRuntimeTurn:
     @pytest.mark.asyncio
     async def test_run_turn_prompt_error_yields_error_and_cancels(self) -> None:
         """A failed prompt surfaces as an ERROR event and cancels the session."""
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.initialize = AsyncMock()
         conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1"))
@@ -123,7 +125,7 @@ class TestAcpRuntimeTurn:
 class TestAcpRuntimeLifecycle:
     @pytest.mark.asyncio
     async def test_do_cancel_with_connection(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.cancel = AsyncMock()
         rt._conn = conn
@@ -133,12 +135,12 @@ class TestAcpRuntimeLifecycle:
 
     @pytest.mark.asyncio
     async def test_do_cancel_without_connection_is_noop(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         await rt._do_cancel("s1")
 
     @pytest.mark.asyncio
     async def test_do_resume(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         assert await rt._do_resume("s1") is False
         rt._process = _live_process()
         rt._session_id = "sess-1"
@@ -146,18 +148,18 @@ class TestAcpRuntimeLifecycle:
 
     @pytest.mark.asyncio
     async def test_do_get_status_stopped(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         assert await rt._do_get_status() == "stopped"
 
     @pytest.mark.asyncio
     async def test_do_get_status_ready(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         rt._process = _live_process()
         assert await rt._do_get_status() == "ready"
 
     @pytest.mark.asyncio
     async def test_do_get_status_error(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         proc = MagicMock()
         proc.returncode = 1
         rt._process = proc
@@ -166,7 +168,7 @@ class TestAcpRuntimeLifecycle:
     @pytest.mark.asyncio
     async def test_do_close_with_ctx_manager(self) -> None:
         """Close path that exits the spawn context manager."""
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.close_session = AsyncMock()
         ctx = MagicMock()
@@ -191,7 +193,7 @@ class TestAcpRuntimeLifecycle:
     @pytest.mark.asyncio
     async def test_do_close_skips_close_session_when_not_advertised(self) -> None:
         """ACP forbids calling session/close on an agent that did not advertise it."""
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.close_session = AsyncMock()
         ctx = MagicMock()
@@ -215,7 +217,7 @@ class TestAcpRuntimeLifecycle:
         async def _hang_forever(**_: object) -> None:
             await asyncio.Event().wait()
 
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.close_session = AsyncMock(side_effect=_hang_forever)
         ctx = MagicMock()
@@ -250,7 +252,7 @@ class TestAcpRuntimeLifecycle:
     async def test_ensure_connection_records_session_close_capability(
         self, agent_capabilities: AgentCapabilities | None, expected: bool
     ) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.initialize = AsyncMock(
             return_value=InitializeResponse(protocol_version=1, agent_capabilities=agent_capabilities)
@@ -264,12 +266,12 @@ class TestAcpRuntimeLifecycle:
 
     @pytest.mark.asyncio
     async def test_ensure_connection_requires_command(self) -> None:
-        rt = AcpRuntime("acp", _make_config(command=None))
+        rt = AcpRuntime("acp", _make_config(command=None), workspace=_WORKSPACE)
         with pytest.raises(ValueError):
             await rt._ensure_connection()
 
     @pytest.mark.asyncio
     async def test_create_session_without_connection(self) -> None:
-        rt = AcpRuntime("acp", _make_config())
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         with pytest.raises(RuntimeError):
             await rt._create_session()

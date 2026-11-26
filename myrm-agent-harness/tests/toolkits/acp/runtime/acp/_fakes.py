@@ -19,7 +19,7 @@ def make_png(directory: Path, name: str, size: int) -> tuple[Path, bytes]:
     return path, body
 
 
-def make_pool(cwd: Path, *agent_args: str) -> RuntimePool:
+def make_pool(*agent_args: str) -> RuntimePool:
     pool = RuntimePool(max_concurrent=1)
     pool.register(
         "mock",
@@ -27,17 +27,18 @@ def make_pool(cwd: Path, *agent_args: str) -> RuntimePool:
             backend_type="acp",
             command=sys.executable,
             args=[str(_MOCK_AGENT), *agent_args],
-            cwd=str(cwd),
             timeout_seconds=60,
         ),
     )
     return pool
 
 
-async def run_turn(pool: RuntimePool, images: list[str]) -> tuple[str, list[RuntimeEvent]]:
+async def run_turn(pool: RuntimePool, images: list[str], *, workspace: Path) -> tuple[str, list[RuntimeEvent]]:
     text: list[str] = []
     events: list[RuntimeEvent] = []
-    async for event in pool.run_turn("mock", "look at this", session_id="chat-1", images=images):
+    async for event in pool.run_turn(
+        "mock", "look at this", session_id="chat-1", workspace=str(workspace), images=images
+    ):
         events.append(event)
         if event.type == RuntimeEventType.TEXT_DELTA:
             text.append(str(event.data.get("content")))

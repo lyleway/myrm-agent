@@ -11,6 +11,8 @@ from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHand
 from myrm_agent_harness.toolkits.acp.types import PermissionDecision, RuntimeConfig
 from tests.support.windows_text_mode import emulate_windows_text_mode
 
+_WORKSPACE = "/tmp/ws"
+
 
 class TestAcpCallbackHandlerSessionUpdate:
     @pytest.mark.asyncio
@@ -18,6 +20,7 @@ class TestAcpCallbackHandlerSessionUpdate:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=_WORKSPACE,
         )
         update = MagicMock()
         update.session_update = "agent_message_chunk"
@@ -33,6 +36,7 @@ class TestAcpCallbackHandlerSessionUpdate:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=_WORKSPACE,
         )
         update = MagicMock()
         update.session_update = "tool_call"
@@ -48,6 +52,7 @@ class TestAcpCallbackHandlerSessionUpdate:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=_WORKSPACE,
         )
         update = MagicMock()
         update.session_update = "tool_call_update"
@@ -64,6 +69,7 @@ class TestAcpCallbackHandlerSessionUpdate:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=_WORKSPACE,
         )
         update = MagicMock()
         update.session_update = "agent_thought_chunk"
@@ -79,6 +85,7 @@ class TestAcpCallbackHandlerSessionUpdate:
         handler = AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=_WORKSPACE,
         )
         handler._text_parts.append("old text")
         handler.reset()
@@ -91,8 +98,9 @@ class TestAcpCallbackHandlerFileOps:
         test_file = tmp_path / "test.txt"
         test_file.write_text("file content", encoding="utf-8")
         handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy", cwd=str(tmp_path)),
+            RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=str(tmp_path),
         )
         result = await handler.read_text_file(str(test_file), "s1")
         assert result["content"] == "file content"
@@ -102,8 +110,9 @@ class TestAcpCallbackHandlerFileOps:
         test_file = tmp_path / "test.txt"
         test_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
         handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy", cwd=str(tmp_path)),
+            RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=str(tmp_path),
         )
         result = await handler.read_text_file(str(test_file), "s1", limit=1, line=2)
         assert "line2" in result["content"]
@@ -111,8 +120,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_read_text_file_outside_cwd(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy", cwd=str(tmp_path / "sub")),
+            RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=str(tmp_path / "sub"),
         )
         result = await handler.read_text_file("/etc/passwd", "s1")
         assert "[error]" in result["content"]
@@ -120,8 +130,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_read_text_file_nonexistent(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy", cwd=str(tmp_path)),
+            RuntimeConfig(backend_type="acp", command="dummy"),
             "s1",
+            workspace=str(tmp_path),
         )
         result = await handler.read_text_file(str(tmp_path / "nope.txt"), "s1")
         assert "[error]" in result["content"]
@@ -129,13 +140,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_write_text_file_allow_all(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(
-                backend_type="acp",
-                command="dummy",
-                cwd=str(tmp_path),
-                permission_mode="allow_all",
-            ),
+            RuntimeConfig(backend_type="acp", command="dummy", permission_mode="allow_all"),
             "s1",
+            workspace=str(tmp_path),
         )
         target = tmp_path / "output.txt"
         result = await handler.write_text_file("content", str(target), "s1")
@@ -145,13 +152,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_write_text_file_safe_mode_denied(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(
-                backend_type="acp",
-                command="dummy",
-                cwd=str(tmp_path),
-                permission_mode="safe",
-            ),
+            RuntimeConfig(backend_type="acp", command="dummy", permission_mode="safe"),
             "s1",
+            workspace=str(tmp_path),
         )
         result = await handler.write_text_file("content", str(tmp_path / "out.txt"), "s1")
         assert result is None
@@ -159,13 +162,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_write_text_file_outside_cwd(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(
-                backend_type="acp",
-                command="dummy",
-                cwd=str(tmp_path),
-                permission_mode="allow_all",
-            ),
+            RuntimeConfig(backend_type="acp", command="dummy", permission_mode="allow_all"),
             "s1",
+            workspace=str(tmp_path),
         )
         result = await handler.write_text_file("content", "/tmp/evil.txt", "s1")
         assert result is None
@@ -173,13 +172,9 @@ class TestAcpCallbackHandlerFileOps:
     @pytest.mark.asyncio
     async def test_write_text_file_parent_mkdir_failure(self, tmp_path: Path) -> None:
         handler = AcpCallbackHandler(
-            RuntimeConfig(
-                backend_type="acp",
-                command="dummy",
-                cwd=str(tmp_path),
-                permission_mode="allow_all",
-            ),
+            RuntimeConfig(backend_type="acp", command="dummy", permission_mode="allow_all"),
             "s1",
+            workspace=str(tmp_path),
         )
         # A path whose parent is an existing file forces mkdir → FileExistsError/OSError.
         blocker = tmp_path / "blocker"
@@ -189,10 +184,11 @@ class TestAcpCallbackHandlerFileOps:
         assert result is None
 
     @staticmethod
-    def _writable_handler(cwd: Path) -> AcpCallbackHandler:
+    def _writable_handler(workspace: Path) -> AcpCallbackHandler:
         return AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy", cwd=str(cwd), permission_mode="allow_all"),
+            RuntimeConfig(backend_type="acp", command="dummy", permission_mode="allow_all"),
             "s1",
+            workspace=str(workspace),
         )
 
     @pytest.mark.asyncio

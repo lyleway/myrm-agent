@@ -41,9 +41,9 @@ def _stalled_runtime(directory: Path, tool_pid_file: Path | None = None) -> tupl
             backend_type="acp",
             command=sys.executable,
             args=[str(_STALLED_AGENT), _STALL_SECONDS, *([str(tool_pid_file)] if tool_pid_file else [])],
-            cwd=str(directory),
             timeout_seconds=120,
         ),
+        workspace=str(directory),
     )
     return runtime, str(image)
 
@@ -210,10 +210,10 @@ class TestStalledAgent:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(stalled_agent, "STALLED_AGENT_TIMEOUT_SECONDS", 1.0)
-        pool = make_pool(tmp_path, "--images")
+        pool = make_pool("--images")
         try:
-            await run_turn(pool, [])
-            runtime = pool.get("mock")
+            await run_turn(pool, [], workspace=tmp_path)
+            runtime = pool.get("mock", str(tmp_path))
             process = getattr(runtime, "_process", None)
             assert process is not None
 

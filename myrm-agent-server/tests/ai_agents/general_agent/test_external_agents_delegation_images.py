@@ -17,6 +17,7 @@ from app.ai_agents.general_agent.external_agents import ExternalAgentsMixin
 from app.services.external_agents.delegation import images
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+WORKSPACE = "/work/repo"
 
 
 class _RecordingPool:
@@ -24,6 +25,7 @@ class _RecordingPool:
 
     def __init__(self, *, endless: bool = False) -> None:
         self.prompts: list[str] = []
+        self.workspaces: list[str] = []
         self.images: list[list[str] | None] = []
         self.present_during_turn: list[bool] = []
         self.turn_closed = asyncio.Event()
@@ -35,8 +37,11 @@ class _RecordingPool:
     async def cancel(self, name: str, session_id: str) -> None:
         return None
 
-    async def run_turn(self, name: str, prompt: str, session_id: str, *, images: list[str] | None = None, **_: object):
+    async def run_turn(
+        self, name: str, prompt: str, session_id: str, *, workspace: str, images: list[str] | None = None, **_: object
+    ):
         self.prompts.append(prompt)
+        self.workspaces.append(workspace)
         self.images.append(images)
         self.present_during_turn.append(all(Path(path).exists() for path in images or []))
         try:
@@ -60,6 +65,7 @@ def _mixin(pool: object) -> ExternalAgentsMixin:
     mixin._runtime_pool = pool
     mixin.locale = "en"
     mixin.quote = None
+    mixin.declared_allowed_roots = (WORKSPACE,)
     return mixin
 
 
@@ -92,6 +98,7 @@ async def test_the_cli_gets_the_staged_files_and_a_prompt_that_points_at_them(tm
     ((staged,),) = pool.images
     assert Path(staged).parent == staging
     assert pool.present_during_turn == [True]
+    assert pool.workspaces == [WORKSPACE]
     assert pool.prompts == [f"what is wrong here\n\n[Image: {staged}]"]
     assert any(event["type"] == AgentEventType.MESSAGE.value for event in events)
 

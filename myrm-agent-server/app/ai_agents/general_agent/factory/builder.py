@@ -131,11 +131,7 @@ async def build_general_agent(
         agent_id=agent_wrapper.agent_id,
         force_external_agent=agent_wrapper.force_external_agent,
     ):
-        await agent_wrapper._setup_external_agents(
-            tools,
-            mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool,
-            external_agent_workdir=str(workspace_root) if workspace_root else None,
-        )
+        await agent_wrapper._setup_external_agents(tools, mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool)
 
     from app.services.agent.goals.goal_registry import GoalRegistry
 

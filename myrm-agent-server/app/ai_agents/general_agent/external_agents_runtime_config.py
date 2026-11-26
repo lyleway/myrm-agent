@@ -11,7 +11,7 @@
 - _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
 - _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
-- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (each with the fixed directory delegated images are staged in)
+- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's)
 
 [POS]
 GeneralAgent 外部 Agent 配置归一化与探测装配层。确保 RuntimePool 指纹与注册字段同源，
@@ -127,14 +127,6 @@ def _normalized_env(cfg: dict[str, object]) -> dict[str, str] | None:
     return {key: normalized[key] for key in sorted(normalized)}
 
 
-def _normalized_cwd(cfg: dict[str, object]) -> str | None:
-    """Return cwd normalized exactly as RuntimeConfig input semantics."""
-    raw_cwd = cfg.get("cwd")
-    if not raw_cwd:
-        return None
-    return str(raw_cwd)
-
-
 @dataclass(frozen=True, slots=True)
 class _NormalizedRuntimeCfg:
     name: str
@@ -142,7 +134,6 @@ class _NormalizedRuntimeCfg:
     command: str
     args: list[str]
     env: dict[str, str] | None
-    cwd: str | None
     timeout_seconds: int
     max_response_chars: int
     permission_mode: PermissionMode
@@ -169,7 +160,6 @@ def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | No
         command=str(command),
         args=args,
         env=_normalized_env(cfg),
-        cwd=_normalized_cwd(cfg),
         timeout_seconds=_turn_timeout(cfg),
         max_response_chars=_cfg_int(cfg, "maxResponseChars", 50_000),
         permission_mode=_permission_mode(cfg),
@@ -196,7 +186,6 @@ def _config_fingerprint(agent_cfgs: list[dict[str, object]]) -> str:
                 "args": runtime_cfg.args,
                 "authMode": runtime_cfg.auth_mode,
                 "env": runtime_cfg.env,
-                "cwd": runtime_cfg.cwd,
                 "timeout": runtime_cfg.timeout_seconds,
                 "maxResponseChars": runtime_cfg.max_response_chars,
                 "permissionMode": runtime_cfg.permission_mode,
@@ -287,7 +276,6 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             command=normalized_cfg.command,
             args=normalized_cfg.args,
             env=normalized_cfg.env,
-            cwd=normalized_cfg.cwd,
             timeout_seconds=normalized_cfg.timeout_seconds,
             max_response_chars=normalized_cfg.max_response_chars,
             permission_mode=normalized_cfg.permission_mode,

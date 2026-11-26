@@ -75,7 +75,7 @@ class TestLaunch:
     @pytest.mark.asyncio
     async def test_a_cli_that_is_not_installed_is_one_backend_not_found_error(self, tmp_path: Path) -> None:
         command = str(tmp_path / "not-installed")
-        runtime = CliRuntime("t", RuntimeConfig(backend_type="cli", command=command, cwd=str(tmp_path)))
+        runtime = CliRuntime("t", RuntimeConfig(backend_type="cli", command=command), workspace=str(tmp_path))
 
         events = await run_turn(runtime)
 
@@ -88,7 +88,7 @@ class TestLaunch:
     async def test_a_missing_working_directory_is_not_taken_for_a_missing_cli(
         self, fake_cli: FakeCli, tmp_path: Path
     ) -> None:
-        runtime = make_runtime(fake_cli, cwd=str(tmp_path / "gone"))
+        runtime = make_runtime(fake_cli, workspace=str(tmp_path / "gone"))
 
         events = await run_turn(runtime)
 

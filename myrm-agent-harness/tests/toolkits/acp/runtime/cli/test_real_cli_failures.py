@@ -110,12 +110,11 @@ def _claude(
         command=str(_CLAUDE),
         args=cli_launch_args("claude"),
         env=env,
-        cwd=str(tmp_path),
         permission_mode="safe",
         auth_mode="api_key",
         timeout_seconds=60,
     )
-    return CliRuntime("claude", config)
+    return CliRuntime("claude", config, workspace=str(tmp_path))
 
 
 def _codex(tmp_path: Path, base_url: str, *, retries: int | None = 0) -> CliRuntime:
@@ -143,12 +142,11 @@ wire_api = "responses"
         command=str(_CODEX),
         args=cli_launch_args("codex"),
         env={"HOME": str(home), "CODEX_HOME": str(codex_home), "STUB_KEY": "stub-key"},
-        cwd=str(tmp_path),
         permission_mode="safe",
         auth_mode="api_key",
         timeout_seconds=60,
     )
-    return CliRuntime("codex", config)
+    return CliRuntime("codex", config, workspace=str(tmp_path))
 
 
 async def _errors_of(runtime: CliRuntime) -> tuple[list[RuntimeEvent], list[AcpError]]:

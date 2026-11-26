@@ -255,11 +255,12 @@ async def stream_direct_delegate(
     prompt: str,
     *,
     session_id: str,
+    workspace: str,
     images: list[str] | None = None,
     cancel_token: CancellationToken | None = None,
     locale: str = "en",
 ) -> AsyncGenerator[SseEvent]:
-    """Run one turn of ``agent_name`` on ``pool`` and stream it as frontend events.
+    """Run one turn of ``agent_name`` on ``pool`` in ``workspace`` and stream it as frontend events.
 
     ``images`` are the local files of the images attached to ``prompt``, for a CLI that takes them natively.
 
@@ -278,7 +279,7 @@ async def stream_direct_delegate(
     yield turn.connecting()
 
     async with (
-        aclosing(pool.run_turn(agent_name, prompt, session_id=session_id, images=images or None)) as events,
+        aclosing(pool.run_turn(agent_name, prompt, session_id=session_id, workspace=workspace, images=images or None)) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:

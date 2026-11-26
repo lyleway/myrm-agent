@@ -2,7 +2,8 @@
 
 Supports ACP and CLI backends with config-driven registration and
 concurrency control via a global asyncio.Semaphore plus per-backend
-serialization locks. Backends are created lazily on first use, and a resident
+serialization locks. Every turn names the workspace it runs in: a backend belongs to one
+(name, workspace) pair for its whole life, is created lazily on first use, and a resident
 ACP process that has exited is reconnected by its next ``run_turn``. A ``oneshot``
 turn runs on a private backend (fresh session, closed afterwards) so it never
 disturbs the shared backend's persistent session. ``release_resident`` frees the
@@ -12,7 +13,7 @@ resident ACP processes of an idle pool while CLI backends keep their resume stat
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer)
-- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, images_not_sent_event (POS: ACP runtime type definitions layer.)
+- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime (POS: runtime backend implementations)
 
 [OUTPUT]
@@ -40,15 +41,20 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEvent,
     RuntimeEventType,
     images_not_sent_event,
+    normalize_workspace,
 )
 
 logger = logging.getLogger(__name__)
+
+# (backend name, workspace): the identity of a pooled backend.
+type BackendKey = tuple[str, str]
 
 
 def _create_runtime(
     name: str,
     config: RuntimeConfig,
     *,
+    workspace: str,
     event_bus: EventBus | None = None,
     cli_session_store: CliSessionStore | None = None,
 ) -> RuntimeBackend:
@@ -56,12 +62,12 @@ def _create_runtime(
     if config.backend_type == "acp":
         from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 
-        return AcpRuntime(name, config, event_bus=event_bus)
+        return AcpRuntime(name, config, workspace=workspace, event_bus=event_bus)
 
     if config.backend_type == "cli":
         from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 
-        return CliRuntime(name, config, session_store=cli_session_store)
+        return CliRuntime(name, config, workspace=workspace, session_store=cli_session_store)
 
     msg = f"Unknown backend_type: {config.backend_type!r}"
     raise ValueError(msg)
@@ -82,7 +88,7 @@ class RuntimePool:
 
         pool = RuntimePool(max_concurrent=4)
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
-        response = await pool.prompt("claude", "Fix the bug in main.py")
+        response = await pool.prompt("claude", "Fix the bug in main.py", workspace="/work/repo")
     """
 
     def __init__(
@@ -93,11 +99,12 @@ class RuntimePool:
         cli_session_store: CliSessionStore | None = None,
     ) -> None:
         self._configs: dict[str, RuntimeConfig] = {}
-        self._backends: dict[str, RuntimeBackend] = {}
-        # Private backends of in-flight oneshot turns, keyed by (backend name, session id).
-        self._oneshot_backends: dict[tuple[str, str], RuntimeBackend] = {}
+        self._backends: dict[BackendKey, RuntimeBackend] = {}
+        # The backend running each in-flight turn, keyed by (backend name, session id): what ``cancel`` and
+        # ``close_all`` reach, including the private backend of a oneshot turn.
+        self._running: dict[tuple[str, str], RuntimeBackend] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
-        self._backend_locks: dict[str, asyncio.Lock] = {}
+        self._backend_locks: dict[BackendKey, asyncio.Lock] = {}
         self._event_bus = event_bus
         self._cli_session_store = cli_session_store
 
@@ -114,8 +121,10 @@ class RuntimePool:
         """Return the RuntimeConfig for a registered backend, or None if not found."""
         return self._configs.get(name)
 
-    def _new_backend(self, name: str, *, cli_session_store: CliSessionStore | None = None) -> RuntimeBackend:
-        """Create a backend for ``name`` that the pool does not keep.
+    def _new_backend(
+        self, name: str, workspace: str, *, cli_session_store: CliSessionStore | None = None
+    ) -> RuntimeBackend:
+        """Create a backend for ``name`` in ``workspace`` that the pool does not keep.
 
         Only the shared persistent backend is given the session store: a private oneshot backend
         is a fresh session that ends with its turn, so it has nothing to resume or to persist.
@@ -128,20 +137,24 @@ class RuntimePool:
             available = ", ".join(self._configs) or "(none)"
             msg = f"Unknown backend '{name}'. Available: {available}"
             raise KeyError(msg)
-        return _create_runtime(name, config, event_bus=self._event_bus, cli_session_store=cli_session_store)
+        return _create_runtime(
+            name, config, workspace=workspace, event_bus=self._event_bus, cli_session_store=cli_session_store
+        )
 
-    def get(self, name: str) -> RuntimeBackend:
-        """Get or lazily create the shared (persistent) RuntimeBackend by name.
+    def get(self, name: str, workspace: str) -> RuntimeBackend:
+        """Get or lazily create the shared (persistent) RuntimeBackend of ``name`` in ``workspace``.
 
         Raises:
             KeyError: If the name is not registered.
+            ValueError: If ``workspace`` is not an absolute path.
         """
-        backend = self._backends.get(name)
+        key = (name, normalize_workspace(workspace))
+        backend = self._backends.get(key)
         if backend is None:
-            backend = self._backends[name] = self._new_backend(name, cli_session_store=self._cli_session_store)
+            backend = self._backends[key] = self._new_backend(name, key[1], cli_session_store=self._cli_session_store)
         return backend
 
-    async def prompt(self, name: str, task: str, *, mode: str = "persistent") -> str:
+    async def prompt(self, name: str, task: str, *, workspace: str, mode: str = "persistent") -> str:
         """Send a task to the named backend with concurrency control.
 
         Collects all text_delta events and returns the concatenated response.
@@ -155,7 +168,7 @@ class RuntimePool:
             raise ValueError(msg)
 
         text_parts: list[str] = []
-        async for event in self.run_turn(name, task, session_id=session_id, mode=mode):
+        async for event in self.run_turn(name, task, session_id=session_id, workspace=workspace, mode=mode):
             if event.type == RuntimeEventType.TEXT_DELTA:
                 content = event.data.get("content")
                 if isinstance(content, str):
@@ -169,6 +182,7 @@ class RuntimePool:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
@@ -177,7 +191,9 @@ class RuntimePool:
 
         Use this instead of ``prompt()`` when you need the full event stream.
 
-        ``persistent`` turns share one backend per name, so the session carries over between turns.
+        ``workspace`` is the absolute directory the agent starts in and is confined to; a turn never infers it.
+
+        ``persistent`` turns share one backend per name and workspace, so the session carries over between turns.
         A ``oneshot`` turn runs on a private backend that is closed when the turn ends: it always
         starts a fresh session and never touches the persistent backend's session or process.
 
@@ -188,6 +204,7 @@ class RuntimePool:
         if mode not in {"persistent", "oneshot"}:
             msg = f"Invalid mode: {mode}"
             raise ValueError(msg)
+        workspace = normalize_workspace(workspace)
 
         config = self._configs.get(name)
         effective_mcp: list[McpServerConfig] | None = (
@@ -196,7 +213,7 @@ class RuntimePool:
 
         oneshot = mode == "oneshot"
         async with self._semaphore:
-            backend = self._new_backend(name) if oneshot else self.get(name)
+            backend = self._new_backend(name, workspace) if oneshot else self.get(name, workspace)
             # MCP 注入前能力断言：仅向声明支持的后端注入。静默忽略会让调用方
             # 误以为 MCP 已生效，必须显式告警。
             if effective_mcp and not backend.capabilities.supports_mcp:
@@ -220,10 +237,9 @@ class RuntimePool:
             # Serialize turns per backend: a backend instance (e.g. CliRuntime)
             # holds mutable per-turn state (active process handle) that cannot
             # be safely shared across concurrent turns.
-            backend_lock = self._backend_locks.setdefault(name, asyncio.Lock())
+            backend_lock = self._backend_locks.setdefault((name, workspace), asyncio.Lock())
             async with backend_lock:
-                if oneshot:
-                    self._oneshot_backends[(name, session_id)] = backend
+                self._running[(name, session_id)] = backend
                 try:
                     async with aclosing(
                         backend.run_turn(prompt, session_id, mcp_servers=effective_mcp or None, images=images or None)
@@ -238,21 +254,19 @@ class RuntimePool:
                                 await self._event_bus.emit(event)
                             yield event
                 finally:
+                    if self._running.get((name, session_id)) is backend:
+                        del self._running[(name, session_id)]
                     if oneshot:
-                        self._oneshot_backends.pop((name, session_id), None)
                         await _safe_close(name, backend)
 
     async def cancel(self, name: str, session_id: str) -> None:
-        """Cancel a running turn for the named backend.
+        """Cancel the running turn of ``session_id`` on the named backend.
 
-        Delegates to ``backend.cancel(session_id)`` which terminates the
-        external process (e.g., SIGTERM → SIGKILL for CliRuntime). A running
-        oneshot turn is cancelled on its own private backend.
-        No-op if no backend for ``name`` has been instantiated yet.
+        Delegates to ``backend.cancel(session_id)`` of the backend that runs that turn, which terminates the
+        external process (e.g., SIGTERM → SIGKILL for CliRuntime). No-op when no such turn is running: a turn
+        still waiting for its backend has nothing to stop yet, and a cancel never reaches another session's turn.
         """
-        backend = self._oneshot_backends.get((name, session_id))
-        if backend is None:
-            backend = self._backends.get(name)
+        backend = self._running.get((name, session_id))
         if backend is not None:
             await backend.cancel(session_id)
             logger.info("pool_cancel backend=%s session=%s", name, session_id)
@@ -265,20 +279,22 @@ class RuntimePool:
         Call it only while no turn is running on this pool.
         """
         resident = {
-            name: backend
-            for name, backend in self._backends.items()
-            if (config := self._configs.get(name)) is not None and config.backend_type == "acp"
+            key: backend
+            for key, backend in self._backends.items()
+            if (config := self._configs.get(key[0])) is not None and config.backend_type == "acp"
         }
         if not resident:
             return
-        for name in resident:
-            del self._backends[name]
-        await asyncio.gather(*[_safe_close(name, backend) for name, backend in resident.items()])
-        logger.info("runtime_pool_released_resident backends=%s", ",".join(resident))
+        for key in resident:
+            del self._backends[key]
+        await asyncio.gather(*[_safe_close(key[0], backend) for key, backend in resident.items()])
+        logger.info("runtime_pool_released_resident backends=%s", ",".join(sorted({name for name, _ in resident})))
 
     async def close_all(self) -> None:
         """Close all active backend connections, including in-flight oneshot turns."""
-        backends = [*self._backends.items(), *((n, b) for (n, _), b in self._oneshot_backends.items())]
+        backends = [(name, backend) for (name, _), backend in self._backends.items()]
+        shared = {id(backend) for _, backend in backends}
+        backends += [(name, backend) for (name, _), backend in self._running.items() if id(backend) not in shared]
         if backends:
             await asyncio.gather(*[_safe_close(n, b) for n, b in backends])
         self._backends.clear()

@@ -24,6 +24,7 @@ from tests.support.scripted_delegation import (
     CANCELLED,
     MESSAGE_END,
     STEPS,
+    WORKSPACE,
     ScriptedPool,
     event_types,
     playing,
@@ -210,7 +211,7 @@ async def test_closing_the_stream_closes_the_turn_at_once() -> None:
         finally:
             closed.set()
 
-    stream = stream_direct_delegate(ScriptedPool(turn), "claude", "do it", session_id="claude-chat-1")
+    stream = stream_direct_delegate(ScriptedPool(turn), "claude", "do it", session_id="claude-chat-1", workspace=WORKSPACE)
     await anext(stream)
     await anext(stream)
 
