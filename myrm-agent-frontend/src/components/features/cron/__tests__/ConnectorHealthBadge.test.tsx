@@ -80,10 +80,13 @@ describe('ConnectorHealthBadge', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('asks about the job it belongs to and shows nothing when there is nothing to judge', async () => {
+  it.each<[string, BadgeJob]>([
+    ['a job that delivers somewhere', JOB],
+    ['a job with no delivery set up', { ...JOB, delivery: undefined }],
+  ])('asks about the job it belongs to and shows nothing when there is nothing to judge (%s)', async (_case, job) => {
     healthMock.mockResolvedValue(null);
 
-    const { container } = render(<ConnectorHealthBadge job={JOB} />);
+    const { container } = render(<ConnectorHealthBadge job={job} />);
     await act(async () => undefined);
 
     expect(healthMock).toHaveBeenCalledExactlyOnceWith('job-1');

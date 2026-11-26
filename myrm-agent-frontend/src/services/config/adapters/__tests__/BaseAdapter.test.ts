@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  BACKEND_NOT_AVAILABLE_ERROR,
+  BaseConfigAdapter,
   RESPONSE_BODY_DEADLINE_MS,
   RESPONSE_HEADERS_DEADLINE_MS,
+  backendUnavailableSyncResult,
   fetchWithDeadlines,
+  isLostAnswer,
+  isTransportFailure,
 } from '@/services/config/adapters/BaseAdapter';
+import type { ConfigKey, ConfigRecord, SyncResult } from '@/services/config/types';
 import { answerWithBody, brokenBody, runOutBodyDeadline, signalOfRequest, stalledBody } from './bodyDeadlineKit';
 
 const URL_UNDER_TEST = 'http://test.local/config';
@@ -118,5 +124,86 @@ describe('fetchWithDeadlines', () => {
       await expect(readJson()).rejects.toBeInstanceOf(TypeError);
       expect(vi.getTimerCount()).toBe(0);
     });
+  });
+});
+
+describe('isTransportFailure', () => {
+  it.each([
+    ['a TypeError, which every browser throws for a failed request', new TypeError('Load failed')],
+    ['the abort of the headers deadline', new DOMException('The operation was aborted.', 'AbortError')],
+  ])('counts %s as a delivery failure', (_what, error) => {
+    expect(isTransportFailure(error)).toBe(true);
+  });
+
+  it.each([
+    ['an Error', new Error('programming error')],
+    ['a DOMException that is not an abort', new DOMException('denied', 'NotAllowedError')],
+    ['a SyntaxError', new SyntaxError('Unexpected token < in JSON')],
+    ['a value that is not an error', 'Failed to fetch'],
+  ])('does not count %s: that is a bug and stays visible', (_what, error) => {
+    expect(isTransportFailure(error)).toBe(false);
+  });
+});
+
+describe('isLostAnswer', () => {
+  it.each([
+    ['a stalled body, aborted at its deadline', new DOMException('The operation was aborted.', 'AbortError')],
+    ['a connection that broke while the body was read', new TypeError('network error')],
+  ])('counts %s as an answer that never made it', (_what, error) => {
+    expect(isLostAnswer(error)).toBe(true);
+  });
+
+  it('does not count a body that arrived but is not JSON: that is a server defect', () => {
+    expect(isLostAnswer(new SyntaxError('Unexpected token < in JSON'))).toBe(false);
+  });
+});
+
+describe('backendUnavailableSyncResult', () => {
+  it('is the failed result of a write that reached no backend, built fresh on every call', () => {
+    const first = backendUnavailableSyncResult();
+
+    expect(first).toEqual({
+      success: false,
+      conflicts: [],
+      newVersions: new Map(),
+      error: BACKEND_NOT_AVAILABLE_ERROR,
+    });
+    expect(backendUnavailableSyncResult().conflicts).not.toBe(first.conflicts);
+    expect(backendUnavailableSyncResult().newVersions).not.toBe(first.newVersions);
+  });
+});
+
+class StubAdapter extends BaseConfigAdapter {
+  async getAll(): Promise<Map<ConfigKey, ConfigRecord>> {
+    return new Map();
+  }
+
+  async get(): Promise<null> {
+    return null;
+  }
+
+  async sync(): Promise<SyncResult> {
+    return backendUnavailableSyncResult();
+  }
+}
+
+describe('BaseConfigAdapter device id', () => {
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it('is generated once per browser, stored, and reused by the next adapter', () => {
+    const id = new StubAdapter().getDeviceId();
+
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(localStorage.getItem('config-device-id')).toBe(id);
+    expect(new StubAdapter().getDeviceId()).toBe(id);
+  });
+
+  it('is "server" when there is no window to keep an id in', () => {
+    vi.stubGlobal('window', undefined);
+
+    expect(new StubAdapter().getDeviceId()).toBe('server');
   });
 });

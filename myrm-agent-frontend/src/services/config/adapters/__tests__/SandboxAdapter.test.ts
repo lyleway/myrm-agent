@@ -40,6 +40,23 @@ const BACKEND_NOT_AVAILABLE = {
   error: 'Backend not available',
 };
 
+/** A row as the API answers it, and the record the adapter hands the sync layer for it. */
+const API_ROW = {
+  key: 'chatSettings',
+  value: { sample: true },
+  version: '2000_1',
+  updatedAt: '2026-11-26T00:00:00Z',
+  deviceId: 'other-device',
+  encrypted: false,
+};
+
+const API_ROW_RECORD = {
+  key: 'chatSettings',
+  value: { sample: true },
+  meta: { version: '2000_1', updatedAt: '2026-11-26T00:00:00Z', deviceId: 'other-device' },
+  encrypted: false,
+};
+
 describe('SandboxConfigAdapter', () => {
   const originalFetch = globalThis.fetch;
   let adapter: SandboxConfigAdapter;
@@ -59,6 +76,22 @@ describe('SandboxConfigAdapter', () => {
       vi.mocked(fetch).mockResolvedValueOnce(reply(404));
 
       await expect(adapter.get('chatSettings')).resolves.toBeNull();
+    });
+
+    it('returns the row with its version, writer and encryption flag, asked for with the session token', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(200, API_ROW));
+
+      await expect(adapter.get('chatSettings')).resolves.toEqual(API_ROW_RECORD);
+      expect(fetch).toHaveBeenCalledWith(
+        'http://test.local/config/chatSettings',
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-token' }) }),
+      );
+    });
+
+    it('hands on a row the server could not decrypt as unreadable instead of dropping it', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(200, { ...API_ROW, encrypted: true, unreadable: true }));
+
+      await expect(adapter.get('chatSettings')).resolves.toMatchObject({ encrypted: true, unreadable: true });
     });
 
     it.each([401, 500, 502, 503])('throws on HTTP %i: the state of the row is unknown', async (status) => {
@@ -81,7 +114,66 @@ describe('SandboxConfigAdapter', () => {
     });
   });
 
+  describe('getAll', () => {
+    it('asks for every row when no keys are given and returns the rows by key', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(200, { configs: { chatSettings: API_ROW } }));
+
+      await expect(adapter.getAll()).resolves.toEqual(new Map([['chatSettings', API_ROW_RECORD]]));
+      expect(fetch).toHaveBeenCalledWith('http://test.local/config', expect.anything());
+    });
+
+    it('asks only for the given keys', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(200, { configs: {} }));
+
+      await adapter.getAll(['chatSettings', 'personalSettings']);
+
+      expect(fetch).toHaveBeenCalledWith(
+        'http://test.local/config?keys=chatSettings%2CpersonalSettings',
+        expect.anything(),
+      );
+    });
+
+    it('answers an empty set when the server does not know the session (HTTP 401)', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(401));
+
+      await expect(adapter.getAll()).resolves.toEqual(new Map());
+    });
+
+    it('answers an empty set when the session has no token, without sending anything', async () => {
+      vi.mocked(getAuthToken).mockReturnValue(null);
+
+      await expect(adapter.getAll()).resolves.toEqual(new Map());
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it.each([403, 500, 503])('throws on HTTP %i: the rows are unknown', async (status) => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(status));
+
+      await expect(adapter.getAll()).rejects.toThrow(new ConfigSyncError(`Failed to get all configs: HTTP ${status}`));
+    });
+  });
+
   describe('sync', () => {
+    it('sends nothing for an empty change list', async () => {
+      await expect(adapter.sync([])).resolves.toEqual({ success: true, conflicts: [], newVersions: new Map() });
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('posts the changes with the device id and the session token', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce(reply(200, { success: true, conflicts: [], newVersions: {} }));
+
+      await adapter.sync(CHANGES);
+
+      expect(fetch).toHaveBeenCalledWith(
+        'http://test.local/config/sync',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ changes: CHANGES, deviceId: adapter.getDeviceId() }),
+        }),
+      );
+    });
+
     it.each(['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.'])(
       'reports Backend not available when the browser fails the request (%s)',
       async (message) => {

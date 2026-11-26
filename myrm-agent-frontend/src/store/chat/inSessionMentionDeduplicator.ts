@@ -3,12 +3,12 @@
  * - store/chat/types::MentionReference (POS: Chat mention reference models.)
  *
  * [OUTPUT]
- * - inSessionMentionDeduplicator: session-scoped tracker and deduplicator for @-mention injected files,
- *   preventing redundant full-text token bloat across turns.
+ * - inSessionMentionDeduplicator: in-memory registry, per chat, of the reference paths already put into a request;
+ *   splits a turn's references into fresh and repeated ones.
  *
  * [POS]
- * In-session mention lifecycle guardian ensuring files injected in earlier turns
- * are not redundantly packed into subsequent prompts.
+ * Per-chat record of the reference paths already put into a request. The request builder drops the inline content
+ * of repeated references; the mention popover flags files already in context.
  */
 
 import type { MentionReference } from '@/store/chat/types';
@@ -85,8 +85,8 @@ class InSessionMentionDeduplicator {
 
   /**
    * Partitions mention references into:
-   * - fresh: files not yet injected in the current session (eligible for direct full content injection)
-   * - redundant: files already present in session context (skipped from re-injecting full content, only citation kept)
+   * - redundant: file-like references (see `isFileLike`) whose path is already registered for the chat
+   * - fresh: every other reference, including all non-file references
    */
   public partitionMentions(
     chatId: string,
