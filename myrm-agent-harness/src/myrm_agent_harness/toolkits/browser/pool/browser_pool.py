@@ -33,6 +33,7 @@ Global browser resource pool. Manages Browser/Context/Page three-layer resources
 7. Three-layer automatic crash recovery (L1: browser disconnect event, L2: page crash event, L3: lifecycle fallback);
    an acquisition that fails on an exited Playwright driver evicts the browsers it cut off and retries once
 8. Semaphore safety net (prevents semaphore leaks or double releases on crash and on a cancelled or failed acquisition)
+   and a closed state: after ``shutdown`` the pool launches nothing and hands out no page (``BrowserPoolClosedError``)
 9. Connection-level network isolation: with an ``egress_guard`` the contexts of browsers the pool launched connect only through
    it, and the browser may not send UDP outside a proxy (WebRTC); see ``egress_guard.py``
 
@@ -206,6 +207,7 @@ class GlobalBrowserPool(
             ignore_https_errors=self._config.ignore_https_errors,
         )
         self._lifecycle_task: asyncio.Task[None] | None = None
+        self._closed = False
 
         logger.info(
             f"GlobalBrowserPool initialized — max_concurrent_pages={self._config.max_concurrent_pages}, "
@@ -259,7 +261,10 @@ class GlobalBrowserPool(
             browsers: Number of Browsers to pre-create
             pages_per_context: Number of Pages to pre-create per Context
 
+        Raises:
+            BrowserPoolClosedError: The pool was shut down.
         """
+        self._raise_if_closed()
         if browsers <= 0:
             logger.info("GlobalBrowserPool warmup skipped (browsers=%d)", browsers)
             return

@@ -16,8 +16,10 @@
 - ExtensionTab: data class for tabs exposed by extension
 - ExtensionStatus: real-time extension connection status
 - ExtensionBridgeNotAvailableError: exception when extension is not connected
+- BrowserPoolClosedError: work asked of a pool that was shut down (re-export)
 - get_global_browser_pool: get global browser pool singleton
-- reset_global_browser_pool_for_tests: shut down and clear pool singleton (test teardown)
+- peek_global_browser_pool: global pool if one exists, never creating it
+- shutdown_global_browser_pool: shut down and forget the global pool
 
 [POS]
 Global browser resource pool. Manages Browser/Context/Page three-layer resources, implementing zero-copy page reuse,
@@ -29,7 +31,7 @@ stack, which importing the pool must not pay for.
 from importlib import import_module as _import_module
 from typing import TYPE_CHECKING
 
-from ..exceptions import BrowserLaunchError, BrowserPoolError
+from ..exceptions import BrowserLaunchError, BrowserPoolClosedError, BrowserPoolError
 from .browser_launcher import BrowserInstance, BrowserLauncher
 from .browser_pool import (
     ContextType,
@@ -71,7 +73,7 @@ from .extension_bridge import (
 from .humanize_config import HumanizeConfig, HumanizeMode
 from .page_pool import PagePool
 from .proxy import ProxyConfig, ProxyPool, RoundRobinProxyPool
-from .singleton import get_global_browser_pool, reset_global_browser_pool_for_tests
+from .singleton import get_global_browser_pool, peek_global_browser_pool, shutdown_global_browser_pool
 
 if TYPE_CHECKING:
     from .egress_guard import EgressGuard, EgressGuardError, create_egress_guard
@@ -88,6 +90,7 @@ __all__ = [
     "BrowserLaunchError",
     "BrowserLauncher",
     "BrowserMode",
+    "BrowserPoolClosedError",
     "BrowserPoolConfig",
     "BrowserPoolError",
     "ChromePromptGuard",
@@ -123,7 +126,8 @@ __all__ = [
     "create_egress_guard",
     "get_global_browser_pool",
     "is_accessibility_trusted",
-    "reset_global_browser_pool_for_tests",
+    "peek_global_browser_pool",
+    "shutdown_global_browser_pool",
     "watch_chrome_remote_debugging_prompt",
 ]
 

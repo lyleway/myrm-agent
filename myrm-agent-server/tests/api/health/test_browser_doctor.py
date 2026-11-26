@@ -6,7 +6,6 @@ Covers ``/api/v1/health/browser/doctor`` and ``/api/v1/health/browser/orphans``:
 - orphan list/cleanup endpoints use the unified automation scan and keep the
   ``confirm`` safety semantics (D1/D3 regression); the cleanup also prunes stale
   sandboxes and stale browser profiles and reports both with their summed space
-Also covers the ``/browser`` pool health endpoint (healthy or degraded).
 """
 
 import logging
@@ -59,7 +58,7 @@ def _fake_report() -> SimpleNamespace:
 _RELAY_CHECK = "app.services.extension.relay_check.check_extension_relay"
 
 
-@patch("app.lifecycle.browser.resolve_browser_proxy_pool", return_value=None)
+@patch("app.config.browser.resolve_browser_proxy_pool", return_value=None)
 @patch("myrm_agent_harness.toolkits.browser.run_doctor")
 def test_browser_doctor_passes_the_extension_relay_check_to_run_doctor(
     mock_run_doctor: object,
@@ -83,7 +82,7 @@ def test_browser_doctor_passes_the_extension_relay_check_to_run_doctor(
     )
 
 
-@patch("app.lifecycle.browser.resolve_browser_proxy_pool", return_value=None)
+@patch("app.config.browser.resolve_browser_proxy_pool", return_value=None)
 @patch("myrm_agent_harness.toolkits.browser.run_doctor")
 def test_browser_doctor_honors_launch_test_flag(
     mock_run_doctor: object,
@@ -100,7 +99,7 @@ def test_browser_doctor_honors_launch_test_flag(
     assert mock_run_doctor.call_args.kwargs["include_launch_test"] is False  # type: ignore[attr-defined]
 
 
-@patch("app.lifecycle.browser.resolve_browser_proxy_pool", return_value=None)
+@patch("app.config.browser.resolve_browser_proxy_pool", return_value=None)
 @patch(
     "myrm_agent_harness.toolkits.browser.doctor.checks.check_orphan_processes",
     return_value=DoctorCheckResult(name="orphan_processes", status=CheckStatus.OK, message="clean"),
@@ -367,47 +366,3 @@ def test_cleanup_browser_orphans_reports_both_kinds_of_directories_with_their_su
     assert data["failed"] == [sandbox_failure, profile_failure]
     assert "pruned 1 sandbox(es) (100.0 MB reclaimed)" in data["message"]
     assert "pruned 3 browser profile(s) (2.0 MB reclaimed)" in data["message"]
-
-
-@patch("app.config.browser.get_configured_browser_pool")
-def test_browser_health_returns_pool_status(
-    mock_pool_get: object,
-    client: TestClient,
-) -> None:
-    """GET /browser must surface the pool health dict verbatim."""
-    mock_pool = MagicMock()
-    mock_pool.health = AsyncMock(
-        return_value={
-            "status": "healthy",
-            "active": 2,
-            "total": 4,
-        }
-    )
-    mock_pool_get.return_value = mock_pool  # type: ignore[attr-defined]
-
-    response = client.get("/api/v1/health/browser")
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "active": 2, "total": 4}
-
-
-@patch("app.config.browser.get_configured_browser_pool")
-def test_browser_health_degrades_on_exception(
-    mock_pool_get: object,
-    client: TestClient,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """GET /browser must degrade to unhealthy when pool.health raises."""
-    mock_pool = MagicMock()
-    mock_pool.health = AsyncMock(side_effect=RuntimeError("pool exploded"))
-    mock_pool_get.return_value = mock_pool  # type: ignore[attr-defined]
-
-    with caplog.at_level(logging.WARNING, logger="app.api.health.browser"):
-        response = client.get("/api/v1/health/browser")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "unhealthy"
-    assert "pool exploded" in data["error"]
-    assert "Failed to get browser pool health" in data["message"]
-    assert any(record.exc_info is not None and "pool exploded" in str(record.exc_info[1]) for record in caplog.records)

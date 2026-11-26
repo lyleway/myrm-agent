@@ -8,8 +8,8 @@
 - _release_second_brain_cross_process_lock: _release_second_brain_cross_process_lock
 - _validate_config_value: _validate_config_value
 - _require_local_deploy_mode: _require_local_deploy_mode
-- _hot_reload_cloud_browser: Hot-reload the browser pool's remote endpoint after cloud browser config changes.
-- _hot_reload_browser_proxy: Hot-reload the browser pool's proxy pool after browser proxy config changes.
+- _hot_reload_cloud_browser: Hot-reload the running browser pool's remote endpoint after cloud browser config changes.
+- _hot_reload_browser_proxy: Hot-reload the running browser pool's proxy pool after browser proxy config changes.
 
 [POS]
 配置 API 的域子模块；由 app/api/config/router.py 按原顺序挂载。
@@ -128,6 +128,7 @@ def _validate_config_value(config_key: str, value: dict[str, object], *, operati
         ) from exc
     return validated_data.model_dump(exclude_unset=False)
 
+
 def _require_local_deploy_mode() -> None:
     from app.config.deploy_mode import is_local_mode
 
@@ -141,32 +142,41 @@ def _require_local_deploy_mode() -> None:
 
 
 async def _hot_reload_cloud_browser(value: dict[str, object]) -> None:
-    """Hot-reload the browser pool's remote endpoint after cloud browser config changes."""
+    """Hot-reload the browser pool's remote endpoint after cloud browser config changes.
+
+    A pool that does not exist yet needs no reload: it reads the saved config when it is built.
+    """
     try:
-        from app.config.browser import get_configured_browser_pool
+        from app.config.browser import running_browser_pool
         from app.schemas.config import BrowserCloudProviderConfigValue
 
+        pool = await running_browser_pool()
+        if pool is None:
+            return
         config = BrowserCloudProviderConfigValue.model_validate(value)
-        endpoint = config.resolve_ws_endpoint()
-        pool = get_configured_browser_pool()
-        await pool.update_remote_endpoint(endpoint)
+        await pool.update_remote_endpoint(config.resolve_ws_endpoint())
     except Exception:
         logger.debug("Hot-reload cloud browser endpoint failed (non-critical)", exc_info=True)
 
 
 async def _hot_reload_browser_proxy(value: dict[str, object]) -> None:
-    """Hot-reload the browser pool's proxy pool after browser proxy config changes."""
+    """Hot-reload the browser pool's proxy pool after browser proxy config changes.
+
+    A pool that does not exist yet needs no reload: it reads the saved config when it is built.
+    """
     try:
         from myrm_agent_harness.toolkits.browser.pool.proxy import RoundRobinProxyPool
 
-        from app.config.browser import get_configured_browser_pool
+        from app.config.browser import running_browser_pool
         from app.schemas.config import BrowserProxyConfigValue
 
+        pool = await running_browser_pool()
+        if pool is None:
+            return
         config = BrowserProxyConfigValue.model_validate(value)
         proxy_pool = None
         if config.enabled and config.proxies:
             proxy_pool = RoundRobinProxyPool.from_urls(config.proxies)
-        pool = get_configured_browser_pool()
         await pool.update_proxy_pool(proxy_pool)
     except Exception:
         logger.debug("Hot-reload browser proxy failed (non-critical)", exc_info=True)

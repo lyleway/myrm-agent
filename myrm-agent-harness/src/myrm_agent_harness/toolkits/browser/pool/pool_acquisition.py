@@ -18,7 +18,10 @@
 Hands a page out and takes it back. An acquisition takes one global permit, schedules a browser, creates the context
 and page pool on first use (outside the lock, inserted under it) and counts the page as in use. An acquisition that
 fails because the Playwright driver exited is retried once, after the browsers the driver cut off are evicted.
-A release returns the permit unless a crash callback already did (semaphore safety net).
+A release returns the permit unless a crash callback already did (semaphore safety net). A closed pool (shut down)
+refuses an acquisition with `BrowserPoolClosedError`: before it waits for a permit, which a closed pool never gets
+back, and again under the lock, which `shutdown` holds while it closes the browsers, so no acquisition launches a
+browser once the browsers were closed; the retry after a driver exit ends the same way instead of launching a replacement.
 """
 
 from __future__ import annotations
@@ -59,7 +62,7 @@ class PoolAcquisitionMixin:
     - _crash_handled_pages: set[int]
     - _total_acquires / _total_releases / _current_pages_in_use: int
     - _make_page_pool, _get_least_loaded_browser, _register_page_crash_handler, _ensure_lifecycle_loop,
-      _evict_after_driver_exit, _guards_egress (provided by GlobalBrowserPool and its other mixins)
+      _evict_after_driver_exit, _guards_egress, _raise_if_closed (provided by GlobalBrowserPool and its other mixins)
     """
 
     _browsers: list[BrowserInstance]
@@ -86,6 +89,8 @@ class PoolAcquisitionMixin:
         def _register_page_crash_handler(self, page: Page, inst: BrowserInstance) -> None: ...
 
         def _ensure_lifecycle_loop(self) -> None: ...
+
+        def _raise_if_closed(self) -> None: ...
 
         def _guards_egress(self, browser_inst: BrowserInstance) -> bool: ...
 
@@ -144,12 +149,17 @@ class PoolAcquisitionMixin:
         launch_mode_preference: LaunchMode | None,
     ) -> tuple[Page, str]:
         """One acquisition attempt: ``acquire_page`` without the retry after a driver exit."""
+        # Fail fast: a closed pool never gets its permits back, so waiting for one could block until the timeout.
+        self._raise_if_closed()
         engine = engine_preference or self._config.engine
         async with PageAcquisition(self._global_semaphore, self._crash_handled_pages) as claim:
             await self._memory_guard.check_memory()
 
             # 1. Under lock: read state, update counters
             async with self._lock:
+                # `shutdown` holds this lock while it closes the browsers: an acquisition that waited for the lock
+                # sees the pool closed here instead of launching a browser that nothing would close.
+                self._raise_if_closed()
                 self._total_acquires += 1
                 browser_inst = await self._get_least_loaded_browser(engine, launch_mode_preference)
                 ctx_key = context_key or f"{context_type.value}_{id(self)}"

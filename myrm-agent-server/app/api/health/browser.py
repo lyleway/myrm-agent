@@ -11,11 +11,11 @@
 - POST /api/v1/health/browser/test-proxy-connection - 测试浏览器代理连接
 
 [INPUT]
-- app.config.browser::get_configured_browser_pool (POS: 浏览器池配置)
+- myrm_agent_harness.toolkits.browser.pool::peek_global_browser_pool (POS: 只读取全局浏览器池，绝不为了观察而创建)
 - myrm_agent_harness.toolkits.browser::run_doctor (POS: 浏览器诊断)
 - app.services.extension.relay_check::check_extension_relay (POS: 扩展 CDP relay 诊断，作为 run_doctor 的额外检查)
 - myrm_agent_harness.toolkits.browser::cleanup_orphan_processes / cleanup_stale_automation_sandboxes / cleanup_stale_browser_profiles (POS: 浏览器孤儿进程、沙箱与临时 profile 目录清理)
-- app.lifecycle.browser::resolve_browser_proxy_pool (POS: 代理池解析)
+- app.config.browser::resolve_browser_proxy_pool (POS: 代理池解析)
 
 [OUTPUT]
 - browser_health / browser_doctor / 孤儿进程管理 / 连通性测试端点
@@ -39,13 +39,24 @@ router = APIRouter(tags=["health"])
 async def browser_health() -> dict[str, object]:
     """Browser runtime health check.
 
-    Returns:
-        Health status with "healthy" | "degraded" | "unhealthy"
-    """
-    from app.config.browser import get_configured_browser_pool
+    Only looks at the running pool: a read-only probe must not create the pool it reports on.
 
+    Returns:
+        Health status with "healthy" | "degraded" | "unhealthy". A pool that has not been built reports what an
+        idle pool reports: healthy, with no browsers.
+    """
+    from myrm_agent_harness.toolkits.browser.pool import peek_global_browser_pool
+
+    pool = peek_global_browser_pool()
+    if pool is None:
+        return {
+            "status": "healthy",
+            "browsers_alive": 0,
+            "browsers_total": 0,
+            "message": "Browser pool has not started",
+        }
     try:
-        health_status = await get_configured_browser_pool().health()
+        health_status = await pool.health()
         return {str(k): v for k, v in health_status.items()}
     except Exception as exc:
         logger.warning("Failed to get browser pool health", exc_info=True)
@@ -70,7 +81,7 @@ async def browser_doctor(
     """
     from myrm_agent_harness.toolkits.browser import run_doctor
 
-    from app.lifecycle.browser import resolve_browser_proxy_pool
+    from app.config.browser import resolve_browser_proxy_pool
     from app.services.extension.relay_check import check_extension_relay
 
     proxy_pool = await resolve_browser_proxy_pool()

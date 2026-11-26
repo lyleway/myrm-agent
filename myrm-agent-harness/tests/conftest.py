@@ -138,14 +138,15 @@ def _needs_browser_singleton_reset(request: pytest.FixtureRequest) -> bool:
     resources (a real fetch through ``web_fetch``) must reset in its own module's
     event loop: Playwright connections die with that loop, so a later shutdown from
     another loop waits forever. A pool created at import and never used holds no
-    resources and is left alone.
+    resources and is left alone; a pool a test shut down is closed for good and would
+    refuse the next test's work, so it is reset too.
     """
     if Path(request.fspath).resolve().is_relative_to(_BROWSER_TEST_ROOT):
         return True
-    from myrm_agent_harness.toolkits.browser.pool import singleton
+    from myrm_agent_harness.toolkits.browser.pool import peek_global_browser_pool
 
-    pool = singleton._global_pool
-    return pool is not None and bool(pool._browsers or pool._launchers)
+    pool = peek_global_browser_pool()
+    return pool is not None and bool(pool._browsers or pool._launchers or pool._closed)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -407,10 +408,10 @@ async def _reset_global_browser_pool_singleton(request: pytest.FixtureRequest) -
         return
 
     try:
-        from myrm_agent_harness.toolkits.browser.pool import reset_global_browser_pool_for_tests
+        from myrm_agent_harness.toolkits.browser.pool import shutdown_global_browser_pool
 
         with suppress(Exception):
-            await reset_global_browser_pool_for_tests()
+            await shutdown_global_browser_pool()
     except ImportError:
         pass
 

@@ -23,7 +23,7 @@ Reuses the existing ``ManagedBrowser`` (Patchright) infrastructure.
 - SessionEntry: immutable session record (re-export)
 - SessionSummary: lightweight session metadata without sensitive data (re-export)
 - EmulationConfig: type-safe browser environment emulation config (re-export)
-- BrowserError + 13-subclass exception hierarchy (root + 7 subclasses re-exported, including EngineUnavailableError; ClickTargetUnreachableError and the AriaError family stay internal; the two user-takeover errors live in session/takeover/)
+- BrowserError + 13-subclass exception hierarchy (root + 8 subclasses re-exported, including EngineUnavailableError and BrowserPoolClosedError; ClickTargetUnreachableError and the AriaError family stay internal; the two user-takeover errors live in session/takeover/)
 - BrowserObservability: browser observability manager (re-export)
 - RecordingConfig: recording configuration (re-export)
 - ActionCaptureEngine: browser action capture engine (re-export)
@@ -52,6 +52,7 @@ from .exceptions import (
     BrowserError,
     BrowserLaunchError,
     BrowserNavigationError,
+    BrowserPoolClosedError,
     BrowserPoolError,
     BrowserSessionError,
     BrowserToolError,
@@ -104,6 +105,7 @@ __all__ = [
     "BrowserLaunchError",
     "BrowserNavigationError",
     "BrowserObservability",
+    "BrowserPoolClosedError",
     "BrowserPoolError",
     "BrowserSession",
     "BrowserSessionError",

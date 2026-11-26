@@ -47,7 +47,7 @@ class BrowserToolsMixin(ToolSetupBaseMixin):
             )
             from myrm_agent_harness.toolkits.browser.pool import ContextType
 
-            from app.config.browser import get_configured_browser_pool
+            from app.config.browser import ensure_browser_pool
             from app.config.deploy_mode import is_local_mode
             from app.core.security.browser_vault import (
                 get_agent_session_vault,
@@ -55,7 +55,7 @@ class BrowserToolsMixin(ToolSetupBaseMixin):
             )
             from app.platform_utils.workspace_root import get_workspace_root
 
-            pool = get_configured_browser_pool()
+            pool = await ensure_browser_pool()
             if self.agent_id and self.agent_id != "default":
                 self._session_vault = get_agent_session_vault(self.agent_id)
             else:
