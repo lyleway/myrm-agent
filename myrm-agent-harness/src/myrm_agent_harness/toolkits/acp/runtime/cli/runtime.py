@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.security.redact import command_preview
-from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
+from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,

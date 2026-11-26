@@ -14,13 +14,16 @@ resident ACP processes of an idle pool while CLI backends keep their resume stat
 [INPUT]
 - myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime (POS: runtime backend implementations)
+- myrm_agent_harness.toolkits.acp.auth._profiles::effective_transport (POS: Authentication profile registry; the transport a known agent's contract names)
+- myrm_agent_harness.core.security.redact::command_preview (POS: masked, cut command for a log line)
 
 [OUTPUT]
 - RuntimePool: unified runtime instance pool managing multiple backend types
 
 [POS]
 Runtime pool management layer. Provides multi-backend unified management, concurrency control,
-and config-driven registration — the central dispatcher of the runtime system.
+and config-driven registration — the central dispatcher of the runtime system. A known agent runs over the transport its
+contract names, whatever the registered config says.
 """
 
 from __future__ import annotations
@@ -29,8 +32,11 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
+from dataclasses import replace
 from uuid import uuid4
 
+from myrm_agent_harness.core.security.redact import command_preview
+from myrm_agent_harness.toolkits.acp.auth._profiles import effective_transport
 from myrm_agent_harness.toolkits.acp.types import (
     CliSessionStore,
     McpServerConfig,
@@ -86,8 +92,8 @@ class RuntimePool:
     Usage::
 
         pool = RuntimePool(max_concurrent=4)
-        pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
-        response = await pool.prompt("claude", "Fix the bug in main.py", workspace="/work/repo")
+        pool.register("reviewer", RuntimeConfig(backend_type="acp", command="my-acp-agent"))
+        response = await pool.prompt("reviewer", "Fix the bug in main.py", workspace="/work/repo")
     """
 
     def __init__(
@@ -111,7 +117,21 @@ class RuntimePool:
         return list(self._configs)
 
     def register(self, name: str, config: RuntimeConfig) -> None:
-        """Register a backend configuration. Creates the backend lazily on first use."""
+        """Register a backend configuration. Creates the backend lazily on first use.
+
+        A known agent is driven over the transport its contract names, whatever ``config`` says: a config cannot make
+        an agent speak a protocol it does not. Any other command keeps the transport it was configured with.
+        """
+        transport = effective_transport(config.command, config.backend_type)
+        if transport != config.backend_type:
+            logger.info(
+                "pool_transport_by_contract name=%s command=%s configured=%s using=%s",
+                name,
+                command_preview(config.command, 120),
+                config.backend_type,
+                transport,
+            )
+            config = replace(config, backend_type=transport)
         self._configs[name] = config
 
     def get_config(self, name: str) -> RuntimeConfig | None:

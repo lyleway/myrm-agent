@@ -5,7 +5,8 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
-- toolkits.acp.auth._profiles::without_approval_flags (POS: Authentication profile registry; sole owner of per-CLI launch and permission arguments.)
+- toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
+- toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
@@ -17,8 +18,11 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 [POS]
 ACP protocol runtime backend. Sends `session/close` only when the agent advertises it (ACP capability
 negotiation) and bounds it, so a silent agent cannot skip the transport teardown that terminates its process.
-The host's policy answers every permission request the agent makes, so a known agent is started without the flags that let it skip
-asking (``--yolo``, ``--approval-mode``); its sandbox flags stay.
+The host's policy answers every permission request the agent makes, so a known agent is started with its contract's
+entry args (the flag that makes it ask the host included) and without the configured flags that let it skip asking
+(``--yolo``, ``--approval-mode``). In ``safe`` mode a session that the agent reports in a mode that never asks is put
+back in the mode that asks, or the turn is refused: the agent's own report is the only authority on what it will do.
+A refused login (JSON-RPC ``auth_required``) ends the turn as ``AUTH_FAILED`` with the agent's own words.
 A silent agent (one long tool call) is reported as still working at a fixed interval, as ``CliRuntime`` does, and a
 missing ACP SDK (the optional ``acp`` extra) ends the turn with a ``BACKEND_NOT_FOUND`` error that says how to install it.
 
@@ -37,9 +41,10 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import without_approval_flags
+from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -67,12 +72,16 @@ if TYPE_CHECKING:
     from asyncio.subprocess import Process
 
     from acp import ClientSideConnection
+    from acp.schema import NewSessionResponse
 
 logger = logging.getLogger(__name__)
 
 # `session/close` is advisory. Bounded so an agent that advertises it but never answers still reaches the
 # transport teardown (SDK-bounded terminate/kill) that actually stops the process.
 _CLOSE_SESSION_TIMEOUT_SECONDS = 4.0
+
+# JSON-RPC error code of ACP's ``auth_required``: how Gemini and Qwen answer ``session/new`` without a login.
+_AUTH_REQUIRED_CODE = -32000
 
 
 class _AcpSdkMissingError(Exception):
@@ -308,13 +317,9 @@ class AcpRuntime(BaseRuntime):
 
         # The host's policy answers this agent's permission requests; a flag that makes the agent skip asking
         # (``--yolo``) would walk past it, whatever mode the host selected.
-        args = without_approval_flags(command, self._config.args)
-        if len(args) != len(self._config.args):
-            logger.warning(
-                "acp_approval_flags_dropped name=%s flags=%s",
-                self._name,
-                [arg for arg in self._config.args if arg.startswith("-") and arg not in args],
-            )
+        launch = resolve_acp_args(command, self._config.args)
+        if launch.dropped:
+            logger.warning("acp_approval_flags_dropped name=%s flags=%s", self._name, launch.dropped)
 
         # AcpCallbackHandler implements the acp.Client callbacks used here
         # (permission/session/file); terminal & elicitation callbacks are never
@@ -322,7 +327,7 @@ class AcpRuntime(BaseRuntime):
         ctx = spawn_agent_process(
             self._handler,  # type: ignore[arg-type]
             command,
-            *args,
+            *launch.args,
             env=safe_env,
             cwd=self._workspace,
         )
@@ -358,11 +363,51 @@ class AcpRuntime(BaseRuntime):
             response = await self._conn.new_session(cwd=self._workspace, mcp_servers=acp_mcp)
         else:
             response = await self._conn.new_session(cwd=self._workspace)
+        await self._require_ask_mode(response)
         session_id = response.session_id
         self._session_id = session_id
         if self._handler is not None:
             self._handler.session_id = session_id
         logger.info("acp_runtime_session_created name=%s session_id=%s", self._name, session_id)
+
+    async def _require_ask_mode(self, response: NewSessionResponse) -> None:
+        """In ``safe`` mode, put a session that never asks back in the mode that asks, or refuse to run it.
+
+        The launch args ask for the mode in which the agent puts its actions to the host, but the agent's own settings
+        or a trust rule can still leave the session in one that acts without asking, and the agent's own report is
+        the only authority on what it will do.
+        """
+        profile = command_profile(self._config.command)
+        expected = profile.acp_ask_mode if profile is not None else None
+        modes = response.modes
+        if self._config.permission_mode != "safe" or expected is None or modes is None:
+            return
+        if modes.current_mode_id == expected:
+            return
+        problem = (
+            f"Agent '{self._name}' reports session mode '{modes.current_mode_id}', in which it need not ask the host"
+        )
+        if self._conn is None or expected not in {mode.id for mode in modes.available_modes}:
+            await self._refuse_session(f"{problem}, and offers no mode '{expected}' to leave it for")
+        try:
+            await self._conn.set_session_mode(session_id=response.session_id, mode_id=expected)
+        except Exception as exc:
+            await self._refuse_session(f"{problem}, and could not be put in '{expected}': {exc}")
+        logger.warning("acp_session_mode_reset name=%s from=%s to=%s", self._name, modes.current_mode_id, expected)
+
+    async def _refuse_session(self, reason: str) -> NoReturn:
+        """End the agent whose session cannot be run safely, so no later turn finds it half set up, and fail the turn."""
+        await self._do_close()
+        raise RuntimeError(reason)
+
+    def _classify_failure(self, exc: Exception) -> AcpError | None:
+        try:
+            from acp import RequestError
+        except ImportError:
+            return None
+        if isinstance(exc, RequestError) and exc.code == _AUTH_REQUIRED_CODE:
+            return AcpError(AcpErrorCode.AUTH_FAILED, str(exc))
+        return None
 
 
 def _mcp_configs_to_acp_stdio(

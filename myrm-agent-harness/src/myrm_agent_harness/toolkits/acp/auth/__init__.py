@@ -9,14 +9,14 @@ mechanisms, all GUI/SaaS-driven by the business layer:
 - credential import — the universal fallback: persist a credential captured elsewhere
 
 [INPUT]
-- toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, known_backends, profile_for, cli_launch_args (POS: Authentication profile registry.)
+- toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, Transport, cli_launch_args, effective_transport, known_backends, profile_for (POS: Authentication profile registry.)
 - toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.login_session::AuthEvent, AuthEventType, CliLoginSession (POS: CLI login session management.)
 - toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI agent starts from.)
 - toolkits.acp.auth.login_state::LoginReport, probe_login, resolve_login_state (POS: Login state a CLI reports about itself.)
 
 [OUTPUT]
-- LoginStrategy, AuthProfile, profile_for, known_backends, cli_launch_args
+- LoginStrategy, AuthProfile, Transport, profile_for, known_backends, cli_launch_args, effective_transport
 - AuthStatus, CredentialState, CredentialStorageDisabledError, CredentialStore
 - AuthEventType, AuthEvent, CliLoginSession
 - cli_base_env
@@ -31,7 +31,9 @@ from __future__ import annotations
 from myrm_agent_harness.toolkits.acp.auth._profiles import (
     AuthProfile,
     LoginStrategy,
+    Transport,
     cli_launch_args,
+    effective_transport,
     known_backends,
     profile_for,
 )
@@ -60,8 +62,10 @@ __all__ = [
     "CredentialStore",
     "LoginReport",
     "LoginStrategy",
+    "Transport",
     "cli_base_env",
     "cli_launch_args",
+    "effective_transport",
     "known_backends",
     "probe_login",
     "profile_for",

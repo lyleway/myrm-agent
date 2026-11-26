@@ -1,6 +1,6 @@
 """Real integration tests for ACP module with live CLI backends.
 
-These tests spawn actual CLI processes (Claude Code, Codex, Gemini)
+These tests spawn actual agent processes (Claude Code and Codex per turn, Gemini over ACP)
 and verify end-to-end event parsing, session management, and pool routing.
 
 Requirements:
@@ -26,6 +26,7 @@ from myrm_agent_harness.toolkits.acp.acp_agent_tools import (
     create_invoke_acp_agent_tool,
 )
 from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
@@ -245,35 +246,19 @@ class TestCodexCliReal:
             assert isinstance(event.data, dict)
 
 
-# ── Gemini CLI ──────────────────────────────────────────────────────────
+# ── Gemini over ACP ─────────────────────────────────────────────────────
 
 
 @skip_no_gemini
-class TestGeminiCliReal:
-    """Live tests against Gemini CLI.
+class TestGeminiAcpReal:
+    """Live tests against Gemini, which the runtime drives over ACP (``gemini --acp``).
 
-    Gemini uses ``--output-format stream-json`` for NDJSON output.
-    The prompt is passed via ``-p <prompt>`` (prompt as argument, not stdin).
-    Note: ``-p`` in Gemini requires the prompt value immediately after the flag.
+    The launch args come from the agent's contract, so the config carries none.
     """
 
-    def _make_config(self, **overrides: object) -> RuntimeConfig:
-        """Gemini config: prompt is appended as trailing argument (no -p flag).
-
-        Gemini CLI's ``-p/--prompt`` expects a value argument immediately after
-        the flag (``-p "my prompt"``), not stdin input. To avoid confusion with
-        the stdin-based ``-p`` detection in CliRuntime, we omit ``-p`` and let
-        CliRuntime append the prompt as a trailing positional argument.
-        """
-        defaults: dict[str, object] = {
-            "backend_type": "cli",
-            "command": "gemini",
-            "args": ["--output-format", "stream-json", "--yolo"],
-            "timeout_seconds": TIMEOUT,
-            "max_turns": 1,
-        }
-        defaults.update(overrides)
-        return RuntimeConfig(**defaults)  # type: ignore[arg-type]
+    def _make_runtime(self, name: str) -> AcpRuntime:
+        config = RuntimeConfig(backend_type="acp", command="gemini", timeout_seconds=TIMEOUT, max_turns=1)
+        return AcpRuntime(name, config, workspace=os.getcwd())
 
     @pytest.mark.asyncio
     async def test_basic_prompt_produces_events(self) -> None:
@@ -282,7 +267,7 @@ class TestGeminiCliReal:
         With valid auth/network: TEXT_DELTA + DONE.
         With network/auth issues: ERROR — still validates runtime lifecycle.
         """
-        rt = CliRuntime("gemini-test", self._make_config(), workspace=os.getcwd())
+        rt = self._make_runtime("gemini-test")
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "gemini-real-s1")]
 
         types = [e.type for e in events]
@@ -297,7 +282,7 @@ class TestGeminiCliReal:
     @pytest.mark.asyncio
     async def test_gemini_event_validation(self) -> None:
         """Verify all events have correct structure regardless of API status."""
-        rt = CliRuntime("gemini-validate", self._make_config(), workspace=os.getcwd())
+        rt = self._make_runtime("gemini-validate")
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "gemini-validate-s1")]
 
         for event in events:
@@ -344,9 +329,8 @@ class TestRuntimePoolReal:
             pool.register(
                 "gemini",
                 RuntimeConfig(
-                    backend_type="cli",
+                    backend_type="acp",
                     command="gemini",
-                    args=["--output-format", "stream-json", "--yolo"],
                     timeout_seconds=TIMEOUT,
                     max_turns=1,
                     description="Gemini CLI",
@@ -519,9 +503,8 @@ class TestDelegateToolReal:
         pool.register(
             "gemini",
             RuntimeConfig(
-                backend_type="cli",
+                backend_type="acp",
                 command="gemini",
-                args=["--output-format", "stream-json", "--yolo"],
                 timeout_seconds=TIMEOUT,
                 max_turns=1,
                 description="Gemini CLI",

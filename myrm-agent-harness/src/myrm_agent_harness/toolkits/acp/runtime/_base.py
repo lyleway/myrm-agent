@@ -258,7 +258,8 @@ class BaseRuntime:
             yield create_event(
                 RuntimeEventType.ERROR,
                 session_id,
-                error=AcpError(
+                error=self._classify_failure(exc)
+                or AcpError(
                     code=AcpErrorCode.UNKNOWN,
                     message=f"Agent '{self._name}' failed: {type(exc).__name__}: {exc}",
                 ),
@@ -292,6 +293,10 @@ class BaseRuntime:
             logger.info("runtime_closed name=%s", self._name)
 
     # -- Template methods (subclasses implement) --
+
+    def _classify_failure(self, exc: Exception) -> AcpError | None:
+        """The structured error for a failure this transport can name (a refused login), or None for an unknown one."""
+        return None
 
     async def _do_run_turn(
         self,

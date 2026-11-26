@@ -153,6 +153,62 @@ async def test_resolve_external_agent_cfgs_auto_detect_local() -> None:
     assert seen_include_version["value"] is False
 
 
+@pytest.mark.asyncio
+async def test_auto_detect_gives_each_agent_the_transport_and_baseline_args_of_its_contract() -> None:
+    class _FakeDetector:
+        async def detect(self, *, include_version: bool = True) -> list[object]:
+            return [
+                SimpleNamespace(name="claude", path="/usr/bin/claude"),
+                SimpleNamespace(name="gemini", path="/usr/bin/gemini"),
+            ]
+
+    with (
+        patch("app.config.deploy_mode.is_local_mode", return_value=True),
+        patch("myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", _FakeDetector),
+    ):
+        cfgs = await _resolve_external_agent_cfgs(None)
+
+    assert cfgs is not None
+    by_name = {cfg["name"]: cfg for cfg in cfgs}
+    assert by_name["claude"]["type"] == "cli"
+    assert by_name["claude"]["args"] == ["-p", "--output-format", "stream-json", "--verbose"]
+    # The ACP flags come from the contract when the runtime launches the agent, not from a stored list.
+    assert by_name["gemini"]["type"] == "acp"
+    assert by_name["gemini"]["args"] == []
+
+
+@pytest.mark.parametrize(
+    ("command", "stored", "expected"),
+    [
+        # A known agent runs over the transport its contract names, whichever one was stored for it.
+        ("/usr/local/bin/gemini", "cli", "acp"),
+        ("qwen", "cli", "acp"),
+        ("claude", "acp", "cli"),
+        # Anything else keeps what was stored: an adapter that merely carries an agent's name is not that agent.
+        ("claude-code-acp", "acp", "acp"),
+        ("gemini-wrapper", "cli", "cli"),
+        ("my-acp-agent", "acp", "acp"),
+    ],
+)
+def test_register_backends_on_pool_runs_a_known_agent_over_its_contract_transport(
+    command: str, stored: str, expected: str
+) -> None:
+    pool = MagicMock()
+
+    _register_backends_on_pool(pool, [{"name": "a", "command": command, "type": stored}])
+
+    assert pool.register.call_args[0][1].backend_type == expected
+
+
+def test_config_fingerprint_does_not_tell_a_known_agent_apart_by_the_transport_stored_for_it() -> None:
+    cli = {"name": "g", "command": "gemini", "type": "cli"}
+
+    assert _config_fingerprint([cli]) == _config_fingerprint([{**cli, "type": "acp"}])
+    assert _config_fingerprint([{**cli, "command": "my-agent"}]) != _config_fingerprint(
+        [{**cli, "command": "my-agent", "type": "acp"}]
+    )
+
+
 def test_register_backends_on_pool_skips_invalid_and_registers_valid() -> None:
     pool = MagicMock()
     cfgs: list[dict[str, object]] = [

@@ -76,6 +76,22 @@ class TestAuthStatus:
         assert codex["loginStrategy"] == "device_code"
         assert codex["scriptableLogin"] is True
 
+    def test_status_names_the_transport_each_agent_runs_over(self, client):
+        detector = MagicMock()
+        detector.detect = AsyncMock(return_value=[])
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=detector,
+        ):
+            body = client.get("/api/v1/external-agents/auth/status").json()
+
+        assert {b["backend"]: b["transport"] for b in body["backends"]} == {
+            "claude": "cli",
+            "codex": "cli",
+            "gemini": "acp",
+            "qwen": "acp",
+        }
+
     def test_status_reflects_installed_and_authenticated(self, client, tmp_path):
         (tmp_path / ".codex").mkdir()
         (tmp_path / ".codex" / "auth.json").write_text('{"token": "x"}', encoding="utf-8")

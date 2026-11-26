@@ -59,15 +59,17 @@ RuntimeBackend (Protocol)
 - `supports_mcp`：是否支持 MCP Server 注入
 - `supports_streaming`：是否支持流式传输
 - `supports_tools`：是否支持原生工具调用
-- `supports_permission_requests`：`safe` 下是否会把权限请求交给回合的 `PermissionBroker`（Claude CLI 与 ACP 后端为真，Codex / Gemini / Qwen 等 CLI 为假，`safe` 对它们即只读）
+- `supports_permission_requests`：`safe` 下是否会把权限请求交给回合的 `PermissionBroker`（Claude CLI 与 ACP 后端——含 Gemini、Qwen——为真，Codex CLI 为假，`safe` 对它即只读）
 - `supports_images`：是否接收随回合附带的图片文件（`run_turn(images=…)`；`CliRuntime` 对 Claude / Codex 为真、其余 CLI 为假；`AcpRuntime` 恒为真，是否真的发送由该 agent 在 `initialize` 里声明的 `promptCapabilities.image` 决定）
 
 **2 种实现**：
 
 | Runtime | 协议 | 适用场景 |
 |---------|------|---------|
-| AcpRuntime | ACP JSON-RPC (stdin/stdout) | 需 ACP 桥接器（claude-agent-acp / acpx），原生 CLI 不支持 ACP |
-| CliRuntime | spawn CLI + NDJSON 解析（含 reasoning/usage/工具调用）；Claude / Codex 经 CLI 自己的会话 id 跨回合续接 | Claude/Codex/Gemini CLI（推荐，开箱即用） |
+| AcpRuntime | ACP JSON-RPC (stdin/stdout) | 原生就说 ACP 的 Agent（Gemini `--acp`、Qwen `--acp`、opencode `acp`）与 ACP 桥接器（claude-agent-acp / acpx） |
+| CliRuntime | spawn CLI + NDJSON 解析（含 reasoning/usage/工具调用）；Claude / Codex 经 CLI 自己的会话 id 跨回合续接 | Claude Code / Codex CLI（开箱即用） |
+
+**已知 Agent 走哪条通道由契约决定**：`auth` 契约（`AuthProfile.transport`）规定 Claude Code、Codex 每回合拉起进程（`cli`），Gemini、Qwen 走 ACP（`acp`）。命令恰好是这个 Agent 的可执行文件名（任意路径、任意扩展名）时，`RuntimePool.register` 用契约的通道，配置里存下的 `type` 改不了它（旧配置里写成 `cli` 的 `gemini` 无需迁移就走 ACP，并记 INFO `pool_transport_by_contract`）；名字里只是带着 `claude` / `gemini` 的适配器或包装脚本（`claude-code-acp`、`gemini-wrapper`）没有契约，保持配置里的通道与参数。
 
 **BackendInfo**：
 ```
@@ -166,11 +168,11 @@ PermissionVerdict (frozen dataclass)   # allowed；message 是拒绝的理由，
 |------|--------------|----------------|
 | ACP（`runtime/acp/permission_policy.py::AcpPermissionPolicy`） | 读类动作（`read` / `search` / `think`）直接放行；其余每个 `session/request_permission` 变成一条 `PermissionRequest` 交给 broker，答复映射回 Agent 自己给的 allow / reject 选项（没有合适的选项就取消并记 `acp_permission_no_matching_option`）。人同意过的编辑记下它点名的文件，随后的 `fs/write_text_file` 不再问第二次；Agent 不先请求权限、直接写文件时，写之前问一次 | 拒绝（`acp_permission_refused_unattended`） |
 | Claude CLI（`runtime/cli/permission_bridge.py::PermissionBridge`） | `--permission-mode default` 加 `--permission-prompt-tool`：本回合起一个只监听 127.0.0.1 的 MCP 端点（端口由系统分配、每回合随机 bearer token、`0600` 的 `--mcp-config` 文件，回合结束即清除），Claude 把每个需要权限的工具调用交给它的 `approve(tool_name, input, tool_use_id)`，答案是 Claude 照办的 JSON：`allow` 带原输入，或 `deny` 带模型会读到的理由 | 不起端点，Claude 保持 `default` 的拒绝 |
-| Codex / Gemini / Qwen CLI | 不能询问：`codex exec` 的审批策略固定为 `never`，gemini / qwen 的无头回合里没有能答复询问的通道，只取 `plan`（只读）与 `yolo`。`safe` 即只读（`--sandbox read-only` / `--approval-mode plan`） | 同左，不需要 broker |
+| Codex CLI | 不能询问：`codex exec` 的审批策略固定为 `never`，没有能答复询问的通道。`safe` 即只读（`--sandbox read-only`） | 同左，不需要 broker |
 
-**ACP 启动参数**：ACP 通道的审批只由宿主策略回答。用户在 Agent 配置里写的 `--yolo`、`--approval-mode` 这类让 Agent 自己跳过询问的旗标，会让 Agent 根本不发 `session/request_permission`、`safe` 形同虚设，所以已知 Agent（Claude、Codex、Gemini、Qwen）启动时去掉它们（连同取值，`--flag=value` 写法也认），并记 WARNING `acp_approval_flags_dropped` 写明去掉了什么。Codex 的 `--sandbox` / `-s` 保留：它限制批准后的动作范围，不决定问不问。不加 `plan`：那会把会询问的 Agent 变成只会拒绝的 Agent。未知命令的参数原样启动。
+**ACP 启动参数**：ACP 通道的审批只由宿主策略回答。已知的 ACP Agent（Gemini、Qwen）按契约启动：`--acp --approval-mode default`，其后才是配置里的参数；配置里写的 `--yolo`、`-y`、`--approval-mode` 这类让 Agent 自己跳过询问的旗标（连同取值，`--flag=value` 写法也认）会被去掉，并记 WARNING `acp_approval_flags_dropped` 写明去掉了什么。显式写出 `--approval-mode default` 不是多余的。实测（Gemini 0.71.1、Qwen 0.28.6，隔离的 HOME 与工作区、假密钥、不调用模型）：只给 `--acp` 时，会话模式由 Agent 自己的设置决定——Gemini 设置里的 `general.defaultApprovalMode: auto_edit` 得到 `autoEdit`（Gemini 只在它信任的目录里认这条设置），Qwen 设置里的 `tools.approvalMode: yolo` 得到 `yolo`，Qwen 不设置时的默认是由模型判断的 `auto`——这些都是不问宿主就动手；带上这个旗标，不论设置怎么写都报告 `default`。`safe` 下运行时还核对 `session/new` 回答里的当前模式必须是契约的 `default`：不是就用 `session/set_mode` 改回并记 WARNING `acp_session_mode_reset`，Agent 没有这个模式或改不回来，回合以错误结束，不带着一个不问的 Agent 往下跑。不用 `plan`：那会把会询问的 Agent 变成只会拒绝的 Agent。以前的预设存下的 `--output-format stream-json` 不会让两者启动失败，存下的配置不需要迁移。登录被拒（`session/new` 以 ACP 的 `auth_required`，即错误码 -32000 回答）时，回合以 `AUTH_FAILED` 结束并带 Agent 自己的话。未知命令（认的是可执行文件名本身，名字里带 `claude` / `gemini` 的适配器或包装脚本也算未知）的参数原样启动。
 
-`allow_all`：ACP 自动选 Agent 所列的 allow 选项；CLI 用各自的放行档位（Claude `bypassPermissions`、Codex `--sandbox workspace-write`、Gemini / Qwen `--approval-mode yolo`）。
+`allow_all`：ACP 自动选 Agent 所列的 allow 选项；CLI 用各自的放行档位（Claude `bypassPermissions`、Codex `--sandbox workspace-write`）。ACP 的 Gemini / Qwen 在 `allow_all` 下仍以 `default` 启动，由宿主策略答应每一个请求，不再靠 `--approval-mode yolo`。
 
 **文件回调说真话**（`runtime/acp/callback.py`）：`fs/read_text_file` 与 `fs/write_text_file` 只服务工作区内的文件，按字节读写，所以 Agent 写下的就是落盘的（含换行符）；不是合法 UTF-8 的文件直接拒绝，不会被有损读取再写回损坏；每一次拒绝与失败都以 JSON-RPC 错误如实告诉 Agent。
 
@@ -390,7 +392,7 @@ acp/
 3. **执行层**：LLM 自主决定是否使用 `invoke_acp_agent_tool` 委托任务给外部 Agent
 
 **增强功能**：
-- **本地模式自动发现**：本地部署时自动探测 claude/codex/gemini CLI
+- **本地模式自动发现**：本地部署时自动探测 claude/codex/gemini/qwen，每个都带它的契约规定的通道（`type`）
 - **配置校验**：无效配置跳过并记录日志，不阻断 Agent 启动
 - **权限配置**：每个外部 Agent 可独立配置 `permissionMode`（`safe` 或 `allow_all`）；`safe` 下 Agent 的每次改动都是该聊天里的一条 `external_agent_permission` 审批（WebUI 抽屉、IM 卡片与 REST、批量、过期清理走同一个汇合点），600 秒无人答复按拒绝，回合结束或服务重启时遗留的请求被撤回
 - **多渠道支持**：Web Chat 和 Channel 路径均支持外部 Agent
@@ -399,7 +401,7 @@ acp/
 - **命令可用性测试**（本地模式）：通过 `POST /channels/manage/external-agents/test` 检测命令是否存在并返回版本信息
 - **流式事件消费**：`invoke_acp_agent_tool` 通过 `pool.run_turn()` 逐事件消费，实时日志输出工具调用和状态更新，返回结果包含 tool_calls 计数等元数据
 - **前端实时进度推送**：通过 ContextVar + `ToolProgressSink` 机制，`invoke_acp_agent_tool` 在执行期间将外部 Agent 的工具调用和状态事件实时推送至前端 SSE 流（复用 `TASKS_STEPS` 事件类型；会话连续性通知是只带标题的已完成步骤，措辞由前端按 `step_key` 本地化）
-- **前端预设模板**：新增模式下提供 Claude Code / Codex CLI / Gemini CLI 一键填充，降低配置门槛
+- **前端预设模板**：新增模式下提供 Claude Code / Codex CLI / Gemini CLI / Qwen Code 一键填充，降低配置门槛；命令恰好是已知 Agent 时，设置页按服务端 `/auth/status` 报告的通道只读显示类型，保存时存契约的通道而不是旧值
 - **Max Turns 双层安全护栏**：Layer 1 是 CLI 自己的轮次上限——`CliDialect.with_max_turns` 为 Claude 追加 `--max-turns`，到限后 CLI 自行结束并在 `result` 行报告，`classify_failure` 把它归为 `AcpErrorCode.MAX_TURNS`，工具路径据此返回「已达轮次上限」而不是故障；Layer 2 是 delegate 工具对 `TOOL_START` 的计数，只用于没有原生上限的后端（`has_native_turn_limit`），超限时 `pool.cancel()`——Claude 的一个 agent 轮次可发出多个工具调用，对它计数会提前截断
 - **稳定 Tool Schema**：`invoke_acp_agent_tool` 使用固定 tool description（不含动态 agent 列表），保护 Turn1 Prompt Cache；`agent_name` 无效时错误响应列出 `available_backends`
 - **Deploy 门控（Server）**：`external_cli_deploy.is_external_cli_deploy_supported()` + profile `strip_deploy_incompatible_builtin_tools`；沙箱自动剔除 `external_cli`；BuiltinToolsPanel sandbox 硬禁用 toggle
@@ -409,7 +411,7 @@ acp/
 - **401 快速失败**：登录被拒时两个 CLI 都会连续重试数分钟才报错。实测（真实二进制、没有登录、本机假 401 服务）：Claude Code 2.1.199 与 2.1.310 都发出 11 次请求（首次加 10 次重试），分别在 183.5 s 与 184.9 s 后才以 `result`（401）结束；Codex 0.142.2 与 0.164.0 在 WebSocket 与 HTTPS 两段各重试 5 次，28.9 s 后才 `turn.failed`。`TurnParser` 数连续的 401 重试信号——Claude 的 `system/api_retry`（`error_status == 401`）与 Codex 的 `Reconnecting… unexpected status 401` 通知——满 3 次（`_UNAUTHORIZED_RETRIES_LIMIT`）就置位 `auth_rejection`（CLI 自己的原话）——第 3 个信号在 Claude 里出现在 2.7 s，在 Codex 里出现在 8.2 s（0.142.2）与 9.3 s（0.164.0），修复后回合分别在 3.6 s（Claude）与 1.4 s（Codex 本机桩）内结束；`CliRuntime` 记一条 `cli_auth_rejected` WARNING、终止进程，回合以 `AUTH_FAILED` 结束，这个判决优先于「自己停掉的进程是取消」。重试之间出现任何正常输出，或一次非 401 的重试，计数清零；一次 401 重试（CLI 自己刷新令牌）不会触发。令牌自动刷新场景下是否误判，没有用真实令牌验证
 - **图片传递**：宿主把图片落成本地文件，经 `run_turn(images=[路径…])` 交给能收图的 CLI，由 `CliDialect` 写成各 CLI 自己的形式：命令行参数（`with_images`）或输入里的 base64 块（`sends_image_blocks` 为真的方言；`CliRuntime` 先在线程里用 `runtime/image_blocks.load_image_blocks` 读文件，再交给 `with_image_blocks`）。**Claude**：用 stream-json 输入。只有带图的回合才加 `--input-format stream-json`，stdin 写一行用户消息 `{"type":"user","message":{"role":"user","content":[<image 块…>,<text 块>]}}`——图片在前并保持给定顺序，提示词在后（提示词为空白时不写 text 块）；不带图的回合仍是纯文本 stdin。图片字节就在请求里，所以不靠模型去调用 `Read`、与文件位置无关（工作目录之外也行，不需要 `--add-dir`）、与权限模式无关。不用 `@"<路径>"` 文件引用：实测（真实二进制 2.1.199，本机桩 API 记录请求，没有登录、不调用模型）该引用只附 ≤ 256 KiB（262144 字节）的文件，更大的文件不报错、不告诉模型、直接不附，而截图通常比这大。实测 image 块：1×1、200 KiB、300 KiB、4.7 MiB（小于服务端每张 5 MiB 的暂存上限）都进了第一次请求，`default` / `acceptEdits` / `bypassPermissions` 三种权限模式下都成立（300 KiB）；两张图相邻进入同一条消息；续接回合（`--input-format` 在 `--resume` 之前）的图片排在历史之后进入请求。CLI 会把大图缩小再发（4.7 MiB 的 PNG 到请求里是约 0.66 MB 的 base64 JPEG）。事件流仍是 system / assistant / result，`TurnParser` 不变。格式按文件头判定（PNG / JPEG / GIF / WebP，与扩展名无关）；读不了或不是图片的文件被略去并记 `image_skipped` WARNING（不含路径），全部被略去时该回合退回纯文本。`tests/toolkits/acp/runtime/cli/test_real_cli_images.py` 用真实二进制守这些行为（每周的 CLI 契约任务运行）。单个回合 8 张 4.7 MiB 的 PNG（共约 37.5 MiB，stdin 约 50 MiB）全部附上、没有卡住（一次手工测量，不在自动测试里）。未验证：Windows；低于 2.1.199 的版本；真实登录下模型对图的回答；真实 API 对一个回合里多张图总大小的限制。**Codex**：`--image=<文件>`（实测 0.142.2：`debug prompt-input` 渲染出 `input_image` 数据 URL，工作目录外的文件也行；`exec` 与 `exec resume` 的帮助里都列有 `-i, --image`）。必须是等号形式：`-i <文件> <提示词>` 会把提示词当成第二个图片路径（`Codex could not read the local image at \`<提示词>\``）；提示词仍是最后一个位置参数，续接时 `--image=` 落在 `resume` 的选项与会话 id 之间。stdin 只收文本，所以图片只能走文件路径。**ACP**：`AcpRuntime` 在 `initialize` 之后读 `agentCapabilities.promptCapabilities.image`，为真时把同一批图片（同一个 `load_image_blocks`，同一份文件头判定）写成 `session/prompt` 里文本块之后的 `ImageContentBlock`（`data` 为 base64、`mimeType` 为判定出的类型）；没声明的 agent 只收文本块（该回合记 `acp_runtime_images_skipped` INFO，并以一条 `images_not_sent` status_update 开头；宿主提示词里的图片路径一行仍是兜底）。实测（本机子进程假 ACP agent，走生产的 `spawn_agent_process` 路径）：声明图片提示的 agent 按顺序收到全部图片块，5 MiB 的图片（base64 后约 7 MB 的单行消息）完整到达、摘要一致；未声明的 agent 只收到文本且回合正常结束。实测 OpenCode 2.0.32 与 cursor-agent 的 `initialize` 都声明了 `image: true`。未验证：真实 agent 对图片块的回答，Windows。
 - **启动参数合并**：`auth.resolve_cli_args` 按「选项单元」（标志加其后的值，或开头的子命令）合并预设的基线参数与配置里的参数：配置里复述的基线选项（预设的 `exec --json`）只出现一次，配置自己重复写的选项全部保留（`-c a=1 -c b=2` 是两个设置，不是重复）；权限模式的参数仍由映射独占
-- **真二进制契约门禁**：运行时传给 CLI 的每个启动参数与档位取值（`auth._profiles` 里每个后端的每种权限模式）、整条 argv，以及 ACP 代理对 `initialize` 的回答里运行时依赖的能力，都由 `harness-cli-contract.yml` 对最新的真实 claude / codex / gemini / qwen / opencode 核对，涉及 `toolkits/acp` 的 PR、每周、手动与每次发版前（红灯不上传 wheel）都跑；不需要登录也不调用模型。旗标与取值的判官是解析各 CLI 帮助文本的 `tests/toolkits/acp/cli_contract.py`（commander / clap / yargs 三种格式），取值再经带标定的探测确认（真值通过且垃圾值被拒才算数）；帮助里没有的隐藏旗标（claude 的 `--max-turns`、`--permission-prompt-tool`）由整条 argv 的验证兜底——以不存在的会话 id 续接，claude 回答 `No conversation found`、codex 回答 `no rollout found`，说明参数全部被接受。握手的判官是 `tests/toolkits/acp/acp_contract.py::handshake_gaps`，按子集比较：代理多宣告能力不算回退，运行时依赖的能力消失才变红。判官本身由不需要任何二进制的单元测试钉住（取走一个旗标、改错一个取值、去掉一项能力都必须变红）
+- **真二进制契约门禁**：运行时传给 CLI 的每个启动参数与档位取值（CLI Agent 经 `resolve_cli_args` 的每种权限模式，ACP Agent 经 `resolve_acp_args` 的契约参数）、整条 argv，以及 ACP 代理对 `initialize` 的回答里运行时依赖的能力，都由 `harness-cli-contract.yml` 对最新的真实 claude / codex / gemini / qwen / opencode 核对，涉及 `toolkits/acp` 的 PR、每周、手动与每次发版前（红灯不上传 wheel）都跑；不需要登录也不调用模型。旗标与取值的判官是解析各 CLI 帮助文本的 `tests/toolkits/acp/cli_contract.py`（commander / clap / yargs 三种格式），取值再经带标定的探测确认（真值通过且垃圾值被拒才算数）；帮助里没有的隐藏旗标（claude 的 `--max-turns`、`--permission-prompt-tool`）由整条 argv 的验证兜底——以不存在的会话 id 续接，claude 回答 `No conversation found`、codex 回答 `no rollout found`，说明参数全部被接受。握手的判官是 `tests/toolkits/acp/acp_contract.py::handshake_gaps`，按子集比较：代理多宣告能力不算回退，运行时依赖的能力消失才变红。判官本身由不需要任何二进制的单元测试钉住（取走一个旗标、改错一个取值、去掉一项能力都必须变红）；ACP 的 Gemini / Qwen 另由 `tests/toolkits/acp/runtime/acp/test_real_acp_session_mode.py` 守：真实二进制 `session/new` 报告的模式是 `default`（设置文件把模式写成不问也一样，对照组证明设置确实起作用），没有登录时错误码是 -32000，旧预设存下的参数仍能启动
 - **静默心跳**：CLI 回合里 stdout 静默满 15 s（`runtime._base.KEEPALIVE_SECONDS`），`CliRuntime` 每 15 s 发一个 `STATUS_UPDATE(status="working", message="<已运行时长>")`（`_base.working_status` 构造，不用 `warning`：工具路径把 `warning` 当错误计数）；`AcpRuntime` 的事件队列静默满同样的时长，也发同一个状态；有输出的回合不发。宿主若有“静默多久算卡死”的看门狗（Server Gateway 的 `execution_timeout`，默认 300 s），这个状态让一次长时间无输出的编码回合不被它误杀；整个回合仍受 `timeout_seconds` 约束
 - **ACP SDK 缺失**：`acp` 是可选 extra（`myrm-agent-harness[acp]`）。`AcpRuntime` 在拉起进程之前先确认 SDK 已安装，缺失时回合以单个 `BACKEND_NOT_FOUND` 错误结束，消息带安装方式，并记一条 `acp_sdk_missing` WARNING；调用方拿到的是这个错误，而不是 `ModuleNotFoundError` 的调用栈
 - **跨平台进程组清理**：每个 CLI 回合都在独立进程组里运行（POSIX `start_new_session`，Windows `CREATE_NEW_PROCESS_GROUP`），停止时整组终止（POSIX `killpg`，Windows `taskkill /T /F`），子进程随之清理；回合以任何方式结束（正常、异常、取消、超时、消费方提前放弃生成器）都经同一个 `spawn_cli_process` 上下文停掉仍在跑的进程
@@ -468,7 +470,7 @@ acp/
 16. **MCP 注入能力守卫**：`supports_mcp` 在 `RuntimePool` 层统一校验，避免向不支持的 ACP 后端注入 MCP 导致 session 崩溃；直接调用 `CliRuntime` 与 ACP Server 侧 host MCP 均显式告警，防御路径零静默降级
 
 **已知局限**：
-- 能不能逐条询问取决于 Agent 自己：Claude Code（`--permission-prompt-tool`）与 ACP Agent（`session/request_permission`）能问；Codex、Gemini、Qwen 的命令行不能问，`safe` 对它们只意味着只读，要逐条询问需要换用协议驱动
+- 能不能逐条询问取决于 Agent 自己：Claude Code（`--permission-prompt-tool`）与 ACP Agent（`session/request_permission`，含 Gemini、Qwen）能问；Codex 的命令行不能问，`safe` 对它只意味着只读，要逐条询问需要换用协议驱动
 - ACP 的拒绝没有携带理由的位置，人写的拒绝理由只有 Claude Code 收得到
 - 宿主进程自身被强杀时，已启动的外部 CLI 进程不在清理保证内
 - 会话续接与原生轮次上限只覆盖 Claude / Codex；其他 CLI 按配置原样启动

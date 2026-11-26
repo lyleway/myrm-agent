@@ -40,6 +40,7 @@ import {
   DEFAULT_AGENT,
   backendKeyFromCommand,
   cleanAgent,
+  contractTransport,
   envRowProblems,
   toDraft,
   type ExternalAgentDraft,
@@ -152,7 +153,7 @@ const ExternalAgentsConfig = memo(() => {
       return;
     }
 
-    const cleaned = cleanAgent(draft, subscriptionLoginAllowed);
+    const cleaned = cleanAgent(draft, subscriptionLoginAllowed, contractTransport(draft.command, authStatuses));
 
     let updated: ExternalAgentConfig[];
     if (editingIndex === -1) {
@@ -162,7 +163,7 @@ const ExternalAgentsConfig = memo(() => {
     }
     persist(updated);
     setEditingIndex(null);
-  }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, t]);
+  }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, authStatuses, t]);
 
   const handleDelete = useCallback(() => {
     if (deleteIndex === null) {
@@ -253,7 +254,7 @@ const ExternalAgentsConfig = memo(() => {
         {agents.length > 0 && (
           <div className="space-y-2">
             {agents.map((agent, index) => {
-              const TypeIcon = TYPE_ICONS[agent.type] ?? IconTerminal;
+              const TypeIcon = TYPE_ICONS[contractTransport(agent.command, authStatuses) ?? agent.type] ?? IconTerminal;
               return (
                 <div
                   key={`${agent.name}-${index}`}
@@ -301,6 +302,7 @@ const ExternalAgentsConfig = memo(() => {
         {isEditing && (
           <ExternalAgentForm
             draft={draft}
+            fixedTransport={contractTransport(draft.command, authStatuses)}
             isNew={editingIndex === -1}
             isTesting={isTesting}
             subscriptionLoginAllowed={subscriptionLoginAllowed}

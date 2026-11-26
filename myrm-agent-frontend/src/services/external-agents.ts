@@ -13,6 +13,7 @@
  * 供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
  */
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
+import type { ExternalAgentType } from '@/services/config';
 
 export type ExternalAgentLoginStrategy = 'device_code' | 'browser_oauth' | 'setup_token' | 'manual_import';
 
@@ -21,6 +22,8 @@ export interface ExternalAgentAuthStatus {
   installed: boolean;
   path: string | null;
   version: string | null;
+  /** How the app runs this agent. It is the agent's own contract, so a stored choice of type never changes it. */
+  transport: ExternalAgentType;
   authenticated: boolean;
   authStatus: 'authenticated' | 'not_authenticated' | 'unknown';
   loginStrategy: ExternalAgentLoginStrategy;

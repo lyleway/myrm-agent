@@ -24,6 +24,8 @@ import {
 
 interface ExternalAgentFormProps {
   draft: ExternalAgentDraft;
+  /** The transport the app fixes for this command (a known agent), or null when the type is the user's to choose. */
+  fixedTransport: ExternalAgentType | null;
   /** Adding a new agent: offers the one-click presets. */
   isNew: boolean;
   isTesting: boolean;
@@ -38,6 +40,7 @@ interface ExternalAgentFormProps {
 const ExternalAgentForm = memo(
   ({
     draft,
+    fixedTransport,
     isNew,
     isTesting,
     subscriptionLoginAllowed,
@@ -48,6 +51,7 @@ const ExternalAgentForm = memo(
   }: ExternalAgentFormProps) => {
     const t = useTranslations('settings.developer.externalAgents');
     const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
+    const type = fixedTransport ?? draft.type;
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -76,7 +80,11 @@ const ExternalAgentForm = memo(
           </div>
           <div className="space-y-1.5" data-testid="external-agent-type">
             <label className="text-xs font-medium text-muted-foreground">{t('type')}</label>
-            <Select value={draft.type} onValueChange={(v: ExternalAgentType) => onChange({ ...draft, type: v })}>
+            <Select
+              value={type}
+              disabled={fixedTransport !== null}
+              onValueChange={(v: ExternalAgentType) => onChange({ ...draft, type: v })}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -89,6 +97,7 @@ const ExternalAgentForm = memo(
                 </SelectItem>
               </SelectContent>
             </Select>
+            {fixedTransport !== null && <p className="text-[11px] text-muted-foreground/60">{t('typeFixedHint')}</p>}
           </div>
         </div>
 
@@ -141,7 +150,7 @@ const ExternalAgentForm = memo(
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(draft.type, draft.command))}</p>
+            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(type, draft.command))}</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t('maxTurns')}</label>

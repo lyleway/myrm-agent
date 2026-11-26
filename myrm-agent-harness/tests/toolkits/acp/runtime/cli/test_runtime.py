@@ -41,7 +41,7 @@ class TestProperties:
             assert caps.supports_streaming is True
             assert caps.supports_mcp is False
             assert caps.supports_tools is False
-        assert capabilities("gemini").supports_resume is False
+        assert capabilities("my-agent").supports_resume is False
         assert capabilities("/opt/custom/agent").supports_resume is False
 
     def test_is_alive_without_a_process_and_name(self) -> None:
@@ -217,7 +217,7 @@ class TestLaunchArgs:
     async def test_no_turn_limit_flag_when_unlimited_or_for_clis_without_one(self, fake_cli: FakeCli) -> None:
         await run_turn(make_runtime(fake_cli, max_turns=0))
         await run_turn(make_runtime(fake_cli, "codex", args=["exec", "--json"], max_turns=10))
-        await run_turn(make_runtime(fake_cli, "gemini", max_turns=10))
+        await run_turn(make_runtime(fake_cli, "my-agent", max_turns=10))
 
         assert all("--max-turns" not in call["argv"] for call in fake_cli.calls())
 
@@ -254,20 +254,6 @@ class TestLaunchArgs:
         codex_dup = await launched("codex", args=["exec", "--json", "-s", "read-only"], permission_mode="allow_all")
         assert codex_dup.count("--sandbox") == 1
         assert codex_dup[codex_dup.index("--sandbox") + 1] == "workspace-write"
-
-        gemini_eq = await launched(
-            "gemini", args=[*_STREAM_JSON, "--approval-mode=plan", "--yolo"], permission_mode="allow_all"
-        )
-        assert gemini_eq.count("--approval-mode") == 1
-        assert gemini_eq[gemini_eq.index("--approval-mode") + 1] == "yolo"
-
-        # Gemini and Qwen have no way to ask the host, so ``safe`` is their read-only mode.
-        for name in ("gemini", "qwen"):
-            read_only = await launched(name, args=[], permission_mode="safe")
-            assert read_only[read_only.index("--approval-mode") + 1] == "plan"
-
-        gemini_sandbox = await launched("gemini", args=["-s"], permission_mode="safe")
-        assert "-s" in gemini_sandbox
 
         custom = await launched("my-agent", args=["-s", "--silent"], permission_mode="safe")
         assert custom == ["-s", "--silent", "test prompt"]

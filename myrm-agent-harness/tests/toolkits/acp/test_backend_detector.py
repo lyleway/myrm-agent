@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.auth import known_backends
 from myrm_agent_harness.toolkits.acp.core.backend_detector import (
     BackendDetector,
     DetectedBackend,
@@ -39,6 +40,15 @@ class TestDetectedBackend:
 
 
 class TestBackendDetectorDetect:
+    @pytest.mark.asyncio
+    async def test_detects_every_agent_of_the_contract_in_its_order(self) -> None:
+        detector = BackendDetector()
+        with patch.object(detector, "_find_executable", side_effect=lambda name: f"/usr/bin/{name}"):
+            results = await detector.detect(include_version=False)
+
+        assert [backend.name for backend in results] == list(known_backends())
+        assert list(known_backends()) == ["claude", "codex", "gemini", "qwen"]
+
     @pytest.mark.asyncio
     async def test_detect_finds_nothing_when_no_backends(self) -> None:
         detector = BackendDetector()

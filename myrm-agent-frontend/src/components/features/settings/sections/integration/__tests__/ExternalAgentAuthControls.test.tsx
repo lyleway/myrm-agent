@@ -16,7 +16,8 @@ vi.mock('next-intl', () => ({ useTranslations: () => stableT }));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
 vi.mock('@/services/external-agents', () => ({ logoutExternalAgent: mocks.logout }));
 vi.mock('../ExternalAgentInstallDialog', () => ({
-  default: ({ open, backend }: { open: boolean; backend: string }) => (open ? <div>install-dialog:{backend}</div> : null),
+  default: ({ open, backend }: { open: boolean; backend: string }) =>
+    open ? <div>install-dialog:{backend}</div> : null,
 }));
 vi.mock('../ExternalAgentLoginDialog', () => ({
   default: ({ open, command }: { open: boolean; command: string }) => (open ? <div>login-dialog:{command}</div> : null),
@@ -29,6 +30,7 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   installed: true,
   path: '/usr/local/bin/codex',
   version: '0.5.0',
+  transport: 'cli',
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'device_code',
@@ -167,11 +169,7 @@ describe('ExternalAgentAuthControls', () => {
 
   it('keeps the install dialog mounted across the installed transition so a finished install is not cut short', async () => {
     const { rerender } = render(
-      <ExternalAgentAuthControls
-        command="codex"
-        status={status({ installed: false })}
-        onChanged={vi.fn()}
-      />,
+      <ExternalAgentAuthControls command="codex" status={status({ installed: false })} onChanged={vi.fn()} />,
     );
     await userEvent.click(screen.getByRole('button', { name: 'install' }));
     expect(screen.getByText('install-dialog:codex')).toBeInTheDocument();

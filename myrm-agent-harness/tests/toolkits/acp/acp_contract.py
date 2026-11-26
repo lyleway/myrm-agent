@@ -11,8 +11,13 @@ from __future__ import annotations
 
 from acp.schema import InitializeResponse
 
-# The arguments that put each agent in ACP mode.
-ACP_ARGS: dict[str, tuple[str, ...]] = {"opencode": ("acp",), "gemini": ("--acp",), "qwen": ("--acp",)}
+from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+
+# The arguments each agent is started with in ACP mode: the known agents' by their contract, the others' as documented.
+ACP_ARGS: dict[str, tuple[str, ...]] = {
+    "opencode": ("acp",),
+    **{agent: tuple(resolve_acp_args(agent, []).args) for agent in ("gemini", "qwen")},
+}
 
 SESSION_CAPABILITIES = ("list", "delete", "additional_directories", "fork", "resume", "close")
 

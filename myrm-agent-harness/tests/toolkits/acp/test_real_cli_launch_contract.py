@@ -1,7 +1,7 @@
-"""The command line of every permission mode is still one the installed CLI accepts. Offline: no login, no model.
+"""The command line of every known agent is still one the installed CLI accepts. Offline: no login, no model.
 
-``resolve_cli_args`` is the only place that turns a permission mode into CLI flags, so the contract is judged on its
-whole output: each flag must still be one the CLI prints in its ``--help``, and each value of an enumerated option one
+``resolve_cli_args`` (CLI agents) and ``resolve_acp_args`` (ACP agents) are the only places that turn a permission
+mode into CLI flags, so the contract is judged on their whole output: each flag must still be one the CLI prints in its ``--help``, and each value of an enumerated option one
 it still lists (or one its parser is shown to take). A CLI that renames ``--sandbox`` or stops listing a value breaks
 the runtime without any of our code changing; this goes red the day the new release ships, not the day a user finds out.
 
@@ -18,7 +18,8 @@ from typing import get_args
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends, resolve_cli_args
+from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args, resolve_cli_args
+from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends, profile_for
 from myrm_agent_harness.toolkits.acp.types import PermissionMode
 from tests.toolkits.acp.cli_contract import (
     SUBCOMMANDS,
@@ -40,6 +41,15 @@ _TIER_FLAG = {
     "gemini": "--approval-mode",
     "qwen": "--approval-mode",
 }
+
+
+def _launch_args(backend: str, mode: str) -> list[str]:
+    """What the runtime starts ``backend`` with: an ACP agent by its contract, a CLI agent by the mode's flags."""
+    profile = profile_for(backend)
+    assert profile is not None
+    if profile.transport == "acp":
+        return resolve_acp_args(backend, []).args
+    return resolve_cli_args(backend, [], mode)
 
 
 @pytest.fixture(scope="module")
@@ -64,7 +74,7 @@ def test_the_launch_args_of_a_permission_mode_are_accepted(backend: str, mode: s
 
     problems = check_args(
         scopes,
-        resolve_cli_args(backend, [], mode),
+        _launch_args(backend, mode),
         subcommands=SUBCOMMANDS.get(backend, frozenset()),
         probe=parse_probe(binary, probe_home),
     )
@@ -85,7 +95,7 @@ def test_the_tier_flag_still_lists_the_values_it_takes(backend: str, probe_home:
 @pytest.mark.parametrize("backend", sorted(_TIER_FLAG))
 def test_a_tier_value_the_cli_does_not_take_is_refused_by_the_live_judge(backend: str, probe_home: Path) -> None:
     binary, scopes = _scopes(backend, probe_home)
-    args = resolve_cli_args(backend, [], "safe")
+    args = _launch_args(backend, "safe")
     flag = args.index(_TIER_FLAG[backend])
     wrong = [*args[: flag + 1], "__not_a_tier__", *args[flag + 2 :]]
 
@@ -102,7 +112,7 @@ def test_a_tier_value_the_cli_does_not_take_is_refused_by_the_live_judge(backend
 @pytest.mark.parametrize("backend", sorted(_TIER_FLAG))
 def test_a_flag_the_cli_does_not_have_is_refused_by_the_live_judge(backend: str, probe_home: Path) -> None:
     binary, scopes = _scopes(backend, probe_home)
-    args = resolve_cli_args(backend, [], "safe")
+    args = _launch_args(backend, "safe")
     flag = args.index(_TIER_FLAG[backend])
     renamed = [*args[:flag], f"{_TIER_FLAG[backend]}-renamed", *args[flag + 1 :]]
 

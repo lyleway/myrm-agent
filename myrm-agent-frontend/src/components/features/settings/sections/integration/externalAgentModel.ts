@@ -1,12 +1,14 @@
 /**
  * [INPUT]
  * - @/services/config::ExternalAgentConfig (POS: one stored external agent entry)
+ * - @/services/external-agents::ExternalAgentAuthStatus (POS: what the server reports for a known agent, its transport included)
  *
  * [OUTPUT]
  * - DEFAULT_AGENT, AGENT_PRESETS: the blank entry and the one-click presets of the add form
  * - PERMISSION_MODE_OPTIONS, permissionHintKey, normalizePermissionMode: the permission modes on offer and what each
  *   means for the agent being edited
- * - backendKeyFromCommand: command → known login backend
+ * - knownBackendOfCommand, backendKeyFromCommand: command → the known agent it is, command → the agent its login belongs to
+ * - contractTransport: the transport a known agent's contract fixes for a command
  * - ExternalAgentDraft, EnvRow, toDraft, newEnvRow, envRowProblems, effectiveAuthMode, cleanAgent: the editable
  *   form of an agent and the rules for turning it back into what is stored
  *
@@ -20,6 +22,7 @@ import type {
   ExternalAgentPermissionMode,
   ExternalAgentType,
 } from '@/services/config';
+import type { ExternalAgentAuthStatus } from '@/services/external-agents';
 
 export const DEFAULT_AGENT: ExternalAgentConfig = {
   name: '',
@@ -33,14 +36,34 @@ export const DEFAULT_AGENT: ExternalAgentConfig = {
   maxTurns: 25,
 };
 
-/** Map a CLI command to its known auth backend key (codex/claude/gemini/qwen). */
-const KNOWN_BACKENDS = ['codex', 'claude', 'gemini', 'qwen'] as const;
+const KNOWN_BACKENDS = ['claude', 'codex', 'gemini', 'qwen'] as const;
+
+/** The executable's name wherever the command lives and whatever its extension: `C:\tools\gemini.cmd` is `gemini`. */
+function executableName(command: string): string {
+  return (command.split(/[\\/]/).pop() ?? '').toLowerCase().split('.')[0];
+}
+
+/** The known agent a command exactly is. A wrapper or adapter that merely carries an agent's name is a command of its own. */
+export function knownBackendOfCommand(command: string): string | null {
+  const name = executableName(command);
+  return KNOWN_BACKENDS.find((backend) => backend === name) ?? null;
+}
+
+/** The agent a command's login belongs to: the agent it is, else one whose name it carries (`claude-code`). */
 export function backendKeyFromCommand(command: string): string | null {
-  const base = (command.split(/[\\/]/).pop() ?? '').toLowerCase().split('.')[0];
-  if (KNOWN_BACKENDS.includes(base as (typeof KNOWN_BACKENDS)[number])) {
-    return base;
-  }
-  return KNOWN_BACKENDS.find((b) => base.includes(b)) ?? null;
+  return knownBackendOfCommand(command) ?? KNOWN_BACKENDS.find((b) => executableName(command).includes(b)) ?? null;
+}
+
+/**
+ * The transport a command always runs over when it is exactly a known agent, whatever type was stored for it;
+ * null for any other command, and until the server has reported.
+ */
+export function contractTransport(
+  command: string,
+  statuses: readonly ExternalAgentAuthStatus[],
+): ExternalAgentType | null {
+  const backend = knownBackendOfCommand(command);
+  return statuses.find((status) => status.backend === backend)?.transport ?? null;
 }
 
 export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
@@ -69,9 +92,21 @@ export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
     config: {
       ...DEFAULT_AGENT,
       name: 'gemini-cli',
+      type: 'acp',
       command: 'gemini',
-      args: ['--output-format', 'stream-json'],
+      args: [],
       description: 'Google Gemini-powered coding agent',
+    },
+  },
+  {
+    key: 'qwen',
+    config: {
+      ...DEFAULT_AGENT,
+      name: 'qwen-code',
+      type: 'acp',
+      command: 'qwen',
+      args: [],
+      description: 'Alibaba Qwen-powered coding agent',
     },
   },
 ];
@@ -84,7 +119,7 @@ export const PERMISSION_MODE_OPTIONS: { value: ExternalAgentPermissionMode; labe
 
 /** CLI backends whose own permission flags can be set per mode, and whether they can ask the user (the others only read). */
 const CLI_BACKENDS_THAT_ASK = new Set(['claude']);
-const CLI_BACKENDS_THAT_ONLY_READ = new Set(['codex', 'gemini', 'qwen']);
+const CLI_BACKENDS_THAT_ONLY_READ = new Set(['codex']);
 
 /**
  * The hint under the permission select: what `safe` means for this agent. An agent that can ask is asked; a command-line
@@ -169,15 +204,21 @@ export function effectiveAuthMode(
 }
 
 /**
- * The agent as it is stored: trimmed text, no blank arguments, a permission mode its type can honour
- * (otherwise switching type could persist a mode the form never showed), the auth mode the deployment
- * supports, and an `env` only when it has entries. The environment lines must have passed `envRowProblems`.
+ * The agent as it is stored: trimmed text, the transport its contract fixes (`contractTransport`) in place of a
+ * stale choice, no blank arguments, a permission mode its type can honour (otherwise switching type could persist
+ * a mode the form never showed), the auth mode the deployment supports, and an `env` only when it has entries.
+ * The environment lines must have passed `envRowProblems`.
  */
-export function cleanAgent(draft: ExternalAgentDraft, subscriptionLoginAllowed = true): ExternalAgentConfig {
+export function cleanAgent(
+  draft: ExternalAgentDraft,
+  subscriptionLoginAllowed = true,
+  fixedTransport: ExternalAgentType | null = null,
+): ExternalAgentConfig {
   const { envRows, ...rest } = draft;
   const env = Object.fromEntries(envRows.filter((row) => !isBlankRow(row)).map((row) => [row.name.trim(), row.value]));
   const cleaned: ExternalAgentConfig = {
     ...rest,
+    type: fixedTransport ?? draft.type,
     name: draft.name.trim(),
     command: draft.command.trim(),
     args: (draft.args ?? []).filter((a) => a.trim() !== ''),

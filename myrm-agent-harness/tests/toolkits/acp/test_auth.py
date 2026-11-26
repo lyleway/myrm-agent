@@ -34,31 +34,41 @@ class TestProfiles:
     def test_known_backends(self) -> None:
         assert set(known_backends()) == {"codex", "claude", "gemini", "qwen"}
 
-    def test_permission_tables_cover_every_profile(self) -> None:
-        """A profile added without permission tables must fail, not mis-resolve args."""
-        from myrm_agent_harness.toolkits.acp.auth._profiles import _permission_backends
+    def test_permission_tables_cover_the_agents_that_need_them(self) -> None:
+        """Every agent has a strip table and exactly the CLI agents have a mode mapping."""
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
-        assert set(_permission_backends()) == set(known_backends())
+        _launch_args._check_tables()
+        assert set(_launch_args._PERMISSION_FLAGS_BY_BACKEND) == set(known_backends())
+        assert set(_launch_args._PERMISSION_MODE_ARGS) == {"codex", "claude"}
 
     def test_permission_table_drift_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A half-configured backend must raise with diagnostics instead of mis-resolving."""
-        from myrm_agent_harness.toolkits.acp.auth import _profiles
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
-        monkeypatch.delitem(_profiles._PERMISSION_FLAGS_BY_BACKEND, "qwen")
+        monkeypatch.delitem(_launch_args._PERMISSION_FLAGS_BY_BACKEND, "qwen")
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
-            _profiles._permission_backends()
+            _launch_args._check_tables()
 
     def test_resolve_rejects_a_half_configured_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """resolve_cli_args must fail loudly, never merge against missing permissions."""
-        from myrm_agent_harness.toolkits.acp.auth import _profiles
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
         monkeypatch.setattr(
-            _profiles,
+            _launch_args,
             "_PERMISSION_MODE_ARGS",
-            {k: v for k, v in _profiles._PERMISSION_MODE_ARGS.items() if k != "qwen"},
+            {k: v for k, v in _launch_args._PERMISSION_MODE_ARGS.items() if k != "codex"},
         )
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
-            _profiles.resolve_cli_args("qwen", ["--output-format", "stream-json"], "safe")
+            _launch_args.resolve_cli_args("codex", ["--json"], "safe")
+
+    def test_a_mode_mapping_on_an_acp_agent_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An ACP agent asks the host; a mode mapping for it would never be read, so it is a mistake."""
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+
+        monkeypatch.setitem(_launch_args._PERMISSION_MODE_ARGS, "qwen", {"safe": ("--approval-mode", "plan")})
+        with pytest.raises(ValueError, match="out of sync with _PROFILES"):
+            _launch_args.resolve_acp_args("qwen", [])
 
     def test_cli_launch_args_unknown_backend_is_empty(self) -> None:
         from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args
@@ -66,17 +76,23 @@ class TestProfiles:
         assert cli_launch_args("no-such-cli") == []
         assert cli_launch_args("codex") == ["exec", "--json", "--skip-git-repo-check"]
 
-    @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
+    @pytest.mark.parametrize("backend", ["codex", "claude"])
     @pytest.mark.parametrize("mode", ["safe", "allow_all"])
-    def test_every_backend_and_mode_resolves_arguments(self, backend: str, mode: str) -> None:
-        from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
+    def test_every_cli_backend_and_mode_resolves_arguments(self, backend: str, mode: str) -> None:
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
         resolved = resolve_cli_args(backend, [], mode)
         assert resolved, f"{backend}/{mode} resolved to no arguments"
 
+    @pytest.mark.parametrize("backend", ["gemini", "qwen"])
+    def test_every_acp_backend_resolves_arguments(self, backend: str) -> None:
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+
+        assert resolve_acp_args(backend, []).args, f"{backend} resolved to no arguments"
+
     def test_mode_owned_flags_replace_stale_config_flags(self) -> None:
         """Stored configs carrying an old permission flag must not override the mode."""
-        from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
         # codex's `--yolo` is an alias of the bypass flag and conflicts with --sandbox.
         assert "--yolo" not in resolve_cli_args("codex", ["--yolo"], "safe")
@@ -85,16 +101,9 @@ class TestProfiles:
         assert "--dangerously-bypass-approvals-and-sandbox" not in stale_bypass
         assert stale_bypass[stale_bypass.index("--sandbox") + 1] == "read-only"
         # The `--flag=value` spelling escapes a plain name lookup and must be stripped.
-        gemini = resolve_cli_args("gemini", ["--approval-mode=plan"], "allow_all")
-        assert gemini.count("--approval-mode") == 1
-        assert gemini[gemini.index("--approval-mode") + 1] == "yolo"
         codex_eq = resolve_cli_args("codex", ["--sandbox=read-only"], "allow_all")
         assert codex_eq.count("--sandbox") == 1
         assert "--sandbox=read-only" not in codex_eq
-        # Stripping is scoped per backend: gemini's own sandbox toggle survives in both
-        # spellings, because that flag is the user's, not one this mapping owns.
-        assert "-s" in resolve_cli_args("gemini", ["-s"], "safe")
-        assert "--sandbox=true" in resolve_cli_args("gemini", ["--sandbox=true"], "safe")
         # A hook-trust switch has no substitute in the mapping, so it must not be dropped.
         assert "--dangerously-bypass-hook-trust" in resolve_cli_args(
             "codex", ["--dangerously-bypass-hook-trust"], "safe"

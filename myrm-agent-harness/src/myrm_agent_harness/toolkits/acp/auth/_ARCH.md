@@ -12,7 +12,8 @@ whether the deployment may keep a user's subscription credential at all.
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Public surface of the ACP auth subsystem. | ✅ |
-| _profiles.py | Internal | Per-backend CLI knowledge: credential paths, login command, strategy, api-key env, baseline launch args, and the permission-mode → argv mapping. Sole owner of CLI invocation arguments. | ✅ |
+| _profiles.py | Internal | The contract of each known agent: credential paths, login command, strategy, api-key env, and the transport it is driven over (`cli` with its baseline launch args, or `acp` with its entry args and the session mode that asks the host). Resolves a name (`profile_for`) or an exact executable (`command_profile`, `effective_transport`) to its contract. | ✅ |
+| _launch_args.py | Internal | The command line of a known agent: `resolve_cli_args` (permission mode → flags of a CLI agent) and `resolve_acp_args` (the entry args of an ACP agent, every approval-skipping flag dropped and reported). Sole owner of the permission flags of every known agent. | ✅ |
 | credential_store.py | Core | Detect / import / clear subscription credentials (atomic, owner-only writes). A store built with `accepts_new_credentials=False` refuses an import before writing anything and still detects and clears, so a deployment that must not hold subscription credentials can still remove ones stored earlier. | ✅ |
 | launch_env.py | Core | `cli_base_env`: the environment every launch of a CLI starts from (core variables, the CLI's own login-home variable, the managed Node on PATH for a CLI the isolated toolchain installed); shared by turns and probes so a probe sees what a turn will see. | ✅ |
 | login_session.py | Core | Drive `<cli> login` and stream structured AuthEvents (URL/code → SUCCESS/ERROR). | ✅ |
@@ -36,28 +37,41 @@ whether the deployment may keep a user's subscription credential at all.
 - **Import is the universal fallback**: where scripted login is unavailable
   (`scriptable_login` is False) or inconvenient, the user pastes a credential blob
   captured elsewhere and `CredentialStore.import_credential` persists it safely.
+- **The contract names the transport**: `AuthProfile.transport` says how a known agent is driven. Claude Code and Codex
+  are spawned per turn (`cli`); Gemini and Qwen speak ACP (`acp`). The choice belongs to the agent, not to the type a
+  user stored for it, so `effective_transport` returns the contract's transport for a command that exactly is the agent
+  and leaves every other command's stored choice alone (an unrecognised value included, for the layer that stored it to
+  report). The exact executable name decides (`command_profile`: the basename, lower-cased, without its extension):
+  an adapter or wrapper that merely carries an agent's name (`claude-code-acp`, `gemini-wrapper`) is a command of its
+  own with no contract, whereas `profile_for` also accepts such a name, which suits resolving a login by a configured
+  name. `RuntimePool.register` applies the rule, so a config stored as `cli` for `gemini` runs over ACP without a
+  migration.
 - **Single owner of CLI arguments**: `resolve_cli_args` merges the baseline launch
   args with the configured args and the permission-mode mapping. The mapping is the
   sole writer of permission flags, so an explicit flag in a stored config (a sandbox
-  mode, a `--approval-mode=plan` from initial setup, or a `--yolo` alias) is stripped
-  rather than duplicated — both the spaced and the `--flag=value` spellings.
+  mode or a `--full-auto` alias) is stripped rather than duplicated — both the spaced
+  and the `--flag=value` spellings.
   The merge works on options (a flag with the values after it), not on single
   tokens: a config restating a baseline option (a preset's `exec --json`) adds
   nothing, while the config's own repeated options all stay (`-c a=1 -c b=2` is two
   settings; dropping the second `-c` as a duplicate token would lose one of them).
-  This matters because these parsers are last-wins (clap `ArgAction::Set` for codex,
-  non-array yargs for gemini/qwen), so a duplicate would silently override the mode
-  the user selected instead of failing loudly. Stripping is scoped per backend: `-s` is
+  This matters because these parsers are last-wins (clap `ArgAction::Set` for codex), so a duplicate would silently
+  override the mode the user selected instead of failing loudly. Stripping is scoped per backend: `-s` is
   codex's sandbox *mode* but gemini's boolean sandbox *toggle*, so a shared strip list
   would silently disable sandboxing a gemini user explicitly asked for. Unknown CLIs are
   returned untouched, since no contract exists for them and their flags may mean
   something unrelated.
-- **The ACP channel has no mode mapping**: an ACP agent asks the host for permission, and the host's policy answers
-  (`AcpPermissionPolicy`). An agent started with `--yolo` or `--approval-mode` never asks, so the policy's
-  `safe` would be bypassed without a trace. `without_approval_flags` therefore drops those flags (the spaced and the
-  `--flag=value` spellings, with their values) from the configured args of a known agent at launch. Codex's sandbox
-  flags stay, since they limit what an approved action may do rather than whether anyone is asked, and `plan` is
-  never added: it would turn an agent that asks into one that refuses. An unknown command is returned untouched.
+- **An ACP agent is launched by its contract**: the agent asks the host for permission and the host's policy answers
+  (`AcpPermissionPolicy`), so there is no mode mapping to write. `resolve_acp_args` returns the contract's entry args
+  (`--acp --approval-mode default`) followed by the configured args, minus any option the contract already states and
+  minus every flag that would make the agent act without asking (`--yolo`, `-y`, `--approval-mode`, spaced and
+  `--flag=value`, with their values), which `AcpLaunch.dropped` reports for a WARNING. The explicit
+  `--approval-mode default` is not redundant: measured on Gemini 0.71.1 and Qwen 0.28.6, an agent started with
+  `--acp` alone takes its session mode from its own settings (`autoEdit` for Gemini, `yolo` for Qwen, whose own default
+  is the model-judged `auto`), so it would act without ever asking; with the flag both report `default` whatever the
+  settings say, in a folder they trust or not. `plan` is never used: it would turn an agent that asks into one that
+  refuses. A flag an older preset stored (`--output-format stream-json`) does not stop either agent from starting, so
+  stored configs need no migration. A command that is not a known ACP agent keeps its args as configured.
 - **Baseline args never carry permission flags**: `cli_launch_args` holds only the
   non-interactive output/transport arguments. Keeping permission flags out of it is
   what makes the mode mapping genuinely single-owner; otherwise a baseline flag fights

@@ -1,12 +1,13 @@
 """Automatic detection of CLI agent backends.
 
-Discovers installed CLI tools (claude, codex, gemini) by searching PATH,
+Discovers the installed agents of the auth contract (claude, codex, gemini, qwen) by searching PATH,
 common installation paths, and npm global. Maintains process-wide caches
 for versioned and non-versioned detection results to avoid repeated scans.
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.toolchains::TOOLCHAIN_BASE_DIR (POS: Isolated toolchain manager for external CLI agents — keeps tool installations out of the global OS environment)
 - myrm_agent_harness.toolkits.acp.auth.credential_store::CredentialState (POS: Credential persistence and detection layer for the ACP auth subsystem) [TYPE_CHECKING]
+- myrm_agent_harness.toolkits.acp.auth._profiles::known_backends (POS: Authentication profile registry; the agents that have a contract)
 - myrm_agent_harness.toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
 - myrm_agent_harness.toolkits.acp.core.probe::run_probe (POS: Process primitive of the detection and login-state checks)
 
@@ -30,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.core.probe import run_probe
 from myrm_agent_harness.toolkits.acp.toolchains import TOOLCHAIN_BASE_DIR
@@ -40,8 +42,6 @@ if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.auth.credential_store import CredentialState
 
 logger = logging.getLogger(__name__)
-
-_KNOWN_BACKENDS = ("claude", "codex", "gemini", "qwen")
 
 _COMMON_PATHS = (
     TOOLCHAIN_BASE_DIR / "bin",  # Check isolated toolchain first
@@ -105,7 +105,7 @@ class BackendDetector:
                     self._set_cache(include_version=False, value=stripped)
                     return stripped
 
-        located = [(name, path) for name in _KNOWN_BACKENDS if (path := self._find_executable(name)) is not None]
+        located = [(name, path) for name in known_backends() if (path := self._find_executable(name)) is not None]
         versions = await self._versions([path for _, path in located]) if include_version else [None] * len(located)
         results = [
             DetectedBackend(name=name, path=path, version=version)

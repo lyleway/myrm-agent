@@ -133,6 +133,7 @@ async def external_agent_auth_status() -> dict[str, object]:
                 "version": found.version if found else None,
                 "authenticated": state.authenticated,
                 "authStatus": state.status.value,
+                "transport": profile.transport,
                 "loginStrategy": profile.login_strategy.value,
                 "scriptableLogin": profile.scriptable_login,
                 "needsCodeInput": profile.needs_code_input,

@@ -161,6 +161,7 @@ describe('ExternalAgentsConfig auth mode', () => {
     installed: true,
     path: `/usr/bin/${backend}`,
     version: '1.0.0',
+    transport: 'cli',
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'device_code',
@@ -206,5 +207,65 @@ describe('ExternalAgentsConfig auth mode', () => {
     await userEvent.click(screen.getByRole('button', { name: 'save' }));
 
     expect(savedAgent().authMode).toBe('api_key');
+  });
+});
+
+describe('ExternalAgentsConfig transport', () => {
+  const status = (backend: string, transport: 'cli' | 'acp') => ({
+    backend,
+    installed: true,
+    path: `/usr/bin/${backend}`,
+    version: '1.0.0',
+    transport,
+    authenticated: false,
+    authStatus: 'not_authenticated',
+    loginStrategy: 'device_code',
+    scriptableLogin: true,
+    needsCodeInput: false,
+    subscriptionLoginAllowed: true,
+  });
+
+  const typeSelect = () => within(screen.getByTestId('external-agent-type')).getByRole('combobox');
+
+  beforeEach(() => {
+    mocks.set.mockClear();
+    mocks.statuses = [status('claude', 'cli'), status('gemini', 'acp')];
+  });
+
+  it('shows a known agent under the transport the app fixes for it and stores that one', async () => {
+    mocks.saved = { agents: [agent({ name: 'gemini-cli', command: 'gemini', type: 'cli', args: [] })] };
+    await openEditor();
+
+    await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
+    expect(typeSelect()).toHaveTextContent('typeAcp');
+    expect(screen.getByText('typeFixedHint')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent().type).toBe('acp');
+  });
+
+  it('adds Gemini from its preset as the agent it is, with no arguments of ours', async () => {
+    mocks.saved = { agents: [] };
+    render(<ExternalAgentsConfig />);
+    await userEvent.click(await screen.findByRole('button', { name: 'add' }));
+    await userEvent.click(screen.getByRole('button', { name: 'preset_gemini' }));
+
+    await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
+    expect(typeSelect()).toHaveTextContent('typeAcp');
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent()).toMatchObject({ name: 'gemini-cli', command: 'gemini', type: 'acp', args: [] });
+  });
+
+  it('leaves the type to the user for a command that only carries the name of a known agent', async () => {
+    mocks.saved = { agents: [agent({ name: 'wrapped', command: 'gemini-wrapper', type: 'cli', args: [] })] };
+    await openEditor();
+
+    await vi.waitFor(() => expect(screen.getByText('authModeHint', { exact: false })).toBeTruthy());
+    expect(typeSelect()).toBeEnabled();
+    expect(screen.queryByText('typeFixedHint')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent().type).toBe('cli');
   });
 });

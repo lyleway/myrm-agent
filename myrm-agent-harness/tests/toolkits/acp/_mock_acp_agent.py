@@ -12,7 +12,13 @@ the client the way a real agent does, over the real SDK, and report what came ba
 ``/write {"path", "content"}`` -> ``[write] ok`` or ``[write] error <code> <message> <data as JSON>``;
 ``/read {"path", "line", "limit"}`` -> ``[read] <content as JSON>`` or ``[read] error <code> <message> <data as JSON>``;
 ``/edit {"path", "content"}`` asks permission to edit the file, then writes it: both reports, joined.
-``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``.
+``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``;
+``/mode`` -> ``[mode] <the session's current mode>``.
+
+Session modes: ``--mode <id>`` makes ``session/new`` report that current mode (offered with ``--modes a,b``, default
+``default,yolo``), ``set_session_mode`` switches it unless the agent was started with ``--keep-mode``. ``--login-required``
+makes ``session/new`` answer the way an agent without a login does (JSON-RPC ``auth_required``) and ``--bad-session``
+with an unrelated JSON-RPC error.
 """
 
 from __future__ import annotations
@@ -38,6 +44,8 @@ from acp.schema import (
     PermissionOption,
     PromptCapabilities,
     PromptResponse,
+    SessionMode,
+    SessionModeState,
     TextContentBlock,
     ToolCallLocation,
     ToolCallUpdate,
@@ -51,6 +59,12 @@ _OPTIONS = [
 ]
 
 
+def _flag_value(name: str) -> str | None:
+    """The value after ``--name`` on the agent's own command line, or None when the flag is absent."""
+    args = sys.argv[1:]
+    return args[args.index(name) + 1] if name in args else None
+
+
 def _failure(verb: str, error: acp.RequestError) -> str:
     """How a JSON-RPC error from the client reads in a report: the code, the message and the error's data."""
     return f"[{verb}] error {error.code} {error} {json.dumps(error.data)}"
@@ -62,6 +76,7 @@ class MockAcpAgent:
     def __init__(self) -> None:
         self._conn: object | None = None
         self._sessions: dict[str, str] = {}
+        self._modes: dict[str, str] = {}
 
     def on_connect(self, conn: object) -> None:
         self._conn = conn
@@ -86,9 +101,21 @@ class MockAcpAgent:
         mcp_servers: list[object] | None = None,
         **kwargs: Any,
     ) -> NewSessionResponse:
+        if "--login-required" in sys.argv[1:]:
+            raise acp.RequestError.auth_required()
+        if "--bad-session" in sys.argv[1:]:
+            raise acp.RequestError.invalid_params({"why": "scripted"})
         session_id = str(uuid.uuid4())
         self._sessions[session_id] = cwd
-        return NewSessionResponse(session_id=session_id)
+        mode = _flag_value("--mode")
+        if mode is None:
+            return NewSessionResponse(session_id=session_id)
+        self._modes[session_id] = mode
+        offered = (_flag_value("--modes") or "default,yolo").split(",")
+        modes = SessionModeState(
+            current_mode_id=mode, available_modes=[SessionMode(id=offer, name=offer) for offer in offered]
+        )
+        return NewSessionResponse(session_id=session_id, modes=modes)
 
     async def load_session(self, cwd: str, session_id: str, **kwargs: Any) -> None:
         return None
@@ -97,7 +124,9 @@ class MockAcpAgent:
         return ListSessionsResponse(sessions=[])
 
     async def set_session_mode(self, mode_id: str, session_id: str, **kwargs: Any) -> None:
-        return None
+        if "--keep-mode" in sys.argv[1:]:
+            raise acp.RequestError.invalid_params({"mode": mode_id})
+        self._modes[session_id] = mode_id
 
     async def set_session_model(self, model_id: str, session_id: str, **kwargs: Any) -> None:
         return None
@@ -147,6 +176,8 @@ class MockAcpAgent:
         verb, _, rest = text.partition(" ")
         if verb == "/argv":
             return f"[argv] {json.dumps(sys.argv[1:])}"
+        if verb == "/mode":
+            return f"[mode] {self._modes.get(session_id)}"
         if verb not in ("/permission", "/write", "/read", "/edit"):
             return None
         args = json.loads(rest)

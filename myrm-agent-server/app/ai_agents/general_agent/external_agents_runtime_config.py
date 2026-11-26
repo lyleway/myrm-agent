@@ -2,6 +2,7 @@
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
+- myrm_agent_harness.toolkits.acp.auth::effective_transport, cli_launch_args (POS: The transport and baseline launch args a known agent's contract names; a stored choice cannot override the transport)
 - myrm_agent_harness.toolkits.acp.types::RuntimeConfig (POS: ACP runtime config contract)
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
@@ -38,17 +39,6 @@ _DEFAULT_TURN_TIMEOUT_SECONDS = 1800
 # A delegated turn is cut by the Gateway's wall-clock ceiling anyway; ending it a little earlier lets the
 # runtime stop the CLI itself and report a timeout the user can read.
 _CEILING_MARGIN_SECONDS = 60
-
-
-def _default_cli_args(agent_name: str) -> list[str]:
-    """Return sensible default CLI args for a known agent, empty list otherwise.
-
-    Single source of truth lives in the harness auth-profile registry; this
-    shim keeps the server-local call sites stable.
-    """
-    from myrm_agent_harness.toolkits.acp.auth import cli_launch_args
-
-    return cli_launch_args(agent_name)
 
 
 def _auth_mode(cfg: dict[str, object]) -> AuthMode:
@@ -139,6 +129,8 @@ class _NormalizedRuntimeCfg:
 
 def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | None:
     """Normalize one external-agent entry so fingerprint and RuntimeConfig stay aligned."""
+    from myrm_agent_harness.toolkits.acp.auth import effective_transport
+
     name = cfg.get("name")
     command = cfg.get("command")
     if not name or not command:
@@ -151,7 +143,8 @@ def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | No
 
     return _NormalizedRuntimeCfg(
         name=str(name),
-        backend_type=str(cfg.get("type", "cli")),
+        # A known agent runs over the transport its contract names, whatever was stored for it.
+        backend_type=effective_transport(str(command), str(cfg.get("type", "cli"))),
         command=str(command),
         args=args,
         env=_normalized_env(cfg),
@@ -213,7 +206,7 @@ async def _resolve_external_agent_cfgs(
         return None
 
     try:
-        from myrm_agent_harness.toolkits.acp.auth import cli_launch_args
+        from myrm_agent_harness.toolkits.acp.auth import cli_launch_args, effective_transport
         from myrm_agent_harness.toolkits.acp.core.backend_detector import (
             BackendDetector,
         )
@@ -225,7 +218,7 @@ async def _resolve_external_agent_cfgs(
         agent_cfgs = [
             {
                 "name": d.name,
-                "type": "cli",
+                "type": effective_transport(d.path, "cli"),
                 "command": d.path,
                 # Auto-detected backends inherit the fail-closed default so discovery
                 # never silently grants more autonomy than the user granted explicitly.
