@@ -132,12 +132,12 @@ describe('ExternalAgentsConfig environment variables', () => {
   });
 
   it('keeps the settings of the agent that the form does not show', async () => {
-    mocks.saved = { agents: [agent({ timeout: 900, cwd: '/work', env: { A: '1' } })] };
+    mocks.saved = { agents: [agent({ timeout: 900, maxResponseChars: 20000, env: { A: '1' } })] };
     await openEditor();
 
     await userEvent.click(screen.getByRole('button', { name: 'save' }));
 
-    expect(savedAgent()).toMatchObject({ timeout: 900, cwd: '/work', env: { A: '1' } });
+    expect(savedAgent()).toMatchObject({ timeout: 900, maxResponseChars: 20000, env: { A: '1' } });
   });
 
   it('starts a new agent without variables and keeps typed ones when a preset is chosen', async () => {
@@ -208,4 +208,3 @@ describe('ExternalAgentsConfig auth mode', () => {
     expect(savedAgent().authMode).toBe('api_key');
   });
 });
-

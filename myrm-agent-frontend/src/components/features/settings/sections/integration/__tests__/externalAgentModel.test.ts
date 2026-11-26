@@ -68,9 +68,9 @@ describe('cleanAgent', () => {
   });
 
   it('keeps the settings of an agent that this form does not edit', () => {
-    const agent = { ...stored(), timeout: 600, cwd: '/work' } as ExternalAgentConfig;
+    const agent = { ...stored(), timeout: 600, maxResponseChars: 20000 } as ExternalAgentConfig;
 
-    expect(cleanAgent(toDraft(agent))).toMatchObject({ timeout: 600, cwd: '/work' });
+    expect(cleanAgent(toDraft(agent))).toMatchObject({ timeout: 600, maxResponseChars: 20000 });
   });
 
   it('trims the text, drops blank arguments and fixes a mode its type cannot honour', () => {
