@@ -3,41 +3,21 @@
  * compaction runs inside a turn, the tokens saved once it completes. An event that carries no figure leaves the step
  * without a detail instead of showing one the stream never sent.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { applyStatusProgressStep } from '../statusStreamProgressSteps';
 import type { ProgressItem } from '@/store/chat/types';
-import type { StreamCtx } from '../../streamContext';
+import { applyStatusEvent } from './statusStepTestKit';
 
 /** Feed the handler one `context_compaction` event and return the detail items of the step it produced. */
-async function detailOf(event: Record<string, unknown>): Promise<ProgressItem['items']> {
-  const state = {
-    messages: [
-      {
-        content: '',
-        messageId: 'msg-1',
-        chatId: 'chat-1',
-        role: 'assistant' as const,
-        progressSteps: [] as ProgressItem[],
-        createdAt: new Date(),
-      },
-    ],
-  };
-  const ctx: StreamCtx = {
-    data: { type: 'status', messageId: 'msg-1', step_key: 'context_compaction', ...event } as never,
-    input: '',
-    sources: undefined,
-    added: true,
-    recievedMessage: '',
-    state: { chatId: 'chat-1', messages: state.messages } as never,
-    actions: {
-      setLoading: vi.fn(),
-      setMessages: vi.fn((updater: (s: typeof state) => void) => updater(state)),
-    } as never,
-    files: [],
-  };
-  await applyStatusProgressStep(ctx, 'context_compaction');
-  return state.messages[0].progressSteps[0].items;
+async function detailOf({
+  data,
+  ...envelope
+}: {
+  data: Record<string, unknown>;
+  status?: string;
+}): Promise<ProgressItem['items']> {
+  const message = await applyStatusEvent('context_compaction', data, envelope);
+  return message.progressSteps?.[0].items;
 }
 
 describe('context_compaction detail text', () => {
