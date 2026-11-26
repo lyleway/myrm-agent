@@ -16,7 +16,7 @@
 | 文件 | 地位 | 职责| I/O/P |
 |------|------|------|-------|
 | `__init__.py` | ✅ 核心 | 平台服务入口：数据库/存储/文件服务/执行策略单例；导出 `get_deployment_capabilities` | ✅ |
-| `deployment_capabilities.py` | ✅ 核心 | 启动时构建语义能力位（local/tauri/sandbox/remote） | ✅ |
+| `deployment_capabilities.py` | ✅ 核心 | 启动时构建语义能力位（local/tauri/sandbox/remote）；`allows_subscription_login` 只在用户自己的机器上为真（桌面、本地 WebUI、用户从自己机器远程暴露的 WebUI），托管沙箱恒为假且没有任何环境变量可以改写 | ✅ |
 | `execution.py` | ✅ 核心 | Agent 执行策略抽象（ExecutionStrategy Protocol + LocalExecutionStrategy） | 永远返回本地执行策略 |
 | `workspace_root.py` | ✅ 辅助 | 工作区根路径解析（`get_workspace_root`：当前运行绑定的根，运行之外取进程工作目录；为某个会话服务的代码改用 `resolve_chat_workspace_root`） | ✅ |
 | `workspace_session.py` | ✅ 辅助 | chat_id → `chat_{id}` workspace session SSOT（Goal progress hydrate） | ✅ |

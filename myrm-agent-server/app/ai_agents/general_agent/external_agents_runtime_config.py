@@ -4,10 +4,11 @@
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
 - myrm_agent_harness.toolkits.acp.types::RuntimeConfig (POS: ACP runtime config contract)
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
+- app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
 - app.config.settings::settings (POS: Gateway wall-clock ceiling that bounds a delegated turn)
 
 [OUTPUT]
-- _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
+- _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
 - _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
 - _register_backends_on_pool: Register normalized runtime configs into RuntimePool (each with the fixed directory delegated images are staged in)
@@ -24,6 +25,8 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
@@ -49,7 +52,13 @@ def _default_cli_args(agent_name: str) -> list[str]:
 
 
 def _auth_mode(cfg: dict[str, object]) -> AuthMode:
-    """Resolve the configured auth mode, defaulting to subscription (use login state)."""
+    """Resolve the configured auth mode, defaulting to subscription (use login state).
+
+    A deployment that does not allow subscription login runs every delegated CLI on an API key whatever the stored
+    config says, so a login left on the host cannot carry delegated work onto someone's subscription.
+    """
+    if not get_deployment_capabilities().allows_subscription_login:
+        return "api_key"
     return "api_key" if cfg.get("authMode") == "api_key" else "subscription"
 
 
@@ -262,13 +271,16 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             continue
 
         backend_type = normalized_cfg.backend_type
-        if backend_type not in ("cli", "acp"):
-            logger.warning(
-                "Skipping external agent '%s': invalid type '%s'",
-                normalized_cfg.name,
-                backend_type,
-            )
-            continue
+        match backend_type:
+            case "cli" | "acp":
+                pass
+            case _:
+                logger.warning(
+                    "Skipping external agent '%s': invalid type '%s'",
+                    normalized_cfg.name,
+                    backend_type,
+                )
+                continue
 
         runtime_cfg = RuntimeConfig(
             backend_type=backend_type,

@@ -73,6 +73,10 @@ const ExternalAgentsConfig = memo(() => {
     }
   }, []);
 
+  // Until the server has answered, assume a local deployment: the server turns subscription mode into an API key
+  // by itself where login is not allowed, so a form opened early is never a way around it.
+  const subscriptionLoginAllowed = authStatuses.every((s) => s.subscriptionLoginAllowed);
+
   const statusForCommand = useCallback(
     (command: string): ExternalAgentAuthStatus | null => {
       const key = backendKeyFromCommand(command);
@@ -148,7 +152,7 @@ const ExternalAgentsConfig = memo(() => {
       return;
     }
 
-    const cleaned = cleanAgent(draft);
+    const cleaned = cleanAgent(draft, subscriptionLoginAllowed);
 
     let updated: ExternalAgentConfig[];
     if (editingIndex === -1) {
@@ -158,7 +162,7 @@ const ExternalAgentsConfig = memo(() => {
     }
     persist(updated);
     setEditingIndex(null);
-  }, [draft, editingIndex, agents, persist, t]);
+  }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, t]);
 
   const handleDelete = useCallback(() => {
     if (deleteIndex === null) {
@@ -299,6 +303,7 @@ const ExternalAgentsConfig = memo(() => {
             draft={draft}
             isNew={editingIndex === -1}
             isTesting={isTesting}
+            subscriptionLoginAllowed={subscriptionLoginAllowed}
             onChange={setDraft}
             onSave={handleSave}
             onCancel={handleCancel}

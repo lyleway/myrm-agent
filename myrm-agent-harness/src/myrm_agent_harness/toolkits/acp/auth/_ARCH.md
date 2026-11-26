@@ -4,7 +4,8 @@
 Subscription authentication subsystem for external CLI agent backends — lets a
 delegated CLI (Codex / Claude Code / Gemini / Qwen …) run on the user's own model
 subscription instead of a metered API key. Framework-level mechanisms only; the
-business layer drives GUI/SaaS login, status badges, and credential persistence.
+business layer drives GUI login, status badges, and credential persistence, and decides
+whether the deployment may keep a user's subscription credential at all.
 
 ## File & Submodule Index
 
@@ -12,7 +13,7 @@ business layer drives GUI/SaaS login, status badges, and credential persistence.
 |------|------|-------------|-------|
 | __init__.py | Package | Public surface of the ACP auth subsystem. | ✅ |
 | _profiles.py | Internal | Per-backend CLI knowledge: credential paths, login command, strategy, api-key env, baseline launch args, and the permission-mode → argv mapping. Sole owner of CLI invocation arguments. | ✅ |
-| credential_store.py | Core | Detect / import / clear subscription credentials (atomic, owner-only writes). | ✅ |
+| credential_store.py | Core | Detect / import / clear subscription credentials (atomic, owner-only writes). A store built with `accepts_new_credentials=False` refuses an import before writing anything and still detects and clears, so a deployment that must not hold subscription credentials can still remove ones stored earlier. | ✅ |
 | launch_env.py | Core | `cli_base_env`: the environment every launch of a CLI starts from (core variables, the CLI's own login-home variable, the managed Node on PATH for a CLI the isolated toolchain installed); shared by turns and probes so a probe sees what a turn will see. | ✅ |
 | login_session.py | Core | Drive `<cli> login` and stream structured AuthEvents (URL/code → SUCCESS/ERROR). | ✅ |
 | login_state.py | Core | `probe_login` / `resolve_login_state`: the login state a CLI reports about itself (`claude auth status`, `codex login status`), the credential file only as the fallback. | ✅ |

@@ -16,6 +16,7 @@ import {
   AGENT_PRESETS,
   PERMISSION_MODE_HINTS,
   PERMISSION_MODE_OPTIONS,
+  effectiveAuthMode,
   normalizePermissionMode,
   toDraft,
   type ExternalAgentDraft,
@@ -26,6 +27,8 @@ interface ExternalAgentFormProps {
   /** Adding a new agent: offers the one-click presets. */
   isNew: boolean;
   isTesting: boolean;
+  /** False in a hosted deployment: agents run on an API key there, so the form offers nothing else. */
+  subscriptionLoginAllowed: boolean;
   onChange: (next: ExternalAgentDraft) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -33,9 +36,9 @@ interface ExternalAgentFormProps {
 }
 
 const ExternalAgentForm = memo(
-  ({ draft, isNew, isTesting, onChange, onSave, onCancel, onTest }: ExternalAgentFormProps) => {
+  ({ draft, isNew, isTesting, subscriptionLoginAllowed, onChange, onSave, onCancel, onTest }: ExternalAgentFormProps) => {
     const t = useTranslations('settings.developer.externalAgents');
-    const authMode = draft.authMode ?? 'subscription';
+    const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -151,11 +154,13 @@ const ExternalAgentForm = memo(
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="subscription">{t('authModeSubscription')}</SelectItem>
+              {subscriptionLoginAllowed && <SelectItem value="subscription">{t('authModeSubscription')}</SelectItem>}
               <SelectItem value="api_key">{t('authModeApiKey')}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground/60">{t('authModeHint')}</p>
+          <p className="text-[11px] text-muted-foreground/60">
+            {t(subscriptionLoginAllowed ? 'authModeHint' : 'authModeHostedHint')}
+          </p>
         </div>
 
         <ExternalAgentEnvEditor

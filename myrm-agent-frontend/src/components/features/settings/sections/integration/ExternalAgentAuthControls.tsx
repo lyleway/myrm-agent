@@ -17,7 +17,11 @@ interface AuthControlsProps {
   onChanged: () => void;
 }
 
-/** Per-agent controls: install while the CLI is missing, otherwise login-state badge plus login / logout. */
+/**
+ * Per-agent controls: install while the CLI is missing, otherwise the login-state badge plus login / logout.
+ * A hosted deployment offers no login (agents run on an API key); it only shows a login left from before, so
+ * that it can be removed.
+ */
 const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthControlsProps) => {
   const t = useTranslations('settings.developer.externalAgents');
   const [loginOpen, setLoginOpen] = useState(false);
@@ -49,10 +53,11 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
     : 'bg-muted text-muted-foreground';
   const dotTone = status.authenticated ? 'bg-green-500' : 'bg-muted-foreground/40';
   const badgeLabel = status.authenticated ? t('badgeLoggedIn') : t('badgeLoggedOut');
+  const showLoginState = status.installed && (status.subscriptionLoginAllowed || status.authenticated);
 
   return (
     <>
-      {status.installed ? (
+      {showLoginState && (
         <div className="flex items-center gap-1.5">
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeTone}`}
@@ -77,7 +82,8 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
             </Button>
           )}
         </div>
-      ) : (
+      )}
+      {!status.installed && (
         <Button variant="outline" size="sm" onClick={() => setInstallOpen(true)}>
           {t('install')}
         </Button>
@@ -88,7 +94,7 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
         backend={status.backend}
         onInstalled={onChanged}
       />
-      {status.installed && (
+      {status.installed && status.subscriptionLoginAllowed && (
         <ExternalAgentLoginDialog
           open={loginOpen}
           onOpenChange={setLoginOpen}

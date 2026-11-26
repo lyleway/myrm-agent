@@ -26,6 +26,8 @@ export interface ExternalAgentAuthStatus {
   loginStrategy: ExternalAgentLoginStrategy;
   scriptableLogin: boolean;
   needsCodeInput: boolean;
+  /** False in a hosted deployment, which runs delegated agents on an API key and never keeps a subscription login. */
+  subscriptionLoginAllowed: boolean;
 }
 
 export interface ExternalAgentAuthEvent {

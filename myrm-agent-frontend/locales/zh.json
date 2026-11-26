@@ -14824,6 +14824,7 @@
         "authModeSubscription": "订阅登录",
         "authModeApiKey": "API 密钥",
         "authModeHint": "订阅登录使用该 Agent 自身的登录态（如 ChatGPT Plus、Claude Max），无需 API 密钥；API 密钥模式会传入你在「环境变量」中添加的密钥。",
+        "authModeHostedHint": "当前是托管工作区，Agent 使用你自己的 API 密钥运行；订阅登录仅在 Myrm 运行于你自己的电脑上时可用。",
         "env": "环境变量",
         "envAdd": "添加变量",
         "envRemove": "删除变量",
