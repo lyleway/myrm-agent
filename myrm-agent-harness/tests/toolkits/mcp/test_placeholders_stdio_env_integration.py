@@ -13,6 +13,8 @@ mandates for bundled servers:
   and ``env`` values at spawn time;
 - a ``./``-relative ``command`` runs from the plugin root even without an
   explicit ``cwd`` (§7.2.1);
+- injection variables in the server's ``env`` (a linker preload, a Python path, git's
+  ``GIT_CONFIG_*`` group) are stripped at launch and never reach the child;
 - the enterprise network compatibility setting reaches the child as
   ``NODE_USE_SYSTEM_CA=1`` (unset while strict verification is on, and a value
   the server config sets itself is kept).
@@ -34,7 +36,8 @@ from myrm_agent_harness.toolkits.mcp.config import MCPConfig
 from myrm_agent_harness.toolkits.mcp.connection_manager import MCPConnectionManager
 
 # A real MCP server that reports the runtime environment it actually received:
-# the reserved plugin vars, a custom env var, the working directory, and argv.
+# the reserved plugin vars, a custom env var, the names of all its variables,
+# the working directory, and argv.
 _ENV_PROBE_SERVER_SRC = """
 import json
 import os
@@ -52,6 +55,7 @@ def probe() -> str:
         "PLUGIN_DATA": os.environ.get("PLUGIN_DATA", "UNSET"),
         "CUSTOM_ENV": os.environ.get("CUSTOM_ENV", "UNSET"),
         "NODE_USE_SYSTEM_CA": os.environ.get("NODE_USE_SYSTEM_CA", "UNSET"),
+        "ENV_NAMES": sorted(os.environ),
         "CWD": os.getcwd(),
         "ARGV": list(sys.argv),
     })
@@ -62,8 +66,19 @@ if __name__ == "__main__":
 """
 
 
-# What the probe server reports it received: strings, and ``ARGV`` as a list.
+# What the probe server reports it received: strings, and ``ARGV`` and ``ENV_NAMES`` as lists.
 ProbeReport = dict[str, str | list[str]]
+
+# Names that make a later program run what the value names; none of them may reach a child.
+_INJECTED_ENV = {
+    "LD_PRELOAD": "/tmp/rootkit.so",
+    "PYTHONPATH": "/tmp/evil_lib",
+    "node_options": "--inspect",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.sshCommand",
+    "GIT_CONFIG_VALUE_0": "/tmp/hook.sh",
+    "GIT_CONFIG_GLOBAL": "/tmp/evil.cfg",
+}
 
 
 @pytest.fixture
@@ -208,7 +223,7 @@ async def test_stdio_dot_slash_command_runs_from_plugin_root(tmp_path: Path, _re
 
 @pytest.mark.integration
 async def test_stdio_strips_dangerous_env_variables_at_runtime(tmp_path: Path, _reset_manager: None) -> None:
-    """Malicious injection variables (e.g. LD_PRELOAD, PYTHONPATH) must be stripped at launch time."""
+    """Injection variables of the server's ``env`` are stripped at launch: the child never receives them."""
     plugin_root, data_root = _make_roots(tmp_path)
     script = _write_probe_script(tmp_path)
 
@@ -218,21 +233,16 @@ async def test_stdio_strips_dangerous_env_variables_at_runtime(tmp_path: Path, _
         {
             "plugin_root": plugin_root,
             "data_root": data_root,
-            "env": {
-                "CUSTOM_ENV": "legitimate_value",
-                "LD_PRELOAD": "/tmp/rootkit.so",
-                "PYTHONPATH": "/tmp/evil_lib",
-                "node_options": "--inspect",
-            },
+            "env": {"CUSTOM_ENV": "legitimate_value", **_INJECTED_ENV},
         },
     )
     assert report["PLUGIN_ROOT"] == plugin_root
     assert report["PLUGIN_DATA"] == data_root
     assert report["CUSTOM_ENV"] == "legitimate_value"
-    # Ensure malicious env variables are not present in the subprocess environment
-    import os
-
-    assert os.environ.get("LD_PRELOAD") != "/tmp/rootkit.so"
+    received = report["ENV_NAMES"]
+    assert isinstance(received, list)
+    leaked = {name.upper() for name in received} & {name.upper() for name in _INJECTED_ENV}
+    assert not leaked, f"injected names reached the stdio child: {sorted(leaked)}"
 
 
 @pytest.mark.integration
