@@ -188,6 +188,7 @@ Chat 表新增多个字段用于支撑高级功能：
                                             ┌──────────────────────┐
                                             │ do_persist_to_db     │
                                             │ - 核心 DB 操作       │
+                                            │ - 起手取写锁         │
                                             │ - 不自动 commit      │
                                             └──────────────────────┘
                                                         ▲
@@ -212,7 +213,7 @@ Chat 表新增多个字段用于支撑高级功能：
 2. 前端显示确认对话框（warning 样式）
 3. 提示：手动压缩会清除 Prompt Cache，建议等待自动压缩
 4. 用户确认后调用 `POST /api/chats/{chat_id}/compact`
-5. 后端执行 `compact_chat()`：先读取并提交，调用摘要模型时不持有数据库快照，再取写锁、落库并提交（分段见下文「事务模型与并发安全」）
+5. 后端执行 `compact_chat()`：先读取并提交，调用摘要模型时不持有数据库快照，再落库（起手取写锁）并提交（分段见下文「事务模型与并发安全」）
 6. 前端重新加载消息列表，显示压缩结果
 
 **自动压缩（Pipeline）**:
@@ -222,9 +223,9 @@ Chat 表新增多个字段用于支撑高级功能：
 4. 创建独立 session，fire-and-forget 模式
 
 **事务模型与并发安全**：
-- **同步路径**（API/IM `/compact`、回复前门禁、空闲压缩）：使用调用方 session，`compact_chat` 分三段。读段读取会话与待压缩消息后立即提交，让读快照在模型调用之前结束；模型调用段（秒到分钟级）不持有任何数据库快照，否则期间别处的任何一次提交都会让随后的写入以 `SQLITE_BUSY_SNAPSHOT` 失败（`busy_timeout` 不覆盖这一种），摘要白付费；写段先 `acquire_write_lock`，再 `do_persist_to_db` 并提交，读与写之间没有别的写入者可插入的空档。
+- **同步路径**（API/IM `/compact`、回复前门禁、空闲压缩）：使用调用方 session，`compact_chat` 分三段。读段读取会话与待压缩消息后立即提交，让读快照在模型调用之前结束；模型调用段（秒到分钟级）不持有任何数据库快照，否则期间别处的任何一次提交都会让随后的写入以 `SQLITE_BUSY_SNAPSHOT` 失败（`busy_timeout` 不覆盖这一种），摘要白付费；写段调用 `do_persist_to_db` 并提交，它先读压缩边界再写，所以起手 `acquire_write_lock`，读与写之间没有别的写入者可插入的空档。压缩后的连续无效次数由守卫记录函数经存储自带的连接写进 Chat 行，不在调用方会话里留下未提交的写，会话在落库提交后保持无事务。
 - **失败冷却**：摘要超时、摘要失败与落库失败（`ValueError`，先回滚）都会写入失败冷却并立即提交（会话不提交就关闭会把它回滚，下一次空闲回合会为同一个失败的摘要再付一次费）。
-- **异步路径**（Pipeline 自动触发）：`persist_compaction` 创建新 session，fire-and-forget，不阻塞 Agent。
+- **异步路径**（Pipeline 自动触发）：`persist_compaction` 创建新 session，fire-and-forget，不阻塞 Agent；它与进行中的回合并行，期间别处随时可能提交，同样靠 `do_persist_to_db` 起手的写锁保住摘要，否则读与写之间的一次提交就会让落库以 `database is locked` 失败（只记日志，摘要丢失）。
 - **防并发控制**：`compact_chat` 层有按 `chat_id` 的内存 `asyncio.Lock`，同一会话已有压缩在进行时直接返回 `concurrent_compaction_in_progress`，不会出现并发的持久化归档覆盖或历史损坏。
 
 **架构特点**：
@@ -232,7 +233,7 @@ Chat 表新增多个字段用于支撑高级功能：
 - 人工请求（Web API、IM `/compact`）以 `explicit_request` 调用 `compact_chat`：anti-thrash 守卫只约束自动压缩，不拦人工请求，其结果计入连续无效次数但至多计到守卫上限（人工反复重试不会让会话被判为压缩出错）
 - 摘要逻辑集中在框架层，强制使用 `with_structured_output` 获取结构化上下文摘要
 - 业务层通过协议调用
-- `do_persist_to_db` 是 DB 操作核心（由调用方提交），由两种路径共享
+- `do_persist_to_db` 是 DB 操作核心（自带写锁，由调用方提交），由两种路径共享
 
 ### Agent 历史加载
 

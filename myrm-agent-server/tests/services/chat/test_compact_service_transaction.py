@@ -4,8 +4,9 @@ The model needs seconds to minutes for a summary. Under the deferred-read transa
 chat keeps its snapshot of the whole database, so any other commit during the model call (another chat's message, a
 background job) aborts the summary's own write with SQLITE_BUSY_SNAPSHOT (``database is locked``, which
 ``busy_timeout`` does not cover) and the paid-for summary is thrown away. The cooldown after a failed compaction has to
-reach the database too, or the next idle turn pays for the same failing summary again. The tests run the real
-transaction policy on a file database; the plain in-memory engines do not run it.
+reach the database too, or the next idle turn pays for the same failing summary again. The Pipeline's own persist
+callback runs beside a live turn that keeps committing messages, so its summary needs the same protection. The tests
+run the real transaction policy on a file database; the plain in-memory engines do not run it.
 """
 
 from __future__ import annotations
@@ -30,7 +31,8 @@ from sqlalchemy import select
 from app.database.dto import MessageDTO
 from app.database.models import Chat
 from app.database.repositories.chat_repo import ChatRepository
-from app.services.chat.compact_service import compact_chat, is_compaction_failure_cooldown_active
+from app.services.chat.compact.compression_streak import ChatCompressionStreakStore
+from app.services.chat.compact_service import compact_chat, is_compaction_failure_cooldown_active, persist_compaction
 from tests.services.chat.compaction_support import make_messages
 from tests.support.policy_sqlite import PolicyDb, policy_database, run_while_another_writer_commits
 
@@ -163,6 +165,53 @@ async def test_the_summary_is_stored_when_another_writer_commits_between_its_rea
         await run_while_another_writer_commits(policy_db, compact)
 
     assert (await _stored_chat(policy_db, chat_id)).compacted_summary == _SUMMARY
+
+
+@pytest.mark.asyncio
+async def test_the_pipeline_persist_stores_the_summary_when_another_writer_commits_between_its_read_and_its_write(
+    policy_db: PolicyDb, chat_id: str
+) -> None:
+    await _seed_chat(policy_db, chat_id)
+    summary = MagicMock()
+    summary.to_json.return_value = _SUMMARY
+
+    async def persist() -> None:
+        await persist_compaction(chat_id, summary, f"{chat_id}-m{_MESSAGES - 1}", 100)
+
+    rebuild_index = patch("app.services.chat.compact.persist.ConversationRecallIndexService.rebuild_chat", AsyncMock())
+    with rebuild_index:
+        await run_while_another_writer_commits(policy_db, persist)
+
+    stored = await _stored_chat(policy_db, chat_id)
+    assert stored.compacted_summary == _SUMMARY
+    assert stored.compacted_before_id == f"{chat_id}-m{_MESSAGES - 1}"
+
+
+@pytest.mark.asyncio
+async def test_a_finished_compaction_stores_its_streak_and_leaves_nothing_pending_on_the_session(
+    policy_db: PolicyDb, chat_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The streak reaches the chat row through the store's own connection, so the caller's session ends committed.
+
+    A write flushed on that session after its commit is rolled back when the session closes, and holds the database
+    write lock until then.
+    """
+    monkeypatch.setattr("app.config.settings.settings.database.sqlite_path", str(tmp_path / "compact.db"))
+    register_compression_streak_store(ChatCompressionStreakStore())
+    await _seed_chat(policy_db, chat_id)
+    longer_than_the_messages = MagicMock()
+    longer_than_the_messages.to_json.return_value = "review " * 2_000
+
+    async def summarize(**_arguments: object) -> tuple[list[object], MagicMock]:
+        return [], longer_than_the_messages
+
+    with _collaborators(summarize):
+        async with policy_db.factory() as session:
+            result = await compact_chat(session, chat_id)
+            assert not session.in_transaction()
+
+    assert result.compacted is True and result.tokens_saved == 0
+    assert (await _stored_chat(policy_db, chat_id)).compression_ineffective_streak == 1
 
 
 @pytest.mark.asyncio

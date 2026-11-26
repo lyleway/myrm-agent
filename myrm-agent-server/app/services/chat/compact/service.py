@@ -8,7 +8,6 @@
 - myrm_agent_harness...summarize_circuit_guard::is_summarize_circuit_open (POS: circuit breaker)
 - myrm_agent_harness...compression_anti_thrash_guard (POS: streak guard + outcome record)
 - compact._types::CompactReason, CompactResult (POS: closed decline reasons + outcome)
-- app.database.factory::acquire_write_lock (POS: write lock before a read-then-write unit)
 
 [OUTPUT]
 - compact_chat: transactional compaction entry (``for_idle_stale`` idle predicate; ``request_tokens_for_guard`` aligns idle anti-thrash with gate; ``explicit_request`` marks a person's request, which the anti-thrash guard does not stop and which counts toward its streak only up to the guard limit)
@@ -27,7 +26,6 @@ import logging
 from myrm_agent_harness.utils.text_utils import get_token_count
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.factory import acquire_write_lock
 from app.services.chat.compact._lock import get_compaction_lock
 from app.services.chat.compact._types import CompactReason, CompactResult
 from app.services.chat.compact.idle_estimate import resolve_min_messages_to_compact
@@ -80,10 +78,7 @@ async def compact_chat(
         )
         from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
 
-        from app.services.chat.compact.compression_streak import (
-            hydrate_compression_streak_from_db,
-            save_compression_ineffective_streak,
-        )
+        from app.services.chat.compact.compression_streak import hydrate_compression_streak_from_db
 
         if is_summarize_circuit_open():
             return CompactResult(compacted=False, reason=CompactReason.SUMMARIZE_CIRCUIT_OPEN)
@@ -178,9 +173,6 @@ async def compact_chat(
 
         last_msg = db_messages[-1]
 
-        # The persist reads the stored compaction boundary before it writes: taking the write lock first leaves no
-        # moment between the read and the write for another writer to commit in.
-        await acquire_write_lock(db)
         try:
             await do_persist_to_db(
                 db=db,
@@ -196,15 +188,6 @@ async def compact_chat(
                 original_tokens=original_tokens,
                 tokens_saved=tokens_saved,
                 streak_ceiling=ANTI_THRASHING_STREAK_LIMIT if explicit_request else None,
-            )
-            from myrm_agent_harness.agent.context_management.strategies.compression.compression_streak_store import (
-                get_compression_streak_store,
-            )
-
-            await save_compression_ineffective_streak(
-                db,
-                chat_id,
-                get_compression_streak_store().get_streak(chat_id),
             )
 
             logger.warning(

@@ -7,10 +7,11 @@
 [OUTPUT]
 - ChatCompressionStreakStore: harness CompressionStreakStore via sync SQLite
 - register_chat_compression_streak_store: register at app startup
-- load/save async helpers for compact_chat transactional paths
+- load_compression_ineffective_streak / hydrate_compression_streak_from_db: async ORM reads for compact_chat
 
 [POS]
-Server product persistence for the anti-thrash streak.
+Server product persistence for the anti-thrash streak. Writes go through the store's own connection (the guard's
+record function calls ``set_streak``), so no write is left pending in a request session.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import Chat
@@ -124,25 +125,6 @@ async def load_compression_ineffective_streak(db: AsyncSession, chat_id: str) ->
     if value is None:  # pragma: no cover - column has server_default=0, never NULL in DB
         return 0
     return max(0, int(value))
-
-
-async def save_compression_ineffective_streak(
-    db: AsyncSession,
-    chat_id: str,
-    streak: int,
-) -> None:
-    """Persist streak on Chat row within caller transaction."""
-    normalized = max(0, int(streak))
-    await db.execute(update(Chat).where(Chat.id == chat_id).values(compression_ineffective_streak=normalized))
-    await db.flush()
-    ChatCompressionStreakStore._mirror_task_metrics(chat_id, normalized)
-    from myrm_agent_harness.agent.context_management.strategies.compression.compression_streak_store import (
-        get_compression_streak_store,
-    )
-
-    store = get_compression_streak_store()
-    if isinstance(store, ChatCompressionStreakStore):
-        store.seed_streak(chat_id, normalized)
 
 
 async def hydrate_compression_streak_from_db(db: AsyncSession, chat_id: str) -> int:
