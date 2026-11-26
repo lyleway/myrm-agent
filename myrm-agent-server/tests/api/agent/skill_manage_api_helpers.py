@@ -101,10 +101,14 @@ def patch_request(name: str, old: str, new: str) -> str:
 
 
 def workflow_message(marker: str) -> str:
-    """A plain turn that tells the agent how a task is done; its last step names a marker only this chat knows."""
+    """A plain turn that tells the agent how a task is done as exact commands; the last one carries a marker only this chat knows.
+
+    The authoring standard asks a skill to keep exact commands verbatim, so a marker inside a command survives distillation
+    where a step described in prose ("print a confirmation line") would lose it.
+    """
     return (
-        "For context, this is how I ship a build: step 1 run the linter, step 2 run the test suite, "
-        f"step 3 print the line {marker} . Reply with exactly: NOTED"
+        "For context, this is how I ship a build: step 1 run `make lint`, step 2 run `make test`, "
+        f"step 3 run `echo {marker}`. Reply with exactly: NOTED"
     )
 
 
