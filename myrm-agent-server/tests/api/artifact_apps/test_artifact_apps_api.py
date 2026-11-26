@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.artifact_apps import router as artifact_apps_router
@@ -114,6 +115,34 @@ async def test_a_page_of_an_uninstalled_artifact_has_no_detail_grants_or_proxy(c
     assert (await client.get("/api/v1/artifact-apps/clock")).status_code == 404
     assert (await _grant(client, "notify", "allow", [])).status_code == 404
     assert (await client.post("/api/v1/artifact-apps/clock/fetch", json=_PAGE_REQUEST)).status_code == 404
+
+
+async def test_the_page_of_an_app_whose_artifact_was_deleted_is_not_found(
+    client: httpx.AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    await _install(client)
+    async with session_factory() as db:
+        await db.execute(update(Artifact).where(Artifact.id == "clock").values(is_deleted=True))
+        await db.commit()
+
+    response = await client.get("/api/v1/artifact-apps/clock")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Artifact not found"
+
+
+async def test_an_installed_artifact_without_any_version_has_no_page(
+    client: httpx.AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    await _install(client)
+    async with session_factory() as db:
+        await db.execute(delete(ArtifactVersion).where(ArtifactVersion.artifact_id == "clock"))
+        await db.commit()
+
+    response = await client.get("/api/v1/artifact-apps/clock")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Artifact has no version"
 
 
 async def test_the_list_shows_installed_apps_and_uninstall_removes_them(client: httpx.AsyncClient) -> None:
@@ -249,6 +278,17 @@ async def test_the_host_reports_a_page_side_call_into_the_same_log(client: httpx
     assert reported.status_code == 204
     (entry,) = (await client.get("/api/v1/artifact-apps/clock/activity")).json()["data"]
     assert (entry["capability"], entry["outcome"], entry["version_sha256"]) == ("notify", "ok", _NEWER_SHA)
+
+
+async def test_the_host_cannot_report_activity_for_an_uninstalled_app(client: httpx.AsyncClient) -> None:
+    reported = await client.post(
+        "/api/v1/artifact-apps/clock/activity",
+        json={"version_sha256": _SHA, "capability": "notify", "outcome": "ok"},
+    )
+
+    assert reported.status_code == 404
+    assert (await _install(client)).json()["data"]["grants"] == []
+    assert (await client.get("/api/v1/artifact-apps/clock/activity")).json()["data"] == []
 
 
 async def test_a_malformed_version_hash_is_refused(client: httpx.AsyncClient) -> None:

@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { renderHook } from '@testing-library/react';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const isTauriRuntime = vi.hoisted(() => vi.fn());
@@ -32,5 +34,20 @@ describe('useIsAppWindow', () => {
     visit(url, tauri);
 
     expect(renderHook(() => useIsAppWindow()).result.current).toBe(false);
+  });
+
+  it('renders false on the server and during hydration even for the app route, so markup matches the first paint', () => {
+    visit('/apps/art-1?mode=focused', true);
+    const Probe = () => createElement('span', null, String(useIsAppWindow()));
+
+    expect(renderToString(createElement(Probe))).toContain('>false<');
+  });
+
+  it('unmounts cleanly: it never subscribes to anything that outlives the page', () => {
+    visit('/apps/art-1?mode=focused', true);
+    const { result, unmount } = renderHook(() => useIsAppWindow());
+
+    expect(result.current).toBe(true);
+    expect(() => unmount()).not.toThrow();
   });
 });
