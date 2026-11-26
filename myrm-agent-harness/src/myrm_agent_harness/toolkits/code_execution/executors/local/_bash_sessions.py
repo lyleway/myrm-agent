@@ -92,8 +92,9 @@ async def get_or_create_bash_session(
 
     A shell's sandbox is fixed when it starts, so a read-only run keeps its own shell and never reuses the
     writable run's under the same session id, and a change of the granted directories starts a new shell. A shell
-    the registry drops (its grants changed, or it is gone or unhealthy) is closed first: a command still queued on
-    it is refused by the closed session and runs on the shell that replaced it (see ``execute_bash``).
+    the registry drops (its grants changed, or it is gone or unhealthy) is closed first, and the close is not
+    abandoned when this caller is cancelled while it waits: a command still queued on it, or still starting its shell,
+    is refused by the closed session and runs on the shell that replaced it (see ``execute_bash``).
     Callers of one identity pass through ``start_locks`` one at a time, so the check and the start are one step:
     shells started side by side would all but the last be dropped from ``sessions`` while their processes keep
     running, and two callers that both find the shell unhealthy would both restart it. The check never waits for a
@@ -121,7 +122,8 @@ async def get_or_create_bash_session(
                     logger.debug(f" [LocalExecutor] Reusing Bash session: {session_key}")
                     return session
                 logger.warning(f" [LocalExecutor] Unhealthy Bash session, restarting: {session_key}")
-            # A shell that is gone is closed too, so a command still queued on it cannot start a shell in it.
+            # A shell that is gone is closed too, so a command still queued on it cannot start a shell in it, and one
+            # that is starting its shell there finds the session closed before it writes.
             await sessions.pop(session_key).close()
 
         logger.info(f" [LocalExecutor] Creating new Bash session: {session_key}")

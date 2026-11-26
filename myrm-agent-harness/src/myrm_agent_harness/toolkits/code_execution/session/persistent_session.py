@@ -17,7 +17,8 @@ script armor (on POSIX each command runs as ``bash <script>`` in a child of the 
 changes dies with it), and runs the commands of one shell one at a time; the command pump lives in
 ``CommandStreamMixin``. A command whose request is cancelled is stopped like a timed-out one (tree killed, session
 rebuilt on the next command); a command that reaches a shell that died is never replayed. A closed session is final:
-a command that reaches it after ``close()`` is refused, it never starts a shell.
+a command that reaches it after ``close()``, or whose shell was still starting when it closed, is refused and never
+reaches a shell; ``close()`` runs to its end even when the caller that awaits it is cancelled.
 """
 
 from __future__ import annotations
@@ -176,8 +177,10 @@ class PersistentSession(CommandStreamMixin, ABC):
         retried, because the command may already have run: the failure is returned and the next command starts a
         new shell. A closed session starts none: a command that reaches it after ``close()`` is refused
         (``SESSION_CLOSED_BEFORE_START``), so one that waited behind the command a closing session ended never runs
-        in a shell its owner has already dropped. ``env`` is applied around this command only: it is the one way a
-        command's credentials reach a shell that was started before them.
+        in a shell its owner has already dropped, and neither does one whose shell was still starting when the
+        session closed: it is refused once that shell is up, before anything is written to it. ``env`` is applied
+        around this command only: it is the one way a command's credentials reach a shell that was started before
+        them.
         """
         timeout = timeout or self.config.timeout
         try:
@@ -191,6 +194,10 @@ class PersistentSession(CommandStreamMixin, ABC):
                 return _closed_before_start()
             start_time = time.perf_counter()
             await self.start()
+            # A close that came while the shell was starting kills that shell as soon as the start lets go of
+            # ``_lock``: a command written to it now would die with it, so it is refused and runs on the next shell.
+            if self._closed:
+                return _closed_before_start()
             result = await self._execute_core(command, timeout, cancel_token, env)
             return dataclasses.replace(result, duration=time.perf_counter() - start_time)
         finally:
@@ -287,10 +294,17 @@ class PersistentSession(CommandStreamMixin, ABC):
         await self._transit_state(SessionState.TERMINATED)
 
     async def close(self) -> None:
-        """Kill the shell tree and end the session for good: a command that arrives later is refused."""
+        """Kill the shell tree and end the session for good: a command that arrives later is refused.
+
+        The close runs to its end even when the caller is cancelled while it waits for a start in progress: the shell
+        that start creates would otherwise run on with nobody left to close it.
+        """
         # Marked before the first await: a command waiting for the shell gets its turn as soon as the command ahead
         # of it ends, which can be while this close still waits for ``_lock``, and it has to find the session closed.
         self._closed = True
+        await asyncio.shield(self._close_under_lock())
+
+    async def _close_under_lock(self) -> None:
         async with self._lock:
             await self._close_unlocked()
 

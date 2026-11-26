@@ -1,8 +1,9 @@
 """A shell that served a command and waits for the next one ends at once when its session closes.
 
 ``close()`` sends SIGTERM and kills the shell only after a grace period. An idle shell is blocked reading its next
-command, and bash runs a trap only after that read returns, so a signal trap left installed by the last command made
-every close of a used session wait out the whole grace period. These tests drive a real shell and read how it ended.
+command, and bash runs a trap only after that read returns, so a signal trap left installed by the last command
+would make every close of a used session wait out the whole grace period. These tests drive a real shell and read
+how it ended.
 """
 
 from __future__ import annotations

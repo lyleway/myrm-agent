@@ -11,7 +11,8 @@ utils.runtime.cancel_hook::DeadlineCut, cut_deadline_on_cancel (POS: end a timeo
 [OUTPUT]
 CommandStreamMixin: ``_execute_core_stream`` for ``PersistentSession``.
 CANCELLED_WHILE_RUNNING / CANCELLED_BEFORE_START / CANCELLED_EXIT_CODE: result of a command stopped by its request.
-SESSION_CLOSED_BEFORE_START: result of a command that reached a session after it was closed; it did not run.
+SESSION_CLOSED_BEFORE_START: result of a command that reached a session after it was closed, or whose shell was still
+starting when it closed; it did not run.
 
 [POS]
 Output pump of the persistent shell. A command ends in one of four ways: its end marker, a dead shell, the timeout
