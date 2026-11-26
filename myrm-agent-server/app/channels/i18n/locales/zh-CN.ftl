@@ -196,6 +196,7 @@ cron_notice_interrupted_message =
     运行期间应用停止了，这次执行没有完成。
 cron_system_job_heartbeat = Agent 自动巡检
 new_session_started =  新对话已开始，下一条消息将开启新会话。
+new_session_failed =  无法开启新对话，请再发送一次 /new 重试。
 compact_not_configured = ℹ 未配置压缩功能。
 compact_success =  上下文已压缩：{ $message_count } 条消息已摘要，约节省 { $tokens_saved } tokens。{ $topic_hint }
 compact_topic_hint = （聚焦主题：{ $topic }）

@@ -22,6 +22,7 @@ _REQUIRED_ROUTER_METHODS = (
     "_janitor_sweep",
     # pipeline/inbound.py
     "_dispatch_inbound_message",
+    "_open_requested_conversation",
     "_is_duplicate",
     # pipeline/command_dispatch.py
     "_dispatch_resolved",

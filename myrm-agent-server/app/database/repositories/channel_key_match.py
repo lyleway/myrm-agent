@@ -6,12 +6,15 @@
 [OUTPUT]
 - channel_key_extends(): the conversation's key and every key that continues it after a ``:``
 - channel_key_epochs(): the conversation's key and its reset-epoch keys (``:e=<epoch>``)
+- channel_key_started(): the keys of the conversations a person opened on request (``:e=s<stamp>``), which no reset
+  policy derives
 
 [POS]
 A channel session key is ``{channel}:{peer_kind}:{peer}[:thread:..][:agent:..]`` with an optional ``:e=<epoch>``
 suffix, and a peer id keeps ``_`` and ``-`` when it is sanitised. A ``LIKE`` prefix therefore also matches another peer
 (``u1`` and ``u10``), treats ``_`` as a wildcard and scans the table. These matches compare against the key at its
-segment boundary with an index range instead: ``:`` (0x3A) is followed by ``;`` (0x3B) and ``=`` (0x3D) by ``>`` (0x3E).
+segment boundary with an index range instead: ``:`` (0x3A) is followed by ``;`` (0x3B), ``=`` (0x3D) by ``>`` (0x3E)
+and ``s`` (0x73) by ``t`` (0x74).
 """
 
 from __future__ import annotations
@@ -31,3 +34,13 @@ def channel_key_epochs(base_key: str) -> ColumnElement[bool]:
     """Match ``base_key`` and its reset-epoch keys, not the keys of a topic or an agent of the same peer."""
     key = Chat.channel_session_key
     return or_(key == base_key, (key >= f"{base_key}:e=") & (key < f"{base_key}:e>"))
+
+
+def channel_key_started(base_key: str) -> ColumnElement[bool]:
+    """Match the keys of the conversations opened on request under ``base_key`` (see ``started_session_key``).
+
+    The stamp after ``:e=s`` is a UTC time, so the newest conversation is the greatest key, and the unique index on
+    the column serves the range.
+    """
+    key = Chat.channel_session_key
+    return (key >= f"{base_key}:e=s") & (key < f"{base_key}:e=t")

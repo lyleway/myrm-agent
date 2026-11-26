@@ -16,6 +16,7 @@ Keeping them in one module prevents the three copies from drifting apart
 -- is_excluded_path: archive paths that are never packaged or parsed.
 -- AGENT_STRUCTURAL_KEYS: agent frontmatter keys owned by the format (everything else is client data).
 -- MAX_*: capacity ceilings shared by import, export and persistence.
+-- DocumentTooLargeError / ensure_document_size: refusal of a document over its decode ceiling, raised before any decoder reads it.
 
 [POS]
 Framework-level, client-agnostic plugin packaging rules (no I/O, no persistence).
@@ -42,6 +43,12 @@ _NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 MAX_PLUGIN_ZIP_BYTES = 20 * 1024 * 1024
 MAX_TEMPLATE_FILE_BYTES = 1 * 1024 * 1024
 MAX_TOTAL_TEMPLATE_BYTES = 5 * 1024 * 1024
+
+# Decode ceilings: the time and memory a loader takes grow with the text it reads, and the archive limits alone let one
+# document take most of the archive. A document over its ceiling is refused before any decoder reads it. plugin.json and
+# mcp.json count bytes; the YAML header of a SKILL.md or an agent file counts characters.
+MAX_PLUGIN_JSON_BYTES = 1 * 1024 * 1024
+MAX_FRONTMATTER_CHARS = 64 * 1024
 
 _EXCLUDED_SEGMENTS = frozenset({".git", ".venv", "__pycache__", "node_modules", ".DS_Store", "__MACOSX"})
 
@@ -113,3 +120,17 @@ def is_excluded_path(path: str) -> bool:
     build/VCS directories are excluded on both sides of the round trip.
     """
     return any(part.startswith(".") or part in _EXCLUDED_SEGMENTS for part in path.split("/"))
+
+
+class DocumentTooLargeError(ValueError):
+    """A document of the package is over its decode ceiling, so the package is refused as a whole.
+
+    A capacity violation is archive-level, like an archive over the zip limits, whereas a document that is merely
+    malformed stays a diagnostic of its own component.
+    """
+
+
+def ensure_document_size(label: str, size: int, limit: int, unit: str) -> None:
+    """Raise ``DocumentTooLargeError`` naming ``label`` when ``size`` is over ``limit`` (both counted in ``unit``)."""
+    if size > limit:
+        raise DocumentTooLargeError(f"{label} is larger than {limit:,} {unit} (it has {size:,})")

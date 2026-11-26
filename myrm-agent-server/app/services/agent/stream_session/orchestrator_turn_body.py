@@ -133,6 +133,7 @@ async def execute_agent_turn_after_reserve(
             message_id=request.message_id,
             agent_id=request.agent_id,
             request_engine_params=request.engine_params,
+            turn_message_id=persisted_message_id,
         )
 
     chat_history = await chat_history_bootstrap.load_chat_history(

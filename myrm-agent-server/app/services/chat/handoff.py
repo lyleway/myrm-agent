@@ -3,7 +3,7 @@
 [INPUT]
 - database.models.chat::Chat (POS: session record with channel_session_key)
 - database.models.channel::ChannelPairingModel (POS: external identity mapping)
-- channels.types.session::SessionKey, SessionPolicy, SessionResetMode, compute_daily_epoch
+- channels.types.session::SessionKey, started_session_key (POS: session identity and the key of a conversation opened on request)
 
 [OUTPUT]
 - HandoffResult: result dataclass
@@ -11,7 +11,8 @@
 
 [POS]
 Rebinds a Chat's channel_session_key to point at a target channel,
-so subsequent messages on that channel resume the same conversation.
+so subsequent messages on that channel resume the same conversation. The chat is stored as a conversation
+the person opened on the target channel, which the target peer's reset policy lets continue like any other.
 """
 
 from __future__ import annotations
@@ -22,12 +23,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
-from app.channels.types.session import (
-    SessionKey,
-    SessionPolicy,
-    SessionResetMode,
-    compute_daily_epoch,
-)
+from app.channels.types.session import SessionKey, started_session_key
 from app.database.connection import get_session
 from app.database.models.channel import ChannelPairingModel
 from app.database.models.chat import Chat
@@ -46,44 +42,29 @@ class HandoffResult:
 def _build_target_session_key(
     target_channel: str,
     peer_id: str,
-    policy: SessionPolicy,
     agent_id: str | None = None,
 ) -> str:
-    """Build a session key that matches what resolve_session_key would produce."""
+    """The key the handed chat is stored under: a conversation opened now on the target peer.
+
+    ``resolve_session_key`` resolves the target peer's next message to the newest such conversation for as long as the
+    peer's reset policy lets it continue, so the handoff works the same under every policy.
+    """
     sk = SessionKey(
         channel=target_channel,
         peer_kind="dm",
         peer_id=peer_id,
         agent_id=agent_id,
     )
-    base = sk.to_str()
-    match policy.mode:
-        case SessionResetMode.PERSISTENT:
-            return base
-        case SessionResetMode.DAILY:
-            epoch = compute_daily_epoch(policy.daily_reset_hour)
-            return f"{base}:e={epoch}"
-        case SessionResetMode.IDLE:
-            epoch = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M")
-            return f"{base}:e={epoch}"
-    return base
+    return started_session_key(sk.to_str(), datetime.now(tz=UTC))
 
 
-async def handoff_chat(
-    chat_id: str,
-    target_channel_name: str,
-    *,
-    policy: SessionPolicy | None = None,
-) -> HandoffResult:
+async def handoff_chat(chat_id: str, target_channel_name: str) -> HandoffResult:
     """Transfer a chat session to a target channel.
 
     Validates preconditions (chat exists, target channel connected, user paired),
     resolves UNIQUE constraint conflicts, and rebinds the Chat record.
     """
     from app.core.channel_bridge import channel_gateway
-
-    if policy is None:
-        policy = SessionPolicy()
 
     async with get_session() as session:
         chat = (await session.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
@@ -135,7 +116,6 @@ async def handoff_chat(
         target_key = _build_target_session_key(
             target_channel_name,
             pairing.sender_id,
-            policy,
             agent_id=chat.agent_id,
         )
 

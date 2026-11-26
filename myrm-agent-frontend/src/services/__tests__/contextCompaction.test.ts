@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest } from '@/lib/api';
 import { COMPACT_FOCUS_TOPIC_MAX_LENGTH } from '@/lib/constants/compact-focus-topic';
-import { compactChat, describeCompactSkip, runManualCompaction } from '@/services/contextCompaction';
+import {
+  COMPACT_REQUEST_TIMEOUT_MS,
+  compactChat,
+  describeCompactSkip,
+  runManualCompaction,
+} from '@/services/contextCompaction';
 import en from '../../../locales/en.json';
 import zh from '../../../locales/zh.json';
 
@@ -37,13 +42,25 @@ describe('compactChat', () => {
       method: 'POST',
       body: JSON.stringify({ focus_topic: 'billing decisions' }),
       headers: { 'Content-Type': 'application/json' },
+      timeout: COMPACT_REQUEST_TIMEOUT_MS,
     });
   });
 
   it.each([undefined, ''])('sends no body when the topic is %j', async (topic) => {
     await compactChat('chat-1', topic);
 
-    expect(apiRequestMock).toHaveBeenCalledWith('/chats/chat-1/compact', { method: 'POST' });
+    expect(apiRequestMock).toHaveBeenCalledWith('/chats/chat-1/compact', {
+      method: 'POST',
+      timeout: COMPACT_REQUEST_TIMEOUT_MS,
+    });
+  });
+
+  it("waits longer than the server may work on a compaction, so the answer read is the server's and not a page timeout", () => {
+    const SERVER_TOTAL_CEILING_MS = 600_000; // COMPACT_TOTAL_CEILING_S in the server's compact/_constants.py
+    const DEFAULT_REQUEST_TIMEOUT_MS = 30_000; // what apiRequest applies when a call sets none
+
+    expect(COMPACT_REQUEST_TIMEOUT_MS).toBeGreaterThan(SERVER_TOTAL_CEILING_MS);
+    expect(COMPACT_REQUEST_TIMEOUT_MS).toBeGreaterThan(DEFAULT_REQUEST_TIMEOUT_MS);
   });
 
   it('cuts a longer topic to the limit the server accepts, so the request is not refused', async () => {
@@ -118,6 +135,7 @@ describe('runManualCompaction', () => {
     { reason: 'timeout', logged: true },
     { reason: 'persist_failed', logged: true },
     { reason: 'no_compactable_messages', logged: false },
+    { reason: 'chat_not_found', logged: false },
     { reason: 'concurrent_compaction_in_progress', logged: false },
   ])('keeps the raw reason of a failure for the console only ($reason)', async ({ reason, logged }) => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -133,10 +151,11 @@ describe('runManualCompaction', () => {
 const SKIP_CASES = [
   { reason: 'no_compactable_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
   { reason: 'too_few_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
+  // A new chat has an id before its first message is sent; the server has no such chat yet, and it holds nothing.
+  { reason: 'chat_not_found', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
   { reason: 'concurrent_compaction_in_progress', messageKey: 'chat.compact.skip.busy', severity: 'info' },
   { reason: 'summarize_circuit_open', messageKey: 'chat.compact.skip.paused', severity: 'warning' },
   { reason: 'compression_anti_thrash_active', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'chat_not_found', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'timeout', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'persist_failed', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'too_few_messages (2 < 4)', messageKey: 'chat.compact.failed', severity: 'error' },

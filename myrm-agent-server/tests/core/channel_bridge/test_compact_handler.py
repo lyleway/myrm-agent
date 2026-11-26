@@ -68,15 +68,6 @@ async def test_the_conversation_compacted_is_the_one_the_command_resolves(compac
     chat_lookup.assert_awaited_once_with("telegram:c1", "telegram")
 
 
-async def test_a_conversation_new_has_ended_has_nothing_to_compact(compaction: AsyncMock, chat_lookup: AsyncMock) -> None:
-    with patch(f"{_MODULE}.resolve_command_session_key", AsyncMock(return_value=None)):
-        result = await ChannelCompactHandler()(_MESSAGE, "uid1")
-
-    assert result == CompactResult(compacted=False, skip=CompactSkip.NOTHING_TO_COMPACT)
-    chat_lookup.assert_not_awaited()
-    compaction.assert_not_awaited()
-
-
 async def test_a_compaction_that_happened_carries_its_counts(compaction: AsyncMock) -> None:
     result = await ChannelCompactHandler()(_MESSAGE, "uid1")
 

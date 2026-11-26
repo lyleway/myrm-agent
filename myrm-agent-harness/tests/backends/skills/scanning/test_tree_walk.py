@@ -1,11 +1,12 @@
 """Tests for the bounded walk over a skill directory.
 
 [INPUT]
-- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem, MAX_ENTRIES (POS: the walk under test)
+- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkLink, WalkProblem, MAX_ENTRIES (POS: the walk under test)
 
 [OUTPUT]
-- Fails when the walk stops at a depth, enters a folder other than node_modules, follows a symbolic link, loses a folder it
-  cannot list or a tree over the entry budget without a problem, or reads a huge folder past the budget.
+- Fails when the walk stops at a depth, enters a folder other than node_modules, follows a symbolic link, says nothing of a
+  link that leaves the skill, loses a folder it cannot list or a tree over the entry budget without a problem, or reads a
+  huge folder past the budget.
 
 [POS]
 The lifecycle-script audit and the dependency extractor both rely on this walk to see every file an installer could
@@ -24,7 +25,8 @@ from pathlib import Path
 import pytest
 
 from myrm_agent_harness.backends.skills.scanning import tree_walk
-from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
+from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkLink, WalkProblem, walk_tree
+from tests.support.symlinks import make_symlink
 
 
 def _is_json(name: str) -> bool:
@@ -78,19 +80,59 @@ def test_node_modules_is_the_only_folder_not_entered(tmp_path: Path, folder: str
     assert _found(tmp_path) == [_local(f"{folder}/p.json")]
 
 
-def test_a_symlink_is_reported_as_one_and_never_followed(tmp_path: Path) -> None:
+def test_a_symlink_to_a_file_is_reported_as_one_when_wanted_and_never_followed(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     _touch(outside, "inside.json")
     root = tmp_path / "root"
     root.mkdir()
-    try:
-        (root / "link.json").symlink_to(outside / "inside.json")
-        (root / "linked-folder").symlink_to(outside, target_is_directory=True)
-        (root / "other.txt").symlink_to(outside / "inside.json")
-    except OSError:
-        pytest.skip("symbolic links are not available")
+    make_symlink(root / "link.json", outside / "inside.json")
+    make_symlink(root / "other.txt", outside / "inside.json")
 
     assert list(walk_tree(root, _is_json)) == [WalkedFile(root / "link.json", "link.json", True)]
+
+
+def test_a_symlink_to_a_folder_outside_the_root_is_reported_and_never_entered(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    _touch(outside, "inside.json")
+    root = tmp_path / "root"
+    _touch(root, "a/b/seen.json")
+    make_symlink(root / "a" / "b" / "exit", outside)
+    make_symlink(root / "up", tmp_path)
+
+    assert list(walk_tree(root, _is_json)) == [
+        WalkLink("up"),
+        WalkLink(_local("a/b/exit")),
+        WalkedFile(root / "a" / "b" / "seen.json", _local("a/b/seen.json"), False),
+    ]
+
+
+def test_a_symlink_to_a_folder_inside_the_root_is_neither_entered_nor_reported(tmp_path: Path) -> None:
+    _touch(tmp_path, "real/seen.json")
+    make_symlink(tmp_path / "alias", tmp_path / "real")
+    make_symlink(tmp_path / "again", tmp_path)
+
+    assert list(walk_tree(tmp_path, _is_json)) == [
+        WalkedFile(tmp_path / "real" / "seen.json", _local("real/seen.json"), False)
+    ]
+
+
+def test_a_symlink_that_leads_nowhere_is_ignored(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    make_symlink(root / "dangling", tmp_path / "missing")
+    make_symlink(root / "loop", root / "loop")
+
+    assert list(walk_tree(root, _is_json)) == []
+
+
+def test_a_wanted_symlink_to_a_folder_outside_the_root_stays_a_file(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "root"
+    root.mkdir()
+    make_symlink(root / "wanted.json", outside)
+
+    assert list(walk_tree(root, _is_json)) == [WalkedFile(root / "wanted.json", "wanted.json", True)]
 
 
 def test_a_folder_that_cannot_be_listed_is_a_problem_and_the_walk_goes_on(

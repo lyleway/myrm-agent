@@ -142,6 +142,16 @@ class TestRejectedSkillsLeaveNothingBehind:
         assert [f.name for f in outcome.failures] == ["bad"]
         assert sorted(p.name for p in install_root.iterdir()) == ["good"]
 
+    async def test_a_name_the_file_system_cannot_hold_is_reported_and_the_others_install(self, install_root: Path) -> None:
+        unholdable = _skill("long-path", files={"references/" + "x" * 256: b"data"})
+        session = _session(_skill("alpha"), unholdable, _skill("beta"))
+
+        outcome = await _install(session)
+
+        assert sorted(outcome.installed_ids) == ["alpha", "beta"]
+        assert [(f.name, f.code) for f in outcome.failures] == [("long-path", "INVALID_PACKAGE_PATH")]
+        assert sorted(p.name for p in install_root.iterdir()) == ["alpha", "beta"]
+
     async def test_deployment_without_local_skills_blocks_before_touching_disk(self, install_root: Path) -> None:
         outcome = await _install(_session(_skill()), allows_local_skills=False)
 

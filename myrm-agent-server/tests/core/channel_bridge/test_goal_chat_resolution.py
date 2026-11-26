@@ -7,7 +7,7 @@ on another chat than the one the work runs in is never seen by the turns that pu
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +19,7 @@ from app.channels.i18n import get_text
 from app.channels.protocols.goal_command import GoalSubcommand, SubgoalSubcommand
 from app.channels.types import InboundMessage, SessionPolicy, SessionResetMode
 from app.core.channel_bridge.agent_executor import resolve_session_key
+from app.core.channel_bridge.command_session import start_conversation
 from app.core.channel_bridge.goal_handler import ChannelGoalCommandHandler
 from app.core.channel_bridge.goal_handler.chat_resolution import resolve_chat_id
 from app.services.agent.gateway import AgentGateway
@@ -27,10 +28,11 @@ from app.services.chat.chat_service import ChatService
 
 from .command_session_testkit import PERSON_KEEPS_ONE_CONVERSATION, PERSON_RESETS_DAILY, stubbed_stores, topic
 
+pytestmark = pytest.mark.usefixtures("session_key_reads_db_session")
+
 _OBJECTIVE = "Ship the report"
 _CHAT = ("g1", None)
 _MESSAGE = InboundMessage(channel="telegram", sender_id="u1", chat_id="g1", content="/goal", user_id="uid1", is_group=True)
-_ENDED_BY_NEW = replace(_MESSAGE, metadata={"force_new_epoch": True})
 _PERSISTENT = SessionPolicy(mode=SessionResetMode.PERSISTENT)
 
 
@@ -130,19 +132,26 @@ async def test_a_goal_command_that_sets_nothing_opens_no_chat(db_session: AsyncS
     assert await _stored_chat(await resolve_session_key(_MESSAGE, _PERSISTENT)) is None
 
 
-async def test_after_new_a_goal_command_does_not_reach_the_ended_conversation(db_session: AsyncSession) -> None:
+async def test_after_new_a_goal_command_acts_on_the_new_conversation_and_not_on_the_ended_one(db_session: AsyncSession) -> None:
     ended = await _chat_under(await resolve_session_key(_MESSAGE, _PERSISTENT))
+    await ChatService.append_message(ended, "user", "hello", datetime.now(UTC), "UTC", message_id="m-ended")
     await GoalRegistry.resolve_provider(ended).create_goal(ended, _OBJECTIVE)
     handler = ChannelGoalCommandHandler()
 
     with stubbed_stores({}, personal=PERSON_KEEPS_ONE_CONVERSATION):
         before = await handler.handle_goal(_MESSAGE, GoalSubcommand.STATUS, "")
-        after = await handler.handle_goal(_ENDED_BY_NEW, GoalSubcommand.STATUS, "")
-        reply = await handler.handle_goal(_ENDED_BY_NEW, GoalSubcommand.SET, "Another goal")
+        await start_conversation(_MESSAGE)
+        after = await handler.handle_goal(_MESSAGE, GoalSubcommand.STATUS, "")
+        reply = await handler.handle_goal(_MESSAGE, GoalSubcommand.SET, "Another goal")
+        new_chat = await resolve_chat_id(_MESSAGE)
 
     assert _OBJECTIVE in before
-    assert after == get_text(_ENDED_BY_NEW, "no_goal_is_set")
-    assert reply == get_text(_ENDED_BY_NEW, "goal_set", goal="Another goal")
+    assert after == get_text(_MESSAGE, "no_goal_is_set")
+    assert reply == get_text(_MESSAGE, "goal_set", goal="Another goal")
+    assert new_chat not in (None, ended)
+    kept = await GoalRegistry.resolve_provider(new_chat).get_latest_goal(new_chat)
+    assert kept is not None
+    assert kept.objective == "Another goal"
     stored = await GoalRegistry.resolve_provider(ended).get_latest_goal(ended)
     assert stored is not None
     assert stored.objective == _OBJECTIVE

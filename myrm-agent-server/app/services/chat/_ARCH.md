@@ -43,7 +43,7 @@ Conversation Recall 通过会话摘要索引、消息段 SQLite/FTS5 索引与 `
 | `usage_cache.py` | ✅ 辅助 | `ChatUsageCache`: 进程内 TTL 缓存（默认 5s，key=chat_id），携带「最后聚合 assistant 消息 id」，同一会话连续消息落库/连续突变防抖；last_message_id 变化（新消息或 sibling 切换）强制重算 | ✅ |
 | `compact_service.py` | ✅ 核心 | 无损上下文压缩 **facade**（实现见 `compact/` 子包）；导出 `compact_chat` / `CompactResult` / `CompactReason` / idle estimate / cooldown / anti-thrash 接线 | ✅ |
 | `compact/` | ✅ 核心 | 压缩子模块：`service.py`（compact_chat）、`persist.py`、`idle_estimate.py`、`message_io.py`、`summarize_guard.py`、`llm_config.py`、`archive.py` | ✅ |
-| `stale_compact_gate.py` | ✅ 核心 | Pre-reply idle stale compaction gate（`engine_params.idle_compact_after_seconds`，默认 0；idle 锚点=最后消息时间；**idle predicate：tokens>floor only（无 min_messages）**；request-level token floor（summary+tail+overhead）；gate 向 `compact_chat` 传递 `request_tokens_for_guard` 与 anti-thrash 同口径；**compression failure cooldown** + **anti-thrash**；**模型窗口不可用 fail-closed**；Web 经 `pre_reply_compact_sse` 发 `active` 与一个收尾 phase 的 SSE；Channel 入站前 best-effort 调用） | ✅ |
+| `stale_compact_gate.py` | ✅ 核心 | Pre-reply idle stale compaction gate（`engine_params.idle_compact_after_seconds`，默认 0；idle 锚点=本回合之前的最后一条消息时间（Web 回合先提交自己的用户行再进门禁，`turn_message_id` 把这一行排除在外，否则任何聊天都像刚活跃过、门禁永远判不到空闲；Channel 在入站消息落库之前调用，不传）；**idle predicate：tokens>floor only（无 min_messages）**；request-level token floor（summary+tail+overhead）；gate 向 `compact_chat` 传递 `request_tokens_for_guard` 与 anti-thrash 同口径；**compression failure cooldown** + **anti-thrash**；**模型窗口不可用 fail-closed**；Web 经 `pre_reply_compact_sse` 发 `active` 与一个收尾 phase 的 SSE；Channel 入站前 best-effort 调用） | ✅ |
 | `conversation_search_service.py` | ✅ 核心 | Agent 历史会话召回服务；FTS5 召回（候选取数在此，scope 与可见性过滤在仓储 SQL 层，命中的构造与打分交 `conversation_search_hits.py`）、索引覆盖度元数据注入、`expand_message_id` 窗口、source refs、CJK 两档平滑降级（CjkFtsQueryPlanner）；FTS 无命中时按模型键入的查询做子串回退（规划出的查询是词元表达式，不是原文），只随第一档规划查询执行一次，后续档只放宽 FTS 表达式、不重复扫表（`test_search_typed_text.py` 钉住）；交给模型的 snippet 取召回行的 `window`（存储原文的纯文本，不做 HTML 转义；用户自己写的 `<mark>` 原样保留，FTS 高亮是仓储层的非字符标记，不会与它混淆），FTS 命中的窗口在排名与 `min_score` 过滤之后交 `conversation_search_snippet.py` 重建，界面用的 `source_ref.snippet` 仍转义并带高亮；`test_conversation_search_service.py` 钉住两者的分工，`test_conversation_search_redaction.py` 钉住用户写的标签原样读回 | ✅ |
 | `conversation_search_hits.py` | ✅ 核心 | 会话召回命中的构造与打分，只读召回行、不碰数据库。`fts_hit` 把 BM25 rank（经 `relevance_from_rank` 转为越强越高的相关度）与名次、同 agent 加成、`source_interaction_boost`（cron 降权、交互式来源加权）加权成分数，不看时间（相关度会饱和而时间不会，加一项时间会让较新的弱匹配压过较旧的强匹配）；`rank_fts_hits` 以确定性 RRF 融合后把名次归一化到 [0, 1] 供 `min_score` 过滤；`recent_hit` 按列表位置打分；命中的 `snippet` 是召回行的 `window`，`source_ref.snippet` 则转义并带高亮；命中的 `updated_at` 是它所指消息的发送时间（检索命中是命中的那条消息，列表命中是会话的最后一条消息），`created_at` 是会话创建时间，工具把前者写进命中头（请求带时区时按该时区写，否则按 UTC 写）；界面来源卡片只带 `updated_at`；`test_conversation_search_ranking.py` 钉住排序、打分与降权数值，`test_conversation_recall_times.py` 钉住检索命中、最近命中、管理列表、`@chat:` 候选与健康摘要读出的时间、命中头按请求时区写时间、UTC 写不下的时间只让所在命中没有时间而不拖垮检索，以及打分不看时间，`test_conversation_search_service.py` 钉住两种 snippet 的分工 | ✅ |
 | `conversation_search_snippet.py` | ✅ 辅助 | 召回命中窗口的脱敏层。`redact_hit_windows` 对每个入选命中取 FTS 窗口所在的存储原文（先看内存里的摘要与标题，再经 `fetch_window_context` 依次查消息片段、整段对话文本、列表用的最新消息），窗口前后各取 8000 字符整段脱敏，再读出模型可见的片段；`redacted_window` 从两端对齐（窗口之前、之后的文本分别脱敏，窗口取两者之间），一端落在遮蔽区内时由另一端加原始窗口长度定位（遮蔽缩短了窗口时会多带一点相邻文本），两端都落在遮蔽区内（窗口整个在密钥块里）、或窗口在存储原文里找不到（含存储文本自带高亮标记字符、会话在排名之后被排除出召回）时片段置空，不会把未脱敏的切片交出去；推理标签在脱敏之后去除；`test_conversation_search_snippet_window.py`（逐个窗口位置扫描）与 `test_conversation_search_redaction.py`（真实服务栈）钉住 | ✅ |
@@ -54,7 +54,7 @@ Conversation Recall 通过会话摘要索引、消息段 SQLite/FTS5 索引与 `
 | `history_sync.py` | ✅ 核心 | 对话历史单一权威的业务半边：`decide_history_mode`（存储的 `history_sync_token` 等于「活跃分支 + 压缩摘要」的摘要才 `continue`，其余、读失败、从未记录一律 `replace`）、`commit_history_sync`（本回合的回答已落库且仍活跃才写入摘要，持写锁，不动 `updated_at`，失败只记警告）、`history_digest`（摘要含压缩摘要与活跃消息 id 的有序序列；消息正文不会原地修改，id 即身份） | ✅ |
 | conversation_fork_manager.py | ✅ 核心 | 对话分支与独立验收管理（批量消息构造与插入 + commit 后清空子会话 checkpoint 线程（子会话 `history_sync_token` 为空，首轮由存储历史重建） + Fork 关系追踪与多代 root/depth DAG 溯源 + 完整 Chat 元数据继承 + `compacted_before_id` ID 映射 + fork 失败时清理孤儿 checkpoint + `acceptance_verifier` 挑剔验收 Prompt 注入与独立审计分支 + 不可变 `fork_point` 事件日志记录 + commit 后把历史里点名的长粘贴文件复制进子会话工作区） | ✅ |
 | `context_branch_fork.py` | ✅ 核心 | 从 volume snapshot bookmark 读取 jsonl 并 fork 新 chat（无 compaction 状态，对齐 GUI checkpoint branch；同样把快照里点名的长粘贴文件带进子会话工作区） | ✅ |
-| `handoff.py` | ✅ 辅助 | 跨平台会话交接：将 Chat 的 channel_session_key 重绑定到目标渠道，支持 UNIQUE 冲突自动解决和 pairing 验证 | ✅ |
+| `handoff.py` | ✅ 辅助 | 跨平台会话交接：将 Chat 的 channel_session_key 重绑定到目标渠道，键是目标对端此刻按请求开启的会话键（`started_session_key`，`:e=s<UTC 时间戳>`，与重置策略无关，之后的回合与命令按同一个解析器解到它），支持 UNIQUE 冲突自动解决和 pairing 验证 | ✅ |
 | `share_token.py` | ✅ 辅助 | 对话分享 HMAC+TTL 无状态签名 token 创建/验证/无密码确定性重建（同 payload+exp 同 token，GUI 状态查询据此恢复分享链接，零存储原始 token） | ✅ |
 | `share_renderer.py` | ✅ 辅助 | 对话分享只读 HTML 页面 SSR 渲染（Markdown 渲染走分享页共用管线 `core/security/share/share_markdown.py`（markdown-it-py，关闭原始 HTML，开 `breaks`）+ Agent 身份卡片 + 消息历史（长粘贴显示开头与字数）+ OG metadata + Dark Mode + XSS 防护；宽表格经共用管线包进 `.table-wrap`，在消息气泡内横向滚动（单元格按词换行，超长串才撑宽）；页面外壳文案（角色标签、消息数及单复数、无标题/默认智能体兜底名、页脚、`<html lang>`）按必填关键字参数 `lang` 以访客语言（中/英）输出，会话内容与用户自定义的智能体名保持原样；后台完成通知行不进入分享页；先滤掉不可读的行（非 user/assistant、后台完成通知）再取最近 `_MAX_SHARED_MESSAGES`=200 条，超出时对话上方有本地化提示「仅显示最近 N 条，共 M 条消息」，页脚数的是可读消息总数；消息时间与页脚日期一律换算成 UTC 并标「UTC」——页面不跑脚本，换不成访客时区；小号文字（时间、页脚、模型徽标、截断提示、引用块、表格表头）在浅 / 深两套主题下对比度均 ≥ 4.5，表头底色在两套主题下都与气泡底色不同；助手消息里的链接有显式的浅 / 深两套颜色（只设颜色、保留浏览器默认下划线），在气泡与表头底色上对比度均 ≥ 4.5，markdown 链接渲染成锚点而 `javascript:` 链接不渲染成锚点；消息正文、页面标题与链接预览里的凭据经 harness `redact_sensitive_text` 遮蔽（预览先遮蔽再截断，截断位置切不出半截密钥；智能体名片不遮蔽），整页在工作线程里构建，遮蔽的 CPU 开销不占事件循环，页面每次访问现算、不缓存；呈现部分由 `test_chat_share_renderer_presentation.py` 钉住，遮蔽部分由 `test_chat_share_renderer_redaction.py` 钉住） | ✅ |
 | `effective_workspace.py` | ✅ 核心 | SSOT：`resolve_effective_chat_workspace` — project.workspace_path > chat.workspace_dir > JIT sandbox（已存储但包含受保护位置的路径，如家目录或 `/`，读侧直接跳过，旧数据不会把整棵目录树交给沙箱）；供 GET chat、converter（`params/conversion/chat_context.py`）、files suggest/browse、fork、`ensure_default_workspace_dir` 共用；`find_chat_workspace_root`（严格：会话不存在且 id 非法时返回 `None`）与 `resolve_chat_workspace_root`（宽松：无 chat id 时回退进程工作区）是 vault / 产物 / 工作台读取会话文件的唯一根来源 | ✅ |
@@ -139,7 +139,7 @@ ChatService
 - **持久化**：摘要存储在 Chat 记录的 `compacted_summary` 字段
 - **增量**：多次压缩仅处理 `compacted_before_id` 之后的新消息
 - **备份**：压缩前将完整上下文写入文件系统（JSONL 格式）
-- **统一**：手动 `/compact` 和 Pipeline 自动摘要共用 `persist_compaction()`
+- **统一**：手动 `/compact` 和 Pipeline 自动摘要共用 `do_persist_to_db()` 写入压缩元数据（Pipeline 经 `persist_compaction()` 回调进入）
 - **质量**：使用框架层 `generate_structured_summary`，包含质量审计和重试机制
 
 ### 数据模型
@@ -175,34 +175,35 @@ Chat 表新增多个字段用于支撑高级功能：
 ### 压缩架构
 
 ```
-框架层 (myrm-agent-harness)                     业务层 (app)
-┌──────────────────────┐
-│ generate_structured_ │                    ┌──────────────────┐
-│ summary              │◀────────────────────│ compact_chat     │
-│ - 质量审计           │                    │ - 事务内执行     │
-│ - 重试机制           │                    │ - 使用调用方 db  │
-│ - 增量合并           │                    └─────┬────────────┘
-└──────────────────────┘                          │
-                                                  ▼
-                                         ┌─────────────────┐
-                                         │ _do_persist_to_db│
-                                         │ - 核心 DB 操作  │
-                                         │ - 不自动 commit │
-                                         └─────┬───────────┘
-                                               │
-                                    ┌──────────┴──────────┐
-                                    │                     │
-                            ┌───────▼────────┐    ┌──────▼─────────┐
-                            │ compact_chat   │    │persist_compaction│
-                            │ - 同步调用     │    │ - 异步回调     │
-                            │ - 事务内 commit│    │ - 创建新 session│
-                            └────────────────┘    └────────────────┘
-                                                         ▲
-                                                         │
-                                              ┌──────────┴────────┐
-                                              │ ContextPipeline   │
-                                              │ Middleware        │
-                                              └───────────────────┘
+框架层 (myrm-agent-harness)                 业务层 (app)
+┌────────────────────────┐                  ┌──────────────────────┐
+│ generate_structured_   │◀─────────────────│ compact_chat         │
+│ summary                │                  │ - 读、模型、写三段   │
+│ - 质量审计             │                  │ - 使用调用方 db      │
+│ - 重试机制             │                  └──────────────────────┘
+│ - 增量合并             │
+└────────────────────────┘
+                                                        │
+                                                        ▼
+                                            ┌──────────────────────┐
+                                            │ do_persist_to_db     │
+                                            │ - 核心 DB 操作       │
+                                            │ - 起手取写锁         │
+                                            │ - 不自动 commit      │
+                                            └──────────────────────┘
+                                                        ▲
+                                                        │
+                                            ┌──────────────────────┐
+                                            │ persist_compaction   │
+                                            │ - 异步回调           │
+                                            │ - 新建 session 并提交│
+                                            └──────────────────────┘
+                                                        ▲
+                                                        │
+                                            ┌──────────────────────┐
+                                            │ ContextPipeline      │
+                                            │ Middleware           │
+                                            └──────────────────────┘
 ```
 
 ### 用户交互流程
@@ -212,7 +213,7 @@ Chat 表新增多个字段用于支撑高级功能：
 2. 前端显示确认对话框（warning 样式）
 3. 提示：手动压缩会清除 Prompt Cache，建议等待自动压缩
 4. 用户确认后调用 `POST /api/chats/{chat_id}/compact`
-5. 后端执行 `compact_chat()`，事务内完成
+5. 后端执行 `compact_chat()`：先读取并提交，调用摘要模型时不持有数据库快照，再落库（起手取写锁）并提交（分段见下文「事务模型与并发安全」）
 6. 前端重新加载消息列表，显示压缩结果
 
 **自动压缩（Pipeline）**:
@@ -222,16 +223,17 @@ Chat 表新增多个字段用于支撑高级功能：
 4. 创建独立 session，fire-and-forget 模式
 
 **事务模型与并发安全**：
-- **同步路径**（API/IM `/compact`）：使用调用方 session，单一事务，保证一致性。
-- **异步路径**（Pipeline 自动触发）：创建新 session，fire-and-forget，不阻塞 Agent。
-- **防并发控制**：在 `compact_chat` 层增加了内存 `asyncio.Lock`（基于 `chat_id`）。确保单一 Sandbox 内的同一会话不会出现并发的持久化归档覆盖或历史损坏。
+- **同步路径**（API/IM `/compact`、回复前门禁、空闲压缩）：使用调用方 session，`compact_chat` 分三段。读段读取会话与待压缩消息后立即提交，让读快照在模型调用之前结束；模型调用段（秒到分钟级）不持有任何数据库快照，否则期间别处的任何一次提交都会让随后的写入以 `SQLITE_BUSY_SNAPSHOT` 失败（`busy_timeout` 不覆盖这一种），摘要白付费；写段调用 `do_persist_to_db` 并提交，它先读压缩边界再写，所以起手 `acquire_write_lock`，读与写之间没有别的写入者可插入的空档。压缩后的连续无效次数由守卫记录函数经存储自带的连接写进 Chat 行，不在调用方会话里留下未提交的写，会话在落库提交后保持无事务。
+- **失败冷却**：摘要超时、摘要失败与落库失败（`ValueError`，先回滚）都会写入失败冷却并立即提交（会话不提交就关闭会把它回滚，下一次空闲回合会为同一个失败的摘要再付一次费）。
+- **异步路径**（Pipeline 自动触发）：`persist_compaction` 创建新 session，fire-and-forget，不阻塞 Agent；它与进行中的回合并行，期间别处随时可能提交，同样靠 `do_persist_to_db` 起手的写锁保住摘要，否则读与写之间的一次提交就会让落库以 `database is locked` 失败（只记日志，摘要丢失）。
+- **防并发控制**：`compact_chat` 层有按 `chat_id` 的内存 `asyncio.Lock`，同一会话已有压缩在进行时直接返回 `concurrent_compaction_in_progress`，不会出现并发的持久化归档覆盖或历史损坏。
 
 **架构特点**：
 - 手动 `/compact` 和自动压缩使用相同的算法和 prompt
 - 人工请求（Web API、IM `/compact`）以 `explicit_request` 调用 `compact_chat`：anti-thrash 守卫只约束自动压缩，不拦人工请求，其结果计入连续无效次数但至多计到守卫上限（人工反复重试不会让会话被判为压缩出错）
 - 摘要逻辑集中在框架层，强制使用 `with_structured_output` 获取结构化上下文摘要
 - 业务层通过协议调用
-- `_do_persist_to_db` 是 DB 操作核心，由两种路径共享
+- `do_persist_to_db` 是 DB 操作核心（自带写锁，由调用方提交），由两种路径共享
 
 ### Agent 历史加载
 

@@ -148,10 +148,6 @@ class RouterExecutionMixin(RouterDeliveryMixin):
             raw_mid = exec_msg.metadata.get("message_id")
             message_id = raw_mid if isinstance(raw_mid, str) else None
 
-        if state_key in self._new_session_peers:
-            del self._new_session_peers[state_key]
-            exec_msg.metadata["force_new_epoch"] = True
-
         topic_ctx = await self._resolve_topic(exec_msg)
         if topic_ctx and not topic_ctx.enabled:
             logger.warning(

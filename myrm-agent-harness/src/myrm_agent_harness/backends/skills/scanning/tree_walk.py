@@ -1,9 +1,11 @@
-"""Bounded, complete walk over the files of a skill directory that a package manager may read.
+"""Bounded walk over the files of a skill directory that a package manager may read.
 
 A package manager reads a manifest wherever a workspace glob or a ``file:`` dependency points, so the walk has no
-depth cap and enters every folder except ``node_modules``; what bounds it is the number of entries. A folder it cannot
-list and a tree that exceeds the bound are yielded as problems, never swallowed, so a caller that audits what the walk
-finds cannot mistake a partial look for a clean one.
+depth cap and enters every folder except ``node_modules``; what bounds it is the number of entries. A symbolic link is
+never followed (what it leads to is not the skill's own file), but a package manager can follow one, so a link to a
+folder outside the skill is yielded as a ``WalkLink``. A folder the walk cannot list and a tree that exceeds the bound
+are yielded as problems, never swallowed, so a caller that audits what the walk finds cannot mistake a partial look
+for a clean one.
 
 [INPUT]
 - (stdlib: os, collections, itertools, operator, dataclasses, pathlib)
@@ -11,8 +13,9 @@ finds cannot mistake a partial look for a clean one.
 [OUTPUT]
 - MAX_ENTRIES: how many directory entries one walk looks at before it gives up
 - WalkedFile: a file, or a symbolic link (never followed), the caller asked for by name
+- WalkLink: a symbolic link to a folder outside the skill, which the walk never enters and a package manager can
 - WalkProblem: a part of the tree the walk could not examine, with the reason as the tail of a sentence
-- walk_tree(): breadth-first walk yielding the wanted files and the problems
+- walk_tree(): breadth-first walk yielding the wanted files, the links out of the skill and the problems
 
 [POS]
 File discovery shared by the two readers of a skill's package manifests on disk (the lifecycle-script audit and the
@@ -49,6 +52,13 @@ class WalkedFile:
 
 
 @dataclass(frozen=True, slots=True)
+class WalkLink:
+    """A symbolic link to a folder outside the skill; the walk does not enter it, so what lies behind is unknown."""
+
+    relative: str
+
+
+@dataclass(frozen=True, slots=True)
 class WalkProblem:
     """A part of the tree the walk could not examine, so what lies there is unknown.
 
@@ -60,12 +70,22 @@ class WalkProblem:
     reason: str
 
 
-def walk_tree(root: Path, wanted: Callable[[str], bool]) -> Iterator[WalkedFile | WalkProblem]:
-    """Yield the files under *root* whose name *wanted* accepts, folder by folder in name order, then the problems met.
+def _leads_out(entry: os.DirEntry[str], real_root: str) -> bool:
+    """Whether the symbolic link *entry* leads to a folder outside *real_root*; one that leads nowhere does not."""
+    try:
+        return entry.is_dir() and not Path(os.path.realpath(entry.path)).is_relative_to(real_root)
+    except OSError:
+        return False
 
+
+def walk_tree(root: Path, wanted: Callable[[str], bool]) -> Iterator[WalkedFile | WalkLink | WalkProblem]:
+    """Yield what *root* holds that a caller must look at, folder by folder in name order.
+
+    That is each file whose name *wanted* accepts, each symbolic link to a folder outside *root* and each problem met.
     Every entry listed counts against ``MAX_ENTRIES``; the entry that exceeds it ends the walk with a problem for the
     whole tree. A folder that cannot be listed is a problem for that folder, and the walk goes on with the others.
     """
+    real_root = os.path.realpath(root)
     pending: deque[Path] = deque([root])
     seen = 0
     while pending:
@@ -97,3 +117,5 @@ def walk_tree(root: Path, wanted: Callable[[str], bool]) -> Iterator[WalkedFile 
             elif (is_symlink or is_regular) and wanted(entry.name):
                 path = Path(entry.path)
                 yield WalkedFile(path, str(path.relative_to(root)), is_symlink)
+            elif is_symlink and _leads_out(entry, real_root):
+                yield WalkLink(str(Path(entry.path).relative_to(root)))

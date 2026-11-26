@@ -92,7 +92,7 @@ def _entry_agent_hint(extensions: Mapping[str, Mapping[str, object]], raw_manife
 
 
 def _build_agent(slug: str, content: bytes, entry_hint: str | None) -> PluginAgent:
-    metadata, description, prompt = split_frontmatter(content.decode("utf-8", errors="replace"))
+    metadata, description, prompt = split_frontmatter(content.decode("utf-8", errors="replace"), f"agent '{slug}'")
     display_name = str(metadata.get("name") or slug)
     metadata.setdefault("slug", slug)
 

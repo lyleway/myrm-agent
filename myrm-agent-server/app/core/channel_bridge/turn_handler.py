@@ -3,7 +3,7 @@
 [INPUT]
 - app.channels.protocols.turn_management::RetryHandler, RetryResult, UndoHandler, UndoResult
 - app.channels.types::InboundMessage
-- app.core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on, None while /new has ended it)
+- app.core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on)
 - app.services.chat.chat_service::ChatService
 - app.services.files.revert_hydrate::cleanup_persisted_snapshots (POS: Server-side revert snapshot disk hydrate and cleanup)
 - myrm_agent_harness.agent.meta_tools.file_ops.revert_service::RevertService
@@ -11,14 +11,14 @@
 [OUTPUT]
 - ChannelRetryHandler: RetryHandler 业务实现
 - ChannelUndoHandler: UndoHandler 业务实现
-- _current_chat_id: chat holding the conversation a command acts on, None when /new has ended it or nothing was stored
+- _current_chat_id: chat holding the conversation a command acts on, None when nothing was stored there yet
 - _revert_deleted_turn: restore the files a deleted turn changed, with the counts
 - _revert_messages: best-effort file revert + restore_inbox notify
 
 [POS]
 将框架层的 RetryHandler / UndoHandler 协议映射到 ChatService 的
 retry_last_turn / undo_last_turn 方法，并联动 RevertService 还原关联文件快照。
-命令作用于 `resolve_command_session_key` 解出的会话；`/new` 之后、下一回合之前没有会话，命令照「没有可操作的回合」处理。
+命令作用于 `resolve_command_session_key` 解出的会话；会话里还没存过回合（含 `/new` 刚开出的新会话），命令照「没有可操作的回合」处理。
 """
 
 from __future__ import annotations
@@ -89,9 +89,8 @@ _NOTHING_REVERTED = RevertMessagesOutcome(reverted_count=0, not_revertible_count
 
 
 async def _current_chat_id(msg: InboundMessage) -> str | None:
-    """The chat holding ``msg``'s conversation; ``None`` when ``/new`` has ended it or nothing was stored yet."""
-    session_key = await resolve_command_session_key(msg)
-    chat = await ChatService.get_channel_chat_by_key(session_key) if session_key else None
+    """The chat holding ``msg``'s conversation; ``None`` when nothing was stored there yet."""
+    chat = await ChatService.get_channel_chat_by_key(await resolve_command_session_key(msg))
     return chat.id if chat else None
 
 

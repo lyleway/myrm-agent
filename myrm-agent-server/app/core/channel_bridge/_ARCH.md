@@ -42,9 +42,9 @@ Channel 系统的业务适配层。基于 `app.channels` 的渠道框架协议�
 | `goal_handler/` | ✅ 核心 | ChannelGoalCommandHandler：/goal 与 /subgoal 业务处理器（创建目标注入 source channel metadata、clear/pause/resume 与 Web 共用控制规则、status 回复渲染、渠道消息到聊天的解析：与 `/undo` 同一把会话键，`/goal <目标>` 在尚无聊天时建聊天）。见 [goal_handler/_ARCH.md](goal_handler/_ARCH.md) | ✅ |
 | `learn_handler.py` | ✅ 核心 | Learn SSOT：`parse_learn_slash_args` / `rewrite_learn_query_if_needed`（渠道与 WebUI 共用 `_build_learn_prompt`）：只有以 `/learn` 开头的纯文本或文本块列表消息才被解析并改写（命令名不分大小写），单独一个 `/`、其他命令、其余形态的内容与已改写过的提示原样放行；`_AUTHORING_STANDARDS` 含 Myrm-tool framing 块与 description good/bad 示例；ChannelLearnCommandHandler 注入 rewrite 后 prompt；`/learn` 回合由 `SecurityOverlaySpec.learn_authoring` 标记（渠道回合经 `build_security_overlay` 开启，每轮重载已保存配置后重放）：explore 预设的限制层在这样的回合里不含 `skill_manage`，该权限由已保存的配置裁决，已保存的拒绝与远程准入的拒绝不会被本回合解开；`params/enrichment/pipeline.py` 在 permission overlay 前调用 rewrite | ✅ |
 | `kanban_command_handler.py` | ✅ 核心 | ChannelKanbanCommandHandler：KanbanCommandHandler 协议的业务层实现。处理 /kanban (/kb) 斜杠命令的 10 个子命令（list/show/create/comment/edit/complete/block/unblock/archive/stats），调用 KanbanService 完成操作并格式化 Markdown 响应 | ✅ |
-| `command_session.py` | ✅ 核心 | `resolve_command_session_key(msg)`：IM 命令（`/undo`、`/retry`、`/compact`、`/handoff`、`/goal`、`/subgoal`）要操作的会话键，即执行器把这个聊天的下一回合存进的那个会话；消息带 `force_new_epoch`（`/new` 之后、下一回合之前）时返回 `None`——这个聊天此刻没有会话，调用方按「没有可操作的」答复，且不得拿 `None` 去查聊天（网页聊天没有渠道会话键，按空键查会落到它们身上）。服务该消息的绑定走 `channels/routing/topic_binding.py::resolve_bound_topic`（线程、聊天、渠道三级，先存在者胜，哪怕它没有智能体），智能体取该绑定的 `TopicContext.effective_agent_id`（身份冻结即默认智能体，冻结智能体的档案不会被读），重置策略取该智能体档案自带的、否则个人设置的，最后交给 `resolve_session_key`。命令与执行器按同一套规则取这些输入，命令才不会去动用户已不在其中对话的会话；`tests/core/channel_bridge/test_command_session.py` 用真实库跑 `/undo`、`/retry` 守住这一点（含 `/new` 之后不动已结束的会话、也不落到网页聊天上） | ✅ |
-| `turn_handler.py` | ✅ 核心 | ChannelRetryHandler / ChannelUndoHandler：`/retry`/`/undo` + RevertService + restore_inbox 通知；会话键来自 `command_session.resolve_command_session_key`（`/new` 之后、下一回合之前没有会话，返回失败且不还原）；两个处理器共用取聊天与还原文件的步骤；`RevertMessagesOutcome` 含 `not_revertible_count` 供 IM FTL 诚实警告 | ✅ |
-| `compact_handler.py` | ✅ 核心 | ChannelCompactHandler：CompactHandler 协议的业务层实现，处理 /compact 命令的会话压缩；会话键来自 `command_session.resolve_command_session_key`（`/new` 之后、下一回合之前没有会话，按「没有可压缩的」答复）；以人工请求调用 `compact_chat`（不受 anti-thrash 守卫拦截），服务层原因码转成框架的 `CompactSkip` 类别，只有已知的良性原因不算失败，未知原因按失败 | ✅ |
+| `command_session.py` | ✅ 核心 | `resolve_command_session_key(msg)`：IM 命令（`/undo`、`/retry`、`/compact`、`/handoff`、`/goal`、`/subgoal`）要操作的会话键，即执行器把这个聊天的下一回合存进的那个会话；`start_conversation(msg)`：`/new`（以及托管入口的 `force_new_epoch` 标志）开启新会话——会话立刻落库，键为 `…:e=s<UTC 时间戳>`（`channels/types/session.py::started_session_key`，重置策略不会派生这种键），此后下一回合与所有命令经同一个 `resolve_session_key` 解到它，路由器里不留「待开新会话」的状态；当前会话还没有消息（连发 `/new`、从未说过话的聊天）时什么也不开，下一回合就在那里开始。服务该消息的绑定走 `channels/routing/topic_binding.py::resolve_bound_topic`（线程、聊天、渠道三级，先存在者胜，哪怕它没有智能体），智能体取该绑定的 `TopicContext.effective_agent_id`（身份冻结即默认智能体，冻结智能体的档案不会被读），重置策略取该智能体档案自带的、否则个人设置的，最后交给 `resolve_session_key`。命令与执行器按同一套规则取这些输入，命令才不会去动用户已不在其中对话的会话；`tests/core/channel_bridge/test_command_session.py` 与 `test_conversation_start.py` 用真实库守住这一点（含 `/new` 之后命令作用于新会话、不动已结束的会话） | ✅ |
+| `turn_handler.py` | ✅ 核心 | ChannelRetryHandler / ChannelUndoHandler：`/retry`/`/undo` + RevertService + restore_inbox 通知；会话键来自 `command_session.resolve_command_session_key`；两个处理器共用取聊天与还原文件的步骤；`RevertMessagesOutcome` 含 `not_revertible_count` 供 IM FTL 诚实警告 | ✅ |
+| `compact_handler.py` | ✅ 核心 | ChannelCompactHandler：CompactHandler 协议的业务层实现，处理 /compact 命令的会话压缩；会话键来自 `command_session.resolve_command_session_key`；以人工请求调用 `compact_chat`（不受 anti-thrash 守卫拦截），服务层原因码转成框架的 `CompactSkip` 类别，只有已知的良性原因不算失败，未知原因按失败 | ✅ |
 
 ### 子目录
 
@@ -93,6 +93,7 @@ ChannelGateway / AgentRouter / ChannelAgentExecutor
 其中内部入口会额外打上 `metadata["trusted_inbound"] = "control_plane"`。
 这表示外部身份解析、thread/task 绑定和基础触发门控已经在 CP 边界完成，
 Router 不再把这类消息误当成本地 provider 直接上送的原始 inbound。
+控制面替用户答复了 `/new` 时，会在该用户的下一条消息上带 `force_new_epoch`（`METADATA_NEW_CONVERSATION_KEY`）：路由器的消费循环在任何步骤读到这条消息之前开启新会话并去掉该标志（`channels/routing/pipeline/inbound.py::_open_requested_conversation`），消息本身照常处理。
 
 `ChannelAgentExecutor.execute_stream()` 在进入模型前会通过 `agent_executor/helpers.py::build_channel_inbound_query`（`delivery_provenance.prepend_plain_banner`）构建查询：纯文本消息返回带 `[Inbound channel message] … ingress=…` 横幅的字符串；当 Harness 图片富化写入 `metadata["image_data_list"]` 时返回 OpenAI Vision 兼容的多模态 content list。把投递路径显式写给模型但不写入 System Prompt，以降低「路由元数据当成超级用户指令」的风险。消息以 `[use skill]` 标签开头时（IM 技能命令），回复/群聊上下文与横幅都落在标签之后（`decorate_behind_skill_tag`）：harness 只认文本最开头的标签。
 
@@ -110,7 +111,7 @@ HTTP/SSE 主链路在 `execute_stream_pipeline` 内 **INFO 记录解析后的投
 | 普通群聊 | 同一个群的成员共用一份 |
 | 私聊 DM | 每个发送者各一份 |
 
-`resolve_session_key` 在基础键上按重置策略追加 epoch：persistent 不追加，daily 按日，idle 按空闲时长，`/new` 强制新 epoch。上表的归属与键格式由 `tests/core/channel_bridge/test_session_key_ownership.py` 守卫。
+`resolve_session_key` 先看用户按请求开启的会话（`/new`、`/handoff`，键为基础键加 `:e=s<UTC 时间戳>`）：对端最新的那个在重置策略允许的期间内就是当前会话——persistent 到下一次开启，daily 到下一个重置时刻，idle 到它自己（按它自己的最近活动）空闲超过 `idle_minutes`；没有或已结束，再按重置策略在基础键上追加 epoch：persistent 不追加，daily 按日，idle 按空闲时长。上表的归属与键格式由 `tests/core/channel_bridge/test_session_key_ownership.py` 守卫。
 
 ---
 

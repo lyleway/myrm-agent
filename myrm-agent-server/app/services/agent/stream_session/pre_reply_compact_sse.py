@@ -83,8 +83,12 @@ async def run_pre_reply_compact_with_sse(
     message_id: str,
     agent_id: str | None,
     request_engine_params: dict[str, object] | None,
+    turn_message_id: str | None,
 ) -> None:
-    """Run the stale compact gate and report it on the Web stream: active before it compacts, one closing phase after."""
+    """Run the stale compact gate and report it on the Web stream: active before it compacts, one closing phase after.
+
+    ``turn_message_id`` is the user row this turn has already committed; the gate does not count it as chat activity.
+    """
     from app.services.chat.stale_compact_gate import run_pre_reply_stale_compact_gate
 
     async def on_before_compact() -> None:
@@ -96,6 +100,7 @@ async def run_pre_reply_compact_with_sse(
             agent_id=agent_id,
             request_engine_params=request_engine_params,
             on_before_compact=on_before_compact,
+            turn_message_id=turn_message_id,
         )
     except Exception as exc:
         logger.warning(

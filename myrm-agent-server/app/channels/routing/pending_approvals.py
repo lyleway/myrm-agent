@@ -50,7 +50,7 @@ METADATA_APPROVAL_TIMED_OUT_KEY = "approval_timed_out"
 METADATA_RESUME_AGENT_KEY = "resume_agent_id"
 
 # Set per message from the chat's session state when a turn starts; a copy from an earlier turn must not outlive it.
-_SESSION_SCOPED_METADATA = ("yolo_state", "personality_style", "force_new_epoch")
+_SESSION_SCOPED_METADATA = ("yolo_state", "personality_style")
 
 # The journal entries a replayed message stands for belong to that message alone: a timeout resume derived from it has
 # none, so it must be journaled (and acknowledged) like any live message. A replayed person's answer keeps its marks.

@@ -14,7 +14,7 @@ does not implement a separate summarize pipeline.
 [OUTPUT]
 - parse_idle_compact_after_seconds: engine_params → seconds (0 = disabled)
 - resolve_idle_compact_after_seconds: profile + request merge → seconds
-- maybe_compact_stale_chat_before_turn: best-effort pre-reply compaction
+- maybe_compact_stale_chat_before_turn: best-effort pre-reply compaction; idleness is measured from the last message before this turn (``turn_message_id`` leaves out the user row the Web turn has already committed)
 - run_pre_reply_stale_compact_gate: Web/Channel entry with DB session (optional `on_before_compact` for Web SSE active)
 - ModelWindowUnavailableError: fail-closed signal when model window cannot be resolved
 
@@ -63,11 +63,11 @@ def parse_idle_compact_after_seconds(
     if not engine_params:
         return 0
     raw = engine_params.get("idle_compact_after_seconds")
-    if raw is None:
+    if not isinstance(raw, int | float | str):
         return 0
     try:
         return max(0, int(raw))
-    except (TypeError, ValueError):
+    except ValueError:
         return 0
 
 
@@ -88,8 +88,21 @@ async def resolve_idle_compact_after_seconds(
     return parse_idle_compact_after_seconds(engine_params)
 
 
-async def _load_last_message_at(db: AsyncSession, chat_id: str) -> datetime | None:
-    row = await db.execute(select(func.max(Message.created_at)).where(Message.chat_id == chat_id))
+async def _load_last_message_at(
+    db: AsyncSession,
+    chat_id: str,
+    *,
+    turn_message_id: str | None,
+) -> datetime | None:
+    """When the chat last spoke, not counting the message of the turn the gate runs for.
+
+    The Web turn commits its own user row before the gate runs; counted, that row would make every chat look active a
+    moment ago and the gate could never find it idle.
+    """
+    stmt = select(func.max(Message.created_at)).where(Message.chat_id == chat_id)
+    if turn_message_id is not None:
+        stmt = stmt.where(Message.id != turn_message_id)
+    row = await db.execute(stmt)
     last_message_at = row.scalar_one_or_none()
     if last_message_at is None:
         return None
@@ -121,8 +134,13 @@ async def maybe_compact_stale_chat_before_turn(
     max_context_tokens: int | None = None,
     agent_id: str | None = None,
     on_before_compact: Callable[[], Awaitable[None]] | None = None,
+    turn_message_id: str | None = None,
 ) -> CompactResult:
-    """Compact idle stale context before the next agent turn when configured."""
+    """Compact idle stale context before the next agent turn when configured.
+
+    ``turn_message_id`` is the user row of this turn when it is already stored; idleness is measured from the message
+    before it.
+    """
     if idle_after_seconds <= 0:
         return CompactResult(compacted=False, reason="idle_compact_disabled")
 
@@ -130,7 +148,7 @@ async def maybe_compact_stale_chat_before_turn(
     if chat_exists.scalar_one_or_none() is None:
         return CompactResult(compacted=False, reason="chat_not_found")
 
-    last_message_at = await _load_last_message_at(db, chat_id)
+    last_message_at = await _load_last_message_at(db, chat_id, turn_message_id=turn_message_id)
     if last_message_at is None:
         return CompactResult(compacted=False, reason="no_messages")
 
@@ -217,6 +235,7 @@ async def run_pre_reply_stale_compact_gate(
     agent_id: str | None,
     request_engine_params: dict[str, object] | None = None,
     on_before_compact: Callable[[], Awaitable[None]] | None = None,
+    turn_message_id: str | None = None,
 ) -> CompactResult:
     """Run stale compact gate inside a DB session (Web + Channel SSOT)."""
     idle_after = await resolve_idle_compact_after_seconds(agent_id, request_engine_params)
@@ -229,4 +248,5 @@ async def run_pre_reply_stale_compact_gate(
             idle_after_seconds=idle_after,
             on_before_compact=on_before_compact,
             agent_id=agent_id,
+            turn_message_id=turn_message_id,
         )

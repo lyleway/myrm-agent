@@ -52,6 +52,7 @@ async def _run(gate_result: CompactResult, *, announces_active: bool = True) -> 
             message_id="msg-1",
             agent_id="agent-1",
             request_engine_params={"idle_compact_after_seconds": 1800},
+            turn_message_id="msg-turn",
         )
     return buffer
 
@@ -130,9 +131,30 @@ async def test_a_gate_that_raises_closes_the_step_as_a_failure() -> None:
             message_id="msg-1",
             agent_id="agent-1",
             request_engine_params={"idle_compact_after_seconds": 1800},
+            turn_message_id="msg-turn",
         )
 
     assert _phases(buffer) == [("failed", "warning")]
+
+
+@pytest.mark.asyncio
+async def test_the_gate_is_told_which_stored_row_is_this_turn() -> None:
+    gate = AsyncMock(return_value=CompactResult(compacted=False, reason="idle_compact_disabled"))
+
+    with patch(_GATE, gate):
+        await run_pre_reply_compact_with_sse(
+            AsyncMock(),
+            chat_id="chat-1",
+            message_id="msg-1",
+            agent_id="agent-1",
+            request_engine_params=None,
+            turn_message_id="msg-turn",
+        )
+
+    gate.assert_awaited_once()
+    gate_call = gate.await_args
+    assert gate_call is not None
+    assert gate_call.kwargs["turn_message_id"] == "msg-turn"
 
 
 @pytest.mark.asyncio

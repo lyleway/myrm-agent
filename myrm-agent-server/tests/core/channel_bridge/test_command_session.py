@@ -8,25 +8,25 @@ other way, ``/undo`` for one, would delete the turns of a conversation the user 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import replace
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.types import InboundMessage, SessionPolicy, SessionResetMode, TopicContext
+from app.channels.types import InboundMessage, SessionPolicy, SessionResetMode, TopicContext, is_started_session_key
 from app.core.channel_bridge.agent_executor import resolve_session_key
-from app.core.channel_bridge.command_session import resolve_command_session_key
+from app.core.channel_bridge.command_session import resolve_command_session_key, start_conversation
 from app.core.channel_bridge.turn_handler import ChannelRetryHandler, ChannelUndoHandler, RevertMessagesOutcome
 from app.database.dto import MessageDTO
-from app.database.models import Chat, Message
+from app.database.models import Message
 from app.database.repositories.chat_repo import ChatRepository
 from app.services.chat.chat_service import ChatService
 
 from .command_session_testkit import PERSON_KEEPS_ONE_CONVERSATION, PERSON_RESETS_DAILY, stubbed_stores, topic
+
+pytestmark = pytest.mark.usefixtures("session_key_reads_db_session")
 
 _THREAD = ("g1", "th1")
 _CHAT = ("g1", None)
@@ -193,45 +193,31 @@ async def test_undo_removes_the_last_turn_of_the_conversation_the_executor_write
     assert len(await _message_ids(db_session, other_chat)) == 4
 
 
-# After /new, the next turn opens a new conversation; until it does, a command has none to act on.
-_ENDED_BY_NEW = replace(_MESSAGE, metadata={"force_new_epoch": True})
+async def test_after_new_commands_resolve_to_the_conversation_the_next_turn_is_stored_in(db_session: AsyncSession) -> None:
+    ended_key = await resolve_session_key(_MESSAGE, _PERSISTENT)
+    await _seed_conversation(db_session, ended_key, None)
 
+    with stubbed_stores({}, personal=PERSON_KEEPS_ONE_CONVERSATION):
+        before_new = await resolve_command_session_key(_MESSAGE)
+        await start_conversation(_MESSAGE)
+        after_new = await resolve_command_session_key(_MESSAGE)
 
-async def test_a_conversation_new_has_ended_has_no_key_and_no_store_is_read() -> None:
-    bindings = {_CHAT: topic("agent-c")}
-    with stubbed_stores(bindings, personal=None, agent_policies={"agent-c": {"mode": "daily"}}) as profile_lookup:
-        assert await resolve_command_session_key(_ENDED_BY_NEW) is None
-        assert await resolve_command_session_key(_MESSAGE) is not None
-
-    profile_lookup.assert_awaited_once_with("agent-c")
-
-
-async def _seed_web_conversation(db: AsyncSession) -> str:
-    """A web chat has no channel session key; a lookup by a missing key must not land on it."""
-    chat_id = f"web-{uuid4()}"
-    db.add(Chat(id=chat_id, title="Web", source="web"))
-    await db.flush()
-    await ChatRepository.add_messages(db, _turn(chat_id, 1) + _turn(chat_id, 2))
-    await db.commit()
-    return chat_id
+    assert before_new == ended_key
+    assert is_started_session_key(after_new) and after_new.startswith(f"{ended_key}:e=s")
+    assert await resolve_session_key(_MESSAGE, _PERSISTENT) == after_new
 
 
 @pytest.mark.parametrize("handler", [ChannelUndoHandler, ChannelRetryHandler])
-async def test_a_command_before_the_first_turn_after_new_leaves_every_stored_conversation_alone(
+async def test_a_command_after_new_acts_on_the_new_conversation_and_leaves_the_ended_one_alone(
     db_session: AsyncSession,
     undo_collaborators: None,
     handler: type[ChannelUndoHandler | ChannelRetryHandler],
 ) -> None:
-    key = await resolve_session_key(_MESSAGE, _PERSISTENT, agent_id=None)
-    ended = await _seed_conversation(db_session, key, None)
-    web = await _seed_web_conversation(db_session)
+    ended = await _seed_conversation(db_session, await resolve_session_key(_MESSAGE, _PERSISTENT), None)
 
     with stubbed_stores({}, personal=PERSON_KEEPS_ONE_CONVERSATION):
-        after_new = await handler()(_ENDED_BY_NEW, "uid1")
-        assert [len(await _message_ids(db_session, chat)) for chat in (ended, web)] == [4, 4]
-        before_new = await handler()(_MESSAGE, "uid1")
+        await start_conversation(_MESSAGE)
+        after_new = await handler()(_MESSAGE, "uid1")
 
-    assert after_new.success is False
-    assert before_new.success is True
-    assert len(await _message_ids(db_session, ended)) < 4
-    assert len(await _message_ids(db_session, web)) == 4
+    assert after_new.deleted_count == 0, "the new conversation holds nothing to delete"
+    assert len(await _message_ids(db_session, ended)) == 4

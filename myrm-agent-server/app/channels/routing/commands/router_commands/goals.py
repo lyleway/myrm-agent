@@ -5,7 +5,7 @@
 - channels.routing.router_host::RouterCommandsHost (POS: typing protocol for mixin host attributes.)
 - channels.routing.router_keys::routing_state_key (POS: channel+peer+topic state-map key format.)
 - channels.types::InboundMessage, OutboundMessage (POS: channel message types.)
-- core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on, None while /new has ended it; imported where /handoff runs.)
+- core.channel_bridge.command_session::resolve_command_session_key (POS: the session key of the conversation a command acts on; imported where /handoff runs.)
 
 [OUTPUT]
 - RouterCommandsGoalsMixin: goal lifecycle, background tasks, and cross-channel handoff handlers
@@ -309,8 +309,7 @@ class RouterCommandsGoalsMixin:
             from app.services.chat.chat_service import ChatService
             from app.services.chat.handoff import handoff_chat
 
-            session_key = await resolve_command_session_key(msg)
-            chat = await ChatService.get_channel_chat_by_key(session_key) if session_key else None
+            chat = await ChatService.get_channel_chat_by_key(await resolve_command_session_key(msg))
             if not chat:
                 content = get_text(msg, "handoff_failed", error="No active session")
             else:

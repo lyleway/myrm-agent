@@ -1,43 +1,25 @@
 /**
  * The detail text of a `context_compaction` step comes from what the event carries: the elapsed seconds while
  * compaction runs inside a turn, the tokens saved once it completes. An event that carries no figure leaves the step
- * without a detail instead of showing one the stream never sent.
+ * without a detail instead of showing one the stream never sent. The pruning and archiving steps word their saving the
+ * same way.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
-import { applyStatusProgressStep } from '../statusStreamProgressSteps';
 import type { ProgressItem } from '@/store/chat/types';
-import type { StreamCtx } from '../../streamContext';
+import { installGlobalTranslator } from '@/test-utils/globalTranslator';
+import { applyStatusEvent } from './statusStepTestKit';
 
 /** Feed the handler one `context_compaction` event and return the detail items of the step it produced. */
-async function detailOf(event: Record<string, unknown>): Promise<ProgressItem['items']> {
-  const state = {
-    messages: [
-      {
-        content: '',
-        messageId: 'msg-1',
-        chatId: 'chat-1',
-        role: 'assistant' as const,
-        progressSteps: [] as ProgressItem[],
-        createdAt: new Date(),
-      },
-    ],
-  };
-  const ctx: StreamCtx = {
-    data: { type: 'status', messageId: 'msg-1', step_key: 'context_compaction', ...event } as never,
-    input: '',
-    sources: undefined,
-    added: true,
-    recievedMessage: '',
-    state: { chatId: 'chat-1', messages: state.messages } as never,
-    actions: {
-      setLoading: vi.fn(),
-      setMessages: vi.fn((updater: (s: typeof state) => void) => updater(state)),
-    } as never,
-    files: [],
-  };
-  await applyStatusProgressStep(ctx, 'context_compaction');
-  return state.messages[0].progressSteps[0].items;
+async function detailOf({
+  data,
+  ...envelope
+}: {
+  data: Record<string, unknown>;
+  status?: string;
+}): Promise<ProgressItem['items']> {
+  const message = await applyStatusEvent('context_compaction', data, envelope);
+  return message.progressSteps?.[0].items;
 }
 
 describe('context_compaction detail text', () => {
@@ -60,9 +42,21 @@ describe('context_compaction detail text', () => {
   });
 
   describe('tokens saved', () => {
+    beforeEach(async () => {
+      await installGlobalTranslator('en');
+    });
+
     it('shows what a completed event reports in its payload', async () => {
       expect(await detailOf({ data: { phase: 'completed', tokens_saved: 4200 } })).toEqual([
         { text: '(Tokens saved: 4200)' },
+      ]);
+    });
+
+    it('words it in the language of the moment', async () => {
+      await installGlobalTranslator('zh');
+
+      expect(await detailOf({ data: { phase: 'completed', tokens_saved: 4200 } })).toEqual([
+        { text: '(节省 token：4200)' },
       ]);
     });
 
@@ -70,6 +64,30 @@ describe('context_compaction detail text', () => {
       'shows nothing for a completed payload that saved no tokens: %o',
       async (saved) => {
         expect(await detailOf({ data: { phase: 'completed', ...saved } })).toEqual([]);
+      },
+    );
+  });
+
+  describe('tokens saved by pruning and archiving', () => {
+    beforeEach(async () => {
+      await installGlobalTranslator('zh');
+    });
+
+    it.each(['context_pruned', 'memory_archived'])(
+      'shows what the %s event reports, in the language of the moment',
+      async (stepKey) => {
+        const message = await applyStatusEvent(stepKey, {}, { tokens_saved: 900 });
+
+        expect(message.progressSteps?.[0].items).toEqual([{ text: '(节省 token：900)' }]);
+      },
+    );
+
+    it.each(['context_pruned', 'memory_archived'])(
+      'shows no detail when the %s event reports no saving',
+      async (stepKey) => {
+        const message = await applyStatusEvent(stepKey, {}, { tokens_saved: 0 });
+
+        expect(message.progressSteps?.[0].items).toEqual([]);
       },
     );
   });

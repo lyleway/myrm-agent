@@ -175,8 +175,6 @@ class RouterLifecycleMixin:
 
     _SESSION_STATE_TTL = 86400.0  # 24h TTL for session-level state (yolo/personality)
 
-    _NEW_SESSION_PEER_TTL = 3600.0  # 1h TTL for /new markers
-
     async def _janitor_loop(self: RouterLifecycleHost) -> None:
         while True:
             await asyncio.sleep(_JANITOR_INTERVAL)
@@ -209,16 +207,11 @@ class RouterLifecycleMixin:
                 estimator_cleaned,
             )
 
-        self._cleanup_stale_session_state(now)
+        self._cleanup_stale_session_state()
         await self._reap_stuck_tasks(now)
 
-    def _cleanup_stale_session_state(self: RouterLifecycleHost, now_monotonic: float) -> None:
-        """Evict stale entries from _new_session_peers, _session_yolo, _session_personality."""
-        peer_cutoff = now_monotonic - self._NEW_SESSION_PEER_TTL
-        stale_peers = [k for k, ts in self._new_session_peers.items() if ts < peer_cutoff]
-        for k in stale_peers:
-            del self._new_session_peers[k]
-
+    def _cleanup_stale_session_state(self: RouterLifecycleHost) -> None:
+        """Evict stale entries from _session_yolo, _session_personality."""
         # _session_yolo uses time.time() (wall clock), not monotonic
         wall_now = time.time()
         yolo_cutoff = wall_now - self._SESSION_STATE_TTL
@@ -233,13 +226,8 @@ class RouterLifecycleMixin:
             for k in stale_personality:
                 del self._session_personality[k]
 
-        total_cleaned = len(stale_peers) + len(stale_yolo)
-        if total_cleaned > 0:
-            logger.info(
-                "[JANITOR] Session state cleanup: peers=%d, yolo=%d",
-                len(stale_peers),
-                len(stale_yolo),
-            )
+        if stale_yolo:
+            logger.info("[JANITOR] Session state cleanup: yolo=%d", len(stale_yolo))
 
     async def _reap_stuck_tasks(self: RouterLifecycleHost, now: float) -> None:
         """Cancel agent tasks that exceed _STUCK_TASK_TIMEOUT and release all held resources.

@@ -209,7 +209,10 @@ class TestSavingsMeasurement:
 
 
 class TestReasons:
-    """What comes back for a compaction that did not happen is a bare code; the detail goes to the log."""
+    """What comes back for a compaction that did not happen is a bare code; the detail goes to the log.
+
+    A failure that no code stands for is not reported: it reaches the caller, after the cooldown has started.
+    """
 
     async def test_a_missing_chat_is_reported_as_such(self, chat_id: str) -> None:
         with _compaction_env(None):
@@ -234,6 +237,18 @@ class TestReasons:
 
         assert (result.compacted, result.reason) == (False, "timeout")
         env.cooldown.assert_awaited_once_with(db, chat_id, "timeout: summarize exceeded 90s")
+
+    async def test_an_unexpected_model_failure_starts_the_cooldown_and_reaches_the_caller(self, chat_id: str) -> None:
+        db = AsyncMock()
+
+        with (
+            _compaction_env(Chat(id=chat_id), summarize_error=RuntimeError("upstream unavailable")) as env,
+            pytest.raises(RuntimeError, match="upstream unavailable"),
+        ):
+            await compact_chat(db, chat_id)
+
+        env.cooldown.assert_awaited_once_with(db, chat_id, "upstream unavailable")
+        env.persist.assert_not_awaited()
 
     async def test_a_failed_save_is_reported_without_its_detail_and_starts_the_cooldown(self, chat_id: str) -> None:
         db = AsyncMock()

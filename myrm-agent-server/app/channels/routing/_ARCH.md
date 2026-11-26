@@ -221,7 +221,7 @@ through the same `resolve_approval` funnel as every other door.
 ## `/new` Session Boundary Cleanup
 
 `_handle_new_session` in `commands/router_commands/session.py` performs a three-phase cleanup
-before marking the peer for a fresh Chat:
+before opening the new conversation:
 
 1. **Abort running task** — `_abort_session_task(state_key, …)` cancels
    `cancel_token`, the `asyncio.Task`, cleans up the placeholder and ends the session's open
@@ -234,15 +234,21 @@ before marking the peer for a fresh Chat:
    overrides (`_session_personality`) are cleared so the new session starts
    with default behaviour.
 
-Only after cleanup does `handle_new_session` (commands/session.py) flag the peer and
-send the confirmation reply.
+Only after cleanup does `handle_new_session` (commands/session.py) open the new conversation
+(`start_new_conversation` → `core/channel_bridge/command_session.py::start_conversation`) and send the confirmation reply.
+The conversation is stored before the reply, under a key no reset policy derives (`…:e=s<UTC stamp>`,
+`channels/types/session.py::started_session_key`), so every message the sender sends once they have the confirmation,
+however soon, and every command among them (`/undo`, `/retry`, `/compact`, `/handoff`, `/goal`, `/subgoal`) resolve
+through the same `resolve_session_key` to it: the router keeps no "new conversation pending" state. A chat whose conversation holds no
+message yet is already a clean start, so nothing is opened. When opening fails, the sender gets the `new_session_failed`
+reply instead of the confirmation, because they would otherwise believe they have a clean start they do not have.
 
-The flag (`_new_session_peers`) is spent by the next turn (`_prepare_execution_context` sets `force_new_epoch` on it),
-never by a command in between. `_dispatch_system_command` calls `carry_new_session_to_command` first: while the flag
-waits, the command message gets `force_new_epoch`, so `resolve_command_session_key` finds no conversation and `/undo`,
-`/retry`, `/compact`, `/handoff` and `/goal` act on none (not on the one `/new` just ended). A message that already
-arrives with `force_new_epoch` (the channel ingress takes it) puts the flag back, so the next turn, which may come
-without it, still starts the new conversation.
+A forwarder that answered `/new` itself sets `force_new_epoch` (`METADATA_NEW_CONVERSATION_KEY`; the channel ingress
+takes it) on the sender's next message. `_open_requested_conversation` (`pipeline/inbound.py`) spends the flag on the
+consume loop right after the locale is known and before any approval, command or gate step reads the message: it opens
+the conversation and strips the flag, so no later step, journal replay or resumed turn sees it. When opening fails the
+sender is told and the message is dropped, since answering it in the conversation they left is what they asked not to
+happen.
 
 ## Consume-Loop Resilience
 

@@ -6,7 +6,7 @@ Extracts declared dependencies from skill directories and manifest files:
 - pyproject.toml (PyPI ecosystem: PEP 621 project.dependencies, Poetry tool dependencies)
 
 [INPUT]
-- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
+- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkLink, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
 - core.security.path::read_text_bounded, ReadRefusal (POS: text read that stops at a character limit and never waits on a FIFO or device)
 
 [OUTPUT]
@@ -36,7 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
+from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkLink, WalkProblem, walk_tree
 from myrm_agent_harness.core.security.path import ReadRefusal, read_text_bounded
 
 logger = logging.getLogger(__name__)
@@ -426,7 +426,8 @@ def extract_skill_dependencies(skill_dir: Path | str) -> list[DeclaredDependency
 
     The files are the ones ``tree_walk`` finds: at any depth, in every folder but ``node_modules``. A symbolic link is
     not followed (what it leads to is not the skill's own file), a file over ``_MAX_DEPENDENCY_FILE_CHARS`` is skipped,
-    and a part of the tree the walk could not examine is logged: the result is then incomplete, not wrong.
+    and a part of the tree the walk could not examine is logged: the result is then incomplete, not wrong. A link out of
+    the skill is only noted at info level, since a skill may link to shared files on purpose.
     """
     directory = Path(skill_dir).resolve()
     if not directory.is_dir():
@@ -436,6 +437,9 @@ def extract_skill_dependencies(skill_dir: Path | str) -> list[DeclaredDependency
     for found in walk_tree(directory, lambda name: _extractor_for(name) is not None):
         if isinstance(found, WalkProblem):
             logger.warning("Dependency scan of %s is incomplete at %r: %s", directory, found.relative, found.reason)
+            continue
+        if isinstance(found, WalkLink):
+            logger.info("Dependency scan of %s skips %r, a link out of the skill folder", directory, found.relative)
             continue
         extractor = _extractor_for(found.path.name)
         if extractor is None or found.is_symlink:
