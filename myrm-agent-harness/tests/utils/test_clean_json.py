@@ -94,6 +94,22 @@ def test_an_escaped_pair_is_the_character_it_spells_and_any_other_surrogate_esca
     assert load_clean_json(document) == expected
 
 
+def test_every_surrogate_escape_is_replaced_in_either_case_and_the_code_units_beside_the_range_are_kept() -> None:
+    for code in range(0xD800, 0xE000):
+        for digits in (f"{code:04x}", f"{code:04X}"):
+            assert load_clean_json(f'"\\u{digits}"') == REPLACED
+    assert load_clean_json(r'"\ud7ff\ue000"') == "\ud7ff\ue000"
+
+
+def test_every_high_surrogate_escape_followed_by_a_low_one_is_the_character_the_pair_spells() -> None:
+    lows = (0xDC00, 0xDC01, 0xDD55, 0xDE00, 0xDFFE, 0xDFFF)
+    for high in range(0xD800, 0xDC00):
+        for low in lows:
+            expected = chr(0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00))
+            for digits in (f"{high:04x}\\u{low:04x}", f"{high:04X}\\u{low:04X}"):
+                assert load_clean_json(f'"\\u{digits}"') == expected
+
+
 def test_keys_and_nested_values_are_repaired() -> None:
     document = f'{{"k{LONE}": {{"inner": ["a{LONE}", {{"deep": "b{LONE}"}}], "x{LONE}": 1}}, "list": [["c{LONE}"]]}}'
 
