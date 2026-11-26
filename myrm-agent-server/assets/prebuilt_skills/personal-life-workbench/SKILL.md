@@ -259,7 +259,28 @@ Below is the verified, minimal structure for a production-grade workbench artifa
 
 ---
 
-## 4. Delivery Quality Gate
+## 4. Installed-App Bridge (`window.myrm`)
+
+Only when the user wants live data (weather, rates, repo status) or reminders. A page shown in chat or on the dashboard has no network (`fetch()` and `XMLHttpRequest` are blocked) and no `window.myrm`, so it stays an offline workbench. `window.myrm` appears only after the user installs the artifact as an app, and each capability works only if the user approved it. The page runs only while the app is open: promise no reminders while it is closed.
+
+Declare what the page needs in one block (omit what is unused):
+
+```html
+<script type="application/json" id="myrm-app">{"notify": true, "fetch": ["api.open-meteo.com"]}</script>
+```
+
+- `fetch` takes exact public host names: lower-case, at most 20, no wildcards, `localhost`, IP addresses or ports. List every host the page calls; any other host is refused. A malformed block declares nothing.
+- Adding a capability or host in a later edit makes the app ask the user again.
+
+Calls (both return promises):
+- `myrm.notify({ title, body })`: title required (max 80 chars), body optional (max 200). Max 5 per minute.
+- `myrm.fetch(url, { method, headers, body })`: like `fetch`, resolves to a `Response`. `https` only, `GET`/`HEAD`/`POST`, text bodies, request max 256 KB, response max 1 MB, 20 s timeout, about 1 call per second. Cookies are never sent and redirects are not followed, so call the final URL. Use keyless public APIs: page source is not secret.
+
+Degrade gracefully: check `window.myrm` before use and catch every call. `error.code` is `permission_denied` (declined or not yet decided), `not_declared`, `host_not_granted` or `rate_limited`; treat any other code as a failed request. On failure keep showing the last result (save each success with `saveState`) plus a short inline note. Retry only on a user action or the page's own timer, never in a loop.
+
+---
+
+## 5. Delivery Quality Gate
 
 1. **Self-Contained Check**:
    - Must NOT contain `<script src="http...">` or `<link rel="stylesheet" href="http...">`.
@@ -267,3 +288,5 @@ Below is the verified, minimal structure for a production-grade workbench artifa
    - Must use `localStorage` with namespace `myrm_workbench_*` and safe fallback defaults.
 3. **Theme Bridge Check**:
    - Must use CSS variables (`var(--background)`, `var(--card)`, etc.) so it immediately adapts to Dark/Light mode in Myrm's preview window.
+4. **Bridge Check** (only if `window.myrm` is used):
+   - The `myrm-app` block lists exactly the capabilities and hosts the page uses, and every call is guarded as above.
