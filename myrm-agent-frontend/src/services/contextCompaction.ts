@@ -65,10 +65,15 @@ const ALREADY_RUNNING: CompactNotice = { messageKey: 'chat.compact.skip.busy', s
 const TEMPORARILY_PAUSED: CompactNotice = { messageKey: 'chat.compact.skip.paused', severity: 'warning' };
 export const COMPACT_FAILED_NOTICE: CompactNotice = { messageKey: 'chat.compact.failed', severity: 'error' };
 
-/** The server's reasons that are not failures. A reason is a bare code, so it is matched whole. */
+/**
+ * The server's reasons that are not failures. A reason is a bare code, so it is matched whole.
+ * A new chat gets its id in the browser, before its first message is sent, so the server has no chat of that id yet:
+ * `chat_not_found` is a chat with nothing in it.
+ */
 const NOTICE_BY_REASON = new Map<string, CompactNotice>([
   ['no_compactable_messages', NOTHING_TO_COMPACT],
   ['too_few_messages', NOTHING_TO_COMPACT],
+  ['chat_not_found', NOTHING_TO_COMPACT],
   ['concurrent_compaction_in_progress', ALREADY_RUNNING],
   ['summarize_circuit_open', TEMPORARILY_PAUSED],
 ]);

@@ -135,6 +135,7 @@ describe('runManualCompaction', () => {
     { reason: 'timeout', logged: true },
     { reason: 'persist_failed', logged: true },
     { reason: 'no_compactable_messages', logged: false },
+    { reason: 'chat_not_found', logged: false },
     { reason: 'concurrent_compaction_in_progress', logged: false },
   ])('keeps the raw reason of a failure for the console only ($reason)', async ({ reason, logged }) => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -150,10 +151,11 @@ describe('runManualCompaction', () => {
 const SKIP_CASES = [
   { reason: 'no_compactable_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
   { reason: 'too_few_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
+  // A new chat has an id before its first message is sent; the server has no such chat yet, and it holds nothing.
+  { reason: 'chat_not_found', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
   { reason: 'concurrent_compaction_in_progress', messageKey: 'chat.compact.skip.busy', severity: 'info' },
   { reason: 'summarize_circuit_open', messageKey: 'chat.compact.skip.paused', severity: 'warning' },
   { reason: 'compression_anti_thrash_active', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'chat_not_found', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'timeout', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'persist_failed', messageKey: 'chat.compact.failed', severity: 'error' },
   { reason: 'too_few_messages (2 < 4)', messageKey: 'chat.compact.failed', severity: 'error' },
