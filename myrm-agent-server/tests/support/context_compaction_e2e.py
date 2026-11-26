@@ -7,12 +7,15 @@
 
 [OUTPUT]
 - PROJECT_CODENAME / MIGRATION_WINDOW: the facts a compaction summary must keep
-- create_dormant_chat(): a chat resumed after hours, with a history (short or long) that carries those facts
+- create_dormant_chat(): a chat with a history (short or long) that carries those facts, last written ``quiet_for`` ago (hours by default)
 - SHORT_CHAT_ROUNDS / LONG_CHAT_ROUNDS: the two history sizes a test can pick
+- DORMANT_FOR / RECENT_FOR: how long ago the last message was written, for a user back after hours and for one still at it
+- prepare_live_model(): the runtime under test answers with the real model, whose context window is pinned
 - declare_context_window(): pins the model's context window on the runtime under test
 - read_compaction_state(): what the server stored for a chat after a compaction
-- locale_text(): the shipped wording of a key path
-- chat_page() / open_chat(): the chat opened in the shared browser, bridge ready and chat (with its agent) loaded
+- locale_text() / locale_fragments(): the shipped wording of a key path, whole or cut at its placeholders
+- chat_page() / open_chat() / open_new_chat(): the chat (or a new, unsent one) opened in the shared browser, bridge ready and chat (with its agent) loaded
+- ATTACH_CHAT_JS: the page script that loads a chat into the store of the app through its E2E bridge
 - read_locale_cookie() / set_locale_cookie() / ensure_locale() / switch_locale(): the page's language, handed back as found after a test
 
 [POS]
@@ -24,12 +27,14 @@ the model's window, and the catalog's window for the E2E model is far larger tha
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from cdp_chat.support import fetch_config_value, put_config_value
+import pytest
+from cdp_chat.support import fetch_config_value, put_config_value, wait_e2e_provider_ready
 
 from tests.support.chrome_mcp_e2e import (
     ChromeMcpClient,
@@ -38,18 +43,22 @@ from tests.support.chrome_mcp_e2e import (
     dismiss_blocking_modals,
     http_json,
     open_mcp_page,
+    prepare_e2e_ui_session,
     reload_mcp_page,
     wait_for_react_e2e_bridge,
+    wait_for_state,
     warm_ui_route,
 )
-from tests.support.e2e_provider_seed import ResolvedE2ELlmEndpoints, strip_provider_prefix
+from tests.support.e2e_provider_seed import ResolvedE2ELlmEndpoints, seed_live_e2e_providers, strip_provider_prefix
 
 PROJECT_CODENAME = "AMBER-HARBOR-47"
 MIGRATION_WINDOW = "2026-12-03 02:00"
 CONTEXT_WINDOW_TOKENS = 128_000
 # Agent setting the idle gate reads: a chat quiet for this long is compacted before the next reply.
 IDLE_COMPACT_AFTER_SECONDS = 1800
+# How long ago a chat's last message was written: a user back after hours, and one who is still at it.
 DORMANT_FOR = timedelta(hours=3)
+RECENT_FOR = timedelta(minutes=2)
 
 _LOCALES_DIR = Path(__file__).resolve().parents[3] / "myrm-agent-frontend" / "locales"
 _LOCALE_COOKIE = "NEXT_LOCALE"
@@ -82,11 +91,11 @@ def _review_log(round_no: int) -> str:
     return "\n".join(lines)
 
 
-def _history(chat_id: str, *, rounds: int, context_usage_percent: float | None) -> list[dict[str, object]]:
-    """Alternating user / assistant messages ending on an assistant reply, spread over the dormant period."""
-    start = datetime.now(UTC).replace(tzinfo=None) - DORMANT_FOR
-    messages: list[dict[str, object]] = []
+def _history(chat_id: str, *, rounds: int, context_usage_percent: float | None, quiet_for: timedelta) -> list[dict[str, object]]:
+    """Alternating user / assistant messages ending on an assistant reply written ``quiet_for`` ago, a minute apart."""
     message_count = rounds * 2
+    start = datetime.now(UTC).replace(tzinfo=None) - quiet_for - timedelta(minutes=message_count - 1)
+    messages: list[dict[str, object]] = []
     for index in range(message_count):
         round_no = index // 2 + 1
         is_user = index % 2 == 0
@@ -126,8 +135,9 @@ def create_dormant_chat(
     agent_id: str | None = None,
     context_usage_percent: float | None = None,
     rounds: int = SHORT_CHAT_ROUNDS,
+    quiet_for: timedelta = DORMANT_FOR,
 ) -> None:
-    """Create a chat whose whole history is hours old; ``context_usage_percent`` sets the last reply's recorded usage."""
+    """Create a chat whose last message is ``quiet_for`` old; ``context_usage_percent`` sets the last reply's recorded usage."""
     body = http_json(
         "POST",
         f"{api_url}/api/v1/chats/",
@@ -136,10 +146,18 @@ def create_dormant_chat(
             "title": "Datacenter migration review",
             "agent_id": agent_id,
             "action_mode": "agent",
-            "messages": _history(chat_id, rounds=rounds, context_usage_percent=context_usage_percent),
+            "messages": _history(chat_id, rounds=rounds, context_usage_percent=context_usage_percent, quiet_for=quiet_for),
         },
     )
     assert isinstance(body, dict) and body.get("success") is True, f"create dormant chat failed: {body}"
+
+
+def prepare_live_model(api_url: str) -> None:
+    """Make the runtime under test answer with the real E2E model, whose window is pinned (see ``declare_context_window``)."""
+    prepare_e2e_ui_session(api_url)
+    declare_context_window(api_url, seed_live_e2e_providers(api_url))
+    if not wait_e2e_provider_ready(timeout_sec=90.0):
+        pytest.fail("Provider not ready; verify the .env.test LLM credentials")
 
 
 def declare_context_window(api_url: str, endpoints: ResolvedE2ELlmEndpoints, tokens: int = CONTEXT_WINDOW_TOKENS) -> None:
@@ -186,6 +204,13 @@ def locale_text(locale: str, *path: str) -> str:
     return node
 
 
+def locale_fragments(locale: str, *path: str) -> list[str]:
+    """The wording of a key path cut at its ``{placeholders}``: the text a toast must carry, in order, around the values."""
+    fragments = re.split(r"\{\w+\}", locale_text(locale, *path))
+    assert fragments[-1], f"{locale}.json {'.'.join(path)} ends in a placeholder, so its value has no end to be read up to"
+    return fragments
+
+
 def read_locale_cookie(client: ChromeMcpClient, page: McpPage) -> str | None:
     """The language cookie the shared browser profile carries, so a test can hand it back untouched."""
     state = client.evaluate(
@@ -201,7 +226,7 @@ def read_locale_cookie(client: ChromeMcpClient, page: McpPage) -> str | None:
     return value if isinstance(value, str) else None
 
 
-_ATTACH_CHAT_JS = """(async (chatId) => {
+ATTACH_CHAT_JS = """(async (chatId) => {
   const bridge = window.__MYRM_E2E_CHAT__;
   if (!bridge?.attachToChat) return { ok: false, err: 'no-bridge' };
   await bridge.attachToChat(chatId);
@@ -210,10 +235,14 @@ _ATTACH_CHAT_JS = """(async (chatId) => {
 
 
 @contextmanager
-def chat_page(ui_url: str, chat_id: str) -> Iterator[tuple[ChromeMcpClient, McpPage, str]]:
-    """The chat opened in the shared E2E browser; the language cookie the browser carried is handed back on exit."""
-    page_url = f"{ui_url}/{chat_id}"
-    warm_ui_route(f"/{chat_id}")
+def chat_page(ui_url: str, chat_id: str | None = None) -> Iterator[tuple[ChromeMcpClient, McpPage, str]]:
+    """The chat (a new, unsent one without ``chat_id``) opened in the shared E2E browser.
+
+    The language cookie the browser carried is handed back on exit.
+    """
+    route = f"/{chat_id}" if chat_id else "/"
+    page_url = f"{ui_url}{route}"
+    warm_ui_route(route)
     with open_mcp_page(page_url, timeout_ms=120_000) as (client, page):
         previous_locale = read_locale_cookie(client, page)
         try:
@@ -229,8 +258,27 @@ def open_chat(client: ChromeMcpClient, page: McpPage, chat_id: str, page_url: st
     if agent_id is not None:
         attach_chat_and_wait_agent_binding(client, page, chat_id, expected_preset="hitl", agent_id=agent_id, timeout_sec=90.0)
         return
-    attached = client.evaluate(page, f"({_ATTACH_CHAT_JS})({json.dumps(chat_id)})", timeout_sec=60.0)
+    attached = client.evaluate(page, f"({ATTACH_CHAT_JS})({json.dumps(chat_id)})", timeout_sec=60.0)
     assert isinstance(attached, dict) and attached.get("ok") is True, f"attachToChat failed: {attached!r}"
+
+
+# A new chat gets its id in the browser, before anything is sent: the server has never heard of it.
+_NEW_CHAT_READY_JS = """(() => {
+  const state = window.__myrmChatStore?.getState?.();
+  const chatId = state?.chatId;
+  const messages = state?.messages?.length ?? null;
+  return { ready: typeof chatId === 'string' && chatId.startsWith('c-') && messages === 0, chatId: chatId ?? null, messages };
+})()"""
+
+
+def open_new_chat(client: ChromeMcpClient, page: McpPage, page_url: str) -> str:
+    """Wait for the new-chat page and its E2E bridge; returns the id the page gave the chat it has not sent anything in."""
+    dismiss_blocking_modals(client, page)
+    wait_for_react_e2e_bridge(client, page, timeout_sec=90.0, page_url=page_url)
+    ready = wait_for_state(client, page, _NEW_CHAT_READY_JS, timeout_sec=60.0, page_url=page_url)
+    chat_id = ready.get("chatId")
+    assert isinstance(chat_id, str), ready
+    return chat_id
 
 
 def set_locale_cookie(client: ChromeMcpClient, page: McpPage, locale: str | None) -> None:
