@@ -230,28 +230,38 @@ class ProfileManager:
         )
 
     async def _ensure_builtins(self) -> None:
-        """Seed builtin profiles if they don't exist yet."""
+        """Seed missing builtin profiles and re-sync drifted ones.
+
+        A listing that finds every builtin current writes nothing: SQLite has one writer, so a write on a read path
+        makes a concurrent activation fail with "database is busy".
+        """
         session_factory = get_session_factory()
         async with session_factory() as session:
             for builtin in _BUILTIN_PROFILES:
                 key = str(builtin["profile_key"])
                 result = await session.execute(select(SecurityProfile).where(SecurityProfile.profile_key == key))
                 existing = result.scalar_one_or_none()
+                display_name = str(builtin["display_name"])
+                description = str(builtin.get("description", ""))
                 seed_config = _serialize_config(cast("dict[str, object]", builtin["config_json"]))
                 if existing is None:
                     profile = SecurityProfile(
                         id=str(uuid.uuid4()),
                         profile_key=key,
-                        display_name=str(builtin["display_name"]),
-                        description=str(builtin.get("description", "")),
+                        display_name=display_name,
+                        description=description,
                         config_json=seed_config,
                         is_builtin=True,
                         is_active=False,
                     )
                     session.add(profile)
-                elif existing.is_builtin:
-                    existing.display_name = str(builtin["display_name"])
-                    existing.description = str(builtin.get("description", ""))
+                elif existing.is_builtin and (
+                    existing.display_name != display_name
+                    or existing.description != description
+                    or existing.config_json != seed_config
+                ):
+                    existing.display_name = display_name
+                    existing.description = description
                     existing.config_json = seed_config
                     existing.updated_at = datetime.now()
             await session.commit()

@@ -5,8 +5,9 @@
 - app.database.models.security::SecurityProfile (POS: ORM model behind the profiles API)
 
 [OUTPUT]
-- Builtin seeding and re-sync, single-active switching (an unknown key leaves the active profile alone),
-  custom profile create/update/delete/clone and the guards that protect the builtin profiles.
+- Builtin seeding (a missing builtin is created alone) and re-sync (only drifted builtins are rewritten), single-active
+  switching (an unknown key leaves the active profile alone), custom profile create/update/delete/clone and the guards
+  that protect the builtin profiles.
 
 [POS]
 tests/services/security/test_profile_manager_crud.py
@@ -19,7 +20,7 @@ from typing import cast
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.database.models import Base
@@ -73,6 +74,48 @@ async def test_a_drifted_builtin_is_restored_on_the_next_listing(manager: Profil
     assert restored["readonly"]["config_json"] == _builtin_config("readonly")
 
 
+async def _stamps(manager: ProfileManager) -> dict[str, object]:
+    return {str(p["profile_key"]): p["updated_at"] for p in await manager.list_all()}
+
+
+@pytest.mark.asyncio
+async def test_a_listing_rewrites_only_the_builtins_that_drifted(manager: ProfileManager) -> None:
+    """A write on the read path would make a concurrent activation fail with "database is busy"."""
+    seeded = await _stamps(manager)
+
+    assert await _stamps(manager) == seeded
+
+    async with profile_manager.get_session_factory()() as session:
+        await session.execute(
+            update(SecurityProfile).where(SecurityProfile.profile_key == "readonly").values(display_name="Drifted")
+        )
+        await session.commit()
+
+    healed = await _stamps(manager)
+
+    assert healed["readonly"] != seeded["readonly"]
+    assert {key: healed[key] for key in ("full_access", "workspace")} == {
+        key: seeded[key] for key in ("full_access", "workspace")
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_missing_builtin_is_created_alone_and_the_intact_ones_are_not_rewritten(manager: ProfileManager) -> None:
+    seeded = await _stamps(manager)
+    async with profile_manager.get_session_factory()() as session:
+        await session.execute(delete(SecurityProfile).where(SecurityProfile.profile_key == "workspace"))
+        await session.commit()
+
+    listed = {str(p["profile_key"]): p for p in await manager.list_all()}
+
+    assert sorted(listed) == BUILTIN_KEYS
+    assert listed["workspace"]["config_json"] == _builtin_config("workspace")
+    assert listed["workspace"]["is_builtin"] is True and listed["workspace"]["is_active"] is False
+    assert {key: listed[key]["updated_at"] for key in ("full_access", "readonly")} == {
+        key: seeded[key] for key in ("full_access", "readonly")
+    }
+
+
 @pytest.mark.asyncio
 async def test_get_returns_the_profile_or_none(manager: ProfileManager) -> None:
     await manager.list_all()
@@ -98,6 +141,18 @@ async def test_activating_a_profile_deactivates_the_others(manager: ProfileManag
     assert active is not None
     assert active["profile_key"] == "readonly"
     assert [p["profile_key"] for p in await manager.list_all() if p["is_active"]] == ["readonly"]
+
+
+@pytest.mark.asyncio
+async def test_activating_the_active_profile_again_keeps_it_the_only_active_one(manager: ProfileManager) -> None:
+    await manager.list_all()
+    await manager.activate("workspace")
+
+    again = await manager.activate("workspace")
+
+    assert again is not None
+    assert again["is_active"] is True
+    assert [p["profile_key"] for p in await manager.list_all() if p["is_active"]] == ["workspace"]
 
 
 @pytest.mark.asyncio
