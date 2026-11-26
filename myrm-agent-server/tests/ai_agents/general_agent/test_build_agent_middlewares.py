@@ -17,7 +17,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from myrm_agent_harness.agent.middlewares import create_context_pipeline_middleware
 from myrm_agent_harness.agent.middlewares.guardrails import GuardrailMiddleware
 
 from app.ai_agents.agent_middlewares import (
@@ -57,7 +59,7 @@ def _plan(*, widget: bool) -> ResolvedMountPlan:
     )
 
 
-async def _build(*, widget: bool) -> list[object]:
+async def _build(*, widget: bool, llm: BaseChatModel | None = None, lite_llm: BaseChatModel | None = None) -> list[object]:
     wrapper = AgentFactory.create_general_agent(
         GeneralAgentParams(
             model_cfg=ModelConfig(model="gpt-4o", api_key="test-key"),
@@ -71,7 +73,8 @@ async def _build(*, widget: bool) -> list[object]:
         wrapper,
         _CHAT_ID,
         _runtime(),
-        lite_llm=FakeListChatModel(responses=["ok"]),
+        llm=llm or FakeListChatModel(responses=["main"]),
+        lite_llm=lite_llm or FakeListChatModel(responses=["lite"]),
         mount_plan=_plan(widget=widget),
     )
 
@@ -88,3 +91,24 @@ async def test_the_stack_is_assembled_with_the_guardrail_first_and_the_tail_bloc
 async def test_the_widget_declaration_is_mounted_exactly_when_the_plan_says_so() -> None:
     assert widget_capability_middleware in await _build(widget=True)
     assert widget_capability_middleware not in await _build(widget=False)
+
+
+@pytest.mark.asyncio
+async def test_the_context_pipeline_speaks_as_the_main_model_and_does_its_auxiliary_work_on_the_lite_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main = FakeListChatModel(responses=["main"])
+    lite = FakeListChatModel(responses=["lite"])
+    seen: dict[str, object] = {}
+
+    def spy(**kwargs: object) -> object:
+        seen.update(kwargs)
+        return create_context_pipeline_middleware(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("myrm_agent_harness.agent.middlewares.create_context_pipeline_middleware", spy)
+
+    await _build(widget=False, llm=main, lite_llm=lite)
+
+    assert seen["llm"] is main
+    assert seen["summarizer_llm"] is lite
+    assert seen["session_notes_llm"] is lite

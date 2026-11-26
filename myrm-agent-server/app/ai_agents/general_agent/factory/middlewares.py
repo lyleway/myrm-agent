@@ -31,6 +31,7 @@ async def build_agent_middlewares(
     effective_chat_id: str,
     runtime: SandboxRuntime,
     *,
+    llm: "BaseChatModel",
     lite_llm: "BaseChatModel",
     mount_plan: "ResolvedMountPlan",
 ) -> "list[AgentMiddleware]":
@@ -104,8 +105,10 @@ async def build_agent_middlewares(
     elif agent_wrapper.memory_decay_profile == "fast":
         time_decay_half_life_days = 7.0
 
+    # The pipeline takes its identity (cache markers, thinking-block handling) from the model that answers the
+    # request; summary, session notes and wiki archive are auxiliary jobs on the lite model.
     context_pipeline_middleware = create_context_pipeline_middleware(
-        llm=lite_llm,
+        llm=llm,
         summarizer_llm=lite_llm,
         tail_budget_ratio=agent_wrapper.tail_budget_ratio,
         on_summary_persist=make_summary_persist_with_wiki_archive(

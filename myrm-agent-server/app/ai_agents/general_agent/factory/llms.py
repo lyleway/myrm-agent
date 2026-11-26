@@ -37,7 +37,7 @@ class AgentLlmBundle:
 
 async def initialize_agent_llms(agent_wrapper: "GeneralAgent") -> AgentLlmBundle:
     from ..config_builders import build_privacy_routing_config, wrap_with_privacy_routing
-    from ..llm_factory import apply_lite_managed_fallback, create_agent_llms
+    from ..llm_factory import apply_lite_context_downgrade, apply_lite_managed_fallback, create_agent_llms
 
     (
         llm,
@@ -52,28 +52,25 @@ async def initialize_agent_llms(agent_wrapper: "GeneralAgent") -> AgentLlmBundle
         agent_wrapper.safety_fallback_model_cfg,
         fallback_model_cfgs=agent_wrapper.fallback_model_cfgs,
     )
-    agent_wrapper._lite_llm = lite_llm
 
     privacy_routing_cfg = build_privacy_routing_config(agent_wrapper.privacy_routing_raw)
-    if agent_wrapper._lite_llm is not None:
-        from app.ai_agents.general_agent.llm_factory import (
-            apply_lite_context_downgrade,
-        )
 
-        agent_wrapper._lite_llm, lite_cfg_for_fallback = await apply_lite_context_downgrade(
-            llm,
-            agent_wrapper._lite_llm,
-            agent_wrapper.model_cfg,
-            agent_wrapper.lite_model_cfg,
-        )
-        agent_wrapper._lite_llm = await apply_lite_managed_fallback(
-            agent_wrapper._lite_llm,
-            lite_cfg_for_fallback,
-            agent_wrapper.fallback_lite_model_cfg,
-        )
-
-    if privacy_routing_cfg is not None and agent_wrapper._lite_llm is not None:
-        agent_wrapper._lite_llm = wrap_with_privacy_routing(agent_wrapper._lite_llm, privacy_routing_cfg)
+    # One variable carries the lite model through all three wrappers, so the wrapper and the bundle hand every
+    # auxiliary caller (extraction, summary, session notes, wiki archive) the same, fully protected instance.
+    lite_llm, lite_cfg_for_fallback = await apply_lite_context_downgrade(
+        llm,
+        lite_llm,
+        agent_wrapper.model_cfg,
+        agent_wrapper.lite_model_cfg,
+    )
+    lite_llm = await apply_lite_managed_fallback(
+        lite_llm,
+        lite_cfg_for_fallback,
+        agent_wrapper.fallback_lite_model_cfg,
+    )
+    if privacy_routing_cfg is not None:
+        lite_llm = wrap_with_privacy_routing(lite_llm, privacy_routing_cfg)
+    agent_wrapper._lite_llm = lite_llm
 
     from app.services.org_model_policy.enforce import enforce_org_model_policy
 

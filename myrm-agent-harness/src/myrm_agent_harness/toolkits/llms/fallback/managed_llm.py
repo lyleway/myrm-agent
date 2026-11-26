@@ -352,7 +352,7 @@ class ManagedLLM(BaseChatModel):
         return self._main_llm.bind_tools(tools, **kwargs)
 
     # ------------------------------------------------------------------
-    # Identity passthrough (model / api_base / base_url)
+    # Identity passthrough (model / api_base / base_url / wire_protocol)
     # ------------------------------------------------------------------
     # Downstream consumers (capability learning, error diagnostics, LLM
     # metadata in StreamContext) read these attributes via getattr()/property
@@ -377,6 +377,11 @@ class ManagedLLM(BaseChatModel):
     def base_url(self) -> str | None:
         """API base URL alias of the underlying main LLM."""
         return getattr(self._main_llm, "base_url", None) or self.api_base
+
+    @property
+    def wire_protocol(self) -> str | None:
+        """Wire protocol of the underlying main LLM (None when it declares none)."""
+        return getattr(self._main_llm, "wire_protocol", None)
 
     @property
     def _llm_type(self) -> str:

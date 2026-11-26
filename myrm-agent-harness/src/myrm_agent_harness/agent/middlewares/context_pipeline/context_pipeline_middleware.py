@@ -154,7 +154,9 @@ def create_context_pipeline_middleware(
     5. Eco mode signal injection (via budget_pressure_fn callback)
 
     Args:
-        llm: LLM client (used by processors that need LLM, e.g. filter and summarize)
+        llm: The model that answers the request. Its identity (model name, endpoint, wire protocol) drives
+             cache markers and thinking-block handling; it is also the default for ``summarizer_llm``.
+        summarizer_llm: Auxiliary model for filter and summary calls (optional, defaults to ``llm``)
         pipeline: Custom pipeline (optional)
         tool_result_evict_threshold: Tool result eviction threshold (default 5000 tokens)
         compress_min_save: Minimum compression savings threshold (default 3000 tokens)
