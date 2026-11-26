@@ -6,7 +6,7 @@
 - 命令注册表（`command_registry_macro.in`）与产品页来源（`runtime::ProductOrigin`）
 
 [OUTPUT]
-- IPC sender gate（main/session 来源校验）
+- IPC sender gate（main/session/app 来源校验）
 - 产品窗口的 Tauri ACL capability（由 sender gate 推导，Local + 精确来源 Remote）
 - 高敏操作票据与原生确认流程
 - `ipc-sensitive-confirmation` 审计事件
@@ -29,9 +29,9 @@ Desktop IPC 安全边界实现；统一承接命令面授权、拒绝策略与�
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `mod.rs` | 核心 | 模块门面、对外 re-export（含 `register_product_capabilities`）、Tauri `issue_sensitive_action_ticket` 命令入口 | ✅ |
-| `policy.rs` | 核心 | 命令风险分级、main/session/pet/curtain 四信任域策略、`authorize_*` 与 deny 处理 | ✅ |
-| `capability.rs` | 核心 | 产品窗口面（`main` / `session-*` / `pet-surface`）的 ACL capability：应用命令授权由 `authorize_request` × 命令注册表推导；内核与官方插件命令按前端实际用法最小授权（`fs` / `shell:allow-open` 不配静态 scope）；每个窗口面一份，同时覆盖 Local 与精确来源 Remote；`register_product_capabilities` 在 `setup` 里于首个产品页发起 IPC 之前调用 | ✅ |
+| `policy.rs` | 核心 | 命令风险分级、main/session/app/pet/curtain 五信任域策略（应用窗口只放行只读命令与作用于自身的窗口命令；这两条自身命令只给应用窗口，免得主窗口借它们关掉自己）、`authorize_*` 与 deny 处理 | ✅ |
+| `capability.rs` | 核心 | 产品窗口面（`main` / `session-*` / `app-*` / `pet-surface`）的 ACL capability：应用命令授权由 `authorize_request` × 命令注册表推导；内核与官方插件命令按前端实际用法最小授权（`fs` / `shell:allow-open` 不配静态 scope；应用窗口只得事件、应用版本、窗口只读查询与通知）；每个窗口面一份，同时覆盖 Local 与精确来源 Remote；`register_product_capabilities` 在 `setup` 里于首个产品页发起 IPC 之前调用 | ✅ |
 | `ticket_store.rs` | 核心 | 短时敏感票据存储（TTL/上限/消费） | ✅ |
 | `confirmation.rs` | 核心 | 本地化确认文案、原生弹窗确认、确认审计事件 | ✅ |
 | `tests.rs` | 核心 | 策略覆盖、票据语义、本地化确认与命令注册一致性测试 | ✅ |
-| `acl_tests.rs` | 核心 | 进程内 ACL 契约测试：真实 `generate_context!()` 的 ACL 清单 + 真实 `capability.rs`，在 `MockRuntime` 上逐条核对「窗口标签 × 来源（Local 壳页 / Remote 产品页 / 自定义协议页）× 命令」，证明 ACL 与 `authorize_request` 一致（含近似标签的负例）、Local 与 Remote 同权、关键命令只属主窗口、帷幕页只能上报物理输入、插件授权与最小权限表一致、异源页面（其他端口、同前缀端口、`localhost`、https、以 `127.0.0.1.` 开头的域名）一概零授权 | ✅ |
+| `acl_tests.rs` | 核心 | 进程内 ACL 契约测试：真实 `generate_context!()` 的 ACL 清单 + 真实 `capability.rs`，在 `MockRuntime` 上逐条核对「窗口标签 × 来源（Local 壳页 / Remote 产品页 / 自定义协议页）× 命令」，证明 ACL 与 `authorize_request` 一致（含近似标签的负例）、Local 与 Remote 同权、关键命令只属主窗口、应用窗口只得读取与自身窗口命令、帷幕页只能上报物理输入、插件授权与最小权限表一致、异源页面（其他端口、同前缀端口、`localhost`、https、以 `127.0.0.1.` 开头的域名）一概零授权 | ✅ |

@@ -19,6 +19,7 @@ mod menu;
 mod setup;
 mod shortcut_handler;
 mod tray;
+mod window_policy;
 
 include!("../../command_registry_macro.in");
 

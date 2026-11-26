@@ -2,10 +2,10 @@
 //!
 //! [INPUT]
 //! - super::lifecycle::graceful_shutdown (POS: 优雅停机)
-//! - 前端 useTrayEvents.ts 监听 tray:new_chat / tray:settings / tray:workspace 事件
+//! - 前端 useTrayEvents.ts 监听 tray:new_chat / tray:settings / tray:workspace / tray:apps 事件
 //!
 //! [OUTPUT]
-//! - setup_tray: 初始化 Tray 菜单（Show / New Chat / Settings / Workspace / Quit）
+//! - setup_tray: 初始化 Tray 菜单（Show / New Chat / Settings / Workspace / Apps / Quit）
 //! - set_tray_status: IPC 命令，前端同步 Agent 运行状态与 i18n tooltip 到托盘
 //! - update_tray_info: IPC 命令，刷新托盘菜单里的引擎版本与升级进度行
 //! - update_native_tray_status: Rust 侧托盘 error/idle 状态（watchdog、启动失败）
@@ -108,6 +108,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let sep1 = PredefinedMenuItem::separator(app)?;
     let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let workspace_i = MenuItem::with_id(app, "workspace", "Workspace", true, None::<&str>)?;
+    let apps_i = MenuItem::with_id(app, "apps", "Apps", true, None::<&str>)?;
     let curtain_i = MenuItem::with_id(
         app,
         "privacy_curtain",
@@ -129,6 +130,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             &sep1,
             &settings_i,
             &workspace_i,
+            &apps_i,
             &curtain_i,
             &sep2,
             &quit_i,
@@ -157,6 +159,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "new_chat" => show_and_navigate(app, "tray:new_chat"),
             "settings" => show_and_navigate(app, "tray:settings"),
             "workspace" => show_and_navigate(app, "tray:workspace"),
+            "apps" => show_and_navigate(app, "tray:apps"),
             // 帷幕切换：拉起状态则收起，未拉起则手动拉起（手动帷幕不受锁屏 watcher 干涉）。
             "privacy_curtain" => {
                 let active = crate::commands::privacy_curtain::privacy_curtain_active(app.clone())

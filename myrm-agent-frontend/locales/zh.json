@@ -6776,7 +6776,68 @@
     },
     "annotationPanelLabel": "工件批注",
     "htmlPreviewTitle": "HTML 预览",
-    "portalDescription": "正在预览文件 {filename}，类型为 {type}，大小 {size}。按 Esc 键关闭。"
+    "portalDescription": "正在预览文件 {filename}，类型为 {type}，大小 {size}。按 Esc 键关闭。",
+    "apps": {
+      "sectionTitle": "应用",
+      "open": "打开应用",
+      "install": "安装为应用",
+      "installFailed": "安装失败，请重试。",
+      "undecided": "有权限待确认",
+      "backToApps": "返回产物",
+      "keepOnTop": "窗口置顶",
+      "keepOnTopFailed": "无法更改此设置。",
+      "closeWindow": "关闭窗口",
+      "notInstalled": {
+        "title": "这个应用尚未安装",
+        "description": "它可能已被卸载，或文件已被删除。在对话里的 HTML 产物上点击安装即可重新添加。"
+      },
+      "loadFailed": {
+        "title": "无法打开这个应用",
+        "description": "请检查网络后重试。"
+      },
+      "menu": {
+        "label": "应用菜单",
+        "permissions": "权限",
+        "uninstall": "卸载"
+      },
+      "uninstall": {
+        "title": "卸载「{name}」？",
+        "description": "它的权限和活动记录会被清除，文件仍保留在产物里。",
+        "confirm": "卸载",
+        "done": "已卸载",
+        "failed": "卸载失败，请重试。"
+      },
+      "permissions": {
+        "reviewTitle": "「{name}」想要使用",
+        "reviewHint": "选择这个应用可以做什么，之后可随时在应用菜单里修改。",
+        "manageTitle": "权限",
+        "manageHint": "这个应用可以代你做的事。",
+        "none": "这个应用没有请求任何权限。",
+        "later": "暂不决定",
+        "cancel": "取消",
+        "save": "保存",
+        "saving": "保存中…",
+        "saveFailed": "保存失败，请重试。",
+        "notify": {
+          "title": "通知",
+          "description": "在本设备上显示通知。"
+        },
+        "fetch": {
+          "title": "联网访问",
+          "description": "只会从以下站点读取数据："
+        },
+        "activity": {
+          "title": "最近活动",
+          "empty": "暂无记录。",
+          "outcome": {
+            "ok": "已完成",
+            "denied": "已拦截",
+            "rate_limited": "过于频繁",
+            "error": "失败"
+          }
+        }
+      }
+    }
   },
   "MessageSources": {
     "untitled": "未命名",
@@ -21937,18 +21998,12 @@
     "renameHint": "点击重命名",
     "editTitle": "编辑标题",
     "cycleColSpan": "切换布局宽档 (当前 {cols} 列)",
-    "refreshIntervalAria": "自动刷新频率",
-    "refreshManual": "手动",
-    "refreshNow": "立即刷新",
     "unpin": "取消固定",
     "pinnedAt": "固定于 {time}",
-    "refreshedAt": "已刷新 {time}",
     "drawerAria": "数字员工监控工作台",
     "drawerTitle": "项目工作台与监控大盘",
     "widgetCount": "{count} 个组件",
     "drawerSubtitle": "常驻持久化富交互原型、动态数据报表与数字员工监控卡片",
-    "refreshAllHint": "刷新所有组件",
-    "refreshAll": "全部刷新",
     "clearAllHint": "清空所有组件",
     "clearAll": "清空",
     "restoreViewport": "还原视口",

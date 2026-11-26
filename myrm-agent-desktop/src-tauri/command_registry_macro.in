@@ -75,6 +75,12 @@ macro_rules! tauri_command_registry {
                 crate::commands::pet_surface::pet_surface_toggle_main_window
             ),
             ("open_session_window", crate::commands::session_window::open_session_window),
+            ("open_app_window", crate::commands::app_window::open_app_window),
+            ("close_app_window", crate::commands::app_window::close_app_window),
+            (
+                "set_app_window_always_on_top",
+                crate::commands::app_window::set_app_window_always_on_top
+            ),
             ("force_appshot_capture", crate::commands::config::force_appshot_capture),
             ("migrate_data_dir", crate::commands::config::migrate_data_dir),
             ("export_local_sqlite", crate::commands::recovery::export_local_sqlite),

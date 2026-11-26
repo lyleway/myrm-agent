@@ -6776,7 +6776,68 @@
     },
     "annotationPanelLabel": "Artifact annotations",
     "htmlPreviewTitle": "HTML preview",
-    "portalDescription": "Previewing file {filename}, type {type}, size {size}. Press Esc to close."
+    "portalDescription": "Previewing file {filename}, type {type}, size {size}. Press Esc to close.",
+    "apps": {
+      "sectionTitle": "Apps",
+      "open": "Open app",
+      "install": "Install as app",
+      "installFailed": "Couldn't install this app. Try again.",
+      "undecided": "Permissions to review",
+      "backToApps": "Back to artifacts",
+      "keepOnTop": "Keep on top",
+      "keepOnTopFailed": "Couldn't change this setting.",
+      "closeWindow": "Close window",
+      "notInstalled": {
+        "title": "This app isn't installed",
+        "description": "It was uninstalled or its file was removed. Install an HTML artifact from a chat to bring it back."
+      },
+      "loadFailed": {
+        "title": "Couldn't open this app",
+        "description": "Check your connection and try again."
+      },
+      "menu": {
+        "label": "App menu",
+        "permissions": "Permissions",
+        "uninstall": "Uninstall"
+      },
+      "uninstall": {
+        "title": "Uninstall “{name}”?",
+        "description": "Its permissions and activity history are removed. The file stays in your artifacts.",
+        "confirm": "Uninstall",
+        "done": "App uninstalled",
+        "failed": "Couldn't uninstall this app."
+      },
+      "permissions": {
+        "reviewTitle": "“{name}” wants to use",
+        "reviewHint": "Choose what this app may do. You can change this any time from the app menu.",
+        "manageTitle": "Permissions",
+        "manageHint": "What this app may do on your behalf.",
+        "none": "This app doesn't ask for any permissions.",
+        "later": "Not now",
+        "cancel": "Cancel",
+        "save": "Save",
+        "saving": "Saving…",
+        "saveFailed": "Couldn't save your choice. Try again.",
+        "notify": {
+          "title": "Notifications",
+          "description": "Show notifications on this device."
+        },
+        "fetch": {
+          "title": "Network access",
+          "description": "Load data from these sites only:"
+        },
+        "activity": {
+          "title": "Recent activity",
+          "empty": "Nothing yet.",
+          "outcome": {
+            "ok": "Done",
+            "denied": "Blocked",
+            "rate_limited": "Too frequent",
+            "error": "Failed"
+          }
+        }
+      }
+    }
   },
   "MessageSources": {
     "untitled": "Untitled",
@@ -21937,18 +21998,12 @@
     "renameHint": "Click to rename",
     "editTitle": "Edit title",
     "cycleColSpan": "Switch layout width (currently {cols} columns)",
-    "refreshIntervalAria": "Auto-refresh interval",
-    "refreshManual": "Manual",
-    "refreshNow": "Refresh now",
     "unpin": "Unpin",
     "pinnedAt": "Pinned at {time}",
-    "refreshedAt": "Refreshed at {time}",
     "drawerAria": "Digital employee monitoring workspace",
     "drawerTitle": "Project workspace and monitoring board",
     "widgetCount": "{count, plural, one {# widget} other {# widgets}}",
     "drawerSubtitle": "Persistent rich-interaction prototypes, live data reports and digital-employee monitoring cards",
-    "refreshAllHint": "Refresh all widgets",
-    "refreshAll": "Refresh all",
     "clearAllHint": "Clear all widgets",
     "clearAll": "Clear",
     "restoreViewport": "Restore viewport",

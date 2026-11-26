@@ -6,18 +6,9 @@
 
 'use client';
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import {
-  LayoutDashboard,
-  Search,
-  RefreshCw,
-  X,
-  Trash2,
-  Maximize2,
-  Minimize2,
-  Sparkles,
-} from 'lucide-react';
+import { LayoutDashboard, Search, X, Trash2, Maximize2, Minimize2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils/classnameUtils';
 import { useDashboardWorkspaceStore } from './useDashboardWorkspaceStore';
 import { DashboardWidgetCard } from './DashboardWidgetCard';
@@ -26,9 +17,7 @@ export interface DashboardWorkspaceDrawerProps {
   className?: string;
 }
 
-export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> = ({
-  className,
-}) => {
+export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> = ({ className }) => {
   const t = useTranslations('dashboardWorkspace');
   const {
     widgets,
@@ -39,8 +28,6 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
     unpinWidget,
     updateWidgetColSpan,
     updateWidgetTitle,
-    updateWidgetRefreshInterval,
-    refreshWidget,
     setSearchQuery,
     setActiveTagFilter,
     clearAllWidgets,
@@ -65,18 +52,11 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
         widget.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         widget.content.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const matchesTag =
-        activeTagFilter === null || widget.tags.includes(activeTagFilter);
+      const matchesTag = activeTagFilter === null || widget.tags.includes(activeTagFilter);
 
       return matchesSearch && matchesTag;
     });
   }, [widgets, searchQuery, activeTagFilter]);
-
-  const handleRefreshAll = useCallback(() => {
-    for (const widget of widgets) {
-      refreshWidget(widget.id);
-    }
-  }, [widgets, refreshWidget]);
 
   if (!isDrawerOpen) {
     return null;
@@ -101,31 +81,18 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">
-                {t('drawerTitle')}
-              </h2>
+              <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">{t('drawerTitle')}</h2>
               <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300">
                 {t('widgetCount', { count: widgets.length })}
               </span>
             </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              {t('drawerSubtitle')}
-            </p>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('drawerSubtitle')}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {widgets.length > 0 ? (
             <>
-              <button
-                type="button"
-                onClick={handleRefreshAll}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 transition-colors"
-                title={t('refreshAllHint')}
-              >
-                <RefreshCw size={13} />
-                <span>{t('refreshAll')}</span>
-              </button>
               <button
                 type="button"
                 onClick={clearAllWidgets}
@@ -164,10 +131,7 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
       {widgets.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-100/60 dark:bg-neutral-900/40">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
-            />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
             <input
               type="text"
               value={searchQuery}
@@ -216,12 +180,8 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
             <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-500 mb-4">
               <Sparkles size={28} />
             </div>
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
-              {t('emptyTitle')}
-            </h3>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-sm mb-4">
-              {t('emptyHint')}
-            </p>
+            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">{t('emptyTitle')}</h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-sm mb-4">{t('emptyHint')}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -231,8 +191,6 @@ export const DashboardWorkspaceDrawer: React.FC<DashboardWorkspaceDrawerProps> =
                 widget={widget}
                 onUpdateColSpan={updateWidgetColSpan}
                 onUpdateTitle={updateWidgetTitle}
-                onUpdateRefreshInterval={updateWidgetRefreshInterval}
-                onRefresh={refreshWidget}
                 onUnpin={unpinWidget}
               />
             ))}

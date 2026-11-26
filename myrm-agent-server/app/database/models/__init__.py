@@ -8,6 +8,7 @@ from .agent_history import AgentProfileHistory
 from .api_key import APIKey
 from .approval import ApprovalRecord
 from .artifact import Artifact, ArtifactAuditLog, ArtifactVersion
+from .artifact_app import ArtifactApp, ArtifactAppActivity, ArtifactAppGrant
 from .artifact_publication import ArtifactPublication
 from .artifact_share import ArtifactShareRecord
 from .assessment_import import AssessmentImportLedger
@@ -158,6 +159,9 @@ __all__ = [
     "ArtifactAuditLog",
     "ArtifactPublication",
     "ArtifactShareRecord",
+    "ArtifactApp",
+    "ArtifactAppGrant",
+    "ArtifactAppActivity",
     # FAQ
     "FaqCorpus",
     "FaqEntry",

@@ -1,5 +1,5 @@
 /**
- * [INPUT] PinnedDashboardWidget, update actions (colSpan, title, interval, refresh, unpin)
+ * [INPUT] PinnedDashboardWidget, update actions (colSpan, title, unpin)
  * [OUTPUT] DashboardWidgetCard (Individual responsive card with sandbox preview and toolbar)
  * [POS] Features -> Dashboard Workspace -> DashboardWidgetCard
  */
@@ -8,30 +8,15 @@
 
 import React, { useState, useCallback } from 'react';
 import { useTranslations } from 'next-intl';
-import {
-  RefreshCw,
-  Trash2,
-  Columns2,
-  Columns3,
-  Clock,
-  Check,
-  Edit2,
-  Square,
-} from 'lucide-react';
+import { Trash2, Columns2, Columns3, Clock, Check, Edit2, Square } from 'lucide-react';
 import { cn } from '@/lib/utils/classnameUtils';
 import { HtmlPreview } from '@/components/features/artifacts/renderers/MediaPreview';
-import type {
-  AutoRefreshIntervalSeconds,
-  PinnedDashboardWidget,
-  WidgetColSpan,
-} from './dashboardWorkspaceTypes';
+import type { PinnedDashboardWidget, WidgetColSpan } from './dashboardWorkspaceTypes';
 
 export interface DashboardWidgetCardProps {
   widget: PinnedDashboardWidget;
   onUpdateColSpan: (id: string, colSpan: WidgetColSpan) => void;
   onUpdateTitle: (id: string, title: string) => void;
-  onUpdateRefreshInterval: (id: string, interval: AutoRefreshIntervalSeconds) => void;
-  onRefresh: (id: string) => void;
   onUnpin: (id: string) => void;
   className?: string;
 }
@@ -40,8 +25,6 @@ export const DashboardWidgetCard: React.FC<DashboardWidgetCardProps> = ({
   widget,
   onUpdateColSpan,
   onUpdateTitle,
-  onUpdateRefreshInterval,
-  onRefresh,
   onUnpin,
   className,
 }) => {
@@ -62,11 +45,7 @@ export const DashboardWidgetCard: React.FC<DashboardWidgetCardProps> = ({
   }, [tempTitle, widget.id, onUpdateTitle]);
 
   const colSpanClass =
-    widget.colSpan === '3'
-      ? 'col-span-full'
-      : widget.colSpan === '2'
-      ? 'md:col-span-2'
-      : 'col-span-1';
+    widget.colSpan === '3' ? 'col-span-full' : widget.colSpan === '2' ? 'md:col-span-2' : 'col-span-1';
 
   return (
     <div
@@ -131,14 +110,7 @@ export const DashboardWidgetCard: React.FC<DashboardWidgetCardProps> = ({
           <button
             type="button"
             onClick={() =>
-              onUpdateColSpan(
-                widget.id,
-                widget.colSpan === '1'
-                  ? '2'
-                  : widget.colSpan === '2'
-                  ? '3'
-                  : '1',
-              )
+              onUpdateColSpan(widget.id, widget.colSpan === '1' ? '2' : widget.colSpan === '2' ? '3' : '1')
             }
             className="p-1 rounded text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
             title={t('cycleColSpan', { cols: widget.colSpan })}
@@ -150,35 +122,6 @@ export const DashboardWidgetCard: React.FC<DashboardWidgetCardProps> = ({
             ) : (
               <Columns3 size={13} />
             )}
-          </button>
-
-          {/* Refresh Interval Selector */}
-          <select
-            aria-label={t('refreshIntervalAria')}
-            value={widget.autoRefreshInterval}
-            onChange={(e) =>
-              onUpdateRefreshInterval(
-                widget.id,
-                Number(e.target.value) as AutoRefreshIntervalSeconds,
-              )
-            }
-            className="text-[10px] px-1 py-0.5 bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 border-none rounded cursor-pointer focus:outline-none"
-          >
-            <option value={0}>{t('refreshManual')}</option>
-            <option value={15}>15s</option>
-            <option value={30}>30s</option>
-            <option value={60}>1m</option>
-            <option value={300}>5m</option>
-          </select>
-
-          {/* Manual Refresh */}
-          <button
-            type="button"
-            onClick={() => onRefresh(widget.id)}
-            className="p-1 rounded text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
-            title={t('refreshNow')}
-          >
-            <RefreshCw size={13} />
           </button>
 
           {/* Unpin */}
@@ -204,7 +147,6 @@ export const DashboardWidgetCard: React.FC<DashboardWidgetCardProps> = ({
           <Clock size={10} />
           <span>{t('pinnedAt', { time: new Date(widget.pinnedAt).toLocaleTimeString() })}</span>
         </div>
-        <span>{t('refreshedAt', { time: new Date(widget.lastRefreshedAt).toLocaleTimeString() })}</span>
       </div>
     </div>
   );

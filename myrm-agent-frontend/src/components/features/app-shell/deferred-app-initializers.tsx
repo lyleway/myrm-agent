@@ -2,6 +2,8 @@
 
 import dynamic from 'next/dynamic';
 
+import { useIsAppWindow } from '@/hooks/tauri/useIsAppWindow';
+
 import DeferredMount from './deferred-mount';
 
 const FlowPadModal = dynamic(() => import('./flow-pad-modal').then((module) => ({ default: module.FlowPadModal })), {
@@ -40,6 +42,12 @@ const AppshotInitializer = dynamic(() => import('./appshot-initializer'), { ssr:
 const VoicePttInitializer = dynamic(() => import('./voice-ptt-initializer'), { ssr: false });
 
 export default function DeferredAppInitializers() {
+  // An installed app's window only hosts the app. These are app-wide listeners and prompts (updates, global
+  // shortcuts, capture) that belong to the main window; running them again per app window would duplicate them.
+  if (useIsAppWindow()) {
+    return null;
+  }
+
   return (
     <DeferredMount>
       <FlowPadModal />

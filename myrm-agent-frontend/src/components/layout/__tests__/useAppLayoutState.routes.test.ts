@@ -71,6 +71,7 @@ describe('useAppLayoutState: tabs and remembered pages', () => {
       ['/kanban', 'projects'],
       ['/cron', 'projects'],
       ['/artifacts', 'projects'],
+      ['/apps/artifact-1', 'projects'],
     ])('puts %s under the %s tab', (pathname, tab) => {
       expect(mountAt(pathname).result.current.activeTab).toBe(tab);
     });

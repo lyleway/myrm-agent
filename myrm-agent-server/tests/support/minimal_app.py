@@ -156,6 +156,7 @@ _ROUTER_MOUNTS: dict[str, _RouterMount] = {
     "media": _RouterMount("app.api.media", attr="media_router", prefix="/media", tags=("media",)),
     "budget": _RouterMount("app.api.budget", attr="budget_router", prefix="/budget", tags=("budget",)),
     "widget_storage": _RouterMount("app.api.widget_storage", tags=("widget-storage",)),
+    "artifact_apps": _RouterMount("app.api.artifact_apps", tags=("artifact-apps",)),
     "remote_access": _RouterMount("app.api.remote_access.router", prefix="/remote-access", tags=("remote-access",)),
     "browser_domain_skills": _RouterMount(
         "app.api.browser_domain_skills",

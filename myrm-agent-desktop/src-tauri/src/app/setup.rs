@@ -1,11 +1,12 @@
 //! Tauri `setup` 钩子：配置管理、快捷键注册、Sidecar 自启动（Python + Next 始终）；
-//! 以及应用级窗口事件策略（关闭到托盘、窗口销毁即退出编排；帷幕与审批高亮覆盖层豁免）。
+//! 以及应用级窗口事件（关闭到托盘、主窗口销毁即退出编排，策略见 `window_policy`）。
 
 use std::sync::Mutex;
 
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
+use super::window_policy::{self, CloseAction};
 use super::{lifecycle, menu, tray};
 use crate::config::{BackendConfig, ConfigManager, FrontendConfig};
 use crate::runtime::{
@@ -299,24 +300,18 @@ fn register_shortcut_from_config(
     Ok(())
 }
 
-/// 应用级窗口策略（关闭到托盘、退出编排）是否管辖该窗口。帷幕与审批高亮是按需建、用完即销的
-/// 覆盖层，并不承载应用：被关闭时，"关闭到托盘"会把它拦成永不销毁的隐藏窗并把应用切到
-/// Accessory（Dock 图标消失）；被销毁时，`Destroyed` 会被当作应用退出，把后端与前端一并停掉。
-fn governs_app_lifecycle(label: &str) -> bool {
-    !commands::privacy_curtain::is_curtain_label(label)
-        && !commands::visual_approval_overlay::is_overlay_label(label)
-}
-
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
-    if !governs_app_lifecycle(window.label()) {
-        return;
-    }
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
-            let config_manager = window.app_handle().state::<ConfigManager>();
-            let config = config_manager.load();
+            let close_to_tray = window
+                .app_handle()
+                .state::<ConfigManager>()
+                .load()
+                .close_to_tray;
 
-            if config.close_to_tray {
+            if window_policy::on_close_requested(window.label(), close_to_tray)
+                == CloseAction::HideToTray
+            {
                 let _ = window.hide();
                 api.prevent_close();
 
@@ -328,41 +323,13 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 }
             }
         }
-        tauri::WindowEvent::Destroyed => {
+        tauri::WindowEvent::Destroyed if window_policy::destroyed_stops_app(window.label()) => {
             let app_handle = window.app_handle().clone();
-            let is_main = window.label() == "main";
             tauri::async_runtime::spawn(async move {
-                // 非主窗口（会话窗/宠物层）只做资源回收，不触发整个应用退出。
                 lifecycle::graceful_shutdown(app_handle.clone()).await;
-                if is_main {
-                    lifecycle::shutdown_and_exit(app_handle, 0).await;
-                }
+                lifecycle::shutdown_and_exit(app_handle, 0).await;
             });
         }
         _ => {}
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::governs_app_lifecycle;
-
-    #[test]
-    fn overlay_surfaces_are_exempt_from_the_app_lifecycle_policy() {
-        for label in [
-            "privacy-curtain-1-0",
-            "privacy-curtain-7-2",
-            "visual-approval-overlay-0",
-            "visual-approval-overlay-31",
-        ] {
-            assert!(!governs_app_lifecycle(label), "{label}");
-        }
-    }
-
-    #[test]
-    fn every_other_window_stays_under_the_app_lifecycle_policy() {
-        for label in ["main", "pet-surface", "session-42"] {
-            assert!(governs_app_lifecycle(label), "{label}");
-        }
     }
 }

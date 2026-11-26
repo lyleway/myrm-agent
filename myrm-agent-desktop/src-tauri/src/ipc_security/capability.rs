@@ -7,7 +7,7 @@
 //!
 //! [OUTPUT]
 //! - REGISTERED_COMMANDS: 注册表命令名全集
-//! - register_product_capabilities: 向运行中的 App 注册 main / session-* / pet-surface 三个窗口面的 capability
+//! - register_product_capabilities: 向运行中的 App 注册 main / session-* / app-* / pet-surface 四个窗口面的 capability
 //!
 //! [POS]
 //! ACL 层（Tauri 在命令入口按「窗口 × 来源」放行）与 `policy.rs`（应用层按窗口面放行）的接缝。
@@ -19,7 +19,8 @@ use tauri::ipc::CapabilityBuilder;
 use tauri::{Manager, Runtime};
 
 use super::policy::{
-    authorize_request, MAIN_WEBVIEW_LABEL, PET_SURFACE_WEBVIEW_LABEL, SESSION_WEBVIEW_PREFIX,
+    authorize_request, APP_WEBVIEW_PREFIX, MAIN_WEBVIEW_LABEL, PET_SURFACE_WEBVIEW_LABEL,
+    SESSION_WEBVIEW_PREFIX,
 };
 use crate::runtime::ProductOrigin;
 
@@ -69,6 +70,18 @@ const PRODUCT_PAGE_NATIVE_PERMISSIONS: &[&str] = &[
     "updater:allow-install",
 ];
 
+/// 应用窗口只承载宿主页：事件通道、应用版本与窗口只读查询（`core:window:default` 只含读取），
+/// 外加应用请求的通知（授权状态、请求授权、发送）。文件、对话框、剪贴板、链接、深链与更新器都不给：
+/// 应用页本身在无 IPC 的沙箱 iframe 里，宿主页也不需要它们。
+const APP_NATIVE_PERMISSIONS: &[&str] = &[
+    "core:app:default",
+    "core:event:default",
+    "core:window:default",
+    "notification:allow-is-permission-granted",
+    "notification:allow-request-permission",
+    "notification:allow-notify",
+];
+
 /// 桌面宠物浮层只需事件通道与自身窗口的拖动（读位置/尺寸、改位置）。通知插件注入的
 /// `window.Notification` 垫片在每个页面加载时都会查询授权状态，只读查询随之放行，免得每次
 /// 开浮层都留下一条未处理的拒绝。
@@ -85,16 +98,18 @@ const PET_SURFACE_NATIVE_PERMISSIONS: &[&str] = &[
 enum Surface {
     Main,
     Session,
+    App,
     Pet,
 }
 
 impl Surface {
-    const ALL: [Surface; 3] = [Surface::Main, Surface::Session, Surface::Pet];
+    const ALL: [Surface; 4] = [Surface::Main, Surface::Session, Surface::App, Surface::Pet];
 
     fn capability_id(self) -> &'static str {
         match self {
             Surface::Main => "product-main",
             Surface::Session => "product-session",
+            Surface::App => "product-app",
             Surface::Pet => "product-pet-surface",
         }
     }
@@ -104,6 +119,7 @@ impl Surface {
         match self {
             Surface::Main => MAIN_WEBVIEW_LABEL.to_string(),
             Surface::Session => format!("{SESSION_WEBVIEW_PREFIX}*"),
+            Surface::App => format!("{APP_WEBVIEW_PREFIX}*"),
             Surface::Pet => PET_SURFACE_WEBVIEW_LABEL.to_string(),
         }
     }
@@ -112,6 +128,7 @@ impl Surface {
     fn probe_label(self) -> String {
         match self {
             Surface::Session => format!("{SESSION_WEBVIEW_PREFIX}probe"),
+            Surface::App => format!("{APP_WEBVIEW_PREFIX}probe"),
             Surface::Main | Surface::Pet => self.window_pattern(),
         }
     }
@@ -119,6 +136,7 @@ impl Surface {
     fn native_permissions(self) -> &'static [&'static str] {
         match self {
             Surface::Main | Surface::Session => PRODUCT_PAGE_NATIVE_PERMISSIONS,
+            Surface::App => APP_NATIVE_PERMISSIONS,
             Surface::Pet => PET_SURFACE_NATIVE_PERMISSIONS,
         }
     }
