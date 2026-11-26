@@ -35,6 +35,7 @@ async def test_installing_twice_keeps_one_row(db: AsyncSession) -> None:
 
 async def test_apps_of_deleted_artifacts_are_not_listed(db: AsyncSession) -> None:
     db.add_all([Artifact(id="live", name="live.html"), Artifact(id="gone", name="gone.html", is_deleted=True)])
+    await db.commit()
     await store.install_app(db, "live")
     await store.install_app(db, "gone")
 

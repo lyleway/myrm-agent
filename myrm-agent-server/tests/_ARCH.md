@@ -1045,6 +1045,10 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/evolution/test_evolution_display_rows.py` | 模块 | 技能页展示的锁与回归用例取自存放该技能 SKILL.md 的进化行，即 `/derive` 与锁开关作用的那一行（真实 HTTP 与真实存储）：改过名的技能显示旧名行的锁且 `/derive` 同样 409；同名而在不同目录的技能互不串锁（上锁、解锁只影响自己）、互不串用回归用例；存放别的目录 SKILL.md 的行不会被展示；没有行的技能显示自己 SKILL.md 里的锁（两种取值）；以页面 id 为键的行优先；非本地技能仍按名字取；一次列表请求只读一次进化库的活动行 |
 | `services/skills/test_evolution_review_rollback.py` | 模块 | 演化评审回滚：fork 回滚移除其文件与记录且无错误，编辑回滚还原原始内容，已退役的进化类型在技能文件被改动之前即被拒绝 |
 | `services/skills/test_skill_growth_write_contention.py` | 模块 | 技能成长的六处读后写在另一个写者先提交时不丢写（真实事务策略的文件库，夹具 `tests/support/policy_sqlite.py`）：提案结算（`persist_approval_payload`）、草稿退回待审（`_rollback_draft_status`）、批准后的 Agent 绑定（`_bind_skill_to_agent`）、成长记录补写 `resolved_at`（`persist_skill_draft_record`）、fork 的 Agent 绑定改写（`apply_content_update`）、版本激活（`SQLAlchemyStorage.activate_version`，批准提案落盘时调用，失败即该提案应用失败）；写者持锁时各自先等锁再读，写者提交后写入落库；其中三处失败只记日志，丢写没有任何报错 |
+| `e2e/test_installed_app_chrome_e2e.py` | 模块 | 装成应用的 HTML 工件按用户允许的范围使用桥（SHARED+NAMESPACE_WRITE×1，无 LLM）：种子路由登记一个声明 `notify` 与 `fetch: example.com` 的页面 → 卡片上「安装为应用」进入应用页，权限框自动弹出 → 「暂不决定」后能力保持关闭，页面的三次调用都被拒、横幅「有权限待确认」留着、授权表为空 → 横幅重开对话框并保存 → 通知到达用户、声明主机的请求由服务端代理答复（需要真实外网）、未声明主机被服务端拒绝 → 活动记录只含主机名、各条次数与两轮调用一致 → 应用菜单卸载后应用与其页面消失 |
+| `e2e/test_installed_app_live_chrome_e2e.py` | 模块 | 真实模型做出需要实时数据的应用，用户安装并允许（PRIVATE+NAMESPACE_WRITE+LIVE×1，`live_shpoib`）：用户先开启生活工作台技能并授予文件权限、建一个绑定该技能的智能体，再让它做带柏林实时天气与提醒的工作台 → 智能体选用该技能，写出带 `myrm-app` 声明、调用 `window.myrm` 的页面 → 答复卡片提供「安装为应用」，权限框列出页面声明的天气主机 → 保存后重新打开，页面自己的请求由服务端代理答复、提醒送达，两者都在活动记录里 |
+| `support/installed_app_e2e.py` | 辅助 | 两个已装应用 E2E 共用的页内脚本与接口读取：按钮与对话框用中英两种标签匹配、只驱动产品自己的控件；`page_wait_sec` 给首次访问编译路由的页面留足时间；`app_detail` / `activity_counts` / `installed_ids` 读已装应用接口 |
+| `services/artifact_apps/test_store_transactions.py` | 单元 | 已装应用登记表的写入在生产 SQLite 事务策略下（WAL 文件库，别的请求在调用方读之后提交）仍然成功：`record_activity` / `set_grant` / `install_app` / `uninstall_app` 各一例；内存库共用一条连接，复现不了这类 `database is locked` |
 
 ---
 

@@ -117,7 +117,10 @@ async def install_app(
     if not artifact.name.lower().endswith(_HTML_SUFFIXES):
         raise HTTPException(status_code=400, detail="Only HTML artifacts can be installed as apps")
     await store.install_app(db, artifact.id)
-    return success_response((await _detail(artifact, db)).model_dump(mode="json"))
+    # The store begins its write in a transaction of its own, which expires what this request loaded.
+    return success_response(
+        (await _detail(await _installed_artifact(artifact_id, db, workspace_root), db)).model_dump(mode="json")
+    )
 
 
 @router.delete("/{artifact_id}", status_code=204)

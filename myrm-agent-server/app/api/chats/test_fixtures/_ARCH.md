@@ -4,7 +4,7 @@
 
 local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.md)。
 
-`__init__.py` 为聚合门面：include `_inline_core`、`_kanban` 与全部 23 个子模块的 router。上层通过 `from ..test_fixtures import router` 挂载。
+`__init__.py` 为聚合门面：include `_inline_core`、`_kanban` 与全部 24 个子模块的 router。上层通过 `from ..test_fixtures import router` 挂载。
 
 所有 seed 端点以 `POST /chats/test/seed-*` 暴露，`include_in_schema=False`，且仅 local/tauri 模式可用（`is_local_mode` 守卫）。
 
@@ -26,6 +26,7 @@ local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.
 | `file_edit_batch.py` | file_edit batch live/read_ui + workspace-only seed |
 | `file_mutation.py` | file mutation seed |
 | `guardrail_bash.py` | guardrail bash Badge seed |
+| `installed_app.py` | 已安装应用 seed（`POST /chats/test/seed-installed-app-fixture`：一条助手回答携带一份声明了 notify 与 fetch（`example.com`）的 HTML 应用制品，由产品自己的制品处理器登记；页面收到宿主发来的 `e2e-run` 后各调一次允许的主机、未声明的主机与通知，并把结果回传宿主） |
 | `media_cards.py` | 生成媒体卡片 seed（`POST /chats/test/seed-media-cards-fixture`：图像任务 / 视频任务 / 同步图像编辑 / 语音各一条已登记条目，媒体经落库回调真实存储；`address=file` 为任务结果指向不可加载地址的负向对照，`address=expired` 为任务记录已不存在） |
 | `memory_lifecycle.py` | memory lifecycle seed |
 | `prior_chat.py` | composer @chat: mention seed |

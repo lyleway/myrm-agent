@@ -1,6 +1,7 @@
 """Persistence for installed artifact apps.
 
 [INPUT]
+- app.database.factory::acquire_write_lock (POS: SQLite write lock taken before the first read of a transaction)
 - app.database.models.artifact_app (POS: ArtifactApp, ArtifactAppGrant, ArtifactAppActivity)
 - app.database.models.artifact::Artifact (POS: Joined for the app name)
 - app.services.artifact_apps.capabilities (POS: Capability, Decision, Outcome)
@@ -12,7 +13,8 @@
 
 [POS]
 Business layer. The only module that reads or writes the three artifact-app tables; the API layer and the fetch proxy
-go through it. Every database function takes the caller's session and commits its own write.
+go through it. Every database function takes the caller's session and commits its own write, in a transaction of its
+own: the caller's earlier reads (is the app installed) must not decide whether the write can happen.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from typing import Final
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.factory import acquire_write_lock
 from app.database.models.artifact import Artifact
 from app.database.models.artifact_app import ArtifactApp, ArtifactAppActivity, ArtifactAppGrant
 from app.services.artifact_apps.capabilities import Capability, Decision, Outcome
@@ -41,16 +44,30 @@ class InstalledApp:
     updated_at: datetime
 
 
+async def _begin_write(db: AsyncSession) -> None:
+    """Start a write transaction that no earlier read of this session can invalidate.
+
+    The routes read first (is the app installed, which hosts are allowed) and a proxied request can sit between that
+    read and the write. A read snapshot kept open that long fails the write with SQLITE_BUSY_SNAPSHOT ("database is
+    locked", which busy_timeout does not cover) once another request has committed, so the caller's read transaction is
+    ended and the write lock is taken before anything is read again. The session must carry no pending changes, and
+    objects the caller loaded are expired by this.
+    """
+    await db.rollback()
+    await acquire_write_lock(db)
+
+
 async def install_app(db: AsyncSession, artifact_id: str) -> None:
     """Register the artifact as an app; installing twice is a no-op."""
-    if await is_installed(db, artifact_id):
-        return
-    db.add(ArtifactApp(artifact_id=artifact_id))
+    await _begin_write(db)
+    if not await is_installed(db, artifact_id):
+        db.add(ArtifactApp(artifact_id=artifact_id))
     await db.commit()
 
 
 async def uninstall_app(db: AsyncSession, artifact_id: str) -> bool:
     """Remove the app with its grants and activity; returns whether it was installed."""
+    await _begin_write(db)
     installed = await is_installed(db, artifact_id)
     for model in (ArtifactAppActivity, ArtifactAppGrant, ArtifactApp):
         await db.execute(delete(model).where(model.artifact_id == artifact_id))
@@ -95,6 +112,7 @@ async def set_grant(
     version_sha256: str,
 ) -> ArtifactAppGrant:
     """Record the latest decision on one capability, replacing the previous one."""
+    await _begin_write(db)
     rows = await db.execute(
         select(ArtifactAppGrant).where(ArtifactAppGrant.artifact_id == artifact_id, ArtifactAppGrant.capability == capability)
     )
@@ -129,6 +147,7 @@ async def record_activity(
     outcome: Outcome,
     detail: str | None,
 ) -> None:
+    await _begin_write(db)
     db.add(
         ArtifactAppActivity(
             artifact_id=artifact_id,
