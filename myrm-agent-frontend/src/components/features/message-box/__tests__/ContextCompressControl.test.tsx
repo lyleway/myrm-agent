@@ -54,7 +54,7 @@ describe('ContextCompressControl', () => {
 
     await userEvent.setup().click(compressButton());
 
-    expect(await screen.findByText('compressSuccess:{"tokens":"15.2K"}')).toHaveClass('text-emerald-600');
+    expect(await screen.findByText('compressSuccess:{"tokens":"15.2K"}')).toHaveClass('text-emerald-700');
     expect(mockRunManualCompaction).toHaveBeenCalledWith('chat-1', undefined);
   });
 
@@ -86,8 +86,8 @@ describe('ContextCompressControl', () => {
   it.each([
     { reason: 'no_compactable_messages', copy: 'chat.compact.skip.nothing', tone: 'text-muted-foreground' },
     { reason: 'concurrent_compaction_in_progress', copy: 'chat.compact.skip.busy', tone: 'text-muted-foreground' },
-    { reason: 'summarize_circuit_open', copy: 'chat.compact.skip.paused', tone: 'text-amber-600' },
-    { reason: 'timeout', copy: 'chat.compact.failed', tone: 'text-rose-600' },
+    { reason: 'summarize_circuit_open', copy: 'chat.compact.skip.paused', tone: 'text-amber-700' },
+    { reason: 'timeout', copy: 'chat.compact.failed', tone: 'text-rose-700' },
   ])('words a compression the server did not run for its reason: $reason', async ({ reason, copy, tone }) => {
     mockRunManualCompaction.mockResolvedValue({ compacted: false, tokens_saved: 0, reason });
     renderControl();
@@ -105,7 +105,7 @@ describe('ContextCompressControl', () => {
 
     await userEvent.setup().click(compressButton());
 
-    expect(await screen.findByText('chat.compact.failed')).toHaveClass('text-rose-600');
+    expect(await screen.findByText('chat.compact.failed')).toHaveClass('text-rose-700');
     expect(screen.queryByText(/Server error/)).toBeNull();
   });
 

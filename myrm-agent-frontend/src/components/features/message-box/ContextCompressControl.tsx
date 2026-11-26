@@ -36,11 +36,13 @@ interface Outcome {
   text: string;
 }
 
+// The line is 10px text on the panel's own background, which needs 4.5 : 1. In the light theme the 600 steps of these hues
+// fall under that, so the light theme takes the 700 steps; the 400 steps clear it in the dark one.
 const OUTCOME_TONE_CLASS: Record<Outcome['tone'], string> = {
-  success: 'text-emerald-600 dark:text-emerald-400',
+  success: 'text-emerald-700 dark:text-emerald-400',
   info: 'text-muted-foreground',
-  warning: 'text-amber-600 dark:text-amber-400',
-  error: 'text-rose-600 dark:text-rose-400',
+  warning: 'text-amber-700 dark:text-amber-400',
+  error: 'text-rose-700 dark:text-rose-400',
 };
 
 export function ContextCompressControl({ chatId, usagePercent }: ContextCompressControlProps) {
