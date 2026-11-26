@@ -30,7 +30,6 @@ export const POPULAR_SYSTEM_FONTS = [
   'Noto Sans SC',
 ] as const;
 
-// theme-pre-init-script.ts 中有同步副本，修改 stack 时需同步更新
 export const FONT_CHOICES: FontChoice[] = [
   {
     id: 'inter',

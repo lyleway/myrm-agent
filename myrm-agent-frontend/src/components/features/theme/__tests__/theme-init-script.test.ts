@@ -1,14 +1,18 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { THEME_PRE_INIT_SCRIPT } from '../theme-pre-init-script';
 
-describe('THEME_PRE_INIT_SCRIPT', () => {
+// The script the browser really runs: layout.tsx serves it as /theme-init.js before hydration.
+const THEME_INIT_SCRIPT = readFileSync(resolve(process.cwd(), 'public/theme-init.js'), 'utf8');
+
+describe('public/theme-init.js', () => {
   it('sets theme-color meta from localStorage theme', () => {
     document.documentElement.innerHTML = '';
     document.head.innerHTML = '<meta name="theme-color" content="#fdfdfb" />';
 
     localStorage.setItem('theme', 'dark');
-    // eslint-disable-next-line no-eval -- inline SSR script parity test
-    eval(THEME_PRE_INIT_SCRIPT);
+    // eslint-disable-next-line no-eval -- the pre-hydration script is a classic script, evaluated as one
+    eval(THEME_INIT_SCRIPT);
 
     expect(document.querySelector('meta[name="theme-color"]')?.getAttribute('content')).toBe('#0a0a0a');
   });
@@ -27,8 +31,8 @@ describe('THEME_PRE_INIT_SCRIPT', () => {
         primaryHover: '#4a7d84',
       }),
     );
-    // eslint-disable-next-line no-eval -- inline SSR script parity test
-    eval(THEME_PRE_INIT_SCRIPT);
+    // eslint-disable-next-line no-eval -- the pre-hydration script is a classic script, evaluated as one
+    eval(THEME_INIT_SCRIPT);
 
     expect(document.documentElement.getAttribute('data-myrm-theme-profile')).toBe('preset-teal');
     expect(document.documentElement.getAttribute('data-myrm-theme-layout')).toBe('nav-rail-focus');
@@ -57,8 +61,8 @@ describe('THEME_PRE_INIT_SCRIPT', () => {
         artWash: 0.25,
       }),
     );
-    // eslint-disable-next-line no-eval -- inline SSR script parity test
-    eval(THEME_PRE_INIT_SCRIPT);
+    // eslint-disable-next-line no-eval -- the pre-hydration script is a classic script, evaluated as one
+    eval(THEME_INIT_SCRIPT);
     expect(document.documentElement.getAttribute('data-myrm-theme-scene')).toBe('functional');
     expect(document.documentElement.style.getPropertyValue('--myrm-theme-main-opacity')).toBe('0.94');
     expect(Number(document.documentElement.style.getPropertyValue('--myrm-theme-art-wash'))).toBeGreaterThan(0.25);
@@ -71,8 +75,8 @@ describe('THEME_PRE_INIT_SCRIPT', () => {
   it('purges legacy skin and font localStorage keys', () => {
     localStorage.setItem('myrm-skin', 'ocean');
     localStorage.setItem('myrm-font', 'system');
-    // eslint-disable-next-line no-eval -- inline SSR script parity test
-    eval(THEME_PRE_INIT_SCRIPT);
+    // eslint-disable-next-line no-eval -- the pre-hydration script is a classic script, evaluated as one
+    eval(THEME_INIT_SCRIPT);
 
     expect(localStorage.getItem('myrm-skin')).toBeNull();
     expect(localStorage.getItem('myrm-font')).toBeNull();
