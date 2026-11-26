@@ -32,7 +32,7 @@ config_check.py ──→ app.config.* (配置层)
 health_check.py ──→ app.core.infra.health (基础设施)
 server_lock.py ──→ filelock, psutil (主依赖；缺包提示 uv sync)
 uvicorn_runner.py ──→ gc_policy, health_check, app.config (env / deploy_mode), app.core.infra.frontend_launcher, app.services.webui (qrcode / temp_token), app.main (ASGI 应用), harness get_local_ip, uvicorn (外部)
-granian_runner.py ──→ health_check, granian_log_config.json (按路径交给 granian 的 `--log-config`；其中 `RedactingFormatter` 由 granian 的 dictConfig 按点号路径导入), granian (sandbox 组：uv sync --group sandbox)
+granian_runner.py ──→ health_check, granian_log_config.json (按路径交给 granian 的 `--log-config`；其中 `RedactingFormatter` 由 granian 的 dictConfig 按点号路径 `myrm_agent_harness.agent.security.redact` 导入，与 `app/config/logging.py` 的 import 同一路径；import 门禁只扫 `.py`，JSON 里的路径要与之保持一致), granian (sandbox 组：uv sync --group sandbox)
 listen_address.py ──→ app.config.settings / deploy_mode, app.server.runtime_dev_info；被 app/main.py 的脚本入口消费
 local_search_bootstrap.py ──→ docker compose search profile (best-effort, 非阻塞)
 desktop_path.py ──→ 用户登录 shell (子进程探测，失败降级为常见工具目录)；被 app/server/lifespan/app.py 消费
