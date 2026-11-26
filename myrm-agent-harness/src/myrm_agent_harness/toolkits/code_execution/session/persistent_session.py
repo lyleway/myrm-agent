@@ -17,8 +17,9 @@ script armor (on POSIX each command runs as ``bash <script>`` in a child of the 
 changes dies with it), and runs the commands of one shell one at a time; the command pump lives in
 ``CommandStreamMixin``. A command whose request is cancelled is stopped like a timed-out one (tree killed, session
 rebuilt on the next command); a command that reaches a shell that died is never replayed. A closed session is final:
-a command that reaches it after ``close()``, or whose shell was still starting when it closed, is refused and never
-reaches a shell; ``close()`` runs to its end even when the caller that awaits it is cancelled.
+it starts no shell, even through ``start()``; a command that reaches it after ``close()``, or whose shell was still
+starting when it closed, is refused and never reaches a shell; ``close()`` runs to its end even when the caller that
+awaits it is cancelled.
 """
 
 from __future__ import annotations
@@ -115,7 +116,7 @@ class PersistentSession(CommandStreamMixin, ABC):
         logger.debug(f" Session {self.config.session_id} state: {old_state.name} -> {new_state.name}")
 
     async def start(self) -> None:
-        """Locking entry point for starting the session."""
+        """Locking entry point for starting the session; a closed session starts no shell."""
         if self.is_alive and self._state == SessionState.ACTIVE:
             return
 
@@ -124,6 +125,10 @@ class PersistentSession(CommandStreamMixin, ABC):
 
     async def _start_unlocked(self) -> None:
         """Core start logic without lock."""
+        # The one place a shell is spawned: a start that gets ``_lock`` after ``close()`` marked the session would
+        # create a shell that nothing tracks.
+        if self._closed:
+            return
         if self.is_alive and self._state == SessionState.ACTIVE:
             return
 

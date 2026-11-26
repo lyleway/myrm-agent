@@ -79,8 +79,7 @@ class LocalPersistentSession(PersistentSession):
     async def _close_unlocked(self) -> None:
         # Part of the shielded close, so the sandbox is released even when the caller of ``close()`` is cancelled.
         await super()._close_unlocked()
-        if hasattr(self._sandbox_provider, "cleanup"):
-            self._sandbox_provider.cleanup()
+        self._sandbox_provider.cleanup()
 
     async def _create_process(self) -> asyncio.subprocess.Process:
         from myrm_agent_harness.core.security.process_env import (

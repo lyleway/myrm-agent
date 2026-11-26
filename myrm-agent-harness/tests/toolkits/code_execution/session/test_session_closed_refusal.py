@@ -3,8 +3,9 @@
 Without the refusal, a command that waits behind the one a closing session ends takes the lock afterwards and starts
 a new shell in a session its owner has dropped: outside the registry, under the sandbox the closed shell had. A command
 whose shell is already starting when the session closes would be written to a shell that dies under it, so it is
-refused once that shell is up. These tests use a session that runs no shell, so each one picks the moment the command
-gets its turn.
+refused once that shell is up. Whoever asks, a closed session spawns no shell: the refusals above guard the two
+moments a command can reach it, and the spawn itself guards every other way into a start. These tests use sessions
+that run no shell, so each one picks the moment the command gets its turn or counts the spawn.
 """
 
 from __future__ import annotations
@@ -12,8 +13,9 @@ from __future__ import annotations
 import asyncio
 
 from myrm_agent_harness.toolkits.code_execution.session.command_stream import SESSION_CLOSED_BEFORE_START
-from myrm_agent_harness.toolkits.code_execution.session.models import SessionExecutionResult
-from tests.toolkits.code_execution._session_helpers import GatedSession, let_the_loop_run
+from myrm_agent_harness.toolkits.code_execution.session.models import SessionExecutionResult, SessionState
+from myrm_agent_harness.toolkits.code_execution.session.persistent_session import PersistentSession
+from tests.toolkits.code_execution._session_helpers import GatedSession, let_the_loop_run, make_config
 
 _TICKS = 20
 
@@ -30,6 +32,18 @@ class _SlowStartSession(GatedSession):
         async with self._lock:
             self.starting.set()
             await self.start_may_end.wait()
+
+
+class _SpawnCountingSession(PersistentSession):
+    """A session with the real ``start`` whose spawn only counts, so a test sees whether a start reached it."""
+
+    def __init__(self) -> None:
+        super().__init__(make_config())
+        self.spawns = 0
+
+    async def _create_process(self) -> asyncio.subprocess.Process:
+        self.spawns += 1
+        raise NotImplementedError("a spawn-counting session runs no shell")
 
 
 async def _command_waiting_behind_a_running_one() -> tuple[
@@ -87,3 +101,13 @@ async def test_a_command_whose_shell_is_starting_when_the_session_closes_is_refu
 
     assert refused.error == SESSION_CLOSED_BEFORE_START
     assert session.ran == [], "the refused command reached the shell"
+
+
+async def test_a_closed_session_spawns_no_shell_when_it_is_started() -> None:
+    session = _SpawnCountingSession()
+    await session.close()
+
+    await session.start()
+
+    assert session.spawns == 0, "a closed session spawned a shell that nothing tracks"
+    assert session.state == SessionState.TERMINATED, "a start that spawns nothing has no state to move through"
