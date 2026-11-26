@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 
 from myrm_agent_harness.toolkits.code_execution.session import (
     LocalPersistentSession,
+    stream_output_processor,
 )
 from myrm_agent_harness.toolkits.code_execution.session.command_stream import SESSION_CLOSED_BEFORE_START
 from myrm_agent_harness.toolkits.code_execution.session.models import SessionState
@@ -18,14 +20,16 @@ from tests.toolkits.code_execution._session_helpers import captured_stdout_chunk
 
 class TestStreamThrottlingAndOOM:
     @pytest.mark.asyncio
-    async def test_sse_valve_suspends_the_live_output(self) -> None:
-        """Past 500KB of live output the terminal stream is suspended with a warning instead of flooding the UI."""
+    async def test_sse_valve_suspends_the_live_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Past the valve's limit the terminal stream is suspended with a warning instead of flooding the UI."""
+        # The limit itself (500KB) is checked in test_stream_output_processor. Streaming that much through a shell
+        # scrubs it on the way, seconds of CPU that grow with the load of the host, so this test lowers the limit.
+        monkeypatch.setattr(stream_output_processor, "_SSE_VALVE_BYTES", 50_000)
         session = LocalPersistentSession(make_config(timeout=10))
         await session.start()
         try:
-            # 600KB of output triggers the 500KB valve
             with captured_stdout_chunks() as chunks:
-                result = await session.execute("python3 -c \"print('x' * 600000)\"")
+                result = await session.execute("python3 -c \"print('x' * 60000)\"")
 
             assert result.success
             assert any("System Warning: Terminal stream suspended" in chunk for chunk in chunks), (
@@ -107,6 +111,29 @@ class TestStateMachine:
             pid_before = session.process.pid
             await session.start()
             assert session.process.pid == pid_before
+        finally:
+            await session.close()
+
+    @pytest.mark.asyncio
+    async def test_a_start_that_waited_for_the_lock_while_another_start_ran_spawns_no_second_shell(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two starts at once bring up one shell: the one that gets ``_lock`` second finds the shell running."""
+        spawned: list[int] = []
+        create_process = LocalPersistentSession._create_process
+
+        async def counting(self: LocalPersistentSession) -> asyncio.subprocess.Process:
+            process = await create_process(self)
+            spawned.append(process.pid)
+            return process
+
+        monkeypatch.setattr(LocalPersistentSession, "_create_process", counting)
+        session = LocalPersistentSession(make_config())
+        try:
+            await asyncio.gather(session.start(), session.start())
+
+            assert len(spawned) == 1, "the second start spawned a shell that nothing tracks"
+            assert session.state == SessionState.ACTIVE
         finally:
             await session.close()
 

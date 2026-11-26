@@ -125,6 +125,27 @@ async def test_a_shell_that_is_no_longer_alive_is_closed_when_its_replacement_is
         await dead.close()
 
 
+async def test_a_shell_that_fails_its_health_check_is_closed_when_its_replacement_is_started(
+    executor: LocalExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context, env = _context("sick"), executor._build_bash_env(None)
+    sick = await executor._get_or_create_bash_session(context, env)
+
+    async def failing_probe() -> bool:
+        return False
+
+    monkeypatch.setattr(sick, "check_health", failing_probe)
+    try:
+        replacement = await executor._get_or_create_bash_session(context, env)
+
+        assert replacement is not sick
+        assert len(executor._bash_sessions) == 1
+        refused = await sick.execute("echo orphan")
+        assert refused.error == SESSION_CLOSED_BEFORE_START, "the dropped shell was not closed, so a command revived it"
+    finally:
+        await sick.close()
+
+
 async def test_a_command_queued_on_a_shell_that_was_replaced_runs_on_the_shell_that_replaced_it(
     executor: LocalExecutor, tmp_path: Path, outside_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
