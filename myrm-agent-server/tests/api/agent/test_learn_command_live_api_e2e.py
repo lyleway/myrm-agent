@@ -2,17 +2,18 @@
 
 Task flow (no browser): a custom agent with ``skill_manage_tool`` mounted runs in a chat whose session preset is
 ``explore``, which restricts every write, ``skill_manage`` included. A plain request to save a skill is refused by the
-restriction: the stream reports a policy denial of the tool call and the catalog stays empty. The same chat then gets a raw ``/learn`` message: the server
-rewrites it into the authoring prompt, leaves ``skill_manage`` out of the preset's restriction for that one turn, and
-the live model saves the skill the user described; the skill lands in the catalog with the SKILL.md the model sent and
-the stream announces the committed batch. The preset binds again on the turn after: a second plain save is refused.
+restriction: the stream reports a policy denial of the tool call and the catalog stays empty. The same chat then gets
+a raw ``/learn`` message: the server rewrites it into the authoring prompt, leaves ``skill_manage`` out of the preset's
+restriction for that one turn, and the live model saves the skill the user described; the skill lands in the catalog
+with the SKILL.md the model sent and the stream announces the committed batch. The preset binds again on the turn
+after: a second plain save is refused.
 
 A second flow: the user tells the agent in a plain turn how a release is shipped, then sends a bare ``/learn`` with no
 arguments. The server falls back to "the workflow we just went through in this conversation", the live model reads the
 conversation back and saves a skill whose SKILL.md carries the step the user named; the stream announces the batch.
 
-A third flow, the same conversation with a lone ``/`` instead: a stray slash is an ordinary message, so nothing is saved
-(under the ``explore`` preset a ``/learn`` turn is the only one that could save).
+A third flow, the same conversation with a lone ``/`` instead: a stray slash is an ordinary message, so nothing is
+saved (under the ``explore`` preset a ``/learn`` turn is the only one that could save).
 
 Run::
 

@@ -10,14 +10,15 @@
   session security preset)
 - user_request / rewrite_request / patch_request / delete_request / workflow_message: the plain requests the model
   is given
-- batch_id_of / announced_batch / announced_batches / persisted_skill_steps / stored_batch_ids / catalog_skills /
-  catalog_skill_id / skill_md / wait_for: what the tests read back from the stream and the API
+- batch_id_of / announced_batch / announced_batches / announced_batches_in_order / persisted_skill_steps /
+  stored_batch_ids / catalog_skills / catalog_skill_id / skill_md / wait_for: what the tests read back from the stream
+  and the API
 
 [POS]
-Support module of ``test_skill_manage_undo_live_api_e2e.py`` and ``test_learn_command_live_api_e2e.py``. The harness
-completion guard reads freshness words (live, latest, current, ...) in the request as a demand for web evidence, which
-a skill-only agent can never produce; the request and system-prompt wording stays free of them so a turn ends on its
-own.
+Support module of ``test_skill_manage_undo_live_api_e2e.py`` and ``test_learn_command_live_api_e2e.py``;
+``test_profiles_activate_live_api_e2e.py`` takes only ``isolated_backend_url``. The harness completion guard reads
+freshness words (live, latest, current, ...) in the request as a demand for web evidence, which a skill-only agent
+can never produce; the request and system-prompt wording stays free of them so a turn ends on its own.
 """
 
 from __future__ import annotations

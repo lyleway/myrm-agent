@@ -891,6 +891,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `services/agent/test_agent_name_resolution.py` | 模块 | Agent 同名解析确定性单测（大小写归一 + 稳定排序 + 空名短路） |
 | `services/agent/test_sandbox_l3_write_gate.py` | 模块 | 沙箱/编码能力型智能体 L3 写入门控单测（`is_sandbox_capable_tools` 探测、Profile 属性、converter 默认禁用自动提取与启用待审队列、incognito 覆盖等） |
 | `api/agent/test_kanban_agent_stream_e2e.py` | 模块 | Live LLM agent-stream kanban add/list（`@pytest.mark.e2e`） |
+| `api/agent/test_channel_notify_agent_stream_e2e.py` | 模块 | `channel_notify_tool` 外发的 agent-stream live e2e（`@pytest.mark.e2e`；设置 `RUN_E2E_TESTS` 才运行；模型取自 `resolve_working_base_selection`，即后端当前可用的基础模型）：发往另一个聊天的消息不可逆，流在批准请求处停下（请求只含 `channel_notify_tool` 且带 `sociallyIrreversible`），批准前收件聊天没有消息；批准后续跑，消息落进收件聊天且不再被扣留；拒绝后收件聊天仍为空（打印 `E2E_NOTIFY_REJECTED`） |
 | `api/agent/test_bash_compressor_declarative_e2e.py` | 模块 | Declarative bash 压缩真实 LLM agent-stream e2e（`@pytest.mark.e2e`；TestClient 进程内；`.myrm/filters.yaml` replace+strip 生效断言；压缩断言仅针对 tool stdout，LLM 回复文本不受过滤器影响） |
 | `api/agent/test_bash_compressor_live_api_e2e.py` | 模块 | Declarative bash 压缩 live API e2e（`@pytest.mark.e2e`；`resolve_verify_api_base()` 私池 + provider seed + 后端 workspace 根解析；SSE 收集 + workspace 压缩回放） |
 | `api/agent/test_idle_failure_chain_live_api_e2e.py` | 模块 | 失败工具回合后 idle 链 live API e2e（`@pytest.mark.e2e`；仅隔离 runtime；读 `idle_tasks.db` 断言只含受支持的 idle 任务类型且全部 completed） |

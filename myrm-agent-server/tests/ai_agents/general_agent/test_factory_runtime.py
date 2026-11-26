@@ -9,7 +9,7 @@
   instead of failing.
 
 [POS]
-tests/ai_agents/general_agent/test_factory_runtime.py
+Pins the factory's runtime assembly: what the sandbox runtime binds and how the notify tool loader degrades.
 """
 
 from __future__ import annotations

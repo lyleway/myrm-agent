@@ -6,7 +6,7 @@ Task flows (no browser, no model):
   unknown key is refused with 404. The profile that was active stays active: the list still names it, and it is still
   the only active profile.
 - A user picks a profile while a page loads the profile list. Both calls succeed (the list read never makes the pick
-  fail with "database is busy") and the picked profile ends up the only active one.
+  fail with "database is locked") and the picked profile ends up the only active one.
 
 Run::
 

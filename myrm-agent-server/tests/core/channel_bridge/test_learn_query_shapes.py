@@ -9,7 +9,7 @@
   command name is matched case-insensitively.
 
 [POS]
-tests/core/channel_bridge/test_learn_query_shapes.py
+Unit pins for the /learn detection in learn_handler: only a ``/learn`` message is parsed and rewritten.
 """
 
 from __future__ import annotations

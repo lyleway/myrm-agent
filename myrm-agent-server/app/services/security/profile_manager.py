@@ -2,7 +2,7 @@
 
 Persists SecurityConfig snapshots as named profiles in the database.
 Users can save, load, delete, and switch between profiles.
-Builtin profiles (readonly, workspace, full_access) are seeded on first access.
+Builtin profiles (readonly, workspace, full_access) are created when missing and re-synced when they drift.
 
 [INPUT]
 - app.database.models.security::SecurityProfile (ORM model)
@@ -34,7 +34,7 @@ from app.platform_utils import get_session_factory
 
 logger = logging.getLogger(__name__)
 
-# Builtin profile definitions — seeded on first access
+# Builtin profile definitions: the rows _ensure_builtins creates when missing and re-syncs on drift
 _BUILTIN_PROFILES: list[dict[str, object]] = [
     {
         "profile_key": "readonly",
@@ -102,12 +102,12 @@ def _serialize_config(config_dict: dict[str, object]) -> dict[str, object]:
 class ProfileManager:
     """Async CRUD service for security profiles.
 
-    Builtin profiles are seeded lazily on first ``list_all()`` call.
+    ``list_all()`` creates missing builtin profiles and re-syncs drifted ones; an up-to-date set costs no write.
     Builtin profiles cannot be deleted or overwritten — only cloned.
     """
 
     async def list_all(self) -> list[dict[str, object]]:
-        """List all profiles, seeding builtins if needed."""
+        """List all profiles, writing missing or drifted builtins first."""
         await self._ensure_builtins()
         session_factory = get_session_factory()
         async with session_factory() as session:
@@ -233,7 +233,7 @@ class ProfileManager:
         """Seed missing builtin profiles and re-sync drifted ones.
 
         A listing that finds every builtin current writes nothing: SQLite has one writer, so a write on a read path
-        makes a concurrent activation fail with "database is busy".
+        makes a concurrent activation fail with "database is locked" (HTTP 503).
         """
         session_factory = get_session_factory()
         async with session_factory() as session:

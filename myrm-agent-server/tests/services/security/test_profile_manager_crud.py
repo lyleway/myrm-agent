@@ -10,7 +10,7 @@
   that protect the builtin profiles.
 
 [POS]
-tests/services/security/test_profile_manager_crud.py
+Behavior pins for ProfileManager, the persistence service behind the Settings security profile selector.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ async def _stamps(manager: ProfileManager) -> dict[str, object]:
 
 @pytest.mark.asyncio
 async def test_a_listing_rewrites_only_the_builtins_that_drifted(manager: ProfileManager) -> None:
-    """A write on the read path would make a concurrent activation fail with "database is busy"."""
+    """A write on the read path would make a concurrent activation fail with "database is locked"."""
     seeded = await _stamps(manager)
 
     assert await _stamps(manager) == seeded
