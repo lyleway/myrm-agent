@@ -15,15 +15,11 @@ AgentEvent → ACP SessionNotification translation.
 
 from __future__ import annotations
 
-from acp import (
-    session_notification,
-    start_tool_call,
-    update_agent_message_text,
-    update_agent_thought_text,
-    update_tool_call,
-)
 from acp.schema import (
+    AgentMessageChunk,
+    AgentThoughtChunk,
     SessionNotification,
+    TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
     ToolCallStatus,
@@ -91,14 +87,14 @@ def _translate_text(session_id: str, event: dict[str, object]) -> SessionNotific
     data = event.get("data")
     if not data or not isinstance(data, str):
         return None
-    return session_notification(session_id, update_agent_message_text(data))
+    return SessionNotification(session_id=session_id, update=AgentMessageChunk(content=TextContentBlock(text=data)))
 
 
 def _translate_thinking(session_id: str, event: dict[str, object]) -> SessionNotification | None:
     data = event.get("data")
     if not data or not isinstance(data, str):
         return None
-    return session_notification(session_id, update_agent_thought_text(data))
+    return SessionNotification(session_id=session_id, update=AgentThoughtChunk(content=TextContentBlock(text=data)))
 
 
 def _translate_tool_call(
@@ -119,16 +115,16 @@ def _translate_tool_call(
     update: ToolCallStart | ToolCallProgress
     if tool_call_id not in active_tool_calls:
         active_tool_calls.add(tool_call_id)
-        update = start_tool_call(
+        update = ToolCallStart(
             tool_call_id=tool_call_id,
             title=tool_name,
             status=acp_status,
         )
     else:
-        update = update_tool_call(
+        update = ToolCallProgress(
             tool_call_id=tool_call_id,
             title=tool_name,
             status=acp_status,
         )
 
-    return session_notification(session_id, update)
+    return SessionNotification(session_id=session_id, update=update)

@@ -17,7 +17,6 @@ from langgraph.types import Command
 from myrm_agent_harness.agent.base_agent import BaseAgent
 from myrm_agent_harness.agent.skill_agent import SkillAgent
 from myrm_agent_harness.agent.streaming.interrupt_events import INTERRUPT_ID_KEY
-from myrm_agent_harness.agent.streaming.interrupt_identity import decode_interrupt_id, encode_interrupt_id
 from myrm_agent_harness.agent.streaming.types import AgentEventType
 from myrm_agent_harness.backends.skills.types import SkillMetadata
 
@@ -81,7 +80,7 @@ async def test_the_approval_card_carries_the_interrupt_id_and_an_addressed_answe
     agent = BaseAgent(llm=_ScriptedLLM(), tools=[echo], checkpointer=MemorySaver())
     [card] = _approvals(await _run(agent, "go", tmp_path))
     interrupt_id = card[INTERRUPT_ID_KEY]
-    assert decode_interrupt_id(interrupt_id) is not None
+    assert isinstance(interrupt_id, str)
 
     resumed = await _run(agent, _answer(interrupt_id, len(card["data"]["actionRequests"])), tmp_path)  # type: ignore[index]
 
@@ -96,7 +95,7 @@ async def test_an_answer_for_an_interrupt_that_is_not_pending_approves_nothing(t
     [card] = _approvals(await _run(agent, "go", tmp_path))
     action_count = len(card["data"]["actionRequests"])  # type: ignore[index]
 
-    stale = await _run(agent, _answer(encode_interrupt_id("0" * 32, 0), action_count), tmp_path)
+    stale = await _run(agent, _answer("0" * 32, action_count), tmp_path)
 
     [still_pending] = _approvals(stale)
     assert still_pending[INTERRUPT_ID_KEY] == card[INTERRUPT_ID_KEY]
@@ -126,7 +125,7 @@ async def test_the_resume_of_a_skill_agent_keeps_its_card_ids_when_the_skill_cat
     backend.skills = [SkillMetadata(name="current_skill", description="current", model_invocable=True, available=True)]
     action_count = len(card["data"]["actionRequests"])  # type: ignore[index]
 
-    stale = await _run(agent, _answer(encode_interrupt_id("0" * 32, 0), action_count), tmp_path)
+    stale = await _run(agent, _answer("0" * 32, action_count), tmp_path)
 
     [still_pending] = _approvals(stale)
     assert still_pending[INTERRUPT_ID_KEY] == card[INTERRUPT_ID_KEY]

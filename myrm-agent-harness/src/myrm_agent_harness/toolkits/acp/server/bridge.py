@@ -6,7 +6,8 @@ via the event_translator.
 
 
 [INPUT]
-- acp::Client, session_notification, update_agent_message_text (POS: ACP official SDK)
+- acp.schema::AgentMessageChunk, SessionNotification, TextContentBlock (POS: ACP official SDK models)
+- acp::Client (POS: ACP official SDK)
 - myrm_agent_harness.toolkits.acp.server.event_translator::translate_agent_event (POS: AgentEvent → ACP notification translation layer)
 - myrm_agent_harness.toolkits.mcp.config::MCPConfig (POS: MCP server configuration)
 - myrm_agent_harness.utils.runtime.cancellation::CancellationToken (POS: cancellation token abstraction)
@@ -29,8 +30,7 @@ from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
-from acp import session_notification, update_agent_message_text
-from acp.schema import PromptResponse, SessionNotification
+from acp.schema import AgentMessageChunk, PromptResponse, SessionNotification, TextContentBlock
 
 from myrm_agent_harness.toolkits.acp.server.event_translator import (
     translate_agent_event,
@@ -218,4 +218,7 @@ async def _send_notification(conn: Client, notification: SessionNotification) ->
 
 def _build_error_notification(session_id_val: str, message: str) -> SessionNotification:
     """Build an ACP notification with an error message visible to the user."""
-    return session_notification(session_id_val, update_agent_message_text(f"\n\n {message}"))
+    return SessionNotification(
+        session_id=session_id_val,
+        update=AgentMessageChunk(content=TextContentBlock(text=f"\n\n {message}")),
+    )
