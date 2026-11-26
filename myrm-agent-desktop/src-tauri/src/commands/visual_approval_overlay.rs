@@ -7,7 +7,7 @@
 //! - 先建新窗再销毁旧窗，换目标时屏幕上没有空档；建窗失败则不留任何高亮窗口；
 //! - hide 按 label 前缀销毁全部高亮窗口。销毁而非关闭：关闭只是一次可被拦截的请求，
 //!   高亮必须无条件消失（帷幕同理）；
-//! - 高亮窗口不受应用级窗口策略（托盘常驻 / 退出编排）管辖，见 `app/setup.rs`；
+//! - 高亮窗口不受应用级窗口策略（托盘常驻 / 退出编排）管辖：该策略只管辖主窗口，见 `app/window_policy.rs`；
 //! - 窗口点击穿透，因此不进截图排除集：排除集同时驱动 harness 的全局指针守卫，
 //!   把它放进去会让 agent 自己的点击被判为被遮挡。
 //!
@@ -20,7 +20,7 @@
 //! [OUTPUT]
 //! - show_visual_approval_overlay: 返回 `VisualApprovalOverlayShowResult`（含 degraded fail-closed）
 //! - hide_visual_approval_overlay: Tauri 命令
-//! - is_overlay_label: 窗口 label 是否属于审批高亮（app/setup.rs 据此豁免应用级窗口策略）
+//! - is_overlay_label: 窗口 label 是否属于审批高亮（清理残留高亮窗时据此只动自己的窗口）
 //!
 //! [POS]
 //! 视觉审批的原生辅助提示，不承担审批决策；overlay 缺席时审批照常在聊天内联界面完成。
@@ -436,8 +436,8 @@ mod tests {
         assert!(monitor_dimensions_compatible(1440.0, 900.0, 1450.0, 905.0));
     }
 
-    /// 同名重建会撞上尚未异步销毁完的旧窗口，因此 label 永不复用；hide 与应用级窗口策略的豁免
-    /// 都靠同一前缀识别高亮窗口。
+    /// 同名重建会撞上尚未异步销毁完的旧窗口，因此 label 永不复用；清理残留高亮窗
+    /// 靠同一前缀识别高亮窗口。
     #[test]
     fn every_window_gets_a_fresh_label_the_overlay_predicate_recognises() {
         let first = next_window_label();

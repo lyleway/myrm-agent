@@ -7,6 +7,7 @@
 use tauri::{AppHandle, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::runtime::ProductOrigin;
+use crate::utils::window_reveal::reveal_window;
 
 const SESSION_WINDOW_PREFIX: &str = "session-";
 
@@ -30,8 +31,7 @@ pub fn open_session_window(
     let label = session_window_label(&session_id);
 
     if let Some(existing) = app.get_webview_window(&label) {
-        existing.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
+        return reveal_window(&existing);
     }
 
     let url = session_window_url(&origin, &session_id);

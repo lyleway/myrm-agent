@@ -19,7 +19,7 @@
 //! - curtain:state-changed 事件（由 privacy_curtain_state 在 active 变化时广播，设置页订阅回显）
 //! - audit_result（动作结果入审计，watcher 共用）
 //! - relock_outstanding_lease（壳退出前租约仍未交还时的兜底回锁，由 app/lifecycle.rs 调用）
-//! - is_curtain_label（窗口 label 是否属于帷幕；app/setup.rs 据此豁免应用级窗口策略）
+//! - is_curtain_label（窗口 label 是否属于帷幕；`curtain_windows` 据此枚举帷幕窗）
 //! - spawn_privacy_curtain_watcher（见 privacy_curtain_watcher.rs）
 //!
 //! [POS]
@@ -317,7 +317,7 @@ pub async fn curtain_report_physical_input(app: AppHandle, source: String) -> Re
 mod tests {
     use super::{curtain_label, is_curtain_label};
 
-    /// 应用级窗口策略的豁免靠 label 前缀识别帷幕窗：建窗用的 label 必须永远落在这个前缀下。
+    /// `curtain_windows` 靠 label 前缀枚举帷幕窗：建窗用的 label 必须永远落在这个前缀下。
     #[test]
     fn every_curtain_window_label_is_recognised_as_a_curtain() {
         for (generation, index) in [(1, 0), (1, 1), (42, 3)] {
