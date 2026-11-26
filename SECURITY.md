@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Security fixes are applied to the latest release on the default branch of [myrm-agent](https://github.com/Pursue-LLL/myrm-agent).
+Security fixes are applied to the latest release on the default branch of [myrm-agent](https://github.com/lyleway/myrm-agent).
 
 | Component | Scope |
 |-----------|--------|
@@ -17,7 +17,7 @@ Security fixes are applied to the latest release on the default branch of [myrm-
 
 **Please do not open public GitHub issues for security vulnerabilities.**
 
-Use [GitHub Private Vulnerability Reporting](https://github.com/Pursue-LLL/myrm-agent/security/advisories/new) on the repository, or email **security@myrmagent.ai** if you cannot use GitHub.
+Use [GitHub Private Vulnerability Reporting](https://github.com/lyleway/myrm-agent/security/advisories/new) on the repository, or email **security@myrmagent.ai** if you cannot use GitHub.
 
 Include:
 

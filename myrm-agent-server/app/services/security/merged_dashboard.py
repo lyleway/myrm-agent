@@ -39,7 +39,7 @@ from app.services.security.github_supplement import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REPO = "Pursue-LLL/myrm-agent"
+_DEFAULT_REPO = "lyleway/myrm-agent"
 
 
 def _github_token() -> str | None:

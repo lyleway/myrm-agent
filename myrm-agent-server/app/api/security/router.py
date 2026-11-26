@@ -47,7 +47,7 @@ from app.services.security.platform_audit import (
 logger = logging.getLogger(__name__)
 
 GITHUB_TOKEN = _settings.services.github_token.get_secret_value()
-DEFAULT_REPO = "Pursue-LLL/myrm-agent"
+DEFAULT_REPO = "lyleway/myrm-agent"
 
 router = APIRouter(prefix="/security", tags=["security"])
 

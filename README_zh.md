@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
-  <a href="https://github.com/Pursue-LLL/myrm-agent/stargazers"><img src="https://img.shields.io/github/stars/Pursue-LLL/myrm-agent?style=for-the-badge&logo=github&color=FFD43B" alt="GitHub Stars"></a>
+  <a href="https://github.com/lyleway/myrm-agent/stargazers"><img src="https://img.shields.io/github/stars/lyleway/myrm-agent?style=for-the-badge&logo=github&color=FFD43B" alt="GitHub Stars"></a>
   <a href="https://discord.gg/myrm"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
@@ -26,7 +26,7 @@
   <a href="https://docs.myrmagent.ai">文档</a> ·
   <a href="https://app.myrmagent.ai">云端</a> ·
   <a href="https://discord.gg/myrm">Discord</a> ·
-  <a href="https://github.com/Pursue-LLL/myrm-agent/releases">下载</a>
+  <a href="https://github.com/lyleway/myrm-agent/releases">下载</a>
 </p>
 
 ---
@@ -65,7 +65,7 @@ curl -fsSL https://myrmagent.ai/install.sh | bash
 ### 从源码安装
 
 ```bash
-git clone https://github.com/Pursue-LLL/myrm-agent.git
+git clone https://github.com/lyleway/myrm-agent.git
 cd myrm-agent
 bash scripts/install.sh
 myrm start
@@ -77,7 +77,7 @@ myrm start
 
 ### 桌面客户端
 
-从 [Releases](https://github.com/Pursue-LLL/myrm-agent/releases) 下载适合你平台的最新版本。
+从 [Releases](https://github.com/lyleway/myrm-agent/releases) 下载适合你平台的最新版本。
 
 ## 集成
 

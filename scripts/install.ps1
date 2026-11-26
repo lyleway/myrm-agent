@@ -27,7 +27,7 @@ function Resolve-AgentPaths {
         $script:AgentRoot = Join-Path $Root "myrm-agent"
     }
     else {
-        throw "myrm-agent-server not found under $Root. Clone https://github.com/Pursue-LLL/myrm-agent.git"
+        throw "myrm-agent-server not found under $Root. Clone https://github.com/lyleway/myrm-agent.git"
     }
     $script:ServerDir = Join-Path $AgentRoot "myrm-agent-server"
     $script:FrontendDir = Join-Path $AgentRoot "myrm-agent-frontend"
@@ -44,7 +44,7 @@ function Ensure-ProjectRoot {
         # fall through to clone/update
     }
     $repoDir = if ($env:MYRM_INSTALL_DIR) { $env:MYRM_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".myrm\myrm-agent" }
-    $repoUrl = if ($env:MYRM_REPO_URL) { $env:MYRM_REPO_URL } else { "https://github.com/Pursue-LLL/myrm-agent.git" }
+    $repoUrl = if ($env:MYRM_REPO_URL) { $env:MYRM_REPO_URL } else { "https://github.com/lyleway/myrm-agent.git" }
     Write-Info "Preparing install at $repoDir ..."
     if (Test-Path (Join-Path $repoDir "myrm-agent-server")) {
         Set-Location $repoDir

@@ -6,7 +6,7 @@
 
 ## 安装
 
-从 [GitHub Releases](https://github.com/Pursue-LLL/myrm-agent/releases/latest) 或 [myrmagent.ai/download](https://myrmagent.ai/download) 下载安装包。
+从 [GitHub Releases](https://github.com/lyleway/myrm-agent/releases/latest) 或 [myrmagent.ai/download](https://myrmagent.ai/download) 下载安装包。
 
 ## 发布（CI）
 

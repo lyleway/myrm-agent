@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauriRuntime } from '@/lib/deploy-mode';
 
 const LAST_SEEN_VERSION_KEY = 'myrm-whats-new-last-seen-version';
-const RELEASE_API_BASE = 'https://api.github.com/repos/Pursue-LLL/myrm-agent/releases/tags';
+const RELEASE_API_BASE = 'https://api.github.com/repos/lyleway/myrm-agent/releases/tags';
 
 export interface ReleaseInfo {
   version: string;

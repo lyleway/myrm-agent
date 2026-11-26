@@ -11,7 +11,7 @@ from app.schemas.security.dashboard import DependabotPR, SecurityMetrics
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_REPO = "Pursue-LLL/myrm-agent"
+_DEFAULT_REPO = "lyleway/myrm-agent"
 _GITHUB_TIMEOUT = 10.0
 _MAX_REPOS = 3
 

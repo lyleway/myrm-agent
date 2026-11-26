@@ -14,7 +14,7 @@ resolve_agent_paths() {
   else
     echo "ERROR: myrm-agent-server not found under ${project_root}" >&2
     echo "  Nested layout: parent must contain myrm-agent/myrm-agent-server/run.py" >&2
-    echo "  Standalone: clone https://github.com/Pursue-LLL/myrm-agent.git" >&2
+    echo "  Standalone: clone https://github.com/lyleway/myrm-agent.git" >&2
     return 1
   fi
 
