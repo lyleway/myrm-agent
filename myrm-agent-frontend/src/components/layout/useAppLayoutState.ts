@@ -59,6 +59,17 @@ function isProjectsPath(pathname: string): boolean {
   );
 }
 
+/** The tab whose remembered page this path becomes; null for pages no tab restores (settings, research, ...). */
+function rememberedTabOf(pathname: string): NavTab | null {
+  if (pathname === '/' || pathname.startsWith('/c-')) {
+    return 'chat';
+  }
+  if (pathname === '/work' || pathname.startsWith('/work/')) {
+    return 'work';
+  }
+  return isProjectsPath(pathname) ? 'projects' : null;
+}
+
 function getTabFromPathname(pathname: string): NavTab {
   if (pathname === '/work' || pathname.startsWith('/work/')) {
     return 'work';
@@ -74,13 +85,17 @@ export function useAppLayoutState() {
 
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState<NavTab>(() => getTabFromPathname(pathname));
+  // Navigation moves the active tab; a tab click moves it first, ahead of the navigation it triggers.
+  const [tabPathname, setTabPathname] = useState(pathname);
+  if (tabPathname !== pathname) {
+    setTabPathname(pathname);
+    setActiveTab(getTabFromPathname(pathname));
+  }
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isNavButtonHidden, setIsNavButtonHidden] = useState(false);
   const [savedRoutes] = useState(readSavedRoutes);
-  const [lastChatUrl, setLastChatUrl] = useState<string | null>(savedRoutes.chat ?? null);
-  const [lastWorkUrl, setLastWorkUrl] = useState<string | null>(savedRoutes.work ?? null);
-  const [lastProjectsUrl, setLastProjectsUrl] = useState<string | null>(savedRoutes.projects ?? null);
+  const [lastUrls, setLastUrls] = useState<Partial<Record<NavTab, string>>>(savedRoutes);
   const lastScrollPositionRef = useRef(0);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -96,26 +111,21 @@ export function useAppLayoutState() {
   } = useResizableSidebar({ onCollapse: handleSidebarCollapse });
 
   useEffect(() => {
-    const newTab = getTabFromPathname(pathname);
-    setActiveTab((prev) => (prev !== newTab ? newTab : prev));
-  }, [pathname]);
-
-  useEffect(() => {
-    if (pathname === '/' || pathname.match(/^\/c-/)) {
-      setLastChatUrl(pathname);
-      persistRoute('chat', pathname);
-    } else if (pathname === '/work' || pathname.startsWith('/work/')) {
-      setLastWorkUrl(pathname);
-      persistRoute('work', pathname);
-    } else if (isProjectsPath(pathname)) {
-      setLastProjectsUrl(pathname);
-      persistRoute('projects', pathname);
+    const tab = rememberedTabOf(pathname);
+    if (!tab) {
+      return;
     }
+    // The first client render must match the server render, so the current page joins the remembered pages after mount.
+    // oxlint-disable-next-line react/set-state-in-effect -- same reason: remembered pages come from browser storage
+    setLastUrls((prev) => (prev[tab] === pathname ? prev : { ...prev, [tab]: pathname }));
+    persistRoute(tab, pathname);
   }, [pathname]);
 
   useEffect(() => {
     const initialMobile = checkIsMobile();
     if (initialMobile !== isMobile) {
+      // The viewport is only measurable in the browser, so the server render starts desktop-first.
+      // oxlint-disable-next-line react/set-state-in-effect -- measuring the viewport is the external sync this effect exists for
       setIsMobile(initialMobile);
       if (initialMobile) {
         setIsSidebarCollapsed(true);
@@ -213,9 +223,9 @@ export function useAppLayoutState() {
     isMobileSidebarOpen,
     setIsMobileSidebarOpen,
     isNavButtonHidden,
-    lastChatUrl,
-    lastWorkUrl,
-    lastProjectsUrl,
+    lastChatUrl: lastUrls.chat ?? null,
+    lastWorkUrl: lastUrls.work ?? null,
+    lastProjectsUrl: lastUrls.projects ?? null,
     sidebarWidth,
     isSidebarDragging,
     handleSidebarResizeStart,

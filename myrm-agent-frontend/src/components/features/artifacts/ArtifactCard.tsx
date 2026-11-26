@@ -1,57 +1,37 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
-import { cn } from '@/lib/utils/classnameUtils';
-import { Artifact, ArtifactType } from '@/store/chat/types';
-import {
-  BookOpen,
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  Download,
-  ExternalLink,
-  Eye,
-  FolderOpen,
-  Globe,
-  MessageSquarePlus,
-  Send,
-  Pin,
-} from 'lucide-react';
-import { useDashboardWorkspaceStore } from '@/components/features/dashboard-workspace/useDashboardWorkspaceStore';
-import { Button } from '@/components/primitives/button';
-import { apiRequest, getApiUrl, getStorageUrl } from '@/lib/api';
-import { ArtifactAppButton } from './ArtifactAppButton';
-import { ArtifactLocalFileActions } from './ArtifactLocalFileActions';
-import { ArtifactPublicationBanners } from './ArtifactPublicationBanners';
-import { ArtifactSharePopover } from './ArtifactSharePopover';
-import { OrganizePlanPanel } from './OrganizePlanPanel';
-import { WeChatDraftPanel } from './WeChatDraftPanel';
-import { isOrganizePlanArtifact } from './organizePlanUtils';
-import { isTauriRuntime } from '@/lib/deploy-mode';
-import { writeToClipboard } from '@/lib/utils/clipboardUtils';
-import { toast } from 'sonner';
-import useArtifactPortalStore from '@/store/useArtifactPortalStore';
-import useChatStore from '@/store/useChatStore';
-import { wikiService } from '@/services/wikiService';
-import { PublishModal, type PublishedArtifactUpdate } from './PublishModal';
-import { type ArtifactPublication } from '@/services/hosting';
-import { HtmlPreview, SvgPreview } from './renderers/MediaPreview';
-import MermaidPreview from './renderers/MermaidPreview';
+/**
+ * [INPUT]
+ * - ./card/* (POS: card header, action row, inline preview, panels, publication banners and their hooks)
+ * - ./PublishModal (POS: publish dialog)
+ * - ./organizePlanUtils (POS: isOrganizePlanArtifact)
+ * - @/lib/constants/artifact (POS: LARGE_FILE_THRESHOLD)
+ *
+ * [OUTPUT]
+ * ArtifactCard (default).
+ *
+ * [POS]
+ * Card for one artifact in a chat message. Composes the card parts and owns only what
+ * they share: which sections are open and the single click-to-preview target.
+ */
+
+import React, { useCallback, useState } from 'react';
 import { LARGE_FILE_THRESHOLD } from '@/lib/constants/artifact';
-import {
-  deploymentHostname,
-  formatBytes,
-  getArtifactIcon,
-  getDownloadFilename,
-  fetchArtifactDeployPreflight,
-  isDeployCandidateArtifactType,
-  isSharePreviewableArtifact,
-  patchArtifactPublicationsInChat,
-  publicationsChanged,
-  type ArtifactDeployPreflight,
-} from './artifactUtils';
-import { activateOnKey, REVEAL_ON_HOVER } from '@/lib/utils/a11y';
+import { cn } from '@/lib/utils/classnameUtils';
+import { activateOnKey } from '@/lib/utils/a11y';
+import type { Artifact } from '@/store/chat/types';
+import { ArtifactCardActions } from './card/ArtifactCardActions';
+import { ArtifactCardHeader } from './card/ArtifactCardHeader';
+import { ArtifactCardPanels } from './card/ArtifactCardPanels';
+import { ArtifactInlinePreview } from './card/ArtifactInlinePreview';
+import { ArtifactPublicationBanners } from './card/ArtifactPublicationBanners';
+import { abilitiesOf } from './card/artifactKinds';
+import { useArtifactActions } from './card/useArtifactActions';
+import { useArtifactContent } from './card/useArtifactContent';
+import { useArtifactPublishing } from './card/useArtifactPublishing';
+import { useLazyText } from './card/useLazyText';
+import { isOrganizePlanArtifact } from './organizePlanUtils';
+import { PublishModal } from './PublishModal';
 
 interface ArtifactCardProps {
   artifact: Artifact;
@@ -59,421 +39,24 @@ interface ArtifactCardProps {
   onDownload?: (artifact: Artifact) => void;
 }
 
-function getArtifactColor(type: ArtifactType): string {
-  switch (type) {
-    case 'code':
-      return 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20';
-    case 'document':
-      return 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20';
-    case 'html':
-      return 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20';
-    case 'pdf':
-      return 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20';
-    case 'image':
-    case 'svg':
-      return 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20';
-    case 'mermaid':
-      return 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20';
-    case 'spreadsheet':
-      return 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20';
-    case 'presentation':
-      return 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20';
-    case 'word_document':
-      return 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/20';
-    case 'binary':
-    default:
-      return 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20';
-  }
-}
-
-function isPreviewable(type: ArtifactType): boolean {
-  return [
-    'code',
-    'document',
-    'html',
-    'image',
-    'svg',
-    'mermaid',
-    'pdf',
-    'spreadsheet',
-    'presentation',
-    'word_document',
-  ].includes(type);
-}
-
-function isCopyable(type: ArtifactType): boolean {
-  return ['code', 'document', 'html', 'svg', 'mermaid', 'spreadsheet'].includes(type);
-}
-
-function supportsInlinePreview(type: ArtifactType): boolean {
-  return ['html', 'svg', 'mermaid'].includes(type);
-}
-
-function isIngestableToWiki(type: ArtifactType): boolean {
-  return ['code', 'document', 'html', 'svg', 'mermaid'].includes(type);
-}
-
 const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDownload }) => {
-  const t = useTranslations('artifacts');
-  const tWidget = useTranslations('dashboardWorkspace');
-  const pinned = useDashboardWorkspaceStore((state) => state.widgets.some((widget) => widget.id === artifact.id));
-  const togglePinWidget = useDashboardWorkspaceStore((state) => state.togglePinWidget);
-  const Icon = getArtifactIcon(artifact.type as ArtifactType, artifact.filename);
-  const colorClass = getArtifactColor(artifact.type as ArtifactType);
-  const canPreview = isPreviewable(artifact.type as ArtifactType);
-  const canCopy = isCopyable(artifact.type as ArtifactType);
-  const canInlinePreview = supportsInlinePreview(artifact.type as ArtifactType);
-  const [copied, setCopied] = useState(false);
-  const [inlineExpanded, setInlineExpanded] = useState(canInlinePreview);
-  const [inlineContent, setInlineContent] = useState<string | null>(null);
-  const [inlineLoading, setInlineLoading] = useState(false);
-  const [publishModalOpen, setPublishModalOpen] = useState(false);
-  const [publishTargetId, setPublishTargetId] = useState<string | undefined>();
-  const [publications, setPublications] = useState<ArtifactPublication[]>(artifact.publications ?? []);
-  const [deployPreflight, setDeployPreflight] = useState<ArtifactDeployPreflight | null>(null);
-  const [ingestLoading, setIngestLoading] = useState(false);
-  const [wechatDraftOpen, setWechatDraftOpen] = useState(false);
-  const isOrganizePlan = isOrganizePlanArtifact(artifact.filename);
-  const [organizePlanOpen, setOrganizePlanOpen] = useState(false);
-  const [organizePlanContent, setOrganizePlanContent] = useState<string | null>(null);
-  const [organizePlanLoading, setOrganizePlanLoading] = useState(false);
-  const chatId = useChatStore((state) => state.chatId);
-  const workspaceDir = useChatStore((state) => state.workspaceDir);
-  const agentName = useChatStore((state) => state.agentConfig?.agentName);
-  const presetName = useChatStore((state) => state.agentConfig?.presetName);
-  const [artifactState, setArtifactState] = useState(artifact);
-  const hasLocalPath = Boolean(artifact.file_path);
-  const canPushWeChatDraft = (artifact.type as ArtifactType) === 'html' && hasLocalPath;
-  const isDeployCandidate = isDeployCandidateArtifactType(artifact.type as ArtifactType);
-  const canDeploy = isDeployCandidate && deployPreflight?.deployable === true;
-  const canSharePreview = isSharePreviewableArtifact(artifactState);
-  const canIngestToWiki = isIngestableToWiki(artifact.type as ArtifactType);
-  const isLargeFile = canInlinePreview && artifact.size > LARGE_FILE_THRESHOLD;
+  const abilities = abilitiesOf(artifact.type);
+  const publishing = useArtifactPublishing(artifact);
+  const { current } = publishing;
+  const isLargeFile = abilities.inlinePreview && artifact.size > LARGE_FILE_THRESHOLD;
+  const { fetchContent, preloadHandlers } = useArtifactContent(artifact, isLargeFile);
+  const actions = useArtifactActions(artifact, current, fetchContent, onDownload);
 
-  useEffect(() => {
-    setArtifactState(artifact);
-  }, [artifact]);
+  const [inlineExpanded, setInlineExpanded] = useState(abilities.inlinePreview);
+  const inline = useLazyText(abilities.inlinePreview && inlineExpanded && !isLargeFile, fetchContent);
 
-  useEffect(() => {
-    if (!isDeployCandidate) {
-      setDeployPreflight(null);
-      return;
-    }
+  const [wechatOpen, setWechatOpen] = useState(false);
+  const [organizeOpen, setOrganizeOpen] = useState(false);
+  const hasWeChatDraft = artifact.type === 'html' && Boolean(artifact.file_path);
+  const hasOrganizePlan = isOrganizePlanArtifact(artifact.filename);
+  const closeWeChat = useCallback(() => setWechatOpen(false), []);
 
-    let cancelled = false;
-
-    const loadPreflight = async () => {
-      const result = await fetchArtifactDeployPreflight(artifact.id);
-      if (!cancelled) {
-        setDeployPreflight(result);
-      }
-    };
-
-    void loadPreflight();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact.id, isDeployCandidate]);
-
-  useEffect(() => {
-    if (artifact.publications?.length) {
-      setPublications(artifact.publications);
-    }
-  }, [artifact.publications]);
-
-  useEffect(() => {
-    if (!isDeployCandidate) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const hydratePublications = async () => {
-      try {
-        const response = await fetch(getApiUrl(`/files/artifacts/${artifact.id}`));
-        if (!response.ok || cancelled) {
-          return;
-        }
-        const data = (await response.json()) as {
-          latest_version_id?: string | null;
-          publications?: ArtifactPublication[];
-        };
-        if (cancelled) {
-          return;
-        }
-        if (data.publications) {
-          const publications = data.publications;
-          setPublications((prev) => {
-            if (!publicationsChanged(prev, publications)) {
-              return prev;
-            }
-            patchArtifactPublicationsInChat(artifact.id, publications);
-            return publications;
-          });
-        }
-        if (data.latest_version_id) {
-          setArtifactState((prev) => ({ ...prev, latest_version_id: data.latest_version_id }));
-        }
-      } catch {
-        // hydrate is best-effort
-      }
-    };
-
-    void hydratePublications();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [artifact.id, isDeployCandidate]);
-
-  const handleOpenDeploy = useCallback(
-    (event: React.MouseEvent) => {
-      event.stopPropagation();
-      if (deployPreflight && !deployPreflight.deployable) {
-        toast.error(deployPreflight.message, {
-          description: deployPreflight.hint ?? undefined,
-        });
-        return;
-      }
-      setPublishTargetId(undefined);
-      setPublishModalOpen(true);
-    },
-    [deployPreflight],
-  );
-
-  const preloadTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const inlineFetchAttempted = useRef(false);
-  const { getCachedContent, setCachedContent } = useArtifactPortalStore();
-
-  const fetchInlineContent = useCallback(async (): Promise<string | null> => {
-    const cached = getCachedContent(artifact.id);
-    if (cached) {
-      return cached;
-    }
-
-    try {
-      const fullUrl = getStorageUrl(artifact.preview_url);
-      const response = await fetch(fullUrl);
-      if (response.ok) {
-        const text = await response.text();
-        setCachedContent(artifact.id, text);
-        return text;
-      }
-    } catch {
-      // fetch failure handled by caller
-    }
-    return null;
-  }, [artifact.id, artifact.preview_url, getCachedContent, setCachedContent]);
-
-  const toggleInlinePreview = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (inlineExpanded) {
-        setInlineExpanded(false);
-        return;
-      }
-
-      setInlineExpanded(true);
-
-      if (isLargeFile || inlineContent) {
-        return;
-      }
-
-      inlineFetchAttempted.current = true;
-      setInlineLoading(true);
-      const content = await fetchInlineContent();
-      setInlineContent(content);
-      setInlineLoading(false);
-    },
-    [inlineExpanded, inlineContent, fetchInlineContent, isLargeFile],
-  );
-
-  useEffect(() => {
-    if (
-      !canInlinePreview ||
-      !inlineExpanded ||
-      inlineContent ||
-      inlineLoading ||
-      inlineFetchAttempted.current ||
-      isLargeFile
-    ) {
-      return;
-    }
-    inlineFetchAttempted.current = true;
-    let cancelled = false;
-    setInlineLoading(true);
-    fetchInlineContent().then((content) => {
-      if (!cancelled) {
-        setInlineContent(content);
-        setInlineLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [canInlinePreview, inlineExpanded, inlineContent, inlineLoading, fetchInlineContent, isLargeFile]);
-
-  const preloadContent = useCallback(async () => {
-    if (!['code', 'document', 'svg', 'mermaid', 'html'].includes(artifact.type)) {
-      return;
-    }
-    if (isLargeFile) {
-      return;
-    }
-    if (getCachedContent(artifact.id)) {
-      return;
-    }
-
-    try {
-      const fullUrl = getStorageUrl(artifact.preview_url);
-      const response = await fetch(fullUrl);
-      if (response.ok) {
-        const text = await response.text();
-        setCachedContent(artifact.id, text);
-      }
-    } catch {
-      // silent preload failure
-    }
-  }, [artifact, getCachedContent, setCachedContent, isLargeFile]);
-
-  const handleMouseEnter = useCallback(() => {
-    preloadTimerRef.current = setTimeout(() => {
-      preloadContent();
-    }, 200);
-  }, [preloadContent]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (preloadTimerRef.current) {
-      clearTimeout(preloadTimerRef.current);
-      preloadTimerRef.current = null;
-    }
-  }, []);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      const cached = getCachedContent(artifact.id);
-      let text = cached;
-      if (!text) {
-        const fullUrl = getStorageUrl(artifact.preview_url);
-        const response = await fetch(fullUrl);
-        if (response.ok) {
-          text = await response.text();
-          setCachedContent(artifact.id, text);
-        }
-      }
-      if (text) {
-        await writeToClipboard(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }
-    } catch {
-      // clipboard API may fail in insecure context
-    }
-  }, [artifact, getCachedContent, setCachedContent]);
-
-  const handleOpenInNewTab = useCallback(() => {
-    const fullUrl = getStorageUrl(artifact.preview_url);
-    window.open(fullUrl, '_blank', 'noopener,noreferrer');
-  }, [artifact]);
-
-  const handleIngestToWiki = useCallback(async () => {
-    if (ingestLoading) {
-      return;
-    }
-    setIngestLoading(true);
-    try {
-      const agentId = useChatStore.getState().agentConfig?.agentId;
-      const result = await wikiService.ingestArtifact(artifact.id, agentId);
-      if (result.success) {
-        toast.success(t('ingestToWiki.success'), { description: result.message });
-      } else {
-        toast.error(t('ingestToWiki.failed'), { description: result.message });
-      }
-    } catch {
-      toast.error(t('ingestToWiki.failed'));
-    } finally {
-      setIngestLoading(false);
-    }
-  }, [artifact.id, ingestLoading, t]);
-
-  const handleInsertToChat = useCallback(() => {
-    const isLocalMode = isTauriRuntime() && !!artifact.file_path;
-    const chatFile = {
-      fileName: artifact.filename,
-      fileExtension: artifact.filename.split('.').pop() || '',
-      localPath: isLocalMode ? artifact.file_path : undefined,
-      fileUrl: isLocalMode ? undefined : getStorageUrl(artifact.preview_url),
-      fileType: (isLocalMode ? 'local_path' : 'uploaded') as 'local_path' | 'uploaded',
-    };
-    const currentFiles = useChatStore.getState().files;
-    const alreadyAttached = currentFiles.some(
-      (f) =>
-        f.fileName === chatFile.fileName &&
-        ((chatFile.fileUrl && f.fileUrl === chatFile.fileUrl) ||
-          (chatFile.localPath && f.localPath === chatFile.localPath)),
-    );
-    if (alreadyAttached) {
-      toast.info(t('insertToChat.alreadyAttached'));
-      return;
-    }
-    useChatStore.getState().setFiles([...currentFiles, chatFile]);
-    toast.success(t('insertToChat.success'));
-  }, [artifact, t]);
-
-  const handleDownload = async () => {
-    if (onDownload) {
-      onDownload(artifactState);
-      return;
-    }
-
-    try {
-      const response = await fetch(artifactState.download_url);
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = getDownloadFilename(artifactState.filename);
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Download failed:', error);
-    }
-  };
-
-  const handlePublished = (update: PublishedArtifactUpdate) => {
-    setPublications(update.publications);
-    patchArtifactPublicationsInChat(artifact.id, update.publications);
-    if (update.latest_version_id) {
-      setArtifactState((prev) => ({ ...prev, latest_version_id: update.latest_version_id }));
-    }
-    void import('@/lib/progression/tryMarkMilestone').then(({ tryMarkMilestone }) => {
-      tryMarkMilestone('first_multistep_delivery');
-    });
-  };
-
-  const handleDismissWeChatDraftPanel = useCallback(() => {
-    setWechatDraftOpen(false);
-  }, []);
-
-  useEffect(() => {
-    if (!organizePlanOpen || organizePlanContent) {
-      return;
-    }
-    let cancelled = false;
-    setOrganizePlanLoading(true);
-    void fetchInlineContent().then((content) => {
-      if (!cancelled) {
-        setOrganizePlanContent(content);
-        setOrganizePlanLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [organizePlanOpen, organizePlanContent, fetchInlineContent]);
+  const preview = () => onPreview?.(current);
 
   return (
     <>
@@ -485,343 +68,62 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
           'hover:border-gray-300 dark:hover:border-gray-600',
           'hover:shadow-md hover:shadow-gray-200/50 dark:hover:shadow-gray-900/50',
           'transition-all duration-200 ease-out',
-          canInlinePreview && inlineExpanded && 'sm:col-span-2',
+          abilities.inlinePreview && inlineExpanded && 'sm:col-span-2',
         )}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
+        {...preloadHandlers}
       >
-        {/* Card header */}
         {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- dynamic role is not resolvable by static analysis */}
         <div
           className="flex items-center gap-3 p-3 cursor-pointer"
-          onClick={() => canPreview && onPreview?.(artifactState)}
-          role={canPreview ? 'button' : undefined}
-          tabIndex={canPreview ? 0 : undefined}
+          onClick={() => abilities.preview && preview()}
+          role={abilities.preview ? 'button' : undefined}
+          tabIndex={abilities.preview ? 0 : undefined}
           onKeyDown={activateOnKey}
         >
-          <div className={cn('flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center', colorClass)}>
-            <Icon className="w-5 h-5" />
-          </div>
-
-          <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{artifactState.filename}</h4>
-            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <span className="text-xs text-gray-500 dark:text-gray-400">{t(`types.${artifactState.type}`)}</span>
-              <span className="text-xs text-gray-400 dark:text-gray-500">·</span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">{formatBytes(artifactState.size)}</span>
-              {artifactState.filename.endsWith('.skill') && (
-                <>
-                  <span className="text-xs text-gray-400 dark:text-gray-500">·</span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">{t('skillActions.skillPackageHint')}</span>
-                </>
-              )}
-            </div>
-            {hasLocalPath && (
-              <p
-                className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-0.5 max-w-[200px]"
-                title={artifact.file_path}
-              >
-                {artifact.file_path}
-              </p>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className={cn('flex items-center gap-1 transition-opacity duration-200', REVEAL_ON_HOVER)}>
-            {hasLocalPath && <ArtifactLocalFileActions artifactId={artifact.id} filePath={artifact.file_path ?? ''} />}
-            {canDeploy && publications.some((pub) => pub.publication_status === 'READY' && pub.publication_url) && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-green-600 dark:text-green-500"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const live = publications.find((pub) => pub.publication_status === 'READY' && pub.publication_url);
-                  if (live?.publication_url) {
-                    window.open(live.publication_url, '_blank');
-                  }
-                }}
-                title={t('deploy.deployedLabel', {
-                  hostname: deploymentHostname(
-                    publications.find((pub) => pub.publication_status === 'READY' && pub.publication_url)
-                      ?.publication_url ?? '',
-                  ),
-                })}
-              >
-                <ExternalLink className="w-4 h-4" />
-              </Button>
-            )}
-            {canSharePreview && <ArtifactSharePopover artifactId={artifactState.id} artifactType={artifactState.type} />}
-            {(artifact.type as ArtifactType) === 'html' && (
-              <ArtifactAppButton artifactId={artifactState.id} name={artifactState.filename} />
-            )}
-            {isDeployCandidate && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn('h-8 w-8', canDeploy ? 'text-primary' : 'text-muted-foreground opacity-60')}
-                onClick={handleOpenDeploy}
-                title={
-                  canDeploy
-                    ? t('publish.openModal')
-                    : (deployPreflight?.hint ?? deployPreflight?.message ?? t('publish.openModal'))
-                }
-              >
-                <Globe className="w-4 h-4" />
-              </Button>
-            )}
-            {canPushWeChatDraft && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-8 w-8',
-                  wechatDraftOpen
-                    ? 'text-primary'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setWechatDraftOpen((prev) => !prev);
-                }}
-                title={t('wechatDraft.openPanel')}
-                data-testid="wechat-draft-open-panel"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            )}
-            {isOrganizePlan && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'h-8 w-8',
-                  organizePlanOpen
-                    ? 'text-primary'
-                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setOrganizePlanOpen((prev) => !prev);
-                }}
-                title={t('organizePlan.openPanel')}
-              >
-                <FolderOpen className="w-4 h-4" />
-              </Button>
-            )}
-            {canIngestToWiki && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                disabled={ingestLoading}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleIngestToWiki();
-                }}
-                title={t('ingestToWiki.title')}
-              >
-                <BookOpen className={cn('w-4 h-4', ingestLoading && 'opacity-50 animate-pulse')} />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleInsertToChat();
-              }}
-              title={t('insertToChat.title')}
-            >
-              <MessageSquarePlus className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                'h-8 w-8',
-                pinned
-                  ? 'text-blue-600 dark:text-blue-400'
-                  : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
-              )}
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePinWidget({
-                  id: artifact.id,
-                  title: artifactState.filename,
-                  language: artifactState.type,
-                  content: artifactState.content || artifactState.filename,
-                  sourceChatId: chatId ?? undefined,
-                });
-              }}
-              title={pinned ? tWidget('unpin') : tWidget('pinTooltip')}
-              data-testid={`artifact-pin-btn-${artifact.id}`}
-            >
-              <Pin className={cn('w-4 h-4', pinned && 'fill-current')} />
-            </Button>
-            {canInlinePreview && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={toggleInlinePreview}
-                title={inlineExpanded ? t('inlinePreview.collapse') : t('inlinePreview.expand')}
-              >
-                {inlineExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </Button>
-            )}
-            {canPreview && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPreview?.(artifactState);
-                }}
-                title={t('preview')}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-            )}
-            {canCopy && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopy();
-                }}
-                title={copied ? t('copied') : t('copyCode')}
-              >
-                <Copy className={cn('w-4 h-4', copied && 'text-green-500')} />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleOpenInNewTab();
-              }}
-              title={t('openInNewTab')}
-            >
-              <ExternalLink className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDownload();
-              }}
-              title={t('download')}
-            >
-              <Download className="w-4 h-4" />
-            </Button>
-          </div>
+          <ArtifactCardHeader artifact={artifact} current={current} />
+          <ArtifactCardActions
+            artifact={artifact}
+            abilities={abilities}
+            publishing={publishing}
+            actions={actions}
+            inlineExpanded={inlineExpanded}
+            onToggleInline={() => setInlineExpanded((expanded) => !expanded)}
+            wechat={hasWeChatDraft ? { open: wechatOpen, toggle: () => setWechatOpen((open) => !open) } : null}
+            organize={hasOrganizePlan ? { open: organizeOpen, toggle: () => setOrganizeOpen((open) => !open) } : null}
+            onPreview={onPreview}
+          />
         </div>
 
         <ArtifactPublicationBanners
-          publications={publications}
-          latestVersionId={artifactState.latest_version_id}
-          onRedeploy={(targetId) => {
-            setPublishTargetId(targetId);
-            setPublishModalOpen(true);
-          }}
+          publications={publishing.publications}
+          latestVersionId={current.latest_version_id}
+          onRedeploy={publishing.openRedeploy}
         />
 
-        {/* Inline visual preview */}
-        {canInlinePreview && inlineExpanded && (
-          <div className="border-t border-gray-200/60 dark:border-gray-700/60">
-            {isLargeFile ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-6">
-                <span className="text-sm text-muted-foreground">
-                  {t('inlinePreview.largeFileHint', { size: formatBytes(artifact.size) })}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPreview?.(artifactState);
-                  }}
-                >
-                  <Eye className="w-3.5 h-3.5 mr-1.5" />
-                  {t('inlinePreview.viewFullscreen')}
-                </Button>
-              </div>
-            ) : inlineLoading && !inlineContent ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin w-5 h-5 border-2 border-muted-foreground/30 border-t-primary rounded-full" />
-              </div>
-            ) : inlineContent ? (
-              <div className="min-h-[100px]">
-                {artifact.type === 'svg' ? (
-                  <SvgPreview content={inlineContent} />
-                ) : artifact.type === 'mermaid' ? (
-                  <MermaidPreview content={inlineContent} />
-                ) : (
-                  <HtmlPreview content={inlineContent} autoHeight injectTheme />
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-                {t('inlinePreview.loadError')}
-              </div>
-            )}
-          </div>
-        )}
-
-        {canPushWeChatDraft && wechatDraftOpen && artifactState.file_path && (
-          <WeChatDraftPanel
-            artifactId={artifact.id}
-            filename={artifactState.filename}
-            htmlPath={artifactState.file_path}
-            chatId={chatId ?? null}
-            agentName={agentName}
-            presetName={presetName}
-            fetchInlineContent={fetchInlineContent}
-            onComplete={handleDismissWeChatDraftPanel}
+        {abilities.inlinePreview && inlineExpanded ? (
+          <ArtifactInlinePreview
+            artifact={artifact}
+            isLargeFile={isLargeFile}
+            loading={inline.loading}
+            content={inline.text}
+            onOpenFullscreen={preview}
           />
-        )}
+        ) : null}
 
-        {isOrganizePlan && organizePlanOpen && (
-          <div
-            className="mx-3 mb-3 rounded-lg border border-border/60 bg-muted/20 p-3"
-            onClick={(e) => e.stopPropagation()}
-            role="presentation"
-          >
-            {organizePlanLoading && !organizePlanContent ? (
-              <div className="flex items-center justify-center py-6">
-                <div className="animate-spin w-5 h-5 border-2 border-muted-foreground/30 border-t-primary rounded-full" />
-              </div>
-            ) : organizePlanContent ? (
-              <OrganizePlanPanel
-                workspace={workspaceDir ?? ''}
-                planContent={organizePlanContent}
-                onPlanChange={setOrganizePlanContent}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground">{t('organizePlan.invalidPlan')}</p>
-            )}
-          </div>
-        )}
+        <ArtifactCardPanels
+          current={current}
+          fetchContent={fetchContent}
+          wechatOpen={hasWeChatDraft && wechatOpen}
+          organizeOpen={hasOrganizePlan && organizeOpen}
+          onWeChatDone={closeWeChat}
+        />
       </div>
       <PublishModal
-        artifact={artifactState}
-        open={publishModalOpen}
-        onClose={() => {
-          setPublishModalOpen(false);
-          setPublishTargetId(undefined);
-        }}
-        onPublished={handlePublished}
-        initialTargetId={publishTargetId}
+        artifact={current}
+        open={publishing.modalOpen}
+        onClose={publishing.closeModal}
+        onPublished={publishing.handlePublished}
+        initialTargetId={publishing.modalTargetId}
       />
     </>
   );

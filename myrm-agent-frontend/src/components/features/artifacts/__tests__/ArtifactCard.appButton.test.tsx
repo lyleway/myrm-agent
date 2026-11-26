@@ -26,7 +26,7 @@ vi.mock('@/store/useChatStore', () => {
   const hook = (selector: (s: typeof state) => unknown) => selector(state);
   return { default: Object.assign(hook, { getState: () => state }) };
 });
-vi.mock('../ArtifactAppButton', () => ({
+vi.mock('../card/ArtifactAppButton', () => ({
   ArtifactAppButton: (props: { artifactId: string; name: string }) => (
     <button aria-label="install app" data-testid="app-button" data-artifact={props.artifactId} data-name={props.name} />
   ),

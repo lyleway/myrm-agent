@@ -9,6 +9,7 @@
  * - @/store/useArtifactAppsStore (POS: install registry)
  * - @/lib/desktop/appWindow (POS: desktop window control: close, keep on top)
  * - @/hooks/tauri/useIsAppWindow (POS: detects the app's own desktop window)
+ * - @/hooks/ui/useFocusedMode (POS: whether the page is shown without the app shell)
  *
  * [OUTPUT]
  * - AppHostView: the page of one installed app: title bar with a permissions / keep-on-top / uninstall menu, then the app.
@@ -16,7 +17,8 @@
  * [POS]
  * Body of `/apps/[artifactId]`. The app runs in the same sandbox as any HTML artifact (scripts only, no network); the
  * extra it gets is `window.myrm`, which reaches only what the user allowed here. In its own desktop window there is no
- * app shell to return to, so leaving means closing the window.
+ * app shell to return to, so leaving means closing the window, and the page fills the whole window instead of leaving
+ * room for the shell's top bar.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,9 +38,11 @@ import {
 import { EmptyState } from '@/components/primitives/empty-state';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { useIsAppWindow } from '@/hooks/tauri/useIsAppWindow';
+import { useFocusedMode } from '@/hooks/ui/useFocusedMode';
 import { confirmAction } from '@/lib/app-dialog';
 import { BRIDGE_CAPABILITIES } from '@/lib/app-bridge/protocol';
 import { closeAppWindow, setAppWindowAlwaysOnTop } from '@/lib/desktop/appWindow';
+import { cn } from '@/lib/utils/classnameUtils';
 import { useArtifactAppsStore } from '@/store/useArtifactAppsStore';
 import { AppPermissionsDialog, type PermissionsMode } from './AppPermissionsDialog';
 import { useAppBridge } from './useAppBridge';
@@ -51,6 +55,7 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
   const { state, detail, html, declaration, statuses, applyGrants } = useAppHostData(artifactId);
   const frameHostRef = useRef<HTMLDivElement>(null);
   const inAppWindow = useIsAppWindow();
+  const withoutShell = useFocusedMode();
   const [keepOnTop, setKeepOnTop] = useState(false);
   const [dialogMode, setDialogMode] = useState<PermissionsMode | null>(null);
   const reviewedRef = useRef(false);
@@ -138,7 +143,10 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col">
+    <div
+      className={cn('flex min-h-0 w-full flex-col', withoutShell ? 'h-dvh' : 'h-[calc(100vh-4rem)]')}
+      data-testid="app-host"
+    >
       <header className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{detail.name}</h1>
         {undecided && dialogMode === null && (
