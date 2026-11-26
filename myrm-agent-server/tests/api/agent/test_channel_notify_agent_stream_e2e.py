@@ -1,14 +1,17 @@
 """Live-server E2E: agent-stream holds channel_notify_tool for the person's approval, then delivers to chat.
 
 A send to another chat is socially irreversible, so the stream stops at an approval request and nothing reaches the
-recipient. Approving the held call resumes the stream and the message lands in the recipient chat.
+recipient. Approving the held call resumes the stream and the message lands in the recipient chat; rejecting it ends
+the turn and the recipient chat stays empty.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import uuid
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -94,57 +97,74 @@ def _delivered_messages(recipient_chat_id: str) -> list[dict[str, object]]:
     ]
 
 
+@contextlib.contextmanager
+def _held_send() -> Iterator[tuple[dict[str, object], str]]:
+    """An agent whose notify target is a fresh chat, run until its channel_notify_tool call is held for approval.
+
+    Yields the stream payload (re-post it with a resume value to decide the held call) and the recipient chat id.
+    """
+    model_selection = resolve_working_base_selection(backend_url=BASE_URL)
+
+    recipient_chat_id = f"notify_stream_{uuid.uuid4().hex[:8]}"
+    agent_resp = _e2e_request(
+        "POST",
+        f"{BASE_URL}/api/v1/user-agents",
+        json={
+            "name": "Channel Notify Stream Live E2E",
+            "system_prompt": "You send notifications when asked.",
+            "notify_targets": [
+                {"channel": "chat", "recipient_id": recipient_chat_id, "label": "Stream E2E"},
+            ],
+        },
+    )
+    assert agent_resp.status_code == 200, agent_resp.text
+    agent_id = agent_resp.json()["data"]["id"]
+
+    chat_id = f"stream_src_{uuid.uuid4().hex[:8]}"
+    assert _e2e_request("POST", f"{BASE_URL}/api/v1/chats/", json={"chat_id": chat_id}).status_code == 200
+
+    query = (
+        "Call channel_notify_tool exactly once. "
+        f'Send body "{NOTIFY_BODY}" to the configured chat target. '
+        "Do not call any other tools. After success, reply NOTIFY_DONE."
+    )
+
+    try:
+        payload: dict[str, object] = {
+            "message_id": f"msg_{uuid.uuid4().hex[:8]}",
+            "chat_id": chat_id,
+            "query": query,
+            "action_mode": "agent",
+            "agent_id": agent_id,
+            "model_selection": model_selection,
+            "enable_memory": False,
+        }
+        held = _collect_agent_stream(payload)
+        assert "channel_notify_tool" in _invoked_tool_names(held)
+        actions = _held_actions(held)
+        assert [action.get("action") for action in actions] == ["channel_notify_tool"], actions
+        assert actions[0].get("sociallyIrreversible") is True, actions[0]
+        assert not _delivered_messages(recipient_chat_id), "the send reached the chat before anyone approved it"
+        yield payload, recipient_chat_id
+    finally:
+        _e2e_request("DELETE", f"{BASE_URL}/api/v1/user-agents/{agent_id}")
+
+
 @_skip_e2e
 @pytest.mark.e2e
 class TestChannelNotifyAgentStreamLive:
     def test_agent_stream_channel_notify_delivers_to_chat(self) -> None:
         """Real agent-stream on a live server: channel_notify_tool is held for approval, then writes to the chat."""
-        model_selection = resolve_working_base_selection(backend_url=BASE_URL)
-
-        recipient_chat_id = f"notify_stream_{uuid.uuid4().hex[:8]}"
-        agent_resp = _e2e_request(
-            "POST",
-            f"{BASE_URL}/api/v1/user-agents",
-            json={
-                "name": "Channel Notify Stream Live E2E",
-                "system_prompt": "You send notifications when asked.",
-                "notify_targets": [
-                    {"channel": "chat", "recipient_id": recipient_chat_id, "label": "Stream E2E"},
-                ],
-            },
-        )
-        assert agent_resp.status_code == 200, agent_resp.text
-        agent_id = agent_resp.json()["data"]["id"]
-
-        chat_id = f"stream_src_{uuid.uuid4().hex[:8]}"
-        assert _e2e_request("POST", f"{BASE_URL}/api/v1/chats/", json={"chat_id": chat_id}).status_code == 200
-
-        query = (
-            "Call channel_notify_tool exactly once. "
-            f'Send body "{NOTIFY_BODY}" to the configured chat target. '
-            "Do not call any other tools. After success, reply NOTIFY_DONE."
-        )
-
-        try:
-            payload: dict[str, object] = {
-                "message_id": f"msg_{uuid.uuid4().hex[:8]}",
-                "chat_id": chat_id,
-                "query": query,
-                "action_mode": "agent",
-                "agent_id": agent_id,
-                "model_selection": model_selection,
-                "enable_memory": False,
-            }
-            held = _collect_agent_stream(payload)
-            assert "channel_notify_tool" in _invoked_tool_names(held)
-            actions = _held_actions(held)
-            assert [action.get("action") for action in actions] == ["channel_notify_tool"], actions
-            assert actions[0].get("sociallyIrreversible") is True, actions[0]
-            assert not _delivered_messages(recipient_chat_id), "the send reached the chat before anyone approved it"
-
+        with _held_send() as (payload, recipient_chat_id):
             resumed = _collect_agent_stream(dict(payload, resumeValue={"decisions": [{"type": "approve"}]}))
             assert not _held_actions(resumed), "the approved send was held again"
             delivered = _delivered_messages(recipient_chat_id)
             assert delivered, f"Expected delivery in {recipient_chat_id} after the approval"
-        finally:
-            _e2e_request("DELETE", f"{BASE_URL}/api/v1/user-agents/{agent_id}")
+
+    def test_agent_stream_rejected_channel_notify_never_reaches_the_chat(self) -> None:
+        """Rejecting the held call ends the turn without a delivery: the recipient chat stays empty."""
+        with _held_send() as (payload, recipient_chat_id):
+            resumed = _collect_agent_stream(dict(payload, resumeValue={"decisions": [{"type": "reject"}]}))
+            delivered = _delivered_messages(recipient_chat_id)
+            assert not delivered, f"a rejected send reached {recipient_chat_id}: {delivered}"
+            print(f"E2E_NOTIFY_REJECTED: event types={sorted({str(event.get('type')) for event in resumed})}", flush=True)

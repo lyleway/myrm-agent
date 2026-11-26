@@ -7,6 +7,13 @@ rewrites it into the authoring prompt, leaves ``skill_manage`` out of the preset
 the live model saves the skill the user described; the skill lands in the catalog with the SKILL.md the model sent and
 the stream announces the committed batch. The preset binds again on the turn after: a second plain save is refused.
 
+A second flow: the user tells the agent in a plain turn how a release is shipped, then sends a bare ``/learn`` with no
+arguments. The server falls back to "the workflow we just went through in this conversation", the live model reads the
+conversation back and saves a skill whose SKILL.md carries the step the user named; the stream announces the batch.
+
+A third flow, the same conversation with a lone ``/`` instead: a stray slash is an ordinary message, so nothing is saved
+(under the ``explore`` preset a ``/learn`` turn is the only one that could save).
+
 Run::
 
     ./myrm-dev test -m e2e myrm-agent/myrm-agent-server/tests/api/agent/test_learn_command_live_api_e2e.py
@@ -24,7 +31,9 @@ from tests.api.agent.skill_manage_api_helpers import (
     SAVE_TOOL,
     SKILL_DESCRIPTION,
     announced_batches,
+    announced_batches_in_order,
     catalog_skill_id,
+    catalog_skills,
     create_agent,
     create_chat,
     data,
@@ -34,6 +43,7 @@ from tests.api.agent.skill_manage_api_helpers import (
     stream_turn,
     user_request,
     wait_for,
+    workflow_message,
 )
 
 EXPLORE = "explore"
@@ -66,6 +76,13 @@ def save_denials(events: list[dict[str, object]]) -> list[str]:
     ]
 
 
+def roll_back(client: httpx.Client, backend_url: str, batches: list[str]) -> None:
+    """Undo the committed skill batches a turn announced, newest first (an older batch is refused while a newer one stands)."""
+    for batch in reversed(batches):
+        rolled_back = client.post(f"{backend_url}/api/v1/skill-optimization/mutations/{batch}/rollback", timeout=60.0)
+        assert data(rolled_back).get("status")
+
+
 @pytest.mark.e2e
 @pytest.mark.timeout(900)
 @requires_live_model
@@ -96,34 +113,106 @@ def test_explore_preset_refuses_a_plain_skill_save_but_lets_learn_save_one() -> 
         learn_turn = stream_turn(
             client, backend_url, agent_id, chat_id, learn_request(learned_name, marker), security_preset=EXPLORE
         )
-        assert not save_denials(learn_turn), f"the /learn turn's save was refused; stream: {stream_digest(learn_turn)}"
-        skill_id = wait_for(
-            lambda: catalog_skill_id(client, backend_url, learned_name),
-            timeout_sec=60.0,
-            what=f"the /learn turn to save {learned_name} under the explore preset; stream: {stream_digest(learn_turn)}",
-        )
-        saved = skill_md(client, backend_url, skill_id)
-        assert marker in saved, f"the saved SKILL.md lost the marker the user asked for:\n{saved[:600]}"
-        batches = announced_batches(learn_turn)
-        assert batches, "the /learn turn saved a skill but the stream never announced its committed batch"
-        print(f"E2E_LEARN_SAVED: skill={learned_name} batches={sorted(batches)}", flush=True)
+        # The learned skill is undone even when an assertion below fails, so a red run leaves the catalog as it found it.
+        try:
+            assert not save_denials(learn_turn), f"the /learn turn's save was refused; stream: {stream_digest(learn_turn)}"
+            skill_id = wait_for(
+                lambda: catalog_skill_id(client, backend_url, learned_name),
+                timeout_sec=60.0,
+                what=f"the /learn turn to save {learned_name} under the explore preset; stream: {stream_digest(learn_turn)}",
+            )
+            saved = skill_md(client, backend_url, skill_id)
+            assert marker in saved, f"the saved SKILL.md lost the marker the user asked for:\n{saved[:600]}"
+            batches = announced_batches(learn_turn)
+            assert batches, "the /learn turn saved a skill but the stream never announced its committed batch"
+            print(f"E2E_LEARN_SAVED: skill={learned_name} batches={sorted(batches)}", flush=True)
 
-        later_turn = stream_turn(
-            client, backend_url, agent_id, chat_id, user_request(later_refused_name, marker), security_preset=EXPLORE
-        )
-        assert save_denials(later_turn), (
-            f"the explore preset stopped binding after a /learn turn; stream: {stream_digest(later_turn)}"
-        )
-        assert catalog_skill_id(client, backend_url, later_refused_name) is None, (
-            "the explore preset stopped binding after a /learn turn: a plain turn saved a skill"
-        )
-        assert not announced_batches(later_turn) - batches, "a refused save must not announce a committed batch"
-
-        for batch in batches:
-            rolled_back = client.post(f"{backend_url}/api/v1/skill-optimization/mutations/{batch}/rollback", timeout=60.0)
-            assert data(rolled_back).get("status")
+            later_turn = stream_turn(
+                client, backend_url, agent_id, chat_id, user_request(later_refused_name, marker), security_preset=EXPLORE
+            )
+            assert save_denials(later_turn), (
+                f"the explore preset stopped binding after a /learn turn; stream: {stream_digest(later_turn)}"
+            )
+            assert catalog_skill_id(client, backend_url, later_refused_name) is None, (
+                "the explore preset stopped binding after a /learn turn: a plain turn saved a skill"
+            )
+            assert not announced_batches(later_turn) - batches, "a refused save must not announce a committed batch"
+        finally:
+            roll_back(client, backend_url, announced_batches_in_order(learn_turn))
         wait_for(
             lambda: catalog_skill_id(client, backend_url, learned_name) is None,
             timeout_sec=60.0,
             what="the learned skill to disappear after the rollback",
         )
+
+
+@pytest.mark.e2e
+@pytest.mark.timeout(900)
+@requires_live_model
+def test_bare_learn_saves_a_skill_from_the_conversation_so_far() -> None:
+    backend_url = isolated_backend_url()
+    suffix = uuid.uuid4().hex[:8]
+    marker = f"LEARN_CONVERSATION_MARKER_{suffix}"
+    chat_id = f"learnbare{suffix}"
+
+    with httpx.Client() as client:
+        agent_id = create_agent(client, backend_url, suffix)
+        create_chat(client, backend_url, chat_id, agent_id)
+        known = set(catalog_skills(client, backend_url).values())
+
+        told = stream_turn(client, backend_url, agent_id, chat_id, workflow_message(marker), security_preset=EXPLORE)
+        assert not announced_batches(told), f"the plain turn saved a skill; stream: {stream_digest(told)}"
+
+        learn_turn = stream_turn(client, backend_url, agent_id, chat_id, "/learn", security_preset=EXPLORE)
+        batches = announced_batches(learn_turn)
+        # The learned skills are undone even when an assertion below fails, so a red run leaves the catalog as it found it.
+        try:
+            assert not save_denials(learn_turn), f"the bare /learn turn's save was refused; stream: {stream_digest(learn_turn)}"
+            assert batches, f"the bare /learn turn never saved a skill; stream: {stream_digest(learn_turn)}"
+            learned = {name: skill_id for name, skill_id in catalog_skills(client, backend_url).items() if skill_id not in known}
+            assert learned, f"the bare /learn turn announced {sorted(batches)} but no new skill reached the catalog"
+            saved = {name: skill_md(client, backend_url, skill_id) for name, skill_id in learned.items()}
+            assert any(marker in text for text in saved.values()), (
+                f"no learned skill carries the step the user named in the conversation ({marker}); "
+                f"saved: {[(name, text[:300]) for name, text in saved.items()]}"
+            )
+            print(f"E2E_BARE_LEARN_SAVED: skills={sorted(learned)} batches={sorted(batches)}", flush=True)
+        finally:
+            roll_back(client, backend_url, announced_batches_in_order(learn_turn))
+        wait_for(
+            lambda: not set(catalog_skills(client, backend_url).values()) & set(learned.values()),
+            timeout_sec=60.0,
+            what="the learned skills to disappear after the rollback",
+        )
+
+
+@pytest.mark.e2e
+@pytest.mark.timeout(900)
+@requires_live_model
+def test_a_lone_slash_after_a_workflow_does_not_save_a_skill() -> None:
+    backend_url = isolated_backend_url()
+    suffix = uuid.uuid4().hex[:8]
+    chat_id = f"learnslash{suffix}"
+
+    with httpx.Client() as client:
+        agent_id = create_agent(client, backend_url, suffix)
+        create_chat(client, backend_url, chat_id, agent_id)
+        known = set(catalog_skills(client, backend_url).values())
+
+        told = stream_turn(
+            client, backend_url, agent_id, chat_id, workflow_message(f"LEARN_SLASH_MARKER_{suffix}"), security_preset=EXPLORE
+        )
+        assert not announced_batches(told), f"the plain turn saved a skill; stream: {stream_digest(told)}"
+
+        slash_turn = stream_turn(client, backend_url, agent_id, chat_id, "/", security_preset=EXPLORE)
+        batches = announced_batches(slash_turn)
+        try:
+            assert any(event.get("type") == "message_end" for event in slash_turn), (
+                f"the lone '/' turn never completed; stream: {stream_digest(slash_turn)}"
+            )
+            assert not batches, f"a lone '/' was run as /learn and saved a skill; stream: {stream_digest(slash_turn)}"
+            saved = sorted(name for name, skill_id in catalog_skills(client, backend_url).items() if skill_id not in known)
+            assert not saved, f"a lone '/' was run as /learn and saved {saved}"
+            print("E2E_LONE_SLASH_SAVED_NOTHING", flush=True)
+        finally:
+            roll_back(client, backend_url, announced_batches_in_order(slash_turn))

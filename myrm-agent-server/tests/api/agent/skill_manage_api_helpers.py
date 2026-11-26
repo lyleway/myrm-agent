@@ -8,9 +8,10 @@
 - isolated_backend_url / requires_live_model: the guards every live test starts with
 - create_agent / create_chat / stream_turn: a skill-only agent, its chat, and one streamed turn (optionally under a
   session security preset)
-- user_request / rewrite_request / patch_request / delete_request: the plain requests the model is given
-- batch_id_of / announced_batch / announced_batches / persisted_skill_steps / stored_batch_ids / catalog_skill_id /
-  skill_md / wait_for: what the tests read back from the stream and the API
+- user_request / rewrite_request / patch_request / delete_request / workflow_message: the plain requests the model
+  is given
+- batch_id_of / announced_batch / announced_batches / persisted_skill_steps / stored_batch_ids / catalog_skills /
+  catalog_skill_id / skill_md / wait_for: what the tests read back from the stream and the API
 
 [POS]
 Support module of ``test_skill_manage_undo_live_api_e2e.py`` and ``test_learn_command_live_api_e2e.py``. The harness
@@ -96,6 +97,14 @@ def patch_request(name: str, old: str, new: str) -> str:
     return (
         f"Patch the skill {name} with {SAVE_TOOL}: one operation, action=patch, name={name}, "
         f"old_content={old}, new_content={new}. After it is patched, reply with exactly: {DONE_TOKEN}"
+    )
+
+
+def workflow_message(marker: str) -> str:
+    """A plain turn that tells the agent how a task is done; its last step names a marker only this chat knows."""
+    return (
+        "For context, this is how I ship a build: step 1 run the linter, step 2 run the test suite, "
+        f"step 3 print the line {marker} . Reply with exactly: NOTED"
     )
 
 
@@ -211,8 +220,13 @@ def announced_batch(events: list[dict[str, object]]) -> str | None:
     return next((batch_id for event in events if (batch_id := batch_id_of(event))), None)
 
 
+def announced_batches_in_order(events: list[dict[str, object]]) -> list[str]:
+    """The distinct batch ids the stream announced, oldest first."""
+    return list(dict.fromkeys(batch_id for event in events if (batch_id := batch_id_of(event))))
+
+
 def announced_batches(events: list[dict[str, object]]) -> set[str]:
-    return {batch_id for event in events if (batch_id := batch_id_of(event))}
+    return set(announced_batches_in_order(events))
 
 
 def skill_md(client: httpx.Client, backend_url: str, skill_id: str) -> str:
@@ -249,13 +263,19 @@ def stored_batch_ids(client: httpx.Client, backend_url: str, chat_id: str) -> li
     ]
 
 
-def catalog_skill_id(client: httpx.Client, backend_url: str, name: str) -> str | None:
+def catalog_skills(client: httpx.Client, backend_url: str) -> dict[str, str]:
+    """Skill name -> id for every skill in the catalog."""
     listing = client.get(f"{backend_url}/api/v1/skills/", timeout=30.0)
     listing.raise_for_status()
-    for skill in listing.json().get("skills") or []:
-        if isinstance(skill, dict) and skill.get("name") == name:
-            return str(skill["id"])
-    return None
+    return {
+        str(skill["name"]): str(skill["id"])
+        for skill in listing.json().get("skills") or []
+        if isinstance(skill, dict) and "name" in skill and "id" in skill
+    }
+
+
+def catalog_skill_id(client: httpx.Client, backend_url: str, name: str) -> str | None:
+    return catalog_skills(client, backend_url).get(name)
 
 
 def wait_for[T](check: Callable[[], T | None], *, timeout_sec: float, what: str) -> T:
