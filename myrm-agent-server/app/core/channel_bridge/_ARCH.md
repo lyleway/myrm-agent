@@ -121,7 +121,7 @@ HTTP/SSE 主链路在 `execute_stream_pipeline` 内 **INFO 记录解析后的投
 `reply_mode` 是 `TopicContext` 的配置项，控制 Agent 对 Channel 消息的回复是否需要人工审核：
 
 - **`auto`（默认）**：Agent 生成的回复直接发送，无需审核。
-- **`draft_review`**：Agent 回复被整条（含附件、按钮）拦截为 `ApprovalRecord`（`action_type="outbound_draft"`），owner 在 WebUI Approval Drawer 或 IM 通知卡片审核后方可发送；审批无法创建时回复不发送（fail-closed）。生成期间回复正文不会流式编辑进对话（`TopicContext.holds_reply_for_review` → `hold_reply`，审批恢复后的续跑同样适用），对话方在审核通过前只会看到进度提示。IM 内审核仅 owner 可操作：通知卡片（`core/notifications/approval_card.py`）展示来信与草稿正文，Telegram 提供批准/拒绝按钮，其他渠道提示打开应用审核。
+- **`draft_review`**：Agent 回复被整条（含附件、按钮）拦截为 `ApprovalRecord`（`action_type="outbound_draft"`），owner 在 WebUI Approval Drawer 或 IM 通知卡片审核后方可发送；审批无法创建时回复不发送（fail-closed）。生成期间回复正文不会流式编辑进对话（`TopicContext.holds_reply_for_review` → `hold_reply`，审批恢复后的续跑同样适用），对话方在审核通过前只会看到进度提示。IM 内审核仅 owner 可操作：通知卡片（`core/notifications/approval_card.py`）展示来信、拟发回复（均截断）与附件名；批准/拒绝按钮只在 Telegram 且这条回复不经控制平面代发时出现，其余路由的卡片末尾是打开应用的提示与 `/draft approve <code>`、`/draft reject <code>` 两条命令（`<code>` 为审批 ID 的前 8 个字符），详见 `core/notifications/_ARCH.md` 的「Approval Cards」。
 
 ### 超时策略
 
