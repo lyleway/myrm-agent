@@ -8,9 +8,10 @@ persistent root.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -50,11 +51,11 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
         yield test_client
 
 
-def _chat_exists():
+def _chat_exists() -> AbstractContextManager[AsyncMock]:
     return patch.object(ChatService, "get_chat_metadata", new=AsyncMock(return_value=SimpleNamespace(id=_CHAT)))
 
 
-def _chat_is_missing():
+def _chat_is_missing() -> AbstractContextManager[AsyncMock]:
     return patch.object(ChatService, "get_chat_metadata", new=AsyncMock(return_value=None))
 
 
@@ -136,8 +137,7 @@ class TestBranchFork:
             "branch_id": "branch-1",
             "message_count": 12,
         }
-        assert fork.await_args.args[1:] == (_CHAT, "branch-1")
-        assert fork.await_args.kwargs == {"new_title": "Retry"}
+        fork.assert_awaited_once_with(ANY, _CHAT, "branch-1", new_title="Retry")
 
     def test_a_fork_that_cannot_be_made_is_a_400_with_its_reason(self, client: TestClient) -> None:
         refused = AsyncMock(return_value=BranchForkResult(False, None, _CHAT, "branch-1", 0, "Snapshot file is missing"))

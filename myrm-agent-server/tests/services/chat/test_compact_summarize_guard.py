@@ -108,6 +108,7 @@ class TestAnAnsweringModel:
         result = await guarded_compact_summarize(_MESSAGES, llm, "chat-1", earlier, "auth", max_context_tokens=64_000)
 
         assert result == (_KEPT, _SUMMARY)
+        assert answer.await_args is not None
         call = answer.await_args.kwargs
         assert call["messages"] is _MESSAGES
         assert call["llm"] is llm
