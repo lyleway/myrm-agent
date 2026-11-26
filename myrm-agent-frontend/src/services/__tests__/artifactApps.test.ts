@@ -75,7 +75,7 @@ describe('artifactApps client', () => {
     });
   });
 
-  it('reports a page-side call next to the version it ran under and resolves to nothing', async () => {
+  it('reports a page-side call next to the version it ran under, outliving the page, and resolves to nothing', async () => {
     const activity = { capability: 'fetch' as const, outcome: 'ok' as const, detail: 'api.weather.com' };
 
     await expect(reportAppActivity('art-1', SHA, activity)).resolves.toBeUndefined();
@@ -83,6 +83,7 @@ describe('artifactApps client', () => {
     expect(apiRequest).toHaveBeenCalledWith('/artifact-apps/art-1/activity', {
       method: 'POST',
       body: JSON.stringify({ version_sha256: SHA, ...activity }),
+      keepalive: true,
       silent: true,
     });
   });

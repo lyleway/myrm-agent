@@ -86,6 +86,8 @@ export async function reportAppActivity(
   await apiRequest(`/artifact-apps/${artifactId}/activity`, {
     method: 'POST',
     body: JSON.stringify({ version_sha256: versionSha256, ...activity }),
+    // The log is the user's record of what the app did; a request still on its way must outlive the closing page.
+    keepalive: true,
     silent: true,
   });
 }

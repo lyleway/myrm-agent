@@ -154,6 +154,7 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
             variant="ghost"
             size="sm"
             className="gap-1.5 text-amber-600 dark:text-amber-400"
+            aria-label={t('undecided')}
             onClick={() => setDialogMode('review')}
           >
             <ShieldAlert className="h-4 w-4" aria-hidden />
