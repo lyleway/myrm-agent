@@ -114,6 +114,38 @@ describe('useGlobalEvents: events relayed to the window', () => {
     expect(mocks.openApproval).toHaveBeenCalledWith({ action_type: 'shell', approval_id: 'ap-1', normalized: true });
   });
 
+  it('approval_required of an external agent opens the approval at once and asks for permission in its own words', async () => {
+    mountGlobalEvents();
+    const events = recordWindowEvents();
+    const request = {
+      action_type: 'external_agent_permission',
+      approval_id: 'ap-2',
+      payload: { agent: 'claude-code', kind: 'execute' },
+    };
+
+    emit('approval_required', request);
+    await vi.dynamicImportSettled();
+
+    expect(mocks.openApproval).toHaveBeenCalledTimes(1);
+    expect(mocks.openApproval).toHaveBeenCalledWith({ ...request, normalized: true });
+    expect(mocks.toast.info.mock.calls[0][0]).toBe('externalAgentPermissionRequired');
+    expect(mocks.notify).toHaveBeenCalledWith('externalAgentPermissionRequired', {
+      body: undefined,
+      fallbackToToast: false,
+      onClick: expect.any(Function),
+    });
+    expect(events().map((event) => event.type)).toEqual(['approval-required']);
+  });
+
+  it('approval_required of any other kind waits for the person to open it', async () => {
+    mountGlobalEvents();
+
+    emit('approval_required', { action_type: 'shell', approval_id: 'ap-1' });
+    await vi.dynamicImportSettled();
+
+    expect(mocks.openApproval).not.toHaveBeenCalled();
+  });
+
   it('approval_resolved closes the approval only when it carries an id', async () => {
     mountGlobalEvents();
     const events = recordWindowEvents();

@@ -15,6 +15,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
     AuthMode,
+    PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -42,6 +43,7 @@ class ScriptedPool:
         self.turns: list[tuple[str, str, str]] = []
         self.turn_workspaces: list[str] = []
         self.turn_images: list[list[str] | None] = []
+        self.turn_permissions: list[PermissionBroker | None] = []
         self.cancelled: list[tuple[str, str]] = []
         self.cancel_called = asyncio.Event()
 
@@ -62,10 +64,12 @@ class ScriptedPool:
         mode: str = "persistent",
         mcp_servers: object = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         self.turns.append((name, prompt, session_id))
         self.turn_workspaces.append(workspace)
         self.turn_images.append(images)
+        self.turn_permissions.append(permissions)
         return self._turn(self)
 
     async def cancel(self, name: str, session_id: str) -> None:
@@ -90,12 +94,23 @@ def playing(*events: RuntimeEvent) -> TurnScript:
 
 
 async def stream_turn(
-    pool: ScriptedPool, token: CancellationToken | None = None, *, images: list[str] | None = None
+    pool: ScriptedPool,
+    token: CancellationToken | None = None,
+    *,
+    images: list[str] | None = None,
+    permissions: PermissionBroker | None = None,
 ) -> list[SseEvent]:
     return [
         event
         async for event in stream_direct_delegate(
-            pool, "claude", "do it", session_id="claude-chat-1", workspace=WORKSPACE, images=images, cancel_token=token
+            pool,
+            "claude",
+            "do it",
+            session_id="claude-chat-1",
+            workspace=WORKSPACE,
+            images=images,
+            permissions=permissions,
+            cancel_token=token,
         )
     ]
 

@@ -182,6 +182,7 @@ class _ScriptedRuntime(BaseRuntime):
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: object | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         async for event in self.turn(session_id):
             yield event

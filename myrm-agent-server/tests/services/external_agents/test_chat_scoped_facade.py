@@ -39,6 +39,7 @@ async def test_facade_cancel_does_not_deadlock_during_run_turn() -> None:
         mode: str = "persistent",
         mcp_servers: list | None = None,
         images: list[str] | None = None,
+        permissions: object = None,
     ):
         entered.set()
         await unblock.wait()
@@ -81,6 +82,7 @@ async def test_a_facade_turn_stays_in_flight_until_the_pool_turn_has_stopped() -
         mode: str = "persistent",
         mcp_servers: list | None = None,
         images: list[str] | None = None,
+        permissions: object = None,
     ):
         try:
             while True:
@@ -126,7 +128,15 @@ def _build_turn_pool(label: str, ran_on: list[str]) -> MagicMock:
     """A pool whose run_turn records which pool served the turn."""
 
     async def run_turn(
-        name: str, prompt: str, session_id: str, *, workspace: str, mode: str = "persistent", mcp_servers=None, images=None
+        name: str,
+        prompt: str,
+        session_id: str,
+        *,
+        workspace: str,
+        mode: str = "persistent",
+        mcp_servers=None,
+        images=None,
+        permissions=None,
     ):
         ran_on.append(label)
         yield MagicMock()
@@ -276,6 +286,28 @@ async def test_facade_hands_the_turn_workspace_to_the_pool() -> None:
         pass
 
     assert seen == ["/work/a", "/work/b"]
+
+
+@pytest.mark.asyncio
+async def test_facade_hands_the_turn_permission_broker_to_the_pool() -> None:
+    registry = ChatRuntimePoolRegistry(idle_seconds=3600.0)
+    seen: list[object] = []
+    pool = _build_turn_pool("p", [])
+    broker = MagicMock()
+
+    async def run_turn(name: str, prompt: str, session_id: str, *, permissions: object = None, **_: object):
+        seen.append(permissions)
+        yield MagicMock()
+
+    pool.run_turn = run_turn
+    facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, "fp-a")
+
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE, permissions=broker):
+        pass
+    async for _ in facade.run_turn("claude", "hi", "s1", workspace=_WORKSPACE):
+        pass
+
+    assert seen == [broker, None]
 
 
 @pytest.mark.asyncio

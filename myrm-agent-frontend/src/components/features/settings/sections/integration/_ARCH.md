@@ -15,9 +15,9 @@
 | `CredentialsSection.tsx`                                     | re-export                                                                      | 凭证管理                                      | —     |
 | `credentials/`                                               | Vault / 文件 / OAuth 凭证子模块 · [credentials/_ARCH.md](credentials/_ARCH.md) |
 | `ExternalAgentsConfig.tsx`                                   | 外部 Agent 列表：启停、删除、持久化（`externalAgents` 配置键）；保存前校验名称、命令与环境变量 |
-| `ExternalAgentForm.tsx`                                      | 外部 Agent 编辑表单（预设、类型、命令、权限、鉴权方式、环境变量、测试）；托管部署只给 API 密钥一个选项并换成对应说明 |
+| `ExternalAgentForm.tsx`                                      | 外部 Agent 编辑表单（预设、类型、命令、权限、鉴权方式、环境变量、测试）；托管部署只给 API 密钥一个选项并换成对应说明；权限说明随命令变化（会询问 / 只能读取 / 无法限制） |
 | `ExternalAgentEnvEditor.tsx`                                 | 环境变量逐行编辑：值默认掩码、可显示；行内提示名称缺失/非法/重复；随鉴权方式给出说明          |
-| `externalAgentModel.ts`                                      | 纯规则：预设、权限模式、`toDraft`/`cleanAgent`（环境变量 ↔ 编辑行；部署不允许订阅登录时存为 API 密钥）、`effectiveAuthMode`、`envRowProblems` |
+| `externalAgentModel.ts`                                      | 纯规则：预设、权限模式（只有 `safe` 与 `allow_all`，旧词表里存下来的值归为 `safe`）与权限说明 `permissionHintKey`（Claude Code 与 ACP 会逐条询问；Codex、Gemini、Qwen 的命令行不能询问，`safe` 即只读；未知命令没有可设的参数）、`toDraft`/`cleanAgent`（环境变量 ↔ 编辑行；部署不允许订阅登录时存为 API 密钥）、`effectiveAuthMode`、`envRowProblems` |
 | `ExternalAgentAuthControls.tsx`                              | 外部 Agent 单行控件：CLI 缺失时给出安装入口，已安装时给出登录状态徽标（取 CLI 自述的登录态）与登录 / 退出登录；安装对话框常驻挂载，状态翻转为已安装也不打断成功提示 |
 | `ExternalAgentInstallDialog.tsx`                             | 安装对话框：打开即安装并流式显示安装日志；成功即刷新状态再自行关闭；失败可重试；取消 / 关闭 / 卸载都会中止请求，服务端随之停掉 npm |
 | `ExternalAgentLoginDialog.tsx`                               | 登录对话框：脚本化登录事件流（设备码 / 浏览器授权 / 验证码回填）+ 凭据导入兜底                                                |

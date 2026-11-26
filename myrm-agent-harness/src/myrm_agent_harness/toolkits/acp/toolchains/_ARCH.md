@@ -12,8 +12,8 @@ Isolated portable toolchain manager for external CLI agents (Node.js download, n
 
 ## Module Dependencies
 
-- Stdlib + asyncio, `core/security/process_env` (npm environment) and `utils/os_compat` (process groups); `fcntl` is imported when the lock is taken, so the package imports on Windows (an install there stops with `ToolchainError`)
-- Used by `toolkits/acp/` runtime backends and `core/backend_detector.py`
+- Stdlib + asyncio, `core/security/process_env` (npm environment), `core/security/bounded_communicate` (the post-install `--version`, output capped) and `utils/os_compat` (process groups); `fcntl` is imported when the lock is taken, so the package imports on Windows (an install there stops with `ToolchainError`)
+- Used by `toolkits/acp/` runtime backends and `toolkits/acp/core/backend_detector.py`
 
 ## Division vs toolkits/acp/
 

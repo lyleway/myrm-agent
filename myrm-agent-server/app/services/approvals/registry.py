@@ -4,6 +4,8 @@
 - app.services.event.app_event_bus::AppEvent (POS: 服务器级 SSE 总线)
 - app.database.factory::acquire_write_lock (POS: 事务起始处获取 SQLite 写锁，供读后写的工作单元使用)
 - app.services.approvals.outbound_draft::finalize_outbound_draft (POS: 被扣留回复定案后的发送/释放/收尾)
+- app.services.approvals.chat_peer_card::push_approval_card_to_chat_peer (POS: 把审批卡推给 IM 会话的对端)
+- app.services.approvals.external_agent_permission::ACTION_TYPE, pending_permission_answers (POS: 外部 Agent 权限请求的决定交还给等待它的回合)
 - app.services.skills.growth.constants::GROWTH_ACTION_TYPES, is_background_growth_approval (POS: growth draft 分流 SSOT)
 - app.core.notifications.approval_card::build_approval_card (POS: 审批卡文案，按发送路由决定是否带按钮)
 - app.core.channel_bridge.locale_provider::resolve_user_locale (POS: 所有者的语言偏好)
@@ -18,6 +20,8 @@
 待审批记录的会话来自 IM 时，还会把审批卡推给该会话的对端（与通知分发器同一张卡：所有者语言，按钮只给点得动的路由，不带请求载荷）；
 outbound_draft 不推：它只由所有者决定，所有者收到的是通知分发器的卡，会话对端已有「待审核」占位。
 outbound_draft 的定案（WebUI/IM 按钮/`/draft`/批量/TTL）统一在此收口：状态提交后调用 finalize_outbound_draft。
+外部 Agent 的权限请求（external_agent_permission）同样在此收口：任何入口决定后，把裁决交给等待它的回合并广播 APPROVAL_RESOLVED，
+让别的设备上打开的审批卡关闭；回合先结束（停止、超时）的请求由 withdraw 关闭。
 定案是读后写（resolve_approval、TTL 清理），事务起始先取 SQLite 写锁：并发的定案只有一方生效，另一方等待后读到已定案状态
 （resolve_approval 返回 None），不会重复发送；等锁最多一个 busy_timeout，超时才以 "database is locked" 失败。续跑时结算的浏览器接管审批同样逐条走 resolve_approval。
 """
@@ -27,11 +31,18 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 
 from app.database.connection import get_session
 from app.database.factory import acquire_write_lock
 from app.database.models.approval import ApprovalRecord
+from app.services.approvals.chat_peer_card import push_approval_card_to_chat_peer
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
+from app.services.approvals.external_agent_permission import (
+    DECISION_NOTE_CHARS,
+    DECISION_NOTE_KEY,
+    pending_permission_answers,
+)
 from app.services.approvals.outbound_draft import finalize_outbound_draft
 from app.services.event.app_event_bus import AppEvent, AppEventType, get_event_bus
 from app.services.skills.growth.constants import GROWTH_ACTION_TYPES, is_background_growth_approval
@@ -70,6 +81,7 @@ class ApprovalRegistry:
                 return 0
 
             expired_drafts: list[ApprovalRecord] = []
+            expired_permissions: list[ApprovalRecord] = []
 
             for record in expired_records:
                 record.resolved_at = datetime.now(timezone.utc)
@@ -87,9 +99,16 @@ class ApprovalRegistry:
 
                 record.status = "TIMEOUT"
                 record.reason = (record.reason or "") + "\n\n[Auto-Rejected: TTL Expired]"
+                if record.action_type == EXTERNAL_AGENT_PERMISSION:
+                    expired_permissions.append(record)
 
             chat_ids = {record.chat_id for record in expired_records}
             await db.commit()
+
+        for record in expired_permissions:
+            # The turn waiting on it is refused, and the cards of it close.
+            pending_permission_answers.settle(record)
+            cls._publish_resolved(record, action="expired")
 
         # Neither step raises; running them together keeps one slow platform call from holding up the rest.
         await asyncio.gather(
@@ -165,70 +184,25 @@ class ApprovalRegistry:
             logger.error("Failed to publish approval event: %s", e)
 
         if chat_id and status == "PENDING" and action_type != _OUTBOUND_DRAFT:
-            await cls._push_card_to_chat_peer(record, chat_id)
+            await push_approval_card_to_chat_peer(record, chat_id)
 
         await cls._sync_copilot_pending(chat_id)
         return record
 
     @classmethod
-    async def _push_card_to_chat_peer(cls, record: ApprovalRecord, chat_id: str) -> None:
-        """Send the approval card to the IM peer of ``chat_id``; web chats have no peer. Best effort: never raises.
-
-        It is the notification dispatcher's card: in the owner's language, with decision buttons only where a click
-        can be resolved. It is built from the request's identity, severity and reason only: the payload (tool
-        arguments, drafted text) is not for whoever else is in the chat.
-        """
-        try:
-            from app.database.models.chat import Chat
-
-            async with get_session() as db:
-                chat = (await db.execute(select(Chat).where(Chat.id == chat_id))).scalar_one_or_none()
-            if not (chat and chat.source and chat.source != "web" and chat.channel_session_key):
-                return
-
-            from app.channels.types.messages import MessagePriority, OutboundMessage
-            from app.channels.types.session import SessionKey
-            from app.core.channel_bridge import get_channel_gateway
-            from app.core.channel_bridge.locale_provider import resolve_user_locale
-            from app.core.notifications.approval_card import build_approval_card
-
-            # The stored key may carry an epoch suffix (``:e=...``) that is not part of the peer's address.
-            session_key = SessionKey.parse(chat.channel_session_key.split(":e=")[0])
-            if not (session_key and session_key.peer_id):
-                return
-
-            content, components = build_approval_card(
-                {
-                    "approval_id": record.id,
-                    "action_type": record.action_type,
-                    "severity": record.severity,
-                    "reason": record.reason,
-                },
-                session_key.channel,
-                await resolve_user_locale(),
-            )
-            await get_channel_gateway().publish(
-                OutboundMessage(
-                    channel=session_key.channel,
-                    recipient_id=session_key.peer_id,
-                    user_id="sandbox",
-                    content=content,
-                    components=components,
-                    priority=MessagePriority.SYSTEM,
-                )
-            )
-            logger.info("Pushed approval card to channel '%s' for recipient '%s'", session_key.channel, session_key.peer_id)
-        except Exception as e:
-            logger.error("Failed to push approval card to channel: %s", e)
-
-    @classmethod
     async def resolve_approval(
-        cls, approval_id: str, decision: str, edited_payload: dict[str, object] | None = None
+        cls,
+        approval_id: str,
+        decision: str,
+        edited_payload: dict[str, object] | None = None,
+        comment: str | None = None,
     ) -> ApprovalRecord | None:
         """Resolve an approval and return the record for further processing.
 
         Args:
             decision: 'approve' or 'deny'
+            comment: why the person decided as they did; kept on an external agent's permission request so a refusal can
+                tell the agent why. Other approvals have nowhere to put it.
         """
         async with get_session() as db:
             # Check-then-update on one record: with the write lock taken first, a resolver racing this one waits
@@ -254,6 +228,10 @@ class ApprovalRegistry:
                 new_payload.update(edited_payload)
                 record.payload = new_payload
 
+            note = (comment or "").strip()[:DECISION_NOTE_CHARS]
+            if note and record.action_type == EXTERNAL_AGENT_PERMISSION:
+                record.payload = {**record.payload, DECISION_NOTE_KEY: note}
+
             await db.commit()
             await db.refresh(record)
 
@@ -262,8 +240,64 @@ class ApprovalRegistry:
             # reply sends or releases it and closes the sender's placeholder, whichever door it came through.
             # After the session is released: sending talks to the channel and must not hold a connection.
             await finalize_outbound_draft(record)
+        elif record.action_type == EXTERNAL_AGENT_PERMISSION:
+            # The turn waiting on the request carries on with the decision, whichever door it came through.
+            pending_permission_answers.settle(record)
+            cls._publish_resolved(record, action="decided")
         await cls._sync_copilot_pending(record.chat_id)
         return record
+
+    @classmethod
+    async def withdraw(cls, approval_id: str, *, status: str, note: str) -> bool:
+        """Close a pending approval nobody decided because the request behind it is over (its turn stopped or timed out).
+
+        Returns False when it was already decided. Open cards of it close on every device.
+        """
+        return bool(await cls._withdraw_pending(ApprovalRecord.id == approval_id, status=status, note=note))
+
+    @classmethod
+    async def withdraw_pending_of_type(cls, action_type: str, *, status: str, note: str) -> int:
+        """Close every pending approval of ``action_type``: the requests whose asker is gone (a restart ended its turn)."""
+        return await cls._withdraw_pending(ApprovalRecord.action_type == action_type, status=status, note=note)
+
+    @classmethod
+    async def _withdraw_pending(cls, condition: ColumnElement[bool], *, status: str, note: str) -> int:
+        async with get_session() as db:
+            await acquire_write_lock(db)  # a decision racing the withdrawal settles the record only once
+            records = (
+                (await db.execute(select(ApprovalRecord).where(and_(ApprovalRecord.status == "PENDING", condition))))
+                .scalars()
+                .all()
+            )
+            for record in records:
+                record.status = status
+                record.resolved_at = datetime.now(timezone.utc)
+                record.reason = f"{record.reason or ''}\n\n[{note}]"
+            await db.commit()
+        for record in records:
+            cls._publish_resolved(record, action="withdrawn")
+        for chat_id in {record.chat_id for record in records}:
+            await cls._sync_copilot_pending(chat_id)
+        return len(records)
+
+    @classmethod
+    def _publish_resolved(cls, record: ApprovalRecord, *, action: str) -> None:
+        """Tell every open surface that ``record`` is settled, so a card of it stops asking."""
+        try:
+            get_event_bus().publish(
+                AppEvent(
+                    event_type=AppEventType.APPROVAL_RESOLVED,
+                    data={
+                        "action": action,
+                        "approval_id": record.id,
+                        "chat_id": record.chat_id,
+                        "agent_id": record.agent_id,
+                        "decision": record.status,
+                    },
+                )
+            )
+        except Exception as e:
+            logger.error("Failed to publish approval resolution: %s", e)
 
     @classmethod
     async def get_approval(cls, approval_id: str) -> ApprovalRecord | None:

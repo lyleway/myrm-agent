@@ -183,7 +183,9 @@ export function ApprovalDrawer() {
               <DrawerTitle>
                 {queue.length > 1
                   ? tToolApproval('batchTitle', { count: queue.length })
-                  : tNotifications('approvalRequired', { actionType: queue[0]?.action_type || '' })}
+                  : queue[0]?.action_type === 'external_agent_permission'
+                    ? tToolApproval('externalAgentPermission.drawerTitle')
+                    : tNotifications('approvalRequired', { actionType: queue[0]?.action_type || '' })}
               </DrawerTitle>
               <DrawerDescription>
                 {queue.length > 1

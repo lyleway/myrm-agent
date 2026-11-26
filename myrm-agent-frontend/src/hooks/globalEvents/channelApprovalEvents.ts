@@ -7,7 +7,8 @@
  * - channelApprovalEventHandlers: 渠道配对 / 连接状态 / 群组 / 死信与工具审批事件的处理器表
  *
  * [POS]
- * 全局事件中与外部渠道、人工审批相关的部分：弹出提示并把事件转给订阅它的页面。
+ * 全局事件中与外部渠道、人工审批相关的部分：弹出提示并把事件转给订阅它的页面。外部 Agent 的权限请求
+ * 卡住了一个正在运行的回合，所以它直接打开审批抽屉，而不是等人点提示。
  */
 import { showMessageDeadLetteredToast } from '@/hooks/globalEvents/messageDeadLetteredToast';
 import { normalizeApprovalPayload } from '@/store/useApprovalStore';
@@ -62,6 +63,8 @@ const handleMessageDeadLettered: GlobalEventHandler = (payload, { t, notifyIfLea
   showMessageDeadLetteredToast(payload.data, { t, notifyIfLeader });
 };
 
+const EXTERNAL_AGENT_PERMISSION = 'external_agent_permission';
+
 const handleApprovalRequired: GlobalEventHandler = (payload, { t, pushToast, notifyIfLeader }) => {
   const actionType = String(payload.data.action_type ?? 'unknown');
   const normalizedApproval = normalizeApprovalPayload(payload.data);
@@ -70,7 +73,11 @@ const handleApprovalRequired: GlobalEventHandler = (payload, { t, pushToast, not
       mod.default.getState().openApproval(normalizedApproval);
     });
   };
-  pushToast.info(t('approvalRequired', { actionType }), {
+  const isPermissionRequest = actionType === EXTERNAL_AGENT_PERMISSION;
+  const title = isPermissionRequest
+    ? t('externalAgentPermissionRequired', { agent: normalizedApproval.payload?.agent ?? '' })
+    : t('approvalRequired', { actionType });
+  pushToast.info(title, {
     duration: 8_000,
     dismissible: true,
     action: {
@@ -78,7 +85,10 @@ const handleApprovalRequired: GlobalEventHandler = (payload, { t, pushToast, not
       onClick: openApprovalDialog,
     },
   });
-  notifyIfLeader(t('approvalRequired', { actionType }), actionType, openApprovalDialog);
+  notifyIfLeader(title, isPermissionRequest ? undefined : actionType, openApprovalDialog);
+  if (isPermissionRequest) {
+    openApprovalDialog();
+  }
   window.dispatchEvent(
     new CustomEvent('approval-required', {
       detail: normalizedApproval,

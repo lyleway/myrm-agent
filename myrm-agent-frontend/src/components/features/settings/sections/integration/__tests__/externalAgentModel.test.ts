@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ExternalAgentConfig } from '@/services/config';
+import type { ExternalAgentConfig, ExternalAgentPermissionMode } from '@/services/config';
 import {
   DEFAULT_AGENT,
   backendKeyFromCommand,
@@ -9,6 +9,7 @@ import {
   envRowProblems,
   newEnvRow,
   normalizePermissionMode,
+  permissionHintKey,
   toDraft,
 } from '../externalAgentModel';
 
@@ -73,10 +74,10 @@ describe('cleanAgent', () => {
     expect(cleanAgent(toDraft(agent))).toMatchObject({ timeout: 600, maxResponseChars: 20000 });
   });
 
-  it('trims the text, drops blank arguments and fixes a mode its type cannot honour', () => {
+  it('trims the text, drops blank arguments and replaces a mode of an older vocabulary', () => {
     const cleaned = cleanAgent({
       ...toDraft(stored({ name: '  claude-code ', command: ' claude ', args: ['-p', '  ', ''] })),
-      permissionMode: 'ask',
+      permissionMode: 'ask' as ExternalAgentPermissionMode,
     });
 
     expect(cleaned).toMatchObject({ name: 'claude-code', command: 'claude', args: ['-p'], permissionMode: 'safe' });
@@ -143,9 +144,25 @@ describe('envRowProblems', () => {
 });
 
 describe('permission and backend rules', () => {
-  it('keeps a mode the type can honour and falls back to read-only otherwise', () => {
-    expect(normalizePermissionMode('cli', 'allow_all')).toBe('allow_all');
-    expect(normalizePermissionMode('acp', 'ask')).toBe('safe');
+  it('keeps a mode on offer and falls back to the safe one for anything else', () => {
+    expect(normalizePermissionMode('allow_all')).toBe('allow_all');
+    expect(normalizePermissionMode('safe')).toBe('safe');
+    expect(normalizePermissionMode('ask')).toBe('safe');
+    expect(normalizePermissionMode('bypass')).toBe('safe');
+    expect(normalizePermissionMode('')).toBe('safe');
+  });
+
+  it.each([
+    ['acp', 'anything', 'permissionHintAsk'],
+    ['cli', 'claude', 'permissionHintAsk'],
+    ['cli', '/opt/bin/claude', 'permissionHintAsk'],
+    ['cli', 'codex', 'permissionHintReadOnly'],
+    ['cli', 'gemini', 'permissionHintReadOnly'],
+    ['cli', 'qwen', 'permissionHintReadOnly'],
+    ['cli', 'aider', 'permissionHintUnrestricted'],
+    ['cli', '', 'permissionHintUnrestricted'],
+  ] as const)('explains what the safe mode means for a %s agent running %s', (type, command, hint) => {
+    expect(permissionHintKey(type, command)).toBe(hint);
   });
 
   it.each([

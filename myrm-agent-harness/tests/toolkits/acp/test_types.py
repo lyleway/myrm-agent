@@ -9,7 +9,6 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeConfig,
     RuntimeEventType,
     create_event,
-    create_permission_request,
     delegation_session_id,
     normalize_workspace,
 )
@@ -22,7 +21,7 @@ class TestRuntimeConfig:
         assert cfg.args == []
         assert cfg.env is None
         assert cfg.timeout_seconds == 300
-        assert cfg.permission_mode == "allow_all"
+        assert cfg.permission_mode == "safe"
         assert cfg.max_response_chars == 50_000
 
     def test_custom_values(self) -> None:
@@ -32,12 +31,12 @@ class TestRuntimeConfig:
             args=["--acp"],
             env={"MY_VAR": "1"},
             timeout_seconds=120,
-            permission_mode="safe",
+            permission_mode="allow_all",
         )
         assert cfg.command == "codex"
         assert cfg.backend_type == "cli"
         assert cfg.timeout_seconds == 120
-        assert cfg.permission_mode == "safe"
+        assert cfg.permission_mode == "allow_all"
 
     def test_max_turns_default(self) -> None:
         cfg = RuntimeConfig(backend_type="acp", command="test")
@@ -114,15 +113,8 @@ class TestRuntimeEvent:
         assert event.session_id == "sess-1"
         assert event.timestamp > 0
 
-    @pytest.mark.asyncio
-    async def test_create_permission_request(self) -> None:
-        event, _future = create_permission_request("sess-1", "Write", {"path": "/tmp"})
-        assert event.type == RuntimeEventType.PERMISSION_REQUEST
-        assert event.data["tool_name"] == "Write"
-        assert "response_future" in event.data
-
     def test_event_types_count(self) -> None:
-        assert len(RuntimeEventType) == 9
+        assert len(RuntimeEventType) == 8
 
     def test_error_codes_count(self) -> None:
         assert len(AcpErrorCode) == 8

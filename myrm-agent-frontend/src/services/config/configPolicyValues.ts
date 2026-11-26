@@ -18,8 +18,12 @@ export type ExternalAgentType = 'cli' | 'acp';
 
 /**
  * External Agent permission mode.
+ *
+ * - `safe`: the agent may not change anything without the user's say-so (an agent that can ask does, one that
+ *   cannot runs read-only).
+ * - `allow_all`: the agent acts unattended.
  */
-export type ExternalAgentPermissionMode = 'allow_all' | 'ask' | 'safe';
+export type ExternalAgentPermissionMode = 'allow_all' | 'safe';
 
 /**
  * External Agent authentication mode.

@@ -1,0 +1,300 @@
+"""An ACP agent's permission requests and file calls, answered over the real SDK wire.
+
+The scripted agent (``_mock_acp_agent.py``) is a real SDK agent: it sends ``session/request_permission`` and
+``fs/read_text_file`` / ``fs/write_text_file`` through the SDK and reports what came back, so these tests
+cover what the runtime hands to the SDK and how the SDK's answer reads on the agent's side.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import pytest
+
+from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
+from myrm_agent_harness.toolkits.acp.types import (
+    PermissionBroker,
+    PermissionMode,
+    PermissionRequest,
+    PermissionVerdict,
+    RuntimeEventType,
+)
+
+from ._fakes import make_pool
+
+_PERMISSION_DENIED = "-32001"
+_INVALID_PARAMS = "-32602"
+_NOT_FOUND = "-32002"
+
+
+@dataclass
+class _Broker:
+    """A broker that answers every request the same way and remembers what it was asked."""
+
+    verdict: PermissionVerdict = field(default_factory=lambda: PermissionVerdict(allowed=True))
+    asked: list[PermissionRequest] = field(default_factory=list)
+
+    async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+        self.asked.append(request)
+        return self.verdict
+
+
+async def _report(
+    pool: RuntimePool, workspace: Path, verb: str, args: dict[str, object], *, broker: PermissionBroker | None
+) -> str:
+    """The agent's report of one scripted call: ``verb`` with ``args`` as the prompt."""
+    text: list[str] = []
+    async for event in pool.run_turn(
+        "mock",
+        f"/{verb} {json.dumps(args)}",
+        session_id="chat-1",
+        workspace=str(workspace),
+        permissions=broker,
+    ):
+        if event.type is RuntimeEventType.ERROR:
+            pytest.fail(f"the turn failed: {event.data}")
+        if event.type is RuntimeEventType.TEXT_DELTA:
+            text.append(str(event.data["content"]))
+    return "".join(text)
+
+
+async def _permission(
+    mode: PermissionMode, workspace: Path, args: dict[str, object], broker: PermissionBroker | None
+) -> str:
+    pool = make_pool(permission_mode=mode)
+    try:
+        return await _report(pool, workspace, "permission", args, broker=broker)
+    finally:
+        await pool.close_all()
+
+
+class TestPermissionRequests:
+    async def test_an_edit_the_broker_allows_is_answered_with_the_agents_allow_option(self, tmp_path: Path) -> None:
+        broker = _Broker()
+
+        report = await _permission("safe", tmp_path, {"kind": "edit", "title": "Edit notes.txt"}, broker)
+
+        assert report == "[permission] selected allow-once"
+        assert len(broker.asked) == 1
+
+    async def test_an_edit_the_broker_refuses_is_answered_with_the_agents_reject_option(self, tmp_path: Path) -> None:
+        broker = _Broker(PermissionVerdict(allowed=False))
+
+        report = await _permission("safe", tmp_path, {"kind": "execute", "title": "Run the tests"}, broker)
+
+        assert report == "[permission] selected reject-once"
+
+    async def test_a_request_with_nobody_to_ask_is_refused(self, tmp_path: Path) -> None:
+        report = await _permission("safe", tmp_path, {"kind": "edit", "title": "Edit notes.txt"}, None)
+
+        assert report == "[permission] selected reject-once"
+
+    @pytest.mark.parametrize("kind", ["read", "search", "think"])
+    async def test_a_request_that_only_reads_is_allowed_without_asking(self, tmp_path: Path, kind: str) -> None:
+        broker = _Broker(PermissionVerdict(allowed=False))
+
+        report = await _permission("safe", tmp_path, {"kind": kind, "title": "Look"}, broker)
+
+        assert report == "[permission] selected allow-once"
+        assert broker.asked == []
+
+    async def test_a_request_without_a_kind_is_asked_about(self, tmp_path: Path) -> None:
+        broker = _Broker()
+
+        await _permission("safe", tmp_path, {"title": "Do something"}, broker)
+
+        assert [request.kind for request in broker.asked] == ["other"]
+
+    async def test_allow_all_allows_everything_without_asking(self, tmp_path: Path) -> None:
+        broker = _Broker(PermissionVerdict(allowed=False))
+
+        report = await _permission("allow_all", tmp_path, {"kind": "execute", "title": "Run it"}, broker)
+
+        assert report == "[permission] selected allow-once"
+        assert broker.asked == []
+
+    async def test_the_broker_is_told_what_the_agent_wants_to_do(self, tmp_path: Path) -> None:
+        broker = _Broker()
+        link = tmp_path / "link.txt"
+        link.symlink_to(tmp_path / "real.txt")
+
+        await _permission(
+            "safe",
+            tmp_path,
+            {
+                "kind": "edit",
+                "title": "Edit files",
+                "raw_input": {"command": "sed -i s/a/b/ notes.txt"},
+                "locations": ["notes.txt", "link.txt"],
+                "diff_path": "notes.txt",
+            },
+            broker,
+        )
+
+        (request,) = broker.asked
+        assert (request.agent, request.session_id, request.kind, request.title) == (
+            "mock",
+            "chat-1",
+            "edit",
+            "Edit files",
+        )
+        assert request.input == {"command": "sed -i s/a/b/ notes.txt"}
+        assert request.tool_call_id == "call-1"
+        # Relative to the workspace, a link resolved, and a file named twice listed once.
+        assert request.paths == (str((tmp_path / "notes.txt").resolve()), str((tmp_path / "real.txt").resolve()))
+
+
+class TestFileWrites:
+    async def _write(
+        self, mode: PermissionMode, workspace: Path, args: dict[str, object], broker: PermissionBroker | None
+    ) -> str:
+        pool = make_pool(permission_mode=mode)
+        try:
+            return await _report(pool, workspace, "write", args, broker=broker)
+        finally:
+            await pool.close_all()
+
+    async def test_a_write_the_broker_allows_lands_on_disk_byte_for_byte(self, tmp_path: Path) -> None:
+        broker = _Broker()
+
+        report = await self._write("safe", tmp_path, {"path": "out/a.txt", "content": "one\r\ntwo\r\n"}, broker)
+
+        assert report == "[write] ok"
+        assert (tmp_path / "out" / "a.txt").read_bytes() == b"one\r\ntwo\r\n"
+        assert [request.paths for request in broker.asked] == [(str((tmp_path / "out" / "a.txt").resolve()),)]
+
+    async def test_a_write_the_broker_refuses_is_an_error_to_the_agent_and_writes_nothing(self, tmp_path: Path) -> None:
+        report = await self._write(
+            "safe", tmp_path, {"path": "a.txt", "content": "x"}, _Broker(PermissionVerdict(allowed=False))
+        )
+
+        assert report == f'[write] error {_PERMISSION_DENIED} Permission denied {{"path": "a.txt"}}'
+        assert not (tmp_path / "a.txt").exists()
+
+    async def test_a_write_with_nobody_to_ask_is_refused(self, tmp_path: Path) -> None:
+        report = await self._write("safe", tmp_path, {"path": "a.txt", "content": "x"}, None)
+
+        assert report == f'[write] error {_PERMISSION_DENIED} Permission denied {{"path": "a.txt"}}'
+        assert not (tmp_path / "a.txt").exists()
+
+    async def test_allow_all_writes_without_asking(self, tmp_path: Path) -> None:
+        broker = _Broker(PermissionVerdict(allowed=False))
+
+        report = await self._write("allow_all", tmp_path, {"path": "a.txt", "content": "x"}, broker)
+
+        assert report == "[write] ok"
+        assert broker.asked == []
+
+    async def test_a_write_outside_the_workspace_is_refused_before_anyone_is_asked(self, tmp_path: Path) -> None:
+        broker = _Broker()
+        outside = tmp_path.parent / "elsewhere.txt"
+
+        report = await self._write("allow_all", tmp_path, {"path": str(outside), "content": "x"}, broker)
+
+        assert report.startswith(f"[write] error {_INVALID_PARAMS} Invalid params")
+        assert not outside.exists()
+        assert broker.asked == []
+
+    async def test_a_write_the_person_allowed_with_the_edit_is_not_asked_about_again(self, tmp_path: Path) -> None:
+        broker = _Broker()
+        pool = make_pool(permission_mode="safe")
+        try:
+            report = await _report(pool, tmp_path, "edit", {"path": "a.txt", "content": "x"}, broker=broker)
+        finally:
+            await pool.close_all()
+
+        assert report == "[permission] selected allow-once [write] ok"
+        assert (tmp_path / "a.txt").read_text() == "x"
+        assert [request.title for request in broker.asked] == ["Edit a.txt"]
+
+    async def test_what_a_person_allowed_in_one_turn_is_not_allowed_in_the_next(self, tmp_path: Path) -> None:
+        pool = make_pool(permission_mode="safe")
+        try:
+            await _report(pool, tmp_path, "edit", {"path": "a.txt", "content": "x"}, broker=_Broker())
+            report = await _report(
+                pool,
+                tmp_path,
+                "write",
+                {"path": "a.txt", "content": "y"},
+                broker=_Broker(PermissionVerdict(allowed=False)),
+            )
+        finally:
+            await pool.close_all()
+
+        assert report == f'[write] error {_PERMISSION_DENIED} Permission denied {{"path": "a.txt"}}'
+        assert (tmp_path / "a.txt").read_text() == "x"
+
+
+class TestFileReads:
+    async def _read(self, workspace: Path, args: dict[str, object]) -> str:
+        pool = make_pool(permission_mode="safe")
+        try:
+            return await _report(pool, workspace, "read", args, broker=None)
+        finally:
+            await pool.close_all()
+
+    async def test_a_file_is_read_whole_without_asking_anyone(self, tmp_path: Path) -> None:
+        (tmp_path / "a.txt").write_bytes(b"one\r\ntwo\nthree")
+
+        assert await self._read(tmp_path, {"path": "a.txt"}) == '[read] "one\\r\\ntwo\\nthree"'
+
+    @pytest.mark.parametrize(
+        ("line", "limit", "expected"),
+        [(2, 1, "two\n"), (2, None, "two\nthree"), (None, 2, "one\ntwo\n"), (3, 5, "three"), (9, 1, "")],
+    )
+    async def test_line_and_limit_pick_lines_independently(
+        self, tmp_path: Path, line: int | None, limit: int | None, expected: str
+    ) -> None:
+        (tmp_path / "a.txt").write_bytes(b"one\ntwo\nthree")
+
+        report = await self._read(tmp_path, {"path": "a.txt", "line": line, "limit": limit})
+
+        assert report == f"[read] {json.dumps(expected)}"
+
+    async def test_a_file_outside_the_workspace_is_an_error(self, tmp_path: Path) -> None:
+        outside = tmp_path.parent / "outside.txt"
+        outside.write_text("classified")
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        report = await self._read(workspace, {"path": str(outside)})
+
+        assert report.startswith(f"[read] error {_INVALID_PARAMS} Invalid params")
+        assert "classified" not in report
+
+    async def test_a_file_that_does_not_exist_is_an_error(self, tmp_path: Path) -> None:
+        assert (await self._read(tmp_path, {"path": "missing.txt"})).startswith(
+            f"[read] error {_NOT_FOUND} Resource not found"
+        )
+
+    async def test_a_file_that_is_not_text_is_an_error_not_a_lossy_read(self, tmp_path: Path) -> None:
+        (tmp_path / "blob.bin").write_bytes(b"\xff\xfe\x00bad")
+
+        report = await self._read(tmp_path, {"path": "blob.bin"})
+
+        assert report.startswith(f"[read] error {_INVALID_PARAMS} Invalid params")
+        assert "not UTF-8 text" in report
+
+
+class TestWaitingForAPerson:
+    async def test_the_time_a_person_takes_is_not_the_time_the_agent_has(self, tmp_path: Path) -> None:
+        released = asyncio.Event()
+
+        class _SlowBroker:
+            async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+                await released.wait()
+                return PermissionVerdict(allowed=True)
+
+        pool = make_pool(permission_mode="safe", timeout_seconds=1)
+        try:
+            asyncio.get_running_loop().call_later(1.6, released.set)
+            report = await _report(
+                pool, tmp_path, "permission", {"kind": "edit", "title": "Edit"}, broker=_SlowBroker()
+            )
+        finally:
+            await pool.close_all()
+
+        assert report == "[permission] selected allow-once"

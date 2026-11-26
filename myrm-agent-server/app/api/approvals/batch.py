@@ -21,6 +21,7 @@ from myrm_agent_harness.agent.security.batch_risk import (
 from pydantic import BaseModel
 
 from app.database.models.approval import ApprovalRecord
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
 from app.services.approvals.registry import ApprovalRegistry
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,14 @@ class BatchApprovalRecordItem(BaseModel):
 
 class BatchApprovalListResponse(BaseModel):
     approvals: list[BatchApprovalRecordItem]
+
+
+def _first_tool_name(record: ApprovalRecord) -> str:
+    """The name of the first tool the approval waits on; approvals that are not about tool calls name their action type."""
+    tool_calls = record.payload.get("tool_calls")
+    if isinstance(tool_calls, list) and tool_calls and isinstance(tool_calls[0], dict):
+        return str(tool_calls[0].get("name", record.action_type))
+    return record.action_type
 
 
 @router.post("/batch-resolve", response_model=BatchApprovalListResponse)
@@ -72,11 +81,7 @@ async def batch_resolve_approvals(
         BatchApprovalItem(
             item_id=r.id,
             action_type=r.action_type,
-            tool_name=(
-                r.payload.get("tool_calls", [{}])[0].get("name", r.action_type)
-                if isinstance(r.payload.get("tool_calls"), list) and r.payload.get("tool_calls")
-                else r.action_type
-            ),
+            tool_name=_first_tool_name(r),
             severity=r.severity,
             reason=r.reason,
             payload=r.payload or {},
@@ -151,6 +156,10 @@ async def batch_resolve_approvals(
                 continue
 
             resolved_records.append(record)
+
+            if record.action_type == EXTERNAL_AGENT_PERMISSION:
+                # Resolving it woke the delegated turn that asked: nothing is resumed and the chat is still running.
+                continue
 
             if record.action_type == "knowledge_patch":
                 from app.api.approvals.knowledge_patch import handle_knowledge_patch_resolution

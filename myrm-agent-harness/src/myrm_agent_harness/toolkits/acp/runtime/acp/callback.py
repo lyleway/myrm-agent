@@ -2,39 +2,58 @@
 
 Implements the acp.Client callback interface: streams RuntimeEvent instances
 through an asyncio.Queue for real-time consumption by AcpRuntime._do_run_turn.
-Also handles permission requests and file read/write with path safety checks.
+Also answers permission requests (``permission_policy``) and serves the agent's file reads and
+writes inside the workspace, reporting every refusal and failure to the agent as a JSON-RPC error.
 
 [INPUT]
-- toolkits.acp.types::PermissionDecision, RuntimeConfig, RuntimeEvent, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
-- toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer. Provides decoupled event dispatch mechanism for the Runtime system with session isolation and type filtering.)
+- toolkits.acp.types::PermissionBroker, RuntimeConfig, RuntimeEvent, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.runtime.acp.permission_policy::AcpPermissionPolicy (POS: How a turn of an ACP agent is answered when the agent asks to do something)
+- acp (POS: ACP SDK; optional extra, imported when a callback runs)
 
 [OUTPUT]
 - AcpCallbackHandler: Implements acp.Client callbacks for the ACP runtime.
 
 [POS]
-ACP callback handler for the AcpRuntime backend.
+ACP callback handler for the AcpRuntime backend. It receives the SDK's own typed objects. A file is read and
+written as bytes, so what the agent writes is what lands on disk (line endings included), and a file that is not
+valid UTF-8 is refused instead of being read lossily and written back damaged.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.security.path import is_within_boundary
-from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus
+from myrm_agent_harness.toolkits.acp.runtime.acp.permission_policy import AcpPermissionPolicy
 from myrm_agent_harness.toolkits.acp.types import (
-    PermissionDecision,
+    PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
     create_event,
-    create_permission_request,
     normalize_workspace,
 )
 
+if TYPE_CHECKING:
+    from acp.schema import (
+        PermissionOption,
+        ReadTextFileResponse,
+        RequestPermissionResponse,
+        ToolCallUpdate,
+        WriteTextFileResponse,
+    )
+
 logger = logging.getLogger(__name__)
-_PERMISSION_REQUEST_TIMEOUT_SECONDS = 30.0
+
+# JSON-RPC implementation-defined error: the user (or the absence of anyone to ask) refused the write.
+_PERMISSION_DENIED_CODE = -32001
+# A line with its terminator; the last line may have none. Only CR, LF and CRLF end a line, as in an editor.
+_LINE = re.compile(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+")
 
 
 def _resolve_safe_path(path_str: str, cwd: str) -> Path | None:
@@ -61,15 +80,6 @@ def _get_attr(obj: object, *keys: str) -> object | None:
     return None
 
 
-def _as_dict(obj: object) -> dict[str, object]:
-    """Normalise an ACP payload (plain dict or pydantic model) to a dict."""
-    if isinstance(obj, dict):
-        return obj
-    dump = getattr(obj, "model_dump", None)
-    dumped = dump() if callable(dump) else None
-    return dumped if isinstance(dumped, dict) else {}
-
-
 def _extract_text_content(content: object) -> str | None:
     """Extract text from an ACP content block."""
     if content is None:
@@ -81,35 +91,29 @@ def _extract_text_content(content: object) -> str | None:
     return None
 
 
-def _find_option(options: list[object], kinds: tuple[str, ...]) -> str | None:
-    """Find the first option matching any of the given kinds."""
-    for opt in options:
-        opt_dict = _as_dict(opt)
-        if opt_dict.get("kind") in kinds:
-            return str(opt_dict.get("optionId", ""))
-    return None
+def _tool_output_text(content: object) -> str:
+    """The readable text of a tool call's content blocks: its text, and the files its edits touched."""
+    if not isinstance(content, Sequence) or isinstance(content, str):
+        return ""
+    lines: list[str] = []
+    for item in content:
+        kind = _get_attr(item, "type")
+        if kind == "content":
+            text = _extract_text_content(_get_attr(item, "content"))
+            if text:
+                lines.append(text)
+        elif kind == "diff":
+            lines.append(f"Edited {_get_attr(item, 'path')}")
+    return "\n".join(lines)
 
 
-def _select_outcome(option_id: str) -> dict[str, object]:
-    return {"outcome": {"outcome": "selected", "optionId": option_id}}
-
-
-def _cancel_outcome() -> dict[str, object]:
-    return {"outcome": {"outcome": "cancelled"}}
-
-
-def _reject_or_cancel(option_list: list[object]) -> dict[str, object]:
-    reject = _find_option(option_list, ("reject_once", "reject_always"))
-    if reject:
-        return _select_outcome(reject)
-    return _cancel_outcome()
-
-
-def _auto_allow(option_list: list[object]) -> dict[str, object]:
-    allow = _find_option(option_list, ("allow_once", "allow_always"))
-    if allow:
-        return _select_outcome(allow)
-    return _cancel_outcome()
+def _slice_lines(content: str, line: int | None, limit: int | None) -> str:
+    """The ``limit`` lines of ``content`` from 1-based ``line`` (the rest of the file when no limit is given)."""
+    if line is None and limit is None:
+        return content
+    start = max((line or 1) - 1, 0)
+    stop = None if limit is None else start + max(limit, 0)
+    return "".join(_LINE.findall(content)[start:stop])
 
 
 class AcpCallbackHandler:
@@ -120,20 +124,11 @@ class AcpCallbackHandler:
     for truncation and final assembly.
     """
 
-    def __init__(
-        self,
-        config: RuntimeConfig,
-        session_id: str,
-        *,
-        workspace: str,
-        event_bus: EventBus | None = None,
-        permission_request_timeout: float = _PERMISSION_REQUEST_TIMEOUT_SECONDS,
-    ) -> None:
+    def __init__(self, config: RuntimeConfig, session_id: str, *, agent: str, workspace: str) -> None:
         self._config = config
         self._session_id = session_id
         self._cwd = normalize_workspace(workspace)
-        self._event_bus = event_bus
-        self._permission_request_timeout = permission_request_timeout
+        self._policy = AcpPermissionPolicy(config.permission_mode, agent, self._cwd)
         self._text_parts: list[str] = []
         self._event_queue: asyncio.Queue[RuntimeEvent | None] = asyncio.Queue()
 
@@ -160,6 +155,15 @@ class AcpCallbackHandler:
                 self._event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    def begin_turn(self, permissions: PermissionBroker | None, session_id: str) -> None:
+        """Start the turn ``session_id`` (the host's id for it): ``permissions`` is who is asked while it runs."""
+        self.reset()
+        self._policy.begin_turn(permissions, session_id)
+
+    def end_turn(self) -> None:
+        """End the turn: nobody is asked for what the agent still does after it."""
+        self._policy.end_turn()
 
     def mark_done(self, stop_reason: str) -> None:
         """Signal that the prompt has completed. Pushes a DONE event + sentinel."""
@@ -208,13 +212,12 @@ class AcpCallbackHandler:
             if status in ("completed", "failed"):
                 tool_id = str(_get_attr(update, "tool_call_id", "toolCallId") or "")
                 self._text_parts.append(f"[tool update: {tool_id} -> {status}]\n")
-                output = str(_get_attr(update, "content") or "")
                 self._push_event(
                     create_event(
                         RuntimeEventType.TOOL_RESULT,
                         self._session_id,
                         tool_call_id=tool_id,
-                        output=output,
+                        output=_tool_output_text(content),
                         is_error=(status == "failed"),
                     )
                 )
@@ -227,152 +230,66 @@ class AcpCallbackHandler:
 
     async def request_permission(
         self,
-        options: list[object],
         session_id: str,
-        tool_call: object,
+        tool_call: ToolCallUpdate,
+        options: list[PermissionOption],
         **kwargs: object,
-    ) -> dict[str, object]:
-        """Handle permission requests based on configured permission_mode."""
-        option_list = options if isinstance(options, list) else []
-        tool_dict = _as_dict(tool_call)
-        tool_name = str(tool_dict.get("title") or tool_dict.get("name") or "unknown")
-        tool_input = {
-            key: value for key, value in tool_dict.items() if key in ("command", "path", "input", "arguments", "files")
-        }
-
-        mode = self._config.permission_mode
-        if mode == "safe":
-            return self._handle_safe_mode(tool_name, option_list)
-        if mode == "ask":
-            return await self._handle_ask_mode(session_id, tool_name, tool_input, option_list)
-        if mode == "bypass":
-            return _select_outcome("allow_always")
-        return _auto_allow(option_list)
-
-    def _handle_safe_mode(self, tool_name: str, option_list: list[object]) -> dict[str, object]:
-        """Safe mode: allow read operations, reject everything else."""
-        is_read_op = any(kw in tool_name.lower() for kw in ("read", "search", "list", "glob"))
-        if is_read_op:
-            allow = _find_option(option_list, ("allow_once", "allow_always"))
-            if allow:
-                return _select_outcome(allow)
-        return _reject_or_cancel(option_list)
-
-    async def _handle_ask_mode(
-        self,
-        session_id: str,
-        tool_name: str,
-        tool_input: dict[str, object],
-        option_list: list[object],
-    ) -> dict[str, object]:
-        """Ask mode: emit permission request event and await external decision.
-
-        With no event bus wired, no subscriber can answer, so read-only calls are
-        still allowed (matching ``safe``) and write calls fail closed with an
-        explicit log — never a silent denial of work.
-        """
-        if self._event_bus is None:
-            logger.warning(
-                "permission_request_ignored_ask_no_bus session_id=%s tool=%s",
-                self._session_id,
-                tool_name,
-            )
-            return self._handle_safe_mode(tool_name, option_list)
-
-        request_event, decision_future = create_permission_request(
-            session_id=session_id,
-            tool_name=tool_name,
-            tool_input=tool_input,
-        )
-        request_event.data["options"] = option_list
-        await self._event_bus.emit(request_event)
-
-        try:
-            decision = await asyncio.wait_for(
-                decision_future,
-                timeout=self._permission_request_timeout,
-            )
-        except (TimeoutError, RuntimeError):
-            logger.warning(
-                "permission_request_timeout session_id=%s tool=%s",
-                session_id,
-                tool_name,
-            )
-            decision = PermissionDecision.DENY_ONCE
-
-        selected_option = self._decision_to_option(option_list, decision)
-        if selected_option is None:
-            logger.warning(
-                "permission_request_invalid session_id=%s tool=%s decision=%s",
-                session_id,
-                tool_name,
-                decision,
-            )
-            return _cancel_outcome()
-        return _select_outcome(selected_option)
-
-    @staticmethod
-    def _decision_to_option(
-        option_list: list[object],
-        decision: PermissionDecision,
-    ) -> str | None:
-        deny_kinds = ("reject_once", "reject_always")
-
-        if decision == PermissionDecision.ALLOW_ALWAYS:
-            return _find_option(option_list, ("allow_always", "allow_once"))
-        if decision == PermissionDecision.ALLOW_ONCE:
-            return _find_option(option_list, ("allow_once", "allow_always"))
-        if decision == PermissionDecision.DENY_ALWAYS:
-            return _find_option(option_list, ("reject_always", "reject_once"))
-
-        return _find_option(option_list, deny_kinds)
+    ) -> RequestPermissionResponse:
+        """Answer the agent's request for permission to run a tool call, by the backend's permission mode."""
+        return await self._policy.answer(tool_call, options)
 
     async def read_text_file(
         self,
-        path: str,
         session_id: str,
-        limit: int | None = None,
+        path: str,
         line: int | None = None,
+        limit: int | None = None,
         **kwargs: object,
-    ) -> dict[str, str]:
-        """Read a file within the configured cwd (with path safety check)."""
+    ) -> ReadTextFileResponse:
+        """Read a UTF-8 file inside the workspace; anything else is an error the agent is told about."""
+        from acp import RequestError
+        from acp.schema import ReadTextFileResponse
+
         resolved = _resolve_safe_path(path, self._cwd)
         if resolved is None:
-            return {"content": f"[error] Path '{path}' is outside working directory"}
+            raise RequestError.invalid_params({"path": path, "reason": "the path is outside the workspace"})
         try:
-            # Bytes, not ``read_text``: text mode turns CRLF and lone CR into LF, and the agent's edit would then be
-            # written back with every line ending of the file changed.
-            content = resolved.read_bytes().decode("utf-8", errors="replace")
-            if line is not None and limit is not None:
-                lines = content.splitlines(keepends=True)
-                content = "".join(lines[max(0, line - 1) : line - 1 + limit])
-            return {"content": content}
+            data = resolved.read_bytes()
+        except FileNotFoundError as exc:
+            raise RequestError.resource_not_found(path) from exc
         except OSError as exc:
-            logger.warning("ACP file read failed: %s", exc)
-            return {"content": "[error] Cannot read file"}
+            logger.warning("acp_file_read_failed path=%s error=%s", path, exc)
+            raise RequestError.internal_error({"path": path, "reason": exc.strerror or type(exc).__name__}) from exc
+        try:
+            content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise RequestError.invalid_params({"path": path, "reason": "the file is not UTF-8 text"}) from exc
+        return ReadTextFileResponse(content=_slice_lines(content, line, limit))
 
     async def write_text_file(
         self,
-        content: str,
-        path: str,
         session_id: str,
+        path: str,
+        content: str,
         **kwargs: object,
-    ) -> dict[str, bool] | None:
-        """Write a file within the configured cwd (permission_mode gated)."""
-        if self._config.permission_mode in ("safe",):
-            logger.warning("write_text_file_denied path=%s", path)
-            return None
+    ) -> WriteTextFileResponse:
+        """Write a file inside the workspace, byte for byte, once the permission mode allows it."""
+        from acp import RequestError
+        from acp.schema import WriteTextFileResponse
 
         resolved = _resolve_safe_path(path, self._cwd)
         if resolved is None:
-            logger.warning("write_text_file_outside_cwd path=%s", path)
-            return None
+            logger.warning("acp_file_write_outside_workspace path=%s", path)
+            raise RequestError.invalid_params({"path": path, "reason": "the path is outside the workspace"})
+        if not await self._policy.allows_write(str(resolved)):
+            logger.info("acp_file_write_refused path=%s", path)
+            raise RequestError(_PERMISSION_DENIED_CODE, "Permission denied", {"path": path})
         try:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             # Bytes, not ``write_text``: text mode writes ``\n`` as ``\r\n`` on Windows, which would turn a CRLF text
             # into CR CR LF.
             resolved.write_bytes(content.encode("utf-8"))
-            return {"success": True}
         except OSError as exc:
-            logger.error("write_text_file_failed path=%s error=%s", path, exc)
-            return None
+            logger.error("acp_file_write_failed path=%s error=%s", path, exc)
+            raise RequestError.internal_error({"path": path, "reason": exc.strerror or type(exc).__name__}) from exc
+        return WriteTextFileResponse()

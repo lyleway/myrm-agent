@@ -10,7 +10,7 @@ Router 命令 mixin 域：`mixin.py` 把各命令族 mixin 组合成 `RouterComm
 |------|------|------|-------|
 | `__init__.py` | 门面 | 聚合门面，导出全部 mixin 与 `DraftAction` | ✅ |
 | `mixin.py` | 核心 | 组合基类 `RouterCommandsMixin` | ✅ |
-| `approval.py` / `approval_end.py` | 核心 | 审批命令与审批超时/被取代收尾 | ✅ |
+| `approval.py` / `approval_end.py` | 核心 | 审批命令与审批超时/被取代收尾；按钮点击落在被扣留回复（`outbound_draft`）或外部 Agent 的权限请求（`external_agent_permission`）上时，`resolve_approval` 之后只更新原卡片，不恢复 Agent 运行（前者已发出或释放，后者已唤醒等它的委托回合）；群聊旁观者的权限校验与其他审批一致 | ✅ |
 | `delegation.py` | 核心 | `/delegate` 委派与审批交接 | ✅ |
 | `draft.py` | 核心 | `/draft` 决定与 `DraftAction` | ✅ |
 | `goals.py` | 核心 | `/goal`、`/subgoal`、`/background`、`/handoff` | ✅ |

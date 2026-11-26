@@ -67,7 +67,7 @@ class TestProfiles:
         assert cli_launch_args("codex") == ["exec", "--json", "--skip-git-repo-check"]
 
     @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
-    @pytest.mark.parametrize("mode", ["safe", "ask", "allow_all", "bypass"])
+    @pytest.mark.parametrize("mode", ["safe", "allow_all"])
     def test_every_backend_and_mode_resolves_arguments(self, backend: str, mode: str) -> None:
         from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
 

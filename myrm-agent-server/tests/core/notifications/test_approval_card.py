@@ -296,3 +296,43 @@ class TestGenericApprovalCard:
         content, _ = build_approval_card(data, "telegram", "en")
 
         assert content == "⚠️ **Approval Required: delete_database**\nSeverity: `critical`"
+
+
+class TestExternalAgentPermissionCard:
+    DATA: dict[str, object] = {
+        "approval_id": "appr_7",
+        "action_type": "external_agent_permission",
+        "severity": "high",
+        "reason": "claude: Run: rm -rf build",
+    }
+
+    def test_it_says_who_asks_and_what_for_without_the_internal_action_type(self) -> None:
+        content, components = build_approval_card(self.DATA, "telegram", "en")
+
+        assert content == "🔐 **An external agent asks for your permission**\n\n> claude: Run: rm -rf build"
+        assert [button.action_id for button in _buttons(components)] == ["approval:approve:appr_7", "approval:deny:appr_7"]
+
+    def test_it_is_written_in_the_owners_language(self) -> None:
+        content, _ = build_approval_card(self.DATA, "telegram", "zh-CN")
+
+        assert content.startswith("🔐 **外部 Agent 请求你的许可**")
+
+    def test_other_channels_point_to_the_app(self) -> None:
+        content, components = build_approval_card(self.DATA, "slack", "en")
+
+        assert components == ()
+        assert content.endswith("Open the Myrm AI app to review and decide.")
+        assert "external_agent_permission" not in content
+
+    def test_what_the_agent_wrote_cannot_ping_a_channel(self) -> None:
+        content, _ = build_approval_card({**self.DATA, "reason": "claude: Run: echo <!channel> @everyone"}, "slack", "en")
+
+        assert "<!" not in content
+        assert "@everyone" not in content
+
+    def test_a_missing_reason_leaves_only_the_header(self) -> None:
+        data = {key: value for key, value in self.DATA.items() if key != "reason"}
+
+        content, _ = build_approval_card(data, "telegram", "en")
+
+        assert content == "🔐 **An external agent asks for your permission**"

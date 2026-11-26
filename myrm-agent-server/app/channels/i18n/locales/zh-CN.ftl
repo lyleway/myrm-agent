@@ -323,6 +323,7 @@ knowledge_patch_review_reason = 会话盲点知识转正建议: { $title }
 approval_card_title = ⚠️ **需要审批：{ $action }**
 approval_card_severity = 级别：`{ $severity }`
 approval_card_open_app = 请打开 Myrm AI 应用查看并处理。
+approval_permission_title = 🔐 **外部 Agent 请求你的许可**
 approval_draft_title = ✏️ **有一条回复等待你审核**
 approval_draft_incoming = **收到的消息**
 approval_draft_reply = **待发送的回复**

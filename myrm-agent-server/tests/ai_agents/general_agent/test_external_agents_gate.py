@@ -22,6 +22,7 @@ from app.ai_agents.general_agent.external_agents import (
     should_mount_invoke_acp_agent_tool,
 )
 from app.ai_agents.general_agent.external_agents_runtime_config import _permission_mode
+from app.services.external_agents.permission_broker import ChatPermissionBroker
 
 
 def test_auth_mode_resolves_api_key_and_subscription() -> None:
@@ -34,9 +35,10 @@ def test_permission_mode_keeps_each_known_mode(mode: str) -> None:
     assert _permission_mode({"permissionMode": mode}) == mode
 
 
-@pytest.mark.parametrize("raw", [None, "", "allow-all", "ALLOW_ALL", 3, ["safe"]])
+@pytest.mark.parametrize("raw", [None, "", "allow-all", "ALLOW_ALL", "ask", "bypass", 3, ["safe"]])
 def test_permission_mode_unknown_value_fails_closed_to_safe(raw: object) -> None:
-    # An unknown name would otherwise map to no CLI flag at all and leave the CLI on its own default.
+    # A name the harness does not know would stop the agent from launching; ``ask`` and ``bypass`` are names of an
+    # older vocabulary that stored settings may still hold.
     assert _permission_mode({"permissionMode": raw}) == "safe"
 
 
@@ -261,6 +263,7 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
     mixin = ExternalAgentsMixin.__new__(ExternalAgentsMixin)
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = None
+    mixin.agent_id = "agent-9"
     mixin._runtime_pool_scope_id = None
     mixin.declared_allowed_roots = ("/workspace/root",)
 
@@ -289,6 +292,7 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
         mock_pool,
         workspace="/workspace/root",
         session_scope=None,
+        permissions=ChatPermissionBroker(agent_id="agent-9", chat_id=None, workspace="/workspace/root"),
     )
 
 
@@ -297,6 +301,7 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
     mixin = ExternalAgentsMixin.__new__(ExternalAgentsMixin)
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = " chat-scope-1 "
+    mixin.agent_id = None
     mixin._runtime_pool_scope_id = None
     mixin.declared_allowed_roots = ("/workspace/chat-scope-1",)
 
@@ -333,6 +338,8 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
         mock_pool,
         workspace="/workspace/chat-scope-1",
         session_scope="chat-scope-1",
+        # The approvals belong to the chat as stored; only the pool's scope is the trimmed id.
+        permissions=ChatPermissionBroker(agent_id="default", chat_id=" chat-scope-1 ", workspace="/workspace/chat-scope-1"),
     )
 
 

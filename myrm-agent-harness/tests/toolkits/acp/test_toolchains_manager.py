@@ -325,6 +325,46 @@ class TestNpmInstall:
         assert "cannot start" in str(raised.value)
         assert "missing platform binary" in str(raised.value)
 
+    async def test_an_installed_cli_that_never_answers_version_is_not_a_success_and_is_stopped(
+        self, manager: IsolatedToolchainManager, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "version-pid.txt"
+        monkeypatch.setattr(manager_module, "VERSION_CHECK_SECONDS", 0.5)
+        _fake_npm(
+            manager,
+            f"""
+            prefix=""
+            while [ $# -gt 0 ]; do [ "$1" = "--prefix" ] && prefix="$2"; shift; done
+            mkdir -p "$prefix/bin"
+            printf '#!/bin/sh\\necho $$ > {pid_file}\\nexec sleep 30\\n' > "$prefix/bin/claude"
+            chmod +x "$prefix/bin/claude"
+            """,
+        )
+
+        with pytest.raises(ToolchainError, match="did not answer --version"):
+            await _run(manager)
+
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), 0)
+
+    async def test_a_cli_that_floods_its_version_output_still_names_its_first_line(
+        self, manager: IsolatedToolchainManager
+    ) -> None:
+        _fake_npm(
+            manager,
+            """
+            prefix=""
+            while [ $# -gt 0 ]; do [ "$1" = "--prefix" ] && prefix="$2"; shift; done
+            mkdir -p "$prefix/bin"
+            printf '#!/bin/sh\\necho "1.2.3 (loud)"\\nyes x | head -c 3000000\\n' > "$prefix/bin/claude"
+            chmod +x "$prefix/bin/claude"
+            """,
+        )
+
+        messages = await _run(manager)
+
+        assert messages[-1] == "Successfully installed claude 1.2.3 (loud)"
+
     async def test_missing_npm_is_reported(self, manager: IsolatedToolchainManager) -> None:
         with pytest.raises(ToolchainError, match="no npm"):
             await _run(manager)

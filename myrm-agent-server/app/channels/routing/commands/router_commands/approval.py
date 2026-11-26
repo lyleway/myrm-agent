@@ -31,6 +31,7 @@ from app.channels.routing.pending_approvals import answer_resume_message
 from app.channels.routing.router_host import RouterCommandsHost
 from app.channels.routing.router_keys import routing_state_key
 from app.channels.types import InboundMessage, OutboundMessage
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
 
 from ..parsers import ApprovalDecision, DenyWithReason
 
@@ -281,8 +282,9 @@ class RouterCommandsApprovalMixin:
         sender_display = str(msg.metadata.get("username") or msg.sender_id or "")
         await _show_outcome_on_card(self._bus, msg, chat_id, outcome_key, user=sender_display)
 
-        # A held reply has no agent run to resume: resolving it has already sent or released it.
-        if record.action_type == _OUTBOUND_DRAFT:
+        # Neither has an agent run to resume: resolving a held reply has already sent or released it, and resolving an
+        # external agent's permission request has woken the delegated turn that asked.
+        if record.action_type in (_OUTBOUND_DRAFT, EXTERNAL_AGENT_PERMISSION):
             return
 
         # --- Resume the interrupted Agent ---

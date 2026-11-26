@@ -2,7 +2,7 @@
 - app.services / app.core schedulers (POS: the schedulers this module starts)
 
 [OUTPUT]
-- _login_session_cleanup_scheduler, _auth_log_cleanup_scheduler, _approval_ttl_scheduler_task, _cancellation_cleanup_scheduler_task, _login_session_cleanup_scheduler_task, _auth_log_cleanup_scheduler_task, _approval_ttl_job, start_approval_ttl_scheduler, stop_approval_ttl_scheduler, _cancellation_token_cleanup_job, start_cancellation_cleanup_scheduler, stop_cancellation_cleanup_scheduler, _login_session_cleanup_job, start_login_session_cleanup_scheduler, stop_login_session_cleanup_scheduler, _auth_log_cleanup_job, start_auth_log_cleanup_scheduler, stop_auth_log_cleanup_scheduler
+- _login_session_cleanup_scheduler, _auth_log_cleanup_scheduler, _approval_ttl_scheduler_task, _cancellation_cleanup_scheduler_task, _login_session_cleanup_scheduler_task, _auth_log_cleanup_scheduler_task, _approval_ttl_job, _withdraw_orphaned_permission_requests, start_approval_ttl_scheduler, stop_approval_ttl_scheduler, _cancellation_token_cleanup_job, start_cancellation_cleanup_scheduler, stop_cancellation_cleanup_scheduler, _login_session_cleanup_job, start_login_session_cleanup_scheduler, stop_login_session_cleanup_scheduler, _auth_log_cleanup_job, start_auth_log_cleanup_scheduler, stop_auth_log_cleanup_scheduler
 
 [POS]
 Lifecycle schedulers: approval TTL, cancellation-token, login-session and auth-log cleanup.
@@ -50,6 +50,25 @@ async def _approval_ttl_job() -> None:
         logger.warning("Approval TTL cleanup failed: %s", exc)
 
 
+async def _withdraw_orphaned_permission_requests() -> None:
+    """Close the permission requests of external agents whose turn ended with the previous server process.
+
+    Nothing waits for them any more, so an answer would reach no agent; closing them now spares the person a card
+    that would only sit there until its expiry.
+    """
+    try:
+        from app.services.approvals.external_agent_permission import ACTION_TYPE
+        from app.services.approvals.registry import ApprovalRegistry
+
+        withdrawn = await ApprovalRegistry.withdraw_pending_of_type(
+            ACTION_TYPE, status="CANCELLED", note="Withdrawn: the server restarted"
+        )
+        if withdrawn:
+            logger.info("Withdrew %d external agent permission request(s) left by the previous server process", withdrawn)
+    except Exception as exc:
+        logger.warning("Withdrawing orphaned external agent permission requests failed: %s", exc)
+
+
 async def start_approval_ttl_scheduler() -> None:
     """Start approval TTL auto-downgrade scheduler (every 5 minutes)."""
     global _approval_ttl_scheduler_task
@@ -60,6 +79,7 @@ async def start_approval_ttl_scheduler() -> None:
 
         async def run_scheduler() -> None:
             """Run scheduler in context manager."""
+            await _withdraw_orphaned_permission_requests()
             async with AsyncScheduler() as scheduler:
                 await scheduler.add_schedule(
                     _approval_ttl_job,

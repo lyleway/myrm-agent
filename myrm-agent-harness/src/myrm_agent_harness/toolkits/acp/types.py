@@ -1,7 +1,7 @@
 """Core type definitions for the ACP runtime system.
 
 Defines the fundamental abstractions: RuntimeBackend Protocol, RuntimeEvent,
-error codes, configuration, and permission types. All other ACP runtime modules
+error codes, configuration, and the permission vocabulary. All other ACP runtime modules
 depend on this module.
 
 
@@ -20,8 +20,8 @@ no - Base type definition module
 - delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
 - CliSessionRecord: a CLI-native session id bound to the working directory that created it
 - CliSessionStore: protocol a host implements to keep CLI session records across process restarts
-- PermissionMode: Permission pattern type
-- PermissionDecision: Permission decision enum
+- PermissionMode: what a delegated agent may do without asking (``safe`` or ``allow_all``)
+- PermissionRequest, PermissionVerdict, PermissionBroker: one action a ``safe`` agent asks to take, the answer, and the host-side party that puts it to a person
 
 [POS]
 ACP runtime type definitions layer. Provides all ACP-related core abstractions and data
@@ -30,7 +30,6 @@ structures, serving as the foundation for the entire ACP module.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from collections.abc import AsyncGenerator
@@ -50,7 +49,6 @@ class RuntimeEventType(StrEnum):
     REASONING_DELTA = "reasoning_delta"
     TOOL_START = "tool_start"
     TOOL_RESULT = "tool_result"
-    PERMISSION_REQUEST = "permission_request"
     USAGE_UPDATE = "usage_update"
     STATUS_UPDATE = "status_update"
     ERROR = "error"
@@ -91,7 +89,9 @@ class ContinuityStatus(StrEnum):
 # takes none); the agent still has the image's location in the prompt.
 IMAGES_NOT_SENT_STATUS = "images_not_sent"
 
-PermissionMode = Literal["safe", "ask", "allow_all", "bypass"]
+# ``safe``: the agent reads freely and asks before anything else (an edit, a command, a download); where nobody can
+# answer it, it may only read. ``allow_all``: the agent acts without asking.
+PermissionMode = Literal["safe", "allow_all"]
 
 BackendType = Literal["acp", "cli"]
 
@@ -124,11 +124,7 @@ class AcpError:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeEvent:
-    """A single event emitted during a runtime turn.
-
-    For ``permission_request`` events, ``data["response_future"]`` contains an
-    ``asyncio.Future[PermissionDecision]`` that the subscriber must resolve.
-    """
+    """A single event emitted during a runtime turn."""
 
     type: RuntimeEventType
     data: dict[str, object]
@@ -146,6 +142,9 @@ class BackendCapabilities:
     supports_tools: bool = True
     # Image files can be attached to a turn (``run_turn(images=...)``); a backend without it is told nothing about them.
     supports_images: bool = False
+    # In ``safe`` mode the backend puts what it may not do on its own to the turn's ``PermissionBroker``; a backend
+    # without it can only refuse, so there ``safe`` means read-only.
+    supports_permission_requests: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +178,7 @@ class RuntimeConfig:
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
     timeout_seconds: int = 300
-    permission_mode: PermissionMode = "allow_all"
+    permission_mode: PermissionMode = "safe"
     auth_mode: AuthMode = "subscription"
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
     max_response_chars: int = 50_000
@@ -200,18 +199,45 @@ class CliSessionRecord:
     cwd: str
 
 
-class PermissionDecision(StrEnum):
-    """Possible outcomes for a permission request."""
+@dataclass(frozen=True, slots=True)
+class PermissionRequest:
+    """One action a ``safe`` agent asks to take, as much of it as the agent says."""
 
-    ALLOW_ONCE = "allow_once"
-    ALLOW_ALWAYS = "allow_always"
-    DENY_ONCE = "deny_once"
-    DENY_ALWAYS = "deny_always"
+    agent: str
+    session_id: str
+    tool_name: str
+    # The agent's own kind of tool: ``read``, ``search``, ``edit``, ``delete``, ``move``, ``execute``, ``fetch``, ``think``
+    # or ``other`` (what an agent does not classify).
+    kind: str
+    title: str
+    # What the agent is about to do (the command, the file); loosely typed because each agent words it its own way.
+    input: dict[str, object]
+    paths: tuple[str, ...] = ()
+    tool_call_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PermissionVerdict:
+    """A person's answer to a ``PermissionRequest``; ``message`` is why it was refused, for agents that can be told."""
+
+    allowed: bool
+    message: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
+
+
+class PermissionBroker(Protocol):
+    """Puts one permission request of a delegated agent to a person and returns what they decided.
+
+    A host implements it and hands it to a turn. ``decide`` waits as long as the person takes (the turn's own time
+    limit stands still meanwhile) and ends the wait itself, with a refusal, when it gives up. A turn without a broker
+    has nobody to ask, so a ``safe`` agent there may only read; a ``decide`` that raises refuses the request.
+    """
+
+    async def decide(self, request: PermissionRequest) -> PermissionVerdict: ...
 
 
 @runtime_checkable
@@ -238,6 +264,7 @@ class RuntimeBackend(Protocol):
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...
 
     async def cancel(self, session_id: str) -> None: ...
@@ -271,6 +298,7 @@ class DelegationPool(Protocol):
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...
 
     async def cancel(self, name: str, session_id: str) -> None: ...
@@ -329,27 +357,3 @@ def create_event(
 def images_not_sent_event(session_id: str, images: int) -> RuntimeEvent:
     """The notice that the ``images`` image files of a turn were not handed to the agent."""
     return create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=IMAGES_NOT_SENT_STATUS, images=images)
-
-
-def create_permission_request(
-    session_id: str,
-    tool_name: str,
-    tool_input: dict[str, object],
-) -> tuple[RuntimeEvent, asyncio.Future[PermissionDecision]]:
-    """Create a permission_request event with its response Future.
-
-    Returns:
-        A (event, future) tuple. The subscriber resolves the future with a
-        PermissionDecision; the runtime awaits it.
-    """
-    future: asyncio.Future[PermissionDecision] = asyncio.get_running_loop().create_future()
-    event = RuntimeEvent(
-        type=RuntimeEventType.PERMISSION_REQUEST,
-        data={
-            "tool_name": tool_name,
-            "tool_input": tool_input,
-            "response_future": future,
-        },
-        session_id=session_id,
-    )
-    return event, future

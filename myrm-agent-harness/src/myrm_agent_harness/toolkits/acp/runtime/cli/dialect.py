@@ -3,6 +3,7 @@
 The CLIs share the NDJSON event vocabulary (``parser``) but not their command lines: Claude resumes with a
 ``--resume <id>`` flag, Codex with an ``exec resume <id>`` subcommand, only Claude has a native turn limit, and
 an attached image reaches Claude as a base64 block in its stream-json input and Codex as an ``--image`` file.
+Only Claude can hand its permission prompts to the host (``--permission-prompt-tool``).
 Keeping those differences in one place leaves the runtime free of per-CLI branching.
 
 [INPUT]
@@ -10,7 +11,7 @@ Keeping those differences in one place leaves the runtime free of per-CLI branch
 - toolkits.acp.runtime.image_blocks::ImageBlock (POS: Image input shared by CliRuntime and AcpRuntime)
 
 [OUTPUT]
-- CliDialect: launch differences of one CLI (resume, native turn limit, partial-message streaming, images, environment)
+- CliDialect: launch differences of one CLI (resume, native turn limit, partial-message streaming, images, permission prompts, environment)
 - dialect_for: the dialect of a command, or None for a CLI without a known one
 - has_native_turn_limit: whether a command's CLI stops itself at the configured turn limit
 - is_session_id: whether a string has the shape of a CLI session id
@@ -52,6 +53,8 @@ class CliDialect:
     # block in its input (``sends_image_blocks``, ``with_image_blocks``).
     takes_images = False
     sends_image_blocks = False
+    # Whether the CLI can hand its permission prompts to the host while it runs (``with_permission_bridge``).
+    asks_host = False
 
     def is_resuming(self, args: list[str]) -> bool:
         """Whether the configured args already pick the conversation themselves."""
@@ -82,6 +85,10 @@ class CliDialect:
         """``args`` and the stdin ``prompt`` carrying this turn's images as blocks; unchanged for a CLI that takes none."""
         return args, prompt
 
+    def with_permission_bridge(self, args: list[str], tool: str, config_path: str) -> list[str]:
+        """``args`` sending the CLI's permission prompts to the MCP ``tool`` that ``config_path`` connects; unchanged for a CLI that cannot ask."""
+        return args
+
     def _resume(self, args: list[str], cli_session_id: str) -> list[str] | None:
         return None
 
@@ -95,9 +102,14 @@ class _ClaudeDialect(CliDialect):
     env_defaults = MappingProxyType({"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"})
     takes_images = True
     sends_image_blocks = True
+    asks_host = True
 
     def is_resuming(self, args: list[str]) -> bool:
         return "--resume" in args
+
+    def with_permission_bridge(self, args: list[str], tool: str, config_path: str) -> list[str]:
+        """``--permission-prompt-tool`` names the MCP tool to ask; ``--mcp-config`` connects the CLI to it."""
+        return [*args, "--permission-prompt-tool", tool, "--mcp-config", config_path]
 
     def with_image_blocks(self, args: list[str], prompt: str, blocks: Sequence[ImageBlock]) -> tuple[list[str], str]:
         """Claude takes images as base64 blocks of one user message in ``--input-format stream-json``.

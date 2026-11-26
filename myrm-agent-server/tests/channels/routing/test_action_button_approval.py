@@ -24,6 +24,8 @@ from app.channels.routing.router_models import _ActiveTask
 from app.channels.types import InboundMessage
 from app.database.models.approval import ApprovalRecord
 from app.database.models.base import Base
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
+from app.services.approvals.external_agent_permission import pending_permission_answers
 from tests.support.pending_approvals import empty_registry
 
 _engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -276,6 +278,40 @@ class TestActionButtonAuthorisation:
         )
         await host._handle_action_button_approval(msg)
         host._gate.submit.assert_called_once()
+
+
+class TestExternalAgentPermissionClick:
+    """An external agent's permission request is answered by the delegated turn waiting on it, not by a resumed run."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("click", "allowed"), [("approve", True), ("deny", False)])
+    async def test_a_click_decides_the_request_and_resumes_no_agent_run(self, click: str, allowed: bool):
+        host = _host()
+        key = routing_session_key("telegram", "chat-1")
+        host._active_tasks[key] = _make_active_task("alice")
+        await _seed("appr-perm-1", action_type=EXTERNAL_AGENT_PERMISSION)
+        waiting = pending_permission_answers.expect("appr-perm-1")
+
+        await host._handle_action_button_approval(_action_msg(f"approval:{click}:appr-perm-1"))
+
+        assert (await asyncio.wait_for(waiting, timeout=2)).allowed is allowed
+        host._gate.submit.assert_not_called()
+        assert await _status_of("appr-perm-1") == ("APPROVED" if allowed else "REJECTED")
+
+    @pytest.mark.asyncio
+    async def test_a_group_bystander_cannot_allow_what_the_agent_asks(self):
+        host = _host()
+        key = routing_session_key("telegram", "chat-1")
+        host._active_tasks[key] = _make_active_task("alice")
+        await _seed("appr-perm-2", action_type=EXTERNAL_AGENT_PERMISSION)
+        waiting = pending_permission_answers.expect("appr-perm-2")
+
+        await host._handle_action_button_approval(_action_msg("approval:approve:appr-perm-2", sender_id="bob", is_group=True))
+
+        assert not waiting.done()
+        assert await _status_of("appr-perm-2") == "PENDING"
+        waiting.cancel()
+        pending_permission_answers.forget("appr-perm-2")
 
 
 class TestActionButtonResolve:

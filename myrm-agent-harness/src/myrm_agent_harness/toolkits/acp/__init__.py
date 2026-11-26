@@ -9,7 +9,6 @@ Facades and contracts (root):
 - acp_agent_tools.py: Delegate-to-agent tool factory for the agent layer.
 
 Shared infrastructure (core/):
-- core/event_bus.py: Unified event bus (publish-subscribe)
 - core/backend_detector.py: CLI backend auto-detection
 - auth/: subscription login, credential detection, and credential import for CLI backends
 

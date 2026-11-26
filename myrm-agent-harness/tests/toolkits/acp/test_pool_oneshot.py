@@ -45,7 +45,7 @@ class _FakeBackend:
         self.closed = False
 
     async def run_turn(
-        self, prompt: str, session_id: str, *, mcp_servers=None, images=None
+        self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None
     ) -> AsyncIterator[RuntimeEvent]:
         self.started.set()
         if self.fail:

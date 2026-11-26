@@ -251,10 +251,6 @@ class TestLaunchArgs:
         assert codex_safe[codex_safe.index("--sandbox") + 1] == "read-only"
         assert "--full-auto" not in codex_safe
 
-        codex_bypass = await launched("codex", args=["exec", "--json"], permission_mode="bypass")
-        assert "--dangerously-bypass-approvals-and-sandbox" in codex_bypass
-        assert "--sandbox" not in codex_bypass
-
         codex_dup = await launched("codex", args=["exec", "--json", "-s", "read-only"], permission_mode="allow_all")
         assert codex_dup.count("--sandbox") == 1
         assert codex_dup[codex_dup.index("--sandbox") + 1] == "workspace-write"
@@ -265,9 +261,10 @@ class TestLaunchArgs:
         assert gemini_eq.count("--approval-mode") == 1
         assert gemini_eq[gemini_eq.index("--approval-mode") + 1] == "yolo"
 
-        for name, expected in (("gemini", "auto_edit"), ("qwen", "auto-edit")):
-            edit = await launched(name, args=[], permission_mode="ask")
-            assert edit[edit.index("--approval-mode") + 1] == expected
+        # Gemini and Qwen have no way to ask the host, so ``safe`` is their read-only mode.
+        for name in ("gemini", "qwen"):
+            read_only = await launched(name, args=[], permission_mode="safe")
+            assert read_only[read_only.index("--approval-mode") + 1] == "plan"
 
         gemini_sandbox = await launched("gemini", args=["-s"], permission_mode="safe")
         assert "-s" in gemini_sandbox

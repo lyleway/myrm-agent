@@ -8,7 +8,7 @@
 | `dispatchGlobalEvent.ts`      | 事件类型 → 处理器注册表（两张表认领同一类型时加载即抛错）；只需唤醒页面的事件（`memory_history_updated` / `subagents_updated` / `cron_updated` / `budget_updated` / `goal:branch_switched` / `workspace_file_changed` / `async_agent_stream_chunk` / `extension_status_changed` / `managed_policy_updated`）直接转成 window 事件；未知类型忽略 |
 | `eventTypes.ts`               | 共享契约：`SSEPayload`、`GlobalEventDeps`、`GlobalEventHandler`、`PushToast`、`GlobalEventTranslator`、`DebounceTimers` |
 | `scheduleDebounced.ts`        | 按 key 防抖：成串到达的事件合并为静默 `delayMs` 后的一次刷新 |
-| `channelApprovalEvents.ts`    | `pairing_pending` / `channel_connected` / `channel_disconnected` / `groups_updated` / `message_dead_lettered` / `approval_required` / `approval_resolved` |
+| `channelApprovalEvents.ts`    | `pairing_pending` / `channel_connected` / `channel_disconnected` / `groups_updated` / `message_dead_lettered` / `approval_required` / `approval_resolved`；外部 Agent 的权限请求（`external_agent_permission`）卡着一个正在运行的回合，所以用自己的提示文案并直接打开审批抽屉，其余审批仍等人点提示 |
 | `skillEvents.ts`              | `new_skill_draft` / `skill_growth_updated` / `skill_evolved`：提示直达 `/settings/evolutionPending`，并转成技能页订阅的 window 事件；`skill_pool_updated`（安装 / 卸载 / 同步 / 归档）静默 300ms 后合并为一次本地技能列表与启用配置重载，并转成 window 事件 |
 | `systemEvents.ts`             | `idle_status` / `run_digest_updated` / `system_notification`（含后台任务完成时刷新目标与任务列表、`voice-bg-done`）/ `memory_operation` / `locator_healed` / `mcp_auth_required` / `oauth_reauth_required` / `kanban_task_updated` |
 | `alertEvents.ts`              | `health_alert`（整机 / 云端记忆备份失败走专用 toast，其余失败为通用错误 toast 与系统通知）/ `budget_alert`（`work_units` 用尽弹对话框并刷新权益，其余按严重度 toast） |

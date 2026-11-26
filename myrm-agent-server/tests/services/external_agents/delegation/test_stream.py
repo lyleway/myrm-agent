@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 from myrm_agent_harness.api import AgentEventType
-from myrm_agent_harness.toolkits.acp.types import AuthMode, RuntimeEventType
+from myrm_agent_harness.toolkits.acp.types import (
+    AuthMode,
+    PermissionRequest,
+    PermissionVerdict,
+    RuntimeEventType,
+)
 
 from app.services.external_agents.delegation.stream import _token_count
 from tests.support.scripted_delegation import (
@@ -43,6 +48,28 @@ async def test_a_turn_without_images_hands_the_pool_none(images: list[str] | Non
     await stream_turn(pool, images=images)
 
     assert pool.turn_images == [None]
+
+
+class _Refuser:
+    async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+        return PermissionVerdict(allowed=False)
+
+
+async def test_the_broker_of_the_turn_reaches_the_pool() -> None:
+    pool = ScriptedPool(playing())
+    broker = _Refuser()
+
+    await stream_turn(pool, permissions=broker)
+
+    assert pool.turn_permissions == [broker]
+
+
+async def test_a_turn_without_a_broker_hands_the_pool_none() -> None:
+    pool = ScriptedPool(playing())
+
+    await stream_turn(pool)
+
+    assert pool.turn_permissions == [None]
 
 
 async def test_a_turn_streams_its_text_and_reasoning_between_a_running_and_a_completed_status_step() -> None:

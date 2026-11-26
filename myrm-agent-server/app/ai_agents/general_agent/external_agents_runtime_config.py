@@ -65,16 +65,11 @@ def _auth_mode(cfg: dict[str, object]) -> AuthMode:
 def _permission_mode(cfg: dict[str, object]) -> PermissionMode:
     """Resolve the configured permission mode; a missing or unknown value fails closed to ``safe``.
 
-    The harness adds no CLI flag for a mode name it does not know, which would leave the CLI on its
-    own default (possibly permissive), so the name is validated here instead.
+    The harness refuses to launch under a mode name it does not know, so the name is validated here instead.
     """
     match cfg.get("permissionMode"):
-        case "ask":
-            return "ask"
         case "allow_all":
             return "allow_all"
-        case "bypass":
-            return "bypass"
         case "safe" | None:
             return "safe"
         case other:
