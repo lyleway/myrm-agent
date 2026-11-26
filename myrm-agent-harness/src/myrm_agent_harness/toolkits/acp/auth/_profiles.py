@@ -14,6 +14,7 @@ no — leaf module, standard library only
 - profile_for: Resolve an AuthProfile from a backend name or command.
 - cli_launch_args: Baseline non-interactive launch args for a backend.
 - resolve_cli_args: Merge launch args with config args and permission-mode args.
+- without_approval_flags: Config args minus the flags that let a known agent skip asking, for transports where the host answers.
 
 [POS]
 Authentication profile registry for the ACP auth subsystem. Sole owner of per-CLI
@@ -280,9 +281,18 @@ def _permission_backends() -> frozenset[str]:
     return backends
 
 
-def _strip_permission_flags(backend: str, args: list[str]) -> list[str]:
-    """Drop the permission flags this backend's mapping owns, plus their values."""
+# The flags that confine what an approved action may do (codex's sandbox) rather than whether anyone is asked.
+_SANDBOX_FLAGS = frozenset({"-s", "--sandbox"})
+_SANDBOX_PREFIX = "--sandbox="
+
+
+def _strip_permission_flags(backend: str, args: list[str], *, keep_sandbox: bool = False) -> list[str]:
+    """Drop the permission flags this backend's mapping owns, plus their values (the sandbox's too unless kept)."""
     flag_lookup, value_flags, prefix_flags = _PERMISSION_FLAGS_BY_BACKEND[backend]
+    if keep_sandbox:
+        flag_lookup = flag_lookup - _SANDBOX_FLAGS
+        value_flags = value_flags - _SANDBOX_FLAGS
+        prefix_flags = tuple(prefix for prefix in prefix_flags if prefix != _SANDBOX_PREFIX)
     kept: list[str] = []
     skip_value = False
     for arg in args:
@@ -331,6 +341,21 @@ def resolve_cli_args(
     owned = _strip_permission_flags(profile.backend, configured_args)
     merged.extend(_without_restated(owned, profile.cli_launch_args))
     return merged
+
+
+def without_approval_flags(backend_or_command: str, configured_args: list[str]) -> list[str]:
+    """``configured_args`` minus the flags that let a known agent act without asking (``--yolo``, ``--approval-mode``…).
+
+    For a transport on which the host answers every request the agent makes (ACP), the host's policy is the only owner
+    of what needs a person's say-so, and an agent started in a mode that never asks would walk past it. The sandbox
+    flags stay: they confine what an approved action may do, which is no approval at all. An unknown command passes
+    through untouched.
+    """
+    profile = profile_for(backend_or_command)
+    if profile is None:
+        return list(configured_args)
+    _permission_backends()
+    return _strip_permission_flags(profile.backend, configured_args, keep_sandbox=True)
 
 
 def _option_units(args: tuple[str, ...]) -> list[tuple[str, ...]]:

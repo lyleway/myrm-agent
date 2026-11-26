@@ -52,6 +52,12 @@ whether the deployment may keep a user's subscription credential at all.
   would silently disable sandboxing a gemini user explicitly asked for. Unknown CLIs are
   returned untouched, since no contract exists for them and their flags may mean
   something unrelated.
+- **The ACP channel has no mode mapping**: an ACP agent asks the host for permission, and the host's policy answers
+  (`AcpPermissionPolicy`). An agent started with `--yolo` or `--approval-mode` never asks, so the policy's
+  `safe` would be bypassed without a trace. `without_approval_flags` therefore drops those flags (the spaced and the
+  `--flag=value` spellings, with their values) from the configured args of a known agent at launch. Codex's sandbox
+  flags stay, since they limit what an approved action may do rather than whether anyone is asked, and `plan` is
+  never added: it would turn an agent that asks into one that refuses. An unknown command is returned untouched.
 - **Baseline args never carry permission flags**: `cli_launch_args` holds only the
   non-interactive output/transport arguments. Keeping permission flags out of it is
   what makes the mode mapping genuinely single-owner; otherwise a baseline flag fights

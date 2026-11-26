@@ -15,7 +15,8 @@ so it keeps the system prompt prefix cache stable.
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Literal, cast
 
 from myrm_agent_harness.toolkits.llms.video.models import ProviderCapabilities
 from pydantic import BaseModel, ConfigDict, create_model
@@ -106,5 +107,7 @@ def build_video_input_schema(capabilities: ProviderCapabilities | None) -> type[
         if capabilities.max_input_videos <= 0:
             del fields["reference_videos"]
 
-    model: type[BaseModel] = create_model("VideoToolInput", __config__=ConfigDict(extra="allow"), **fields)
-    return model
+    # pydantic types each field definition as ``TypeForm``, which annotations built at runtime cannot satisfy; the
+    # variadic callable keeps the call's real result type (a model class) without silencing any checker.
+    make_model = cast("Callable[..., type[BaseModel]]", create_model)
+    return make_model("VideoToolInput", __config__=ConfigDict(extra="allow"), **fields)

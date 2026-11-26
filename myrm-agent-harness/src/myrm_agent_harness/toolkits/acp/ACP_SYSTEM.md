@@ -168,6 +168,8 @@ PermissionVerdict (frozen dataclass)   # allowed；message 是拒绝的理由，
 | Claude CLI（`runtime/cli/permission_bridge.py::PermissionBridge`） | `--permission-mode default` 加 `--permission-prompt-tool`：本回合起一个只监听 127.0.0.1 的 MCP 端点（端口由系统分配、每回合随机 bearer token、`0600` 的 `--mcp-config` 文件，回合结束即清除），Claude 把每个需要权限的工具调用交给它的 `approve(tool_name, input, tool_use_id)`，答案是 Claude 照办的 JSON：`allow` 带原输入，或 `deny` 带模型会读到的理由 | 不起端点，Claude 保持 `default` 的拒绝 |
 | Codex / Gemini / Qwen CLI | 不能询问：`codex exec` 的审批策略固定为 `never`，gemini / qwen 的无头回合里没有能答复询问的通道，只取 `plan`（只读）与 `yolo`。`safe` 即只读（`--sandbox read-only` / `--approval-mode plan`） | 同左，不需要 broker |
 
+**ACP 启动参数**：ACP 通道的审批只由宿主策略回答。用户在 Agent 配置里写的 `--yolo`、`--approval-mode` 这类让 Agent 自己跳过询问的旗标，会让 Agent 根本不发 `session/request_permission`、`safe` 形同虚设，所以已知 Agent（Claude、Codex、Gemini、Qwen）启动时去掉它们（连同取值，`--flag=value` 写法也认），并记 WARNING `acp_approval_flags_dropped` 写明去掉了什么。Codex 的 `--sandbox` / `-s` 保留：它限制批准后的动作范围，不决定问不问。不加 `plan`：那会把会询问的 Agent 变成只会拒绝的 Agent。未知命令的参数原样启动。
+
 `allow_all`：ACP 自动选 Agent 所列的 allow 选项；CLI 用各自的放行档位（Claude `bypassPermissions`、Codex `--sandbox workspace-write`、Gemini / Qwen `--approval-mode yolo`）。
 
 **文件回调说真话**（`runtime/acp/callback.py`）：`fs/read_text_file` 与 `fs/write_text_file` 只服务工作区内的文件，按字节读写，所以 Agent 写下的就是落盘的（含换行符）；不是合法 UTF-8 的文件直接拒绝，不会被有损读取再写回损坏；每一次拒绝与失败都以 JSON-RPC 错误如实告诉 Agent。
