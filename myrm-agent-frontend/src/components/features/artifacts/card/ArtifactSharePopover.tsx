@@ -2,7 +2,7 @@
 
 /**
  * [INPUT]
- * - ./artifactUtils::createArtifactSharePreview (POS: creates a read-only share link for an artifact)
+ * - ../artifactUtils::createArtifactSharePreview (POS: creates a read-only share link for an artifact)
  * - @/services/artifactShares::buildPublicArtifactShareUrl (POS: resolves a share path to a reachable URL)
  * - @/lib/utils/clipboardUtils::writeToClipboard (POS: clipboard write)
  *
@@ -23,7 +23,7 @@ import { Label } from '@/components/primitives/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/primitives/popover';
 import { writeToClipboard } from '@/lib/utils/clipboardUtils';
 import { buildPublicArtifactShareUrl } from '@/services/artifactShares';
-import { createArtifactSharePreview } from './artifactUtils';
+import { createArtifactSharePreview } from '../artifactUtils';
 
 interface ArtifactSharePopoverProps {
   artifactId: string;
