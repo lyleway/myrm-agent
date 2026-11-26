@@ -11,9 +11,9 @@
 
 [POS]
 LangChain adapter of the video engine. ``generate`` enqueues one background task and answers with the task list;
-``status`` and ``list`` read the queue and the provider catalog. Reference files are resolved by the worker through
-the single input resolver, so a bad reference fails the task with its name in the message instead of generating
-something else.
+``status`` (optionally waiting for a running task) and ``list`` read the queue and the provider catalog. Reference
+files are resolved by the worker through the single input resolver, so a bad reference fails the task with its name in
+the message instead of generating something else.
 """
 
 from __future__ import annotations
@@ -43,7 +43,8 @@ _TOOL_DESCRIPTION = (
     "so never repeat its media:// address in your reply. "
     "action='generate': a clip from a text prompt, optionally steered by reference_images (image-to-video) or "
     "reference_videos (video-to-video, where the provider supports it). "
-    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier video. "
+    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier video; "
+    "wait_seconds waits for a task that is still running. "
     "action='list': the available providers and models and what they support."
 )
 
@@ -130,12 +131,13 @@ def create_video_generation_tool(
         negative_prompt: str | None = None,
         seed: int | None = None,
         task_id: str | None = None,
+        wait_seconds: int | None = None,
     ) -> str:
         """Generate, poll the status of, or list videos."""
         if action == "list":
             return lister.list_providers()
         if action == "status":
-            return await media_task_status_result(task_id)
+            return await media_task_status_result(task_id, wait_seconds)
         return await _generate(
             prompt,
             provider=provider,

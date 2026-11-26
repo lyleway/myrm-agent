@@ -153,14 +153,14 @@ describe('stream handlers write through the live store', () => {
             result: {
               status: 'success',
               audio_url: 'media://media_speech',
-              model: 'gpt-4o-mini-tts',
+              model: 'eleven_multilingual_v2',
               duration_seconds: 2,
             },
           }),
         ]);
 
         expect(message.metadata?.media_generated).toEqual([
-          { kind: 'tts', media: 'media://media_speech', model: 'gpt-4o-mini-tts', duration_seconds: 2 },
+          { kind: 'tts', media: 'media://media_speech', model: 'eleven_multilingual_v2', duration_seconds: 2 },
         ]);
       });
 

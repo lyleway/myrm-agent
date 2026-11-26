@@ -17,6 +17,7 @@
 | `encryption.py` | 核心 | 业务层加密策略：密钥注入、敏感配置判定、encrypt/decrypt 委托到 harness ConfigCrypto | ✅ |
 | `migration.py` | 核心 | 配置加密迁移：明文→密文自动升级；`seal_stored_configs` 是启动时的整体入口（一个会话里先封配置行、再封审计历史、最后迁移本地模型密钥） | ✅ |
 | `key_consolidation.py` | 核心 | 合并分裂的 providers 子键（defaultModelConfig/customModelInfo）到 providers bundle；providers 行因密钥丢失读不出（`unreadable`）时整体跳过，不覆盖也不删子键 | ✅ |
+| `retired_audio_settings.py` | 核心 | 启动迁移：把仍保存着已停用音频选项的行改写掉——`voice` 行里 `ttsProvider=openai` 改为 `edge` 并去掉该提供商专属的模型/音色/密钥/Base URL（音色名 Edge 不认），`sttModel=whisper-1`（旧设置页预填、非用户所选）去掉让默认值接管；`personalSettings` 里 `webTtsProvider=openai` 改为 `browser`。幂等（没有停用值的行不写），读不出（`unreadable`）的行不碰，写入带 `expected_version` | ✅ |
 | `onboarding.py` | 核心 | 首次配置 onboarding：检查状态、标记完成、推荐 provider、probe 本地模型与搜索（SearXNG） | ✅ |
 | `searxng_setup.py` | 辅助 | 本地 SearXNG 启动（Docker Compose，local/tauri deploy only）+ 启动后轮询探测可用性 | ✅ |
 

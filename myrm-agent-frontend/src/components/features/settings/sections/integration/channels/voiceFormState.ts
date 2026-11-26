@@ -31,7 +31,7 @@ export const DEFAULT_VOICE_FORM: VoiceFormState = {
   sttEnabled: false,
   sttProvider: 'openai',
   sttApiKey: '',
-  sttModel: 'whisper-1',
+  sttModel: '',
   sttLanguage: '',
   sttLocalModel: 'base',
   sttLocalDevice: 'auto',

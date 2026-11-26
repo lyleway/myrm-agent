@@ -5,7 +5,6 @@
  *
  * [OUTPUT]
  * gapEvents: CAPABILITY_GAP SSE handler for factual gaps only (migration, web_search config).
- * Substring entitlement enable-and-resend toasts removed.
  *
  * [POS]
  * SSE handlers for non-ambiguous capability gaps from stream preflight.
@@ -98,10 +97,6 @@ export async function gapEvents(ctx: StreamCtx): Promise<StreamTurn | null> {
       return done(ctx);
     }
 
-    return null;
-  }
-
-  if (data.type === H.AgentEventType.SKILL_GAP) {
     return null;
   }
 

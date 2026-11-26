@@ -66,7 +66,6 @@ _IMAGE_PROBE_ENDPOINTS: dict[str, tuple[str, str]] = {
 }
 
 _TTS_LIGHT_PROBE_ENDPOINTS: dict[str, tuple[str, str]] = {
-    "openai": ("https://api.openai.com/v1/models", "Authorization: Bearer {key}"),
     "elevenlabs": ("https://api.elevenlabs.io/v1/user", "xi-api-key: {key}"),
 }
 

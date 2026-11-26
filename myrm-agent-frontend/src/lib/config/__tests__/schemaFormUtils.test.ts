@@ -143,14 +143,14 @@ describe('schemaFormUtils', () => {
     const translate = (key: string) =>
       ({
         'webTts.browser': 'Browser Built-in',
-        'webTts.openai': 'OpenAI TTS',
+        'webTts.fishAudio': 'Fish Audio',
       })[key] ?? key;
 
     const hasKey = (key: string) => key.startsWith('webTts.');
 
     it('maps webTtsProvider enum values to webTts locale keys', () => {
       expect(resolveEnumLabel(translate, hasKey, 'settings', 'webTtsProvider', 'browser')).toBe('Browser Built-in');
-      expect(resolveEnumLabel(translate, hasKey, 'settings', 'webTtsProvider', 'openai')).toBe('OpenAI TTS');
+      expect(resolveEnumLabel(translate, hasKey, 'settings', 'webTtsProvider', 'fish_audio')).toBe('Fish Audio');
     });
   });
 });

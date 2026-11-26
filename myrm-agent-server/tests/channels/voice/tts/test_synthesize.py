@@ -16,7 +16,7 @@ from app.channels.voice.tts import (
 
 
 def _voice(
-    provider: str = "openai",
+    provider: str = "elevenlabs",
     api_key: str = "sk-test",
     voice: str = "",
     max_length: int = 4000,
@@ -48,44 +48,19 @@ class TestSynthesizeValidation:
 
 
 # ---------------------------------------------------------------------------
-# synthesize() — OpenAI provider
+# synthesize() — Fish Audio provider
 # ---------------------------------------------------------------------------
 
 
-class TestSynthesizeOpenAI:
+class TestSynthesizeFishAudio:
     @pytest.mark.asyncio
-    async def test_openai_success(self) -> None:
-        audio_bytes = b"\xff\xfb\x90\x00" * 256
-
-        mock_resp = httpx.Response(
-            200,
-            content=audio_bytes,
-            request=httpx.Request("POST", "https://api.openai.com/v1/audio/speech"),
-        )
-
-        with patch("app.channels.voice.tts.providers.httpx.AsyncClient") as mock_cls:
-            mock_client = AsyncMock()
-            mock_client.post.return_value = mock_resp
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_cls.return_value = mock_client
-
-            result = await synthesize("Hello, this is a test message.", _voice("openai"))
-
-        assert result is not None
-        assert result.exists()
-        assert result.suffix == ".mp3"
-        assert result.stat().st_size == len(audio_bytes)
-        result.unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_openai_opus_format(self) -> None:
+    async def test_fish_audio_opus_format(self) -> None:
         audio_bytes = b"\x00" * 512
 
         mock_resp = httpx.Response(
             200,
             content=audio_bytes,
-            request=httpx.Request("POST", "https://api.openai.com/v1/audio/speech"),
+            request=httpx.Request("POST", "https://api.fish.audio/v1/tts"),
         )
 
         with patch("app.channels.voice.tts.providers.httpx.AsyncClient") as mock_cls:
@@ -97,12 +72,14 @@ class TestSynthesizeOpenAI:
 
             result = await synthesize(
                 "Hello, this is a test message.",
-                _voice("openai"),
+                _voice("fish_audio"),
                 output_format="opus",
             )
 
         assert result is not None
         assert result.suffix == ".opus"
+        assert result.stat().st_size == len(audio_bytes)
+        assert mock_client.post.call_args.kwargs["json"]["format"] == "opus"
         result.unlink(missing_ok=True)
 
 
@@ -206,7 +183,7 @@ class TestSynthesizeEdge:
 
 class TestSynthesizeFallback:
     @pytest.mark.asyncio
-    async def test_falls_back_to_edge_on_openai_failure(self) -> None:
+    async def test_falls_back_to_edge_on_provider_failure(self) -> None:
         mock_edge = MagicMock()
         mock_communicate = MagicMock()
 
@@ -228,7 +205,7 @@ class TestSynthesizeFallback:
 
             result = await synthesize(
                 "Hello, this is a test message.",
-                _voice("openai"),
+                _voice("elevenlabs"),
             )
 
         assert result is not None
@@ -236,7 +213,7 @@ class TestSynthesizeFallback:
         result.unlink(missing_ok=True)
 
     @pytest.mark.asyncio
-    async def test_openai_failure_without_edge_returns_none(self) -> None:
+    async def test_provider_failure_without_edge_returns_none(self) -> None:
         with (
             patch("app.channels.voice.tts.providers.httpx.AsyncClient") as mock_cls,
             patch("app.channels.voice.tts.core.is_edge_tts_available", return_value=False),
@@ -249,7 +226,7 @@ class TestSynthesizeFallback:
 
             result = await synthesize(
                 "Hello, this is a test message.",
-                _voice("openai"),
+                _voice("elevenlabs"),
             )
 
         assert result is None

@@ -223,6 +223,15 @@ class TestExtractVoiceConfig:
         assert result.stt_provider == "openai"
         assert result.stt_api_key == "sk-test"
 
+    def test_stt_model_stays_empty_unless_the_user_typed_one(self) -> None:
+        unset = extract_voice_config({"sttEnabled": True, "sttProvider": "groq"})
+        typed = extract_voice_config({"sttEnabled": True, "sttModel": "whisper-large-v3-turbo"})
+
+        assert unset is not None
+        assert typed is not None
+        assert unset.stt_model == ""
+        assert typed.stt_model == "whisper-large-v3-turbo"
+
     def test_none_when_both_disabled(self) -> None:
         voice_dict: dict[str, object] = {"sttEnabled": False, "ttsMode": "off"}
         result = extract_voice_config(voice_dict)

@@ -127,7 +127,7 @@ describe('readKanbanTasksCreated', () => {
 
 describe('readMediaGenerated', () => {
   const task = { kind: 'image', task_id: 'img-1' };
-  const speech = { kind: 'tts', media: 'media://media_speech', model: 'gpt-4o-mini-tts', duration_seconds: 2 };
+  const speech = { kind: 'tts', media: 'media://media_speech', model: 'eleven_multilingual_v2', duration_seconds: 2 };
 
   it('reads the registered entries in order', () => {
     expect(readMediaGenerated(message({ metadata: { media_generated: [task, speech] } }))).toEqual([task, speech]);

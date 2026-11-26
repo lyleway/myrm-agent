@@ -101,26 +101,41 @@ def test_test_media_config_fal_success(client: TestClient) -> None:
 def test_test_media_config_tts_requires_key(client: TestClient) -> None:
     """The TTS branch is served by the live router and reports the missing credential."""
     with _user_configs():
-        resp = client.post("/api/v1/agents/test-media-config", json={"mediaType": "tts", "provider": "openai"})
+        resp = client.post("/api/v1/agents/test-media-config", json={"mediaType": "tts", "provider": "elevenlabs"})
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["success"] is False
-    assert "No API key found for TTS provider 'openai'" in data["message"]
+    assert "No API key found for TTS provider 'elevenlabs'" in data["message"]
 
 
 def test_test_media_config_tts_prefers_voice_settings_key(client: TestClient) -> None:
     """Voice settings take precedence over the provider table for the TTS credential."""
     with (
-        _user_configs(voice={"ttsProvider": "openai", "ttsApiKey": "voice-key"}),
+        _user_configs(voice={"ttsProvider": "elevenlabs", "ttsApiKey": "voice-key"}),
         patch("app.api.agents.general_agent.media_config._probe_endpoint", new_callable=AsyncMock) as probe,
     ):
         probe.return_value = (True, "API key is valid")
-        resp = client.post("/api/v1/agents/test-media-config", json={"mediaType": "tts", "provider": "openai"})
+        resp = client.post("/api/v1/agents/test-media-config", json={"mediaType": "tts", "provider": "elevenlabs"})
 
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "ok"
-    assert probe.await_args.args[1] == {"Authorization": "Bearer voice-key"}
+    assert probe.await_args.args[1] == {"xi-api-key": "voice-key"}
+
+
+def test_test_media_config_tts_rejects_retired_provider(client: TestClient) -> None:
+    """A provider the TTS tool no longer offers is reported as unsupported, never probed."""
+    with (
+        _user_configs(voice={"ttsProvider": "openai", "ttsApiKey": "voice-key"}),
+        patch("app.api.agents.general_agent.media_config._probe_endpoint", new_callable=AsyncMock) as probe,
+    ):
+        resp = client.post("/api/v1/agents/test-media-config", json={"mediaType": "tts", "provider": "openai"})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+    assert data["message"] == "Unsupported TTS provider: openai"
+    probe.assert_not_awaited()
 
 
 def test_test_media_config_degrades_when_configs_unreadable(client: TestClient) -> None:

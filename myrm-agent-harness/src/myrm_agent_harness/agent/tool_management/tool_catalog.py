@@ -4,9 +4,9 @@
 - .tool_layers::ToolLayer (POS: CORE/HIGH_PRIORITY/EXTENDED/EXTERNAL priority)
 - .env_dependency::get_tool_env_dependencies, probe_tool_env_health (POS: Tool runtime environment requirements)
 - core.security.tool_registry::TOOL_TO_GROUP (POS: harness tool group SSOT)
-- meta_tools.discover_capability.capability_gap::BUILTIN_TOOL_ID_TO_GROUP (POS: GUI togglable product ID → group)
 
 [OUTPUT]
+- BUILTIN_TOOL_ID_TO_GROUP: GUI-togglable product ID → harness tool group SSOT
 - get_tool_load_condition(): human-readable load gate
 - get_tool_product_id(): enabled_builtin_tools ID when applicable
 - get_tool_env_profile(): get declared environment dependencies
@@ -25,9 +25,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from myrm_agent_harness.agent.meta_tools.discover_capability.capability_gap import (
-    BUILTIN_TOOL_ID_TO_GROUP,
-)
 from myrm_agent_harness.agent.tool_management.env_dependency import (
     ToolEnvDependencyProfile,
     ToolEnvHealthReport,
@@ -46,6 +43,25 @@ class ToolCatalogRole(StrEnum):
 
     USER_CAPABILITY = "user_capability"
 
+
+# GUI-togglable product ID -> harness tool group. Left out: skill_market / skill_manage (no tool
+# group) and the agent baseline file_ops / code_execute (forced on, no product toggle).
+BUILTIN_TOOL_ID_TO_GROUP: dict[str, str] = {
+    "web_search": "web",
+    "memory": "memory",
+    "browser": "browser",
+    "computer_use": "computer_use",
+    "wiki": "wiki",
+    "kanban": "kanban",
+    "structured_clarify": "structured_clarify",
+    "answer_tool": "answer_tool",
+    "planning": "planning",
+    "cron": "cron",
+    "image_generation": "image_generation",
+    "video_generation": "video_generation",
+    "tts": "tts",
+    "external_cli": "external_cli",
+}
 
 _GROUP_TO_PRODUCT_ID: dict[str, str] = {group: product_id for product_id, group in BUILTIN_TOOL_ID_TO_GROUP.items()}
 

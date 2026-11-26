@@ -13,8 +13,9 @@
 
 [POS]
 LangChain adapter of the image engines. ``generate`` enqueues one background task per image (``n`` tasks) and answers
-with the task list; ``edit`` answers in the call; ``status`` and ``list`` read the queue and the model catalog. Every
-failure is an explicit error result, and a parameter that belongs to another action is refused instead of dropped.
+with the task list; ``edit`` answers in the call; ``status`` (optionally waiting for a running task) and ``list`` read
+the queue and the model catalog. Every failure is an explicit error result, and a parameter that belongs to another
+action is refused instead of dropped.
 ``quality`` is sent on the OpenAI-compatible wire only (``openai_chat``, ``azure_openai``), for generation and edit
 alike; Gemini, Stability and MiniMax requests do not carry it.
 """
@@ -37,6 +38,8 @@ from pydantic import BaseModel, Field
 
 from app.ai_agents.media_tools.input_policy import build_media_input_policy
 from app.ai_agents.media_tools.task_results import (
+    MAX_WAIT_SECONDS,
+    WAIT_SECONDS_DESCRIPTION,
     media_task_status_result,
     media_task_store,
     started_tasks_result,
@@ -52,7 +55,8 @@ _TOOL_DESCRIPTION = (
     "action='generate': new images from a text prompt; reference_image_urls steer the style or content. "
     "action='edit': change one existing image as the prompt says (optional mask_url); answers in the call and needs a "
     "model that edits images. "
-    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier image. "
+    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier image; "
+    "wait_seconds waits for a task that is still running. "
     "action='list': the available models and what they support."
 )
 
@@ -99,6 +103,7 @@ class ImageToolInput(BaseModel):
         default=None,
         description="Task ID from an earlier generate result (required when action='status').",
     )
+    wait_seconds: int | None = Field(default=None, ge=1, le=MAX_WAIT_SECONDS, description=WAIT_SECONDS_DESCRIPTION)
 
 
 # The action that owns each parameter of a single action (prompt, size, quality and n are shared and not listed).
@@ -107,19 +112,22 @@ _PARAMETER_OWNER = {
     "image_url": "edit",
     "mask_url": "edit",
     "task_id": "status",
+    "wait_seconds": "status",
 }
 
 
-def _passed(value: str | Sequence[str] | None) -> bool:
+def _passed(value: str | int | Sequence[str] | None) -> bool:
     """Whether the model gave a value; an empty string or list means the same as leaving the parameter out."""
     if value is None:
         return False
+    if isinstance(value, int):
+        return True
     if isinstance(value, str):
         return bool(value.strip())
     return any(item.strip() for item in value)
 
 
-def _foreign_parameter(action: str, **given: str | Sequence[str] | None) -> str | None:
+def _foreign_parameter(action: str, **given: str | int | Sequence[str] | None) -> str | None:
     """The error for the first parameter the model passed although another action owns it, or ``None``.
 
     Acting on the call anyway would drop the parameter silently and return an image that differs from what was asked.
@@ -227,18 +235,20 @@ def create_image_generation_tool(
         image_url: str | None = None,
         mask_url: str | None = None,
         task_id: str | None = None,
+        wait_seconds: int | None = None,
     ) -> str:
         """Generate, edit, poll the status of, or list images."""
         if action == "list":
             return editor.list_models()
         if action == "status":
-            return await media_task_status_result(task_id)
+            return await media_task_status_result(task_id, wait_seconds)
         foreign = _foreign_parameter(
             action,
             reference_image_urls=reference_image_urls,
             image_url=image_url,
             mask_url=mask_url,
             task_id=task_id,
+            wait_seconds=wait_seconds,
         )
         if foreign:
             return tool_error(foreign)

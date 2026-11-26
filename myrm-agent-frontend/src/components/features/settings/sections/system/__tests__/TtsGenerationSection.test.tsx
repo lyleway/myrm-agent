@@ -37,7 +37,7 @@ vi.mock('@/lib/utils/media', async (importOriginal) => ({
   providerHasActiveApiKey: kit.providerKeyReady,
 }));
 
-const openaiChosen = { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy' };
+const elevenChosen = { ttsProvider: 'elevenlabs', ttsModel: 'eleven_turbo_v2_5', ttsVoice: '21m00Tcm4TlvDq8ikWAM' };
 
 const storedVoice = (overrides: Record<string, unknown> = {}): VoiceRecord => ({
   value: { sttEnabled: true, ttsMaxLength: 900, ...overrides },
@@ -68,7 +68,7 @@ async function choose(current: RegExp | string, option: RegExp, user: ReturnType
 beforeEach(() => {
   vi.resetAllMocks();
   kit.providers = [];
-  kit.record = storedVoice({ ...openaiChosen, ttsApiKey: 'sk-stored' });
+  kit.record = storedVoice({ ...elevenChosen, ttsApiKey: 'sk-stored' });
   kit.providerKeyReady.mockReturnValue(false);
   kit.apiRequest.mockImplementation(async (_path, options) => (options?.method === 'PUT' ? {} : kit.record));
 });
@@ -93,7 +93,7 @@ describe('TtsGenerationSection loading', () => {
   });
 
   it('asks for a key when neither the settings nor the provider list hold one', async () => {
-    kit.record = storedVoice(openaiChosen);
+    kit.record = storedVoice(elevenChosen);
 
     await renderSection();
 
@@ -102,12 +102,12 @@ describe('TtsGenerationSection loading', () => {
   });
 
   it("counts an active key of the provider's own list as configured", async () => {
-    kit.record = storedVoice(openaiChosen);
+    kit.record = storedVoice(elevenChosen);
     kit.providerKeyReady.mockReturnValue(true);
 
     await renderSection();
 
-    expect(kit.providerKeyReady).toHaveBeenCalledWith(kit.providers, 'openai');
+    expect(kit.providerKeyReady).toHaveBeenCalledWith(kit.providers, 'elevenlabs');
     expect(screen.getByText('Configured')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Enter API Key')).toBeNull();
   });
@@ -146,15 +146,15 @@ describe('TtsGenerationSection loading', () => {
   });
 
   it('shows a stored model of the provider as it is', async () => {
-    kit.record = storedVoice({ ...openaiChosen, ttsModel: 'tts-1-hd' });
+    kit.record = storedVoice({ ...elevenChosen, ttsModel: 'eleven_flash_v2_5' });
 
     await renderSection();
 
-    expect(screen.getByRole('button', { name: /TTS 1 HD/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Flash v2.5/ })).toBeInTheDocument();
   });
 
-  it.each(['edge', 'piper', 'voicebox'])(
-    'asks for a new provider when the settings hold %s, one only the channel voice settings offer',
+  it.each(['edge', 'piper', 'voicebox', 'openai'])(
+    'asks for a new provider when the settings hold %s, one this card does not offer',
     async (ttsProvider) => {
       kit.record = storedVoice({
         ttsProvider,
@@ -196,18 +196,18 @@ describe('TtsGenerationSection choices', () => {
     const user = userEvent.setup();
     await renderSection();
 
-    await choose(/OpenAI TTS/, /ElevenLabs/, user);
+    await choose(/ElevenLabs/, /Volcengine Speech/, user);
 
-    expect(screen.getByRole('button', { name: /Turbo v2.5/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Rachel/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Seed-Audio 1.0/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Uranus/ })).toBeInTheDocument();
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(putBody()).toEqual({
       value: {
         sttEnabled: true,
         ttsMaxLength: 900,
-        ttsProvider: 'elevenlabs',
-        ttsModel: 'eleven_turbo_v2_5',
-        ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+        ttsProvider: 'volcengine',
+        ttsModel: 'seed-audio-1.0',
+        ttsVoice: 'zh_female_vv_uranus_bigtts',
         ttsApiKey: '',
       },
       expectedVersion: 'v3',
@@ -215,7 +215,7 @@ describe('TtsGenerationSection choices', () => {
     });
     expect(puts()[0][1]?.silent).toBe(true);
     // The old provider's key is gone, so the new provider is judged by its own key.
-    expect(kit.providerKeyReady).toHaveBeenLastCalledWith(kit.providers, 'elevenlabs');
+    expect(kit.providerKeyReady).toHaveBeenLastCalledWith(kit.providers, 'volcengine');
     expect(screen.getByText('API Key Required')).toBeInTheDocument();
   });
 
@@ -223,15 +223,19 @@ describe('TtsGenerationSection choices', () => {
     const user = userEvent.setup();
     await renderSection();
 
-    await choose('TTS 1', /TTS 1 HD/, user);
-    await choose('Alloy', /Nova/, user);
+    await choose(/Turbo v2.5/, /Multilingual v2/, user);
+    await choose(/Rachel/, /Sarah/, user);
 
     await waitFor(() => expect(puts()).toHaveLength(2));
-    expect(putBody(0).value).toMatchObject({ ttsProvider: 'openai', ttsModel: 'tts-1-hd', ttsVoice: 'alloy' });
+    expect(putBody(0).value).toMatchObject({
+      ttsProvider: 'elevenlabs',
+      ttsModel: 'eleven_multilingual_v2',
+      ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+    });
     expect(putBody(1).value).toMatchObject({
-      ttsProvider: 'openai',
-      ttsModel: 'tts-1-hd',
-      ttsVoice: 'nova',
+      ttsProvider: 'elevenlabs',
+      ttsModel: 'eleven_multilingual_v2',
+      ttsVoice: 'EXAVITQu4vr4xnSDxMaL',
       ttsApiKey: 'sk-stored',
     });
   });
@@ -242,13 +246,18 @@ describe('TtsGenerationSection choices', () => {
     await renderSection();
 
     await user.click(emptyDropdowns()[0]);
-    await user.click(screen.getByRole('button', { name: /OpenAI TTS/ }));
+    await user.click(screen.getByRole('button', { name: /ElevenLabs/ }));
 
-    expect(screen.getByRole('button', { name: 'TTS 1' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Alloy' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Turbo v2.5/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Rachel/ })).toBeInTheDocument();
     await waitFor(() => expect(puts()).toHaveLength(1));
     expect(putBody()).toEqual({
-      value: { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy', ttsApiKey: '' },
+      value: {
+        ttsProvider: 'elevenlabs',
+        ttsModel: 'eleven_turbo_v2_5',
+        ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+        ttsApiKey: '',
+      },
       expectedVersion: '0',
       deviceId: 'web',
     });
@@ -258,8 +267,8 @@ describe('TtsGenerationSection choices', () => {
     const user = userEvent.setup();
     await renderSection();
 
-    await user.click(screen.getByRole('button', { name: /OpenAI TTS/ }));
-    const [, sameProviderOption] = screen.getAllByRole('button', { name: /OpenAI TTS/ });
+    await user.click(screen.getByRole('button', { name: /ElevenLabs/ }));
+    const [, sameProviderOption] = screen.getAllByRole('button', { name: /ElevenLabs/ });
     await user.click(sameProviderOption);
 
     expect(puts()).toHaveLength(0);
@@ -279,15 +288,15 @@ describe('TtsGenerationSection choices', () => {
     const user = userEvent.setup();
     await renderSection();
 
-    await choose(/OpenAI TTS/, /ElevenLabs/, user);
-    await choose(/Turbo v2.5/, /Multilingual v2/, user);
+    await choose(/ElevenLabs/, /Volcengine Speech/, user);
+    await choose(/Seed-Audio 1.0/, /Doubao-TTS/, user);
     await waitFor(() => expect(puts()).toHaveLength(1));
 
     await act(async () => firstWrite.resolve({}));
 
     await waitFor(() => expect(puts()).toHaveLength(2));
-    expect(putBody(0).value).toMatchObject({ ttsProvider: 'elevenlabs', ttsModel: 'eleven_turbo_v2_5' });
-    expect(putBody(1).value).toMatchObject({ ttsProvider: 'elevenlabs', ttsModel: 'eleven_multilingual_v2' });
+    expect(putBody(0).value).toMatchObject({ ttsProvider: 'volcengine', ttsModel: 'seed-audio-1.0' });
+    expect(putBody(1).value).toMatchObject({ ttsProvider: 'volcengine', ttsModel: 'doubao-tts' });
   });
 
   it('says the choice was not saved and shows what is really stored when the server refuses it', async () => {
@@ -301,11 +310,11 @@ describe('TtsGenerationSection choices', () => {
     const user = userEvent.setup();
     await renderSection();
 
-    await choose(/OpenAI TTS/, /ElevenLabs/, user);
+    await choose(/ElevenLabs/, /Volcengine Speech/, user);
 
     await waitFor(() => expect(kit.error).toHaveBeenCalledWith('Failed to save your selection'));
-    await waitFor(() => expect(screen.getByRole('button', { name: /OpenAI TTS/ })).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /ElevenLabs/ })).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: /ElevenLabs/ })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Volcengine Speech/ })).toBeNull();
   });
 
   it('warns that the Seed-Audio test is slow and explains the composite Doubao credential', async () => {
@@ -328,13 +337,13 @@ describe('TtsGenerationSection choices', () => {
 
 describe('TtsGenerationSection saving the key', () => {
   beforeEach(() => {
-    kit.record = storedVoice(openaiChosen);
+    kit.record = storedVoice(elevenChosen);
   });
 
   it('saves the trimmed key with the chosen voice, the stored version and a device id', async () => {
     const user = userEvent.setup();
     await renderSection();
-    await choose(/OpenAI TTS/, /ElevenLabs/, user);
+    await choose(/ElevenLabs/, /Volcengine Speech/, user);
 
     await user.type(keyInput(), '  sk-new  ');
     await user.click(saveButton());
@@ -347,9 +356,9 @@ describe('TtsGenerationSection saving the key', () => {
       value: {
         sttEnabled: true,
         ttsMaxLength: 900,
-        ttsProvider: 'elevenlabs',
-        ttsModel: 'eleven_turbo_v2_5',
-        ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+        ttsProvider: 'volcengine',
+        ttsModel: 'seed-audio-1.0',
+        ttsVoice: 'zh_female_vv_uranus_bigtts',
         ttsApiKey: 'sk-new',
       },
       expectedVersion: 'v3',
@@ -360,7 +369,7 @@ describe('TtsGenerationSection saving the key', () => {
   it('writes against the version read at save time, not the one read at load', async () => {
     const user = userEvent.setup();
     await renderSection();
-    kit.record = { ...storedVoice(openaiChosen), meta: { version: 'v4' } };
+    kit.record = { ...storedVoice(elevenChosen), meta: { version: 'v4' } };
 
     await user.type(keyInput(), 'sk-new');
     await user.click(saveButton());
@@ -386,14 +395,19 @@ describe('TtsGenerationSection saving the key', () => {
     const user = userEvent.setup();
     await renderSection();
     await user.click(emptyDropdowns()[0]);
-    await user.click(screen.getByRole('button', { name: /OpenAI TTS/ }));
+    await user.click(screen.getByRole('button', { name: /ElevenLabs/ }));
 
     await user.type(keyInput(), 'sk-first');
     await user.click(saveButton());
 
     await waitFor(() => expect(kit.success).toHaveBeenCalled());
     expect(putBody(1)).toEqual({
-      value: { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy', ttsApiKey: 'sk-first' },
+      value: {
+        ttsProvider: 'elevenlabs',
+        ttsModel: 'eleven_turbo_v2_5',
+        ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+        ttsApiKey: 'sk-first',
+      },
       expectedVersion: '0',
       deviceId: 'web',
     });

@@ -11,7 +11,7 @@ import type { UpdateVoiceForm, VoiceFormState } from './voiceFormState';
 
 const STT_PROVIDERS = [
   { value: 'local', label: 'Local Whisper (Free)' },
-  { value: 'openai', label: 'OpenAI Whisper' },
+  { value: 'openai', label: 'OpenAI' },
   { value: 'groq', label: 'Groq Whisper' },
   { value: 'deepgram', label: 'Deepgram' },
   { value: 'xai', label: 'xAI Grok STT' },
@@ -142,7 +142,7 @@ export function VoiceSttSettings({
               <VoiceFieldRow label={t('sttModel')} htmlFor="voice-stt-model">
                 <Input
                   id="voice-stt-model"
-                  placeholder="whisper-1"
+                  placeholder={t('sttModelPlaceholder')}
                   value={form.sttModel}
                   onChange={(e) => update({ sttModel: e.target.value })}
                 />

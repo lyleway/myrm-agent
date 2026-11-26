@@ -326,7 +326,7 @@ interface LabelCase {
   labels: string[];
 }
 
-const CLOUD_VOICE = { sttEnabled: true, sttProvider: 'openai', ttsMode: 'always', ttsProvider: 'openai' };
+const CLOUD_VOICE = { sttEnabled: true, sttProvider: 'openai', ttsMode: 'always', ttsProvider: 'elevenlabs' };
 
 // Each state shows different rows; together they show every labelled control of the form.
 const LABEL_CASES: LabelCase[] = [
@@ -345,7 +345,6 @@ const LABEL_CASES: LabelCase[] = [
       'ttsMode',
       'ttsProvider',
       'ttsApiKey',
-      'ttsBaseUrl',
       'ttsVoice',
       'ttsSpeed',
       'ttsPitch',
@@ -360,6 +359,12 @@ const LABEL_CASES: LabelCase[] = [
     saved: { ...CLOUD_VOICE, sttProvider: 'local' },
     mode: null,
     labels: ['sttLocalModel', 'sttLocalDevice'],
+  },
+  {
+    name: 'a Voicebox on the loopback',
+    saved: { ...CLOUD_VOICE, ttsProvider: 'voicebox' },
+    mode: null,
+    labels: ['ttsBaseUrl'],
   },
   { name: 'the realtime voice mode', saved: CLOUD_VOICE, mode: 'openai_realtime', labels: ['realtimeVoice'] },
   { name: 'the Gemini Live mode', saved: CLOUD_VOICE, mode: 'gemini_live', labels: ['geminiLiveModel'] },

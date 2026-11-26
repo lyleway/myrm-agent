@@ -39,7 +39,7 @@ def _build_voice_config_from_dict(voice_dict: dict[str, object]) -> "VoiceConfig
         stt_enabled=stt_enabled,
         stt_provider=str(voice_dict.get("sttProvider", "openai")),
         stt_api_key=str(voice_dict.get("sttApiKey", "")),
-        stt_model=str(voice_dict.get("sttModel", "whisper-1")),
+        stt_model=str(voice_dict.get("sttModel", "")),
         stt_language=stt_language if isinstance(stt_language, str) else None,
         stt_local_model=str(voice_dict.get("sttLocalModel", "base")),
         stt_local_device=str(voice_dict.get("sttLocalDevice", "auto")),

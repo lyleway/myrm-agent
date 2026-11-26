@@ -77,6 +77,7 @@ def test_the_schema_carries_official_parameters_only() -> None:
         "image_url",
         "mask_url",
         "task_id",
+        "wait_seconds",
     }
     assert "style" not in tool.args
     assert tool.args["quality"]["anyOf"][0]["enum"] == ["low", "medium", "high"]
@@ -288,6 +289,7 @@ async def test_edit_names_the_reference_it_cannot_use(arguments: dict[str, objec
         ({"action": "generate", "prompt": "a cat", "image_url": "media://media_src"}, "image_url", "edit"),
         ({"action": "generate", "prompt": "a cat", "mask_url": "mask.png"}, "mask_url", "edit"),
         ({"action": "generate", "prompt": "a cat", "task_id": "img-1"}, "task_id", "status"),
+        ({"action": "generate", "prompt": "a cat", "wait_seconds": 5}, "wait_seconds", "status"),
         (
             {
                 "action": "edit",
@@ -301,6 +303,11 @@ async def test_edit_names_the_reference_it_cannot_use(arguments: dict[str, objec
         (
             {"action": "edit", "prompt": "brighter", "image_url": "media://media_src", "task_id": "img-1"},
             "task_id",
+            "status",
+        ),
+        (
+            {"action": "edit", "prompt": "brighter", "image_url": "media://media_src", "wait_seconds": 5},
+            "wait_seconds",
             "status",
         ),
     ],

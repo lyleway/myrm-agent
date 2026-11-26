@@ -237,17 +237,17 @@ def test_tts_tool_needs_params_a_full_selection_and_credentials() -> None:
 
     assert tools == []
     assert _tts_tools(api_key="tts-key") == []  # nothing selected: no voice is assumed
-    assert _tts_tools(provider="openai", model="gpt-4o-mini-tts", api_key="tts-key") == []
-    assert _tts_tools(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key=None) == []
+    assert _tts_tools(provider="elevenlabs", model="eleven_flash_v2_5", api_key="tts-key") == []
+    assert _tts_tools(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key=None) == []
 
 
-@pytest.mark.parametrize("provider", ["edge", "azure", ""])
+@pytest.mark.parametrize("provider", ["edge", "azure", "openai", ""])
 def test_tts_tool_is_absent_for_a_provider_the_engine_does_not_call(provider: str) -> None:
     assert _tts_tools(provider=provider, model="m", voice="v", api_key="tts-key") == []
 
 
 def test_tts_tool_is_mounted_for_a_full_selection() -> None:
-    tools = _tts_tools(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key="tts-key")
+    tools = _tts_tools(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="tts-key")
 
     assert [getattr(tool, "name", None) for tool in tools] == ["tts_generate"]
 
@@ -269,4 +269,4 @@ def test_tts_engine_gets_the_selection_and_a_persist_callback() -> None:
 
 def test_tts_tool_load_failure_is_swallowed() -> None:
     with patch("app.ai_agents.media_tools.create_tts_tool", side_effect=RuntimeError("tts init failed")):
-        assert _tts_tools(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key="tts-key") == []
+        assert _tts_tools(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="tts-key") == []

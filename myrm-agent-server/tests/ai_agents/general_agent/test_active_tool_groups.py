@@ -1,10 +1,11 @@
-"""Unit tests for active_tool_groups SSOT (Entitlement Gap)."""
+"""Unit tests for the active_tool_groups SSOT."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 from myrm_agent_harness.agent.meta_tools.mount_policy import FileAccessMode
+from myrm_agent_harness.agent.tool_management.tool_catalog import BUILTIN_TOOL_ID_TO_GROUP
 from myrm_agent_harness.toolkits.memory.config import RecallMode
 
 from app.ai_agents.general_agent.active_tool_groups import (
@@ -64,18 +65,7 @@ def test_derive_includes_external_cli_when_enabled() -> None:
     assert "external_cli" in groups
 
 
-def test_derive_active_tool_groups_from_params_includes_external_cli() -> None:
-    from app.ai_agents.general_agent.active_tool_groups import (
-        derive_active_tool_groups_from_params,
-    )
-
-    params = SimpleNamespace(
-        enable_web_search=False,
-        enable_external_cli=True,
-        enable_planning=False,
-    )
-    groups = derive_active_tool_groups_from_params(params)
-    assert "external_cli" in groups
+def test_derive_includes_cron_when_eager_enabled() -> None:
     groups = derive_active_tool_groups(_agent(enable_cron_eager=True), enable_planning=False)
     assert "cron" in groups
 
@@ -119,35 +109,14 @@ def test_memory_group_follows_whether_memory_tools_are_mounted() -> None:
         assert ("memory" in groups) is mounted, recall_mode
 
 
-def test_params_without_a_recall_mode_keep_the_memory_group_and_a_context_one_drops_it() -> None:
-    from app.ai_agents.general_agent.active_tool_groups import derive_active_tool_groups_from_params
-
-    assert "memory" in derive_active_tool_groups_from_params(SimpleNamespace())
-    assert "memory" not in derive_active_tool_groups_from_params(SimpleNamespace(memory_recall_mode=RecallMode.CONTEXT))
-
-
 def test_builtin_tool_id_to_group_values_subset_of_active_keys() -> None:
-    from myrm_agent_harness.agent.meta_tools.discover_capability.capability_gap import (
-        BUILTIN_TOOL_ID_TO_GROUP,
-    )
-
     assert set(BUILTIN_TOOL_ID_TO_GROUP.values()).issubset(set(ACTIVE_TOOL_GROUP_KEYS))
 
 
 def test_builtin_tool_id_to_group_keys_match_togglable_catalog() -> None:
-    from myrm_agent_harness.agent.meta_tools.discover_capability.capability_gap import (
-        BUILTIN_TOOL_ID_TO_GROUP,
-        CAPABILITY_GAP_REGISTRY,
-    )
-
     from app.services.agent.builtin_specs.builtin_tool_ids import TOGGLABLE_BUILTIN_TOOL_IDS
 
-    gap_excluded = frozenset({"skill_market", "skill_manage"})
+    without_tool_group = frozenset({"skill_market", "skill_manage"})
 
-    registry_ids = {entry.tool_id for entry in CAPABILITY_GAP_REGISTRY}
-    assert registry_ids == set(BUILTIN_TOOL_ID_TO_GROUP)
-    assert set(BUILTIN_TOOL_ID_TO_GROUP) == set(TOGGLABLE_BUILTIN_TOOL_IDS) - gap_excluded
-    assert gap_excluded <= set(TOGGLABLE_BUILTIN_TOOL_IDS)
-    for entry in CAPABILITY_GAP_REGISTRY:
-        assert BUILTIN_TOOL_ID_TO_GROUP[entry.tool_id] == entry.tool_group
-        assert entry.triggers, f"capability gap triggers must be non-empty for {entry.tool_id!r}"
+    assert set(BUILTIN_TOOL_ID_TO_GROUP) == set(TOGGLABLE_BUILTIN_TOOL_IDS) - without_tool_group
+    assert without_tool_group <= set(TOGGLABLE_BUILTIN_TOOL_IDS)

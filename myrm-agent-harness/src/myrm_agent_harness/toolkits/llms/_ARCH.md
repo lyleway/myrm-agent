@@ -37,7 +37,7 @@ Bug ledgers (local-only: git-ignored and excluded from the wheel): `llms_<start>
 | routing/ | Pre-agent routing layer: task complexity routing and privacy routing. |
 | utils/ | LLM toollayer: JSON handles, modelparameter, log |
 | video/ | Video generation module — multi-provider video generation with failover. |
-| tts/ | Audio generation module — OpenAI/ElevenLabs TTS with gateway fallback. See [tts/_ARCH.md](tts/_ARCH.md). |
+| tts/ | Audio generation module — ElevenLabs/Volcengine TTS with gateway fallback. See [tts/_ARCH.md](tts/_ARCH.md). |
 | vision/ | Multimodal understanding — `VisionFallbackEngine` / `VideoAnalysisEngine`. See [vision/_ARCH.md](vision/_ARCH.md). |
 
 ## Media stack (generation vs understanding)

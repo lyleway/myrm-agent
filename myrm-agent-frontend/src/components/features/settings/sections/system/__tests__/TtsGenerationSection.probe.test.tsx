@@ -37,7 +37,12 @@ async function renderSection() {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal('fetch', kit.fetch);
-  kit.voice = { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy', ttsApiKey: 'sk-stored' };
+  kit.voice = {
+    ttsProvider: 'elevenlabs',
+    ttsModel: 'eleven_turbo_v2_5',
+    ttsVoice: '21m00Tcm4TlvDq8ikWAM',
+    ttsApiKey: 'sk-stored',
+  };
 });
 
 afterEach(() => {
@@ -55,7 +60,12 @@ describe('TtsGenerationSection connection test', () => {
     expect(kit.fetch).toHaveBeenCalledExactlyOnceWith('http://backend/api/v1/agents/test-media-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer token' },
-      body: JSON.stringify({ mediaType: 'tts', provider: 'openai', model: 'tts-1', voice: 'alloy' }),
+      body: JSON.stringify({
+        mediaType: 'tts',
+        provider: 'elevenlabs',
+        model: 'eleven_turbo_v2_5',
+        voice: '21m00Tcm4TlvDq8ikWAM',
+      }),
     });
     expect(testButton().querySelector('.text-green-500')).not.toBeNull();
   });
@@ -63,6 +73,10 @@ describe('TtsGenerationSection connection test', () => {
   it.each([
     ['nothing is chosen yet', {}],
     ['the stored provider is one only channel replies can use', { ttsProvider: 'edge', ttsApiKey: 'sk-stored' }],
+    [
+      'the stored provider is one the card no longer offers',
+      { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy', ttsApiKey: 'sk-stored' },
+    ],
   ])('cannot be started while %s', async (_case, voice) => {
     kit.voice = voice;
     await renderSection();

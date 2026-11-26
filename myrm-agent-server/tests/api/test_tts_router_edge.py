@@ -58,7 +58,7 @@ def test_ensure_edge_raises_503_when_unavailable(caplog: pytest.LogCaptureFixtur
 
 
 def test_ensure_edge_skips_non_edge_provider() -> None:
-    voice = VoiceConfig(tts_mode=TTSMode.ALWAYS, tts_provider="openai", tts_api_key="sk-test")
+    voice = VoiceConfig(tts_mode=TTSMode.ALWAYS, tts_provider="elevenlabs", tts_api_key="sk-test")
     with patch("app.channels.voice.tts.is_edge_tts_available", return_value=False):
         _ensure_edge_tts_if_needed(voice)
 
@@ -106,7 +106,7 @@ def test_synthesize_stream_returns_422_when_no_audio(client: TestClient) -> None
     ):
         mock_resolve.return_value = VoiceConfig(
             tts_mode=TTSMode.ALWAYS,
-            tts_provider="openai",
+            tts_provider="elevenlabs",
             tts_api_key="sk-test",
         )
         response = client.post(

@@ -8,7 +8,7 @@
 - AsyncTTSEngine: Core TTS generation engine
 
 [POS]
-Handles HTTP requests to TTS providers (OpenAI, ElevenLabs, Volcengine
+Handles HTTP requests to TTS providers (ElevenLabs, Volcengine
 Doubao-TTS / Seed-Audio) with Try-Catch flexible fallback for gateway
 routing. Volcengine OpenSpeech endpoints are not proxied by the gateway
 and always connect directly via tts/volcengine.py.
@@ -160,9 +160,7 @@ class AsyncTTSEngine:
 
         if not bypass_gateway and self.config.gateway_config and self.config.gateway_config.use_gateway:
             base_url = (self.config.gateway_config.gateway_url or "").rstrip("/")
-            if provider == "openai":
-                url = f"{base_url}/tts/openai/{self.config.model}"
-            elif provider == "elevenlabs":
+            if provider == "elevenlabs":
                 url = f"{base_url}/tts/elevenlabs/{self.config.voice}"
             else:
                 url = f"{base_url}/tts/{provider}/{self.config.model}"
@@ -173,13 +171,7 @@ class AsyncTTSEngine:
             }
         else:
             api_key = self.config.api_key.get_secret_value() if self.config.api_key else ""
-            if provider == "openai":
-                url = self.config.base_url or "https://api.openai.com/v1/audio/speech"
-                headers = {
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                }
-            elif provider == "elevenlabs":
+            if provider == "elevenlabs":
                 url = self.config.base_url or f"https://api.elevenlabs.io/v1/text-to-speech/{self.config.voice}"
                 headers = {
                     "xi-api-key": api_key,
@@ -189,14 +181,7 @@ class AsyncTTSEngine:
                 raise ValueError(f"Unsupported TTS provider: {provider}")
 
         payload: dict[str, object]
-        if provider == "openai":
-            payload = {
-                "model": self.config.model,
-                "input": text,
-                "voice": self.config.voice,
-                "speed": self.config.speed,
-            }
-        elif provider == "elevenlabs":
+        if provider == "elevenlabs":
             payload = {
                 "model_id": self.config.model,
                 "text": text,

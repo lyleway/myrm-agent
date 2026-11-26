@@ -20,19 +20,20 @@ describe('ttsCatalog', () => {
     }
   });
 
-  it.each(['edge', 'piper', 'voicebox', '', undefined])('does not offer %j', (provider) => {
+  it.each(['openai', 'edge', 'piper', 'voicebox', '', undefined])('does not offer %j', (provider) => {
     expect(isTtsProvider(provider)).toBe(false);
   });
 });
 
 describe('isTtsSelected', () => {
   it('needs an offered provider with a model and a voice', () => {
-    expect(isTtsSelected('openai', 'tts-1', 'alloy')).toBe(true);
-    expect(isTtsSelected('openai', 'tts-1', '')).toBe(false);
-    expect(isTtsSelected('openai', ' ', 'alloy')).toBe(false);
-    expect(isTtsSelected('openai', undefined, undefined)).toBe(false);
-    expect(isTtsSelected('edge', 'tts-1', 'alloy')).toBe(false);
-    expect(isTtsSelected(undefined, 'tts-1', 'alloy')).toBe(false);
+    expect(isTtsSelected('elevenlabs', 'eleven_flash_v2_5', 'Rachel')).toBe(true);
+    expect(isTtsSelected('elevenlabs', 'eleven_flash_v2_5', '')).toBe(false);
+    expect(isTtsSelected('elevenlabs', ' ', 'Rachel')).toBe(false);
+    expect(isTtsSelected('elevenlabs', undefined, undefined)).toBe(false);
+    expect(isTtsSelected('edge', 'eleven_flash_v2_5', 'Rachel')).toBe(false);
+    expect(isTtsSelected('openai', 'tts-1', 'alloy')).toBe(false);
+    expect(isTtsSelected(undefined, 'eleven_flash_v2_5', 'Rachel')).toBe(false);
   });
 });
 
@@ -59,8 +60,8 @@ describe('readStoredChoices', () => {
     });
   });
 
-  it.each(['edge', 'piper', 'voicebox'])(
-    'keeps only the provider when the channel voice settings hold %s: its model, voice and key mean nothing here',
+  it.each(['edge', 'piper', 'voicebox', 'openai'])(
+    'keeps only the provider when the settings hold %s, which this card does not offer: its model, voice and key mean nothing here',
     (ttsProvider) => {
       expect(
         readStoredChoices({

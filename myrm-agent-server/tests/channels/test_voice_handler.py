@@ -1,7 +1,6 @@
-"""Tests for voice handler (handler.py), TTS (tts.py), and STT (stt.py) modules.
+"""Tests for the voice handler (handler.py): audio attachment detection, TTS directives and mode logic, inbound transcription.
 
-Covers pure functions, TTS mode logic, directive parsing, provider dispatch,
-and STT transcription with mocked external APIs.
+The STT and TTS packages have their own tests under tests/channels/voice/.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from app.channels.voice.handler import (
     strip_tts_tags,
     transcribe_inbound,
 )
+from tests.channels.voice.voice_testkit import voice_config
 
 
 def _msg(
@@ -49,20 +49,6 @@ def _msg(
 
 def _outbound(content: str = "reply") -> OutboundMessage:
     return OutboundMessage(channel="test", recipient_id="chat-1", content=content, user_id="u1")
-
-
-def _voice_config(**overrides: object) -> VoiceConfig:
-    defaults: dict[str, object] = {
-        "stt_enabled": True,
-        "stt_provider": "openai",
-        "stt_api_key": "test-key",
-        "tts_mode": TTSMode.ALWAYS,
-        "tts_provider": "edge",
-        "tts_api_key": "test-key",
-        "tts_max_length": 4000,
-    }
-    defaults.update(overrides)
-    return VoiceConfig(**defaults)  # type: ignore[arg-type]
 
 
 def _audio_attachment(url: str | None = None, path: str | None = None) -> MediaAttachment:
@@ -106,13 +92,13 @@ class TestParseTtsDirectives:
         assert directives["voice"] == "nova"
 
     def test_provider_directive(self) -> None:
-        directives, _ = parse_tts_directives("Hello [[tts:provider=openai]] world")
-        assert directives["provider"] == "openai"
+        directives, _ = parse_tts_directives("Hello [[tts:provider=elevenlabs]] world")
+        assert directives["provider"] == "elevenlabs"
 
     def test_multiple_directives(self) -> None:
-        directives, _ = parse_tts_directives("Hello [[tts:voice=nova provider=openai]] world")
+        directives, _ = parse_tts_directives("Hello [[tts:voice=nova provider=elevenlabs]] world")
         assert directives["voice"] == "nova"
-        assert directives["provider"] == "openai"
+        assert directives["provider"] == "elevenlabs"
 
     def test_text_block(self) -> None:
         _, text_block = parse_tts_directives("Hello [[tts:text]]Custom speech[[/tts:text]] world")
@@ -148,7 +134,7 @@ class TestStripTtsTags:
 class TestMaybeTts:
     @pytest.mark.asyncio
     async def test_tts_off_returns_original(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.OFF)
+        config = voice_config(tts_mode=TTSMode.OFF)
         result = await maybe_tts(_outbound(), True, config)
         assert result.content == "reply"
 
@@ -159,25 +145,25 @@ class TestMaybeTts:
 
     @pytest.mark.asyncio
     async def test_inbound_mode_no_voice_returns_original(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.INBOUND)
+        config = voice_config(tts_mode=TTSMode.INBOUND)
         result = await maybe_tts(_outbound(), False, config)
         assert result.content == "reply"
 
     @pytest.mark.asyncio
     async def test_empty_content_returns_original(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         result = await maybe_tts(_outbound(content=""), True, config)
         assert result.content == ""
 
     @pytest.mark.asyncio
     async def test_tts_off_directive_strips_tags(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         result = await maybe_tts(_outbound(content="Hello [[tts:off]] world"), True, config)
         assert "[[tts:" not in result.content
 
     @pytest.mark.asyncio
     async def test_successful_synthesis_adds_audio(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         tmp.write(b"fake audio data")
         tmp.close()
@@ -195,7 +181,7 @@ class TestMaybeTts:
 
     @pytest.mark.asyncio
     async def test_synthesis_failure_returns_clean_content(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         with patch(
             "app.channels.voice.tts.synthesize",
             new_callable=AsyncMock,
@@ -206,7 +192,7 @@ class TestMaybeTts:
 
     @pytest.mark.asyncio
     async def test_voice_override_from_directive(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         with patch(
             "app.channels.voice.tts.synthesize",
             new_callable=AsyncMock,
@@ -218,7 +204,7 @@ class TestMaybeTts:
 
     @pytest.mark.asyncio
     async def test_tts_text_block_used_for_synthesis(self) -> None:
-        config = _voice_config(tts_mode=TTSMode.ALWAYS)
+        config = voice_config(tts_mode=TTSMode.ALWAYS)
         with patch(
             "app.channels.voice.tts.synthesize",
             new_callable=AsyncMock,
@@ -246,13 +232,13 @@ class TestTranscribeInbound:
 
     @pytest.mark.asyncio
     async def test_stt_disabled_returns_original(self) -> None:
-        config = _voice_config(stt_enabled=False)
+        config = voice_config(stt_enabled=False)
         result = await transcribe_inbound(_msg(), config, MagicMock())
         assert result.content == "hello"
 
     @pytest.mark.asyncio
     async def test_no_audio_returns_original(self) -> None:
-        config = _voice_config()
+        config = voice_config()
         with patch(
             "app.channels.voice.handler.download_inbound_audio",
             new_callable=AsyncMock,
@@ -263,7 +249,7 @@ class TestTranscribeInbound:
 
     @pytest.mark.asyncio
     async def test_successful_transcription(self) -> None:
-        config = _voice_config()
+        config = voice_config()
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         tmp.write(b"fake audio")
         tmp.close()
@@ -282,7 +268,7 @@ class TestTranscribeInbound:
 
     @pytest.mark.asyncio
     async def test_empty_transcription_returns_original(self) -> None:
-        config = _voice_config()
+        config = voice_config()
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         tmp.write(b"fake audio")
         tmp.close()
@@ -345,417 +331,3 @@ class TestDownloadInboundAudio:
         ):
             result = await download_inbound_audio(msg, lambda _: ch)
             assert result == Path("/tmp/downloaded.mp3")
-
-
-# ══════════════════════════════════════════════════════════════════════
-# tts.py Tests
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestTtsSynthesize:
-    @pytest.mark.asyncio
-    async def test_short_text_returns_none(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config()
-        result = await synthesize("Hi", config)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_long_text_returns_none(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_max_length=50)
-        result = await synthesize("x" * 100, config)
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_edge_provider_dispatch(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_provider="edge")
-        with patch(
-            "app.channels.voice.tts.core._synthesize_edge",
-            new_callable=AsyncMock,
-            return_value=Path("/tmp/edge.mp3"),
-        ) as mock_edge:
-            result = await synthesize("Hello world test text", config)
-            assert result == Path("/tmp/edge.mp3")
-            mock_edge.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_api_provider_dispatch(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_provider="openai")
-        with patch(
-            "app.channels.voice.tts.core._synthesize_api",
-            new_callable=AsyncMock,
-            return_value=Path("/tmp/openai.mp3"),
-        ) as mock_api:
-            result = await synthesize("Hello world test text", config)
-            assert result == Path("/tmp/openai.mp3")
-            mock_api.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_primary_failure_falls_back_to_edge(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_provider="openai")
-        with (
-            patch(
-                "app.channels.voice.tts.core._synthesize_api",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("API down"),
-            ),
-            patch(
-                "app.channels.voice.tts.core.is_edge_tts_available",
-                return_value=True,
-            ),
-            patch(
-                "app.channels.voice.tts.core._synthesize_edge",
-                new_callable=AsyncMock,
-                return_value=Path("/tmp/fallback.mp3"),
-            ) as mock_edge,
-        ):
-            result = await synthesize("Hello world test text", config)
-            assert result == Path("/tmp/fallback.mp3")
-            mock_edge.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_edge_failure_no_double_fallback(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_provider="edge")
-        with patch(
-            "app.channels.voice.tts.core._synthesize_edge",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Edge down"),
-        ):
-            result = await synthesize("Hello world test text", config)
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_both_fail_returns_none(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(tts_provider="openai")
-        with (
-            patch(
-                "app.channels.voice.tts.core._synthesize_api",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("API down"),
-            ),
-            patch(
-                "app.channels.voice.tts.core.is_edge_tts_available",
-                return_value=True,
-            ),
-            patch(
-                "app.channels.voice.tts.core._synthesize_edge",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("Edge down"),
-            ),
-        ):
-            result = await synthesize("Hello world test text", config)
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_summary_triggered_for_long_text(self) -> None:
-        from app.channels.voice.tts import synthesize
-
-        config = _voice_config(
-            tts_provider="edge",
-            tts_summary_enabled=True,
-            tts_summary_threshold=20,
-        )
-        with (
-            patch(
-                "app.channels.voice.tts.core._summarize_for_tts",
-                new_callable=AsyncMock,
-                return_value="short summary",
-            ) as mock_summary,
-            patch(
-                "app.channels.voice.tts.core._synthesize_edge",
-                new_callable=AsyncMock,
-                return_value=Path("/tmp/edge.mp3"),
-            ) as mock_edge,
-        ):
-            await synthesize("A" * 100, config)
-            mock_summary.assert_called_once()
-            called_text = mock_edge.call_args[0][0]
-            assert called_text == "short summary"
-
-
-class TestTtsRequestBuilders:
-    def test_openai_request(self) -> None:
-        from app.channels.voice.tts import _openai_request
-
-        config = _voice_config(tts_api_key="sk-test", tts_voice="nova")
-        url, headers, body = _openai_request(config, "Hello", "mp3")
-        assert "/audio/speech" in url
-        assert "Bearer sk-test" in headers["Authorization"]
-        assert body["voice"] == "nova"
-
-    def test_openai_custom_base_url(self) -> None:
-        from app.channels.voice.tts import _openai_request
-
-        config = _voice_config(tts_api_key="sk-test", tts_base_url="https://custom.api.com/v1/")
-        url, _, _ = _openai_request(config, "Hello", "mp3")
-        assert url.startswith("https://custom.api.com/v1")
-
-    def test_elevenlabs_request(self) -> None:
-        from app.channels.voice.tts import _elevenlabs_request
-
-        config = _voice_config(tts_api_key="el-test")
-        url, headers, params, body = _elevenlabs_request(config, "Hello", stream=False)
-        assert "text-to-speech" in url
-        assert headers["xi-api-key"] == "el-test"
-
-    def test_fish_audio_request(self) -> None:
-        from app.channels.voice.tts import _fish_audio_request
-
-        config = _voice_config(tts_api_key="fa-test")
-        url, headers, body = _fish_audio_request(config, "Hello", "mp3")
-        assert "/tts" in url
-        assert body["format"] == "mp3"
-
-    def test_minimax_request(self) -> None:
-        from app.channels.voice.tts import _minimax_request
-
-        config = _voice_config(tts_api_key="mm-test")
-        url, headers, body = _minimax_request(config, "Hello", stream=False)
-        assert "/t2a_v2" in url
-        assert body["model"] == "speech-2.8-hd"
-
-    def test_resolve_base_url_openai_custom(self) -> None:
-        from app.channels.voice.tts import _resolve_base_url
-
-        config = _voice_config(tts_base_url="https://custom.com/v1/")
-        assert _resolve_base_url(config, "openai") == "https://custom.com/v1"
-
-    def test_resolve_base_url_non_openai_ignores_custom(self) -> None:
-        from app.channels.voice.tts import _resolve_base_url
-
-        config = _voice_config(tts_base_url="https://custom.com/v1/")
-        assert _resolve_base_url(config, "elevenlabs") == "https://api.elevenlabs.io"
-
-
-class TestTtsWriteTemp:
-    def test_write_temp(self) -> None:
-        from app.channels.voice.tts import _write_temp
-
-        path = _write_temp(b"test data", ".mp3")
-        try:
-            assert path.exists()
-            assert path.read_bytes() == b"test data"
-            assert path.suffix == ".mp3"
-        finally:
-            path.unlink(missing_ok=True)
-
-
-# ══════════════════════════════════════════════════════════════════════
-# stt.py Tests
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestSttTranscribe:
-    @pytest.mark.asyncio
-    async def test_missing_file_returns_none(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        result = await transcribe(Path("/nonexistent/audio.mp3"), _voice_config())
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_too_small_file_returns_none(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"tiny")
-        tmp.close()
-        try:
-            result = await transcribe(Path(tmp.name), _voice_config())
-            assert result is None
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_too_large_file_returns_none(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * (26 * 1024 * 1024))
-        tmp.close()
-        try:
-            result = await transcribe(Path(tmp.name), _voice_config())
-            assert result is None
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_openai_provider_dispatch(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        config = _voice_config(stt_provider="openai")
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * 2048)
-        tmp.close()
-        try:
-            with patch(
-                "app.channels.voice.stt._transcribe_openai_compatible",
-                new_callable=AsyncMock,
-                return_value=STTResult(text="hello"),
-            ) as mock_fn:
-                result = await transcribe(Path(tmp.name), config)
-                assert result is not None
-                assert result.text == "hello"
-                mock_fn.assert_called_once()
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_groq_provider_dispatch(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        config = _voice_config(stt_provider="groq")
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * 2048)
-        tmp.close()
-        try:
-            with patch(
-                "app.channels.voice.stt._transcribe_openai_compatible",
-                new_callable=AsyncMock,
-                return_value=STTResult(text="groq result"),
-            ):
-                result = await transcribe(Path(tmp.name), config)
-                assert result is not None
-                assert result.text == "groq result"
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_deepgram_provider_dispatch(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        config = _voice_config(stt_provider="deepgram")
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * 2048)
-        tmp.close()
-        try:
-            with patch(
-                "app.channels.voice.stt._transcribe_deepgram",
-                new_callable=AsyncMock,
-                return_value=STTResult(text="deepgram result"),
-            ):
-                result = await transcribe(Path(tmp.name), config)
-                assert result is not None
-                assert result.text == "deepgram result"
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_unknown_provider_falls_back_to_openai(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        config = _voice_config(stt_provider="unknown")
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * 2048)
-        tmp.close()
-        try:
-            with patch(
-                "app.channels.voice.stt._transcribe_openai_compatible",
-                new_callable=AsyncMock,
-                return_value=STTResult(text="fallback"),
-            ):
-                result = await transcribe(Path(tmp.name), config)
-                assert result is not None
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_exception_returns_none(self) -> None:
-        from app.channels.voice.stt import transcribe
-
-        config = _voice_config(stt_provider="openai")
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        tmp.write(b"x" * 2048)
-        tmp.close()
-        try:
-            with patch(
-                "app.channels.voice.stt._transcribe_openai_compatible",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("API error"),
-            ):
-                result = await transcribe(Path(tmp.name), config)
-                assert result is None
-        finally:
-            Path(tmp.name).unlink(missing_ok=True)
-
-
-class TestSttDownloadAudio:
-    @pytest.mark.asyncio
-    async def test_successful_download(self) -> None:
-        from app.channels.voice.stt import download_audio
-
-        mock_resp = MagicMock()
-        mock_resp.content = b"audio data"
-        mock_resp.raise_for_status = MagicMock()
-        mock_resp.headers = {"content-type": "audio/mpeg"}
-
-        with patch("app.channels.voice.stt.httpx.AsyncClient") as mock_client:
-            instance = AsyncMock()
-            instance.get = AsyncMock(return_value=mock_resp)
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value = instance
-
-            result = await download_audio("https://example.com/audio.mp3")
-            assert result is not None
-            try:
-                assert result.exists()
-                assert result.read_bytes() == b"audio data"
-            finally:
-                result.unlink(missing_ok=True)
-
-    @pytest.mark.asyncio
-    async def test_download_failure_returns_none(self) -> None:
-        from app.channels.voice.stt import download_audio
-
-        with patch("app.channels.voice.stt.httpx.AsyncClient") as mock_client:
-            instance = AsyncMock()
-            instance.get = AsyncMock(side_effect=RuntimeError("network error"))
-            instance.__aenter__ = AsyncMock(return_value=instance)
-            instance.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value = instance
-
-            result = await download_audio("https://example.com/audio.mp3")
-            assert result is None
-
-
-class TestSttHelpers:
-    def test_guess_extension_from_url(self) -> None:
-        from app.channels.voice.stt import _guess_extension
-
-        assert _guess_extension("https://x.com/audio.ogg", "") == ".ogg"
-        assert _guess_extension("https://x.com/audio.wav", "") == ".wav"
-        assert _guess_extension("https://x.com/audio.m4a", "") == ".m4a"
-
-    def test_guess_extension_from_content_type(self) -> None:
-        from app.channels.voice.stt import _guess_extension
-
-        assert _guess_extension("https://x.com/audio", "audio/ogg") == ".ogg"
-        assert _guess_extension("https://x.com/audio", "audio/wav") == ".wav"
-        assert _guess_extension("https://x.com/audio", "audio/webm") == ".webm"
-
-    def test_guess_extension_default(self) -> None:
-        from app.channels.voice.stt import _guess_extension
-
-        assert _guess_extension("https://x.com/audio", "unknown") == ".mp3"
-
-    def test_guess_mime(self) -> None:
-        from app.channels.voice.stt import _guess_mime
-
-        assert _guess_mime(Path("audio.mp3")) == "audio/mpeg"
-        assert _guess_mime(Path("audio.wav")) == "audio/wav"
-        assert _guess_mime(Path("audio.ogg")) == "audio/ogg"
-        assert _guess_mime(Path("audio.unknown")) == "audio/mpeg"

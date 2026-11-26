@@ -3,7 +3,7 @@
 ## Overview
 
 Audio generation module — symmetric with `llms/image/` and `llms/video/`.
-Provides text-to-speech via OpenAI, ElevenLabs, and Volcengine
+Provides text-to-speech via ElevenLabs and Volcengine
 (Doubao-TTS / Seed-Audio) with Unified Tool Gateway billing and BYOK
 fallback. Volcengine endpoints are not proxied by the gateway and always
 connect directly.

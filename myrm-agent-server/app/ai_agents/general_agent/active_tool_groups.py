@@ -4,10 +4,9 @@
 - GeneralAgent boolean flags and media params (POS: product-layer entitlement)
 
 [OUTPUT]
-- derive_active_tool_groups: list of TOOL_GROUP_MAP keys for Gap SSOT + skill filtering
-- derive_active_tool_groups_from_params: frozenset adapter for GeneralAgentParams gap preflight
+- derive_active_tool_groups: list of TOOL_GROUP_MAP keys the agent has enabled (skill visibility + AgentRuntimeSpec.tool_groups)
 - ACTIVE_TOOL_GROUP_KEYS: stable key tuple for architecture tests
-- Catalog parity: test_active_tool_groups asserts gap registry keys match TOGGLABLE minus skill_market/skill_manage (no substring gap preflight for those toggles).
+- Catalog parity: test_active_tool_groups asserts BUILTIN_TOOL_ID_TO_GROUP keys match TOGGLABLE minus skill_market/skill_manage (those toggles have no tool group).
 
 [POS]
 Server SSOT mapping user entitlement → harness ``active_tool_groups`` passed to
@@ -16,7 +15,6 @@ Server SSOT mapping user entitlement → harness ``active_tool_groups`` passed t
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
 from myrm_agent_harness.agent.meta_tools.mount_policy import FileAccessMode
@@ -95,54 +93,3 @@ def derive_active_tool_groups(
         ("external_cli", agent.enable_external_cli),
     ]
     return [group for group, enabled in flag_to_group if enabled]
-
-
-@dataclass(slots=True)
-class _ParamsToolGroupSource:
-    """``ActiveToolGroupSource`` view over ``GeneralAgentParams`` entitlement flags."""
-
-    enable_web_search: bool
-    enable_browser: bool
-    file_access_mode: FileAccessMode
-    enable_shell_tools: bool
-    enable_computer_use: bool
-    enable_memory: bool
-    memory_recall_mode: RecallMode
-    incognito_mode: bool
-    enable_kanban: bool
-    enable_wiki: bool
-    enable_answer_tool: bool
-    enable_structured_clarify: bool
-    enable_external_cli: bool
-    enable_cron_eager: bool
-    image_generation_params: object | None
-    video_generation_params: object | None
-    tts_params: object | None
-
-
-def derive_active_tool_groups_from_params(params: object) -> frozenset[str]:
-    """Map ``GeneralAgentParams`` entitlement flags to harness group names for gap preflight."""
-    adapter = _ParamsToolGroupSource(
-        enable_web_search=bool(getattr(params, "enable_web_search", False)),
-        enable_browser=bool(getattr(params, "enable_browser", False)),
-        file_access_mode=getattr(params, "file_access_mode", FileAccessMode.FULL),
-        enable_shell_tools=bool(getattr(params, "enable_shell_tools", True)),
-        enable_computer_use=bool(getattr(params, "enable_computer_use", False)),
-        enable_memory=bool(getattr(params, "enable_memory", True)),
-        memory_recall_mode=getattr(params, "memory_recall_mode", RecallMode.HYBRID),
-        incognito_mode=bool(getattr(params, "incognito_mode", False)),
-        enable_kanban=bool(getattr(params, "enable_kanban", False)),
-        enable_wiki=bool(getattr(params, "enable_wiki", False)),
-        enable_answer_tool=bool(getattr(params, "enable_answer_tool", False)),
-        enable_structured_clarify=bool(getattr(params, "enable_structured_clarify", False)),
-        enable_external_cli=bool(getattr(params, "enable_external_cli", False)),
-        enable_cron_eager=bool(getattr(params, "enable_cron_eager", False)),
-        image_generation_params=getattr(params, "image_generation", None),
-        video_generation_params=getattr(params, "video_generation", None),
-        tts_params=getattr(params, "tts", None),
-    )
-    groups = derive_active_tool_groups(
-        adapter,
-        enable_planning=bool(getattr(params, "enable_planning", False)),
-    )
-    return frozenset(groups)

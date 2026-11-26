@@ -13,8 +13,8 @@ from myrm_agent_harness.toolkits.llms.tts.generator import AsyncTTSEngine
 from myrm_agent_harness.toolkits.llms.tts.models import TTSConfig, TTSGenerationError
 
 
-def _config(provider: str = "openai", **overrides: object) -> TTSConfig:
-    fields: dict[str, object] = {"provider": provider, "model": "tts-1", "voice": "alloy"}
+def _config(provider: str = "elevenlabs", **overrides: object) -> TTSConfig:
+    fields: dict[str, object] = {"provider": provider, "model": "eleven_v2", "voice": "voice-1"}
     fields.update(overrides)
     return TTSConfig(**fields)
 
@@ -50,15 +50,6 @@ def _patch_async_client(post_return: MagicMock | Exception) -> tuple[MagicMock, 
     )
 
 
-def test_build_request_openai_direct() -> None:
-    engine = AsyncTTSEngine(_config(api_key=SecretStr("sk-test"), voice="nova"))
-    url, headers, body = engine._build_request("hello", bypass_gateway=True)
-
-    assert url == "https://api.openai.com/v1/audio/speech"
-    assert headers["Authorization"] == "Bearer sk-test"
-    assert body == {"model": "tts-1", "input": "hello", "voice": "nova", "speed": 1.0}
-
-
 def test_build_request_elevenlabs_direct() -> None:
     engine = AsyncTTSEngine(
         _config("elevenlabs", api_key=SecretStr("el-key"), voice="voice-123", model="eleven_v2"),
@@ -70,22 +61,13 @@ def test_build_request_elevenlabs_direct() -> None:
     assert body == {"model_id": "eleven_v2", "text": "hi"}
 
 
-def test_build_request_openai_gateway(gateway_config: ToolGatewayConfig) -> None:
-    engine = AsyncTTSEngine(
-        _config(model="gpt-4o-mini-tts", gateway_config=gateway_config),
-    )
-    url, headers, _body = engine._build_request("hello", bypass_gateway=False)
-
-    assert url == "https://gateway.example/tool-relay/tts/openai/gpt-4o-mini-tts"
-    assert headers["Authorization"] == "Bearer gateway-token"
-
-
 def test_build_request_elevenlabs_gateway(gateway_config: ToolGatewayConfig) -> None:
     engine = AsyncTTSEngine(
         _config("elevenlabs", voice="v1", gateway_config=gateway_config),
     )
-    url, _, _ = engine._build_request("hello", bypass_gateway=False)
+    url, headers, _ = engine._build_request("hello", bypass_gateway=False)
     assert url == "https://gateway.example/tool-relay/tts/elevenlabs/v1"
+    assert headers["Authorization"] == "Bearer gateway-token"
 
 
 def test_build_request_gateway_generic_provider(gateway_config: ToolGatewayConfig) -> None:
@@ -97,15 +79,16 @@ def test_build_request_gateway_generic_provider(gateway_config: ToolGatewayConfi
     assert body == {"text": "hello"}
 
 
-def test_build_request_unsupported_provider_direct() -> None:
-    engine = AsyncTTSEngine(_config("unknown", api_key=SecretStr("k")))
+@pytest.mark.parametrize("provider", ["unknown", "openai"])
+def test_build_request_unsupported_provider_direct(provider: str) -> None:
+    engine = AsyncTTSEngine(_config(provider, api_key=SecretStr("k")))
     with pytest.raises(ValueError, match="Unsupported TTS provider"):
         engine._build_request("hello", bypass_gateway=True)
 
 
 @pytest.mark.asyncio
-async def test_generate_openai_success() -> None:
-    engine = AsyncTTSEngine(_config(api_key=SecretStr("sk-test")))
+async def test_generate_success() -> None:
+    engine = AsyncTTSEngine(_config(api_key=SecretStr("el-key")))
     mock_client, client_patch = _patch_async_client(_mock_http_response())
 
     with client_patch:
@@ -113,7 +96,7 @@ async def test_generate_openai_success() -> None:
 
     assert result.audio_bytes == b"audio-bytes"
     assert result.mime_type == "audio/mpeg"
-    assert result.provider == "openai"
+    assert result.provider == "elevenlabs"
     mock_client.post.assert_awaited_once()
 
 

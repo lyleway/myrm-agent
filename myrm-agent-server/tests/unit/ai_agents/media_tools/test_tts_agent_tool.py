@@ -13,7 +13,7 @@ from app.ai_agents.media_tools.tts_agent_tool import MAX_TTS_TEXT_LENGTH, TTSToo
 
 @pytest.fixture
 def config() -> TTSConfig:
-    return TTSConfig(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key="test-key")
+    return TTSConfig(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="test-key")
 
 
 @pytest.fixture
@@ -29,8 +29,8 @@ def _result(*, persisted_ref: str | None = "media://media_speech", duration_seco
     return TTSResult(
         audio_bytes=b"audio",
         mime_type="audio/mpeg",
-        provider="openai",
-        model="gpt-4o-mini-tts",
+        provider="elevenlabs",
+        model="eleven_flash_v2_5",
         latency_ms=150.4,
         persisted_ref=persisted_ref,
         duration_seconds=duration_seconds,
@@ -58,8 +58,8 @@ async def test_success_carries_the_stored_reference_and_what_produced_it(config:
 
     assert payload == {
         "status": "success",
-        "provider": "openai",
-        "model": "gpt-4o-mini-tts",
+        "provider": "elevenlabs",
+        "model": "eleven_flash_v2_5",
         "latency_ms": 150,
         "audio_url": "media://media_speech",
         "message": "Audio generated; it appears in the chat for the user to play.",

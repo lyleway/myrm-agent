@@ -201,13 +201,13 @@ async def test_a_speech_call_answers_with_the_speech_result() -> None:
     spoken = TTSResult(
         audio_bytes=b"audio",
         mime_type="audio/mpeg",
-        provider="openai",
-        model="gpt-4o-mini-tts",
+        provider="elevenlabs",
+        model="eleven_flash_v2_5",
         latency_ms=150.0,
         persisted_ref="media://media_speech",
         duration_seconds=3.24,
     )
-    config = TTSConfig(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key="test-key")
+    config = TTSConfig(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="test-key")
 
     with patch("app.ai_agents.media_tools.tts_agent_tool.AsyncTTSEngine.generate", AsyncMock(return_value=spoken)):
         answer = json.loads(await TTSTool(config).ainvoke({"text": "Hello"}))

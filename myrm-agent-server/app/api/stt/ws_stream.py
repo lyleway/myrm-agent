@@ -83,8 +83,10 @@ async def _stream_via_deepgram(
     keyterms: list[str],
 ) -> None:
     """Proxy audio to Deepgram WebSocket and relay transcripts back."""
+    from app.channels.voice.stt import default_stt_model
+
     params = [
-        ("model", config.stt_model or "nova-3"),
+        ("model", config.stt_model or default_stt_model("deepgram")),
         ("smart_format", "true"),
         ("interim_results", "true"),
         ("endpointing", "300"),
@@ -221,7 +223,7 @@ async def _relay_deepgram_transcripts(ws: WebSocket, dg_ws: object) -> None:
 
 
 async def _batch_fallback(ws: WebSocket, config: VoiceConfig) -> None:
-    """For providers that don't support streaming (e.g. OpenAI Whisper).
+    """For providers that don't support streaming (e.g. OpenAI).
     Collect all audio, transcribe in batch, return final result."""
     await _send_json(
         ws,
