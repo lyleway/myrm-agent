@@ -3,7 +3,8 @@
 A scripted model issues a real ``bash_code_execute_tool`` call that sleeps, inside a real LangGraph agent driven by
 the production ``StreamExecutor`` with the production tool interceptor, on a real ``LocalExecutor`` and a real
 persistent shell. Stop only flips the run's cancel token, and that alone must end the command and everything it
-started, end the run, and keep the model from being asked again.
+started, end the run, and keep the model from being asked again. That includes the shell a stopped first command was
+still starting: the registry keeps a shell only once it is up, so nothing else would close it.
 
 The assertions are about outcomes and ordering (the sleeper is gone, the run ended, the model was asked once), never
 about how long it took.
@@ -31,6 +32,7 @@ from myrm_agent_harness.agent.types import AgentRunStatistics
 from myrm_agent_harness.toolkits.code_execution.config import ExecutionConfig
 from myrm_agent_harness.toolkits.code_execution.executors.base import set_executor
 from myrm_agent_harness.toolkits.code_execution.executors.local.executor import LocalExecutor
+from myrm_agent_harness.toolkits.code_execution.session import LocalPersistentSession
 from myrm_agent_harness.toolkits.code_execution.workspace.storage_root_bind import (
     bind_workspace_storage_root,
     release_workspace_storage_bind_token,
@@ -144,6 +146,42 @@ async def test_stop_ends_the_command_and_the_run_and_the_model_is_not_asked_agai
     assert not process_alive(_MARKER), "the command the stop interrupted must not outlive the run"
     assert run.stats.was_cancelled
     assert run.compactor.events[-1] is STREAM_DONE
+    assert run.model.i == 1, "no further model request may follow the stop"
+
+
+@pytest.mark.asyncio
+async def test_stop_while_the_first_shell_is_starting_ends_the_run_and_leaves_no_shell(
+    executor: LocalExecutor, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawned: list[asyncio.subprocess.Process] = []
+    shell_spawned = asyncio.Event()
+    create_process = LocalPersistentSession._create_process
+
+    async def recording(self: LocalPersistentSession) -> asyncio.subprocess.Process:
+        process = await create_process(self)
+        spawned.append(process)
+        return process
+
+    async def never_ready(self: LocalPersistentSession) -> None:
+        shell_spawned.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(LocalPersistentSession, "_create_process", recording)
+    monkeypatch.setattr(LocalPersistentSession, "_initialize_shell", never_ready)
+    run = _Run(tmp_path, "echo never runs", CancellationToken("e2e_stop_first_shell"))
+    executing = run.start()
+    await asyncio.wait_for(shell_spawned.wait(), timeout=_SETTLE_S)
+
+    run.token.cancel(CancelReason.USER_CANCELLED)
+    await asyncio.wait_for(executing, timeout=_SETTLE_S)
+
+    (shell,) = spawned
+    try:
+        await asyncio.wait_for(shell.wait(), timeout=_SETTLE_S)
+    except TimeoutError:
+        shell.kill()
+        pytest.fail("the shell the stopped command was starting outlived the run")
+    assert run.stats.was_cancelled
     assert run.model.i == 1, "no further model request may follow the stop"
 
 
