@@ -3,7 +3,7 @@
 The identity is written after ``params`` is built; writing it earlier would raise ``UnboundLocalError`` on every
 persisted turn (``orchestrator_turn_body.py``). This test drives the real body with the surrounding pipeline
 stubbed so the assignment point is what is exercised. It also pins what the body hands the pre-reply compaction: the
-turn's own stream buffer, chat, message, agent and engine params.
+turn's own stream buffer, chat, message, agent and engine params, and the user row it has just committed.
 """
 
 from __future__ import annotations
@@ -27,7 +27,12 @@ async def test_turn_identity_is_stamped_on_the_built_params(monkeypatch: pytest.
     await run_turn_body(run)
 
     run.pre_reply_compact.assert_awaited_once_with(
-        run.buffer, chat_id=CHAT_ID, message_id=MESSAGE_ID, agent_id=AGENT_ID, request_engine_params=None
+        run.buffer,
+        chat_id=CHAT_ID,
+        message_id=MESSAGE_ID,
+        agent_id=AGENT_ID,
+        request_engine_params=None,
+        turn_message_id=PERSISTED_MESSAGE_ID,
     )
     (write,) = run.marker_writes
     assert write.params is run.params
