@@ -14,19 +14,17 @@ import {
   Eye,
   FolderOpen,
   Globe,
-  Link2,
-  Lock,
   MessageSquarePlus,
-  Play,
   Send,
   Pin,
 } from 'lucide-react';
 import { useDashboardWorkspaceStore } from '@/components/features/dashboard-workspace/useDashboardWorkspaceStore';
 import { Button } from '@/components/primitives/button';
-import { Input } from '@/components/primitives/input';
-import { Label } from '@/components/primitives/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/primitives/popover';
 import { apiRequest, getApiUrl, getStorageUrl } from '@/lib/api';
+import { ArtifactAppButton } from './ArtifactAppButton';
+import { ArtifactLocalFileActions } from './ArtifactLocalFileActions';
+import { ArtifactPublicationBanners } from './ArtifactPublicationBanners';
+import { ArtifactSharePopover } from './ArtifactSharePopover';
 import { OrganizePlanPanel } from './OrganizePlanPanel';
 import { WeChatDraftPanel } from './WeChatDraftPanel';
 import { isOrganizePlanArtifact } from './organizePlanUtils';
@@ -46,16 +44,13 @@ import {
   formatBytes,
   getArtifactIcon,
   getDownloadFilename,
-  createArtifactSharePreview,
   fetchArtifactDeployPreflight,
   isDeployCandidateArtifactType,
-  isPublicationStale,
   isSharePreviewableArtifact,
   patchArtifactPublicationsInChat,
   publicationsChanged,
   type ArtifactDeployPreflight,
 } from './artifactUtils';
-import { buildPublicArtifactShareUrl } from '@/services/artifactShares';
 import { activateOnKey, REVEAL_ON_HOVER } from '@/lib/utils/a11y';
 
 interface ArtifactCardProps {
@@ -129,7 +124,6 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
   const canCopy = isCopyable(artifact.type as ArtifactType);
   const canInlinePreview = supportsInlinePreview(artifact.type as ArtifactType);
   const [copied, setCopied] = useState(false);
-  const [pathCopied, setPathCopied] = useState(false);
   const [inlineExpanded, setInlineExpanded] = useState(canInlinePreview);
   const [inlineContent, setInlineContent] = useState<string | null>(null);
   const [inlineLoading, setInlineLoading] = useState(false);
@@ -137,10 +131,6 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
   const [publishTargetId, setPublishTargetId] = useState<string | undefined>();
   const [publications, setPublications] = useState<ArtifactPublication[]>(artifact.publications ?? []);
   const [deployPreflight, setDeployPreflight] = useState<ArtifactDeployPreflight | null>(null);
-  const [shareLoading, setShareLoading] = useState(false);
-  const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
-  const [sharePassword, setSharePassword] = useState('');
-  const [shareTtlDays, setShareTtlDays] = useState(7);
   const [ingestLoading, setIngestLoading] = useState(false);
   const [wechatDraftOpen, setWechatDraftOpen] = useState(false);
   const isOrganizePlan = isOrganizePlanArtifact(artifact.filename);
@@ -251,36 +241,6 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
     },
     [deployPreflight],
   );
-
-  const handleSharePreview = useCallback(async () => {
-    if (shareLoading) {
-      return;
-    }
-    setShareLoading(true);
-    try {
-      const pwd = sharePassword.trim() || undefined;
-      const result = await createArtifactSharePreview(artifactState.id, artifactState.type, {
-        ttlDays: shareTtlDays,
-        password: pwd,
-      });
-      const url = result.share_url ?? buildPublicArtifactShareUrl(result.share_path);
-      await writeToClipboard(url);
-      const descKey = result.password_protected
-        ? 'sharePreview.successDescriptionProtected'
-        : 'sharePreview.successDescription';
-      toast.success(t('sharePreview.successTitle'), {
-        description: t(descKey, { days: shareTtlDays }),
-      });
-      setSharePopoverOpen(false);
-      setSharePassword('');
-      setShareTtlDays(7);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : t('sharePreview.failed');
-      toast.error(message);
-    } finally {
-      setShareLoading(false);
-    }
-  }, [artifactState.id, artifactState.type, shareLoading, sharePassword, shareTtlDays, t]);
 
   const preloadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const inlineFetchAttempted = useRef(false);
@@ -417,37 +377,6 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
     window.open(fullUrl, '_blank', 'noopener,noreferrer');
   }, [artifact]);
 
-  const handleRevealInFileManager = useCallback(async () => {
-    if (!artifact.file_path) {
-      return;
-    }
-    try {
-      await apiRequest(`/files/${artifact.id}/reveal`, { method: 'POST' });
-    } catch {
-      toast.error(t('errors.serverError'));
-    }
-  }, [artifact, t]);
-
-  const handleOpenWithDefaultApp = useCallback(async () => {
-    if (!artifact.file_path) {
-      return;
-    }
-    try {
-      await apiRequest(`/files/${artifact.id}/open`, { method: 'POST' });
-    } catch {
-      toast.error(t('errors.serverError'));
-    }
-  }, [artifact, t]);
-
-  const handleCopyPath = useCallback(async () => {
-    if (!artifact.file_path) {
-      return;
-    }
-    await writeToClipboard(artifact.file_path);
-    setPathCopied(true);
-    setTimeout(() => setPathCopied(false), 2000);
-  }, [artifact.file_path]);
-
   const handleIngestToWiki = useCallback(async () => {
     if (ingestLoading) {
       return;
@@ -525,8 +454,6 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
     });
   };
 
-  const stalePublications = publications.filter((pub) => isPublicationStale(pub, artifactState.latest_version_id));
-
   const handleDismissWeChatDraftPanel = useCallback(() => {
     setWechatDraftOpen(false);
   }, []);
@@ -601,48 +528,7 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
 
           {/* Action buttons */}
           <div className={cn('flex items-center gap-1 transition-opacity duration-200', REVEAL_ON_HOVER)}>
-            {hasLocalPath && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleOpenWithDefaultApp();
-                }}
-                title={t('openWithDefaultApp')}
-              >
-                <Play className="w-4 h-4" />
-              </Button>
-            )}
-            {hasLocalPath && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleRevealInFileManager();
-                }}
-                title={t('revealInFileManager')}
-              >
-                <FolderOpen className="w-4 h-4" />
-              </Button>
-            )}
-            {hasLocalPath && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCopyPath();
-                }}
-                title={pathCopied ? t('copied') : t('copyPath')}
-              >
-                <Copy className={cn('w-3.5 h-3.5', pathCopied && 'text-green-500')} />
-              </Button>
-            )}
+            {hasLocalPath && <ArtifactLocalFileActions artifactId={artifact.id} filePath={artifact.file_path ?? ''} />}
             {canDeploy && publications.some((pub) => pub.publication_status === 'READY' && pub.publication_url) && (
               <Button
                 variant="ghost"
@@ -665,62 +551,9 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
                 <ExternalLink className="w-4 h-4" />
               </Button>
             )}
-            {canSharePreview && (
-              <Popover open={sharePopoverOpen} onOpenChange={setSharePopoverOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-primary"
-                    onClick={(e) => e.stopPropagation()}
-                    title={t('sharePreview.open')}
-                  >
-                    <Link2 className="w-4 h-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-72 p-3 space-y-3" align="end" onClick={(e) => e.stopPropagation()}>
-                  <p className="text-sm font-medium">{t('sharePreview.title')}</p>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs flex items-center gap-1">
-                      <Lock className="w-3 h-3" />
-                      {t('sharePreview.passwordLabel')}
-                    </Label>
-                    <Input
-                      type="password"
-                      value={sharePassword}
-                      onChange={(e) => setSharePassword(e.target.value)}
-                      placeholder={t('sharePreview.passwordPlaceholder')}
-                      className="h-8 text-sm"
-                      autoComplete="new-password"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">{t('sharePreview.ttlLabel')}</Label>
-                    <div className="flex gap-1.5">
-                      {[1, 7, 14, 30].map((d) => (
-                        <Button
-                          key={d}
-                          variant={shareTtlDays === d ? 'default' : 'outline'}
-                          size="sm"
-                          className="h-7 flex-1 text-xs px-0"
-                          onClick={() => setShareTtlDays(d)}
-                        >
-                          {t('sharePreview.ttlDays', { days: d })}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <Button
-                    className="w-full h-8 text-sm"
-                    disabled={shareLoading}
-                    onClick={() => {
-                      void handleSharePreview();
-                    }}
-                  >
-                    {shareLoading ? t('sharePreview.creating') : t('sharePreview.createBtn')}
-                  </Button>
-                </PopoverContent>
-              </Popover>
+            {canSharePreview && <ArtifactSharePopover artifactId={artifactState.id} artifactType={artifactState.type} />}
+            {(artifact.type as ArtifactType) === 'html' && (
+              <ArtifactAppButton artifactId={artifactState.id} name={artifactState.filename} />
             )}
             {isDeployCandidate && (
               <Button
@@ -893,66 +726,14 @@ const ArtifactCard: React.FC<ArtifactCardProps> = ({ artifact, onPreview, onDown
           </div>
         </div>
 
-        {publications.some((pub) => pub.publication_status === 'READY' && pub.publication_url) && (
-          <div className="mx-3 mb-2 flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()} role="presentation">
-            {publications
-              .filter((pub) => pub.publication_status === 'READY' && pub.publication_url)
-              .map((pub) => {
-                const url = pub.publication_url;
-                if (!url) {
-                  return null;
-                }
-                return (
-                <button
-                  key={pub.id}
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-xs text-green-800 dark:border-green-900/40 dark:bg-green-950/30 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-950/50"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    window.open(url, '_blank');
-                  }}
-                  title={t('publish.openLiveWithTarget', {
-                    target: pub.hosting_target_name ?? pub.hosting_target_id,
-                    hostname: deploymentHostname(url),
-                  })}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span className="truncate max-w-[12rem]">
-                    {pub.hosting_target_name ? `${pub.hosting_target_name} · ` : ''}
-                    {deploymentHostname(url)}
-                  </span>
-                </button>
-                );
-              })}
-          </div>
-        )}
-
-        {stalePublications.map((pub) => (
-          <div
-            key={pub.id}
-            className="mx-3 mb-2 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100"
-            onClick={(e) => e.stopPropagation()}
-            role="presentation"
-          >
-            <span className="min-w-0">
-              {t('deploy.redeployBannerForTarget', {
-                target: pub.hosting_target_name ?? pub.hosting_target_id,
-              })}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 shrink-0 text-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPublishTargetId(pub.hosting_target_id);
-                setPublishModalOpen(true);
-              }}
-            >
-              {t('deploy.redeployAction')}
-            </Button>
-          </div>
-        ))}
+        <ArtifactPublicationBanners
+          publications={publications}
+          latestVersionId={artifactState.latest_version_id}
+          onRedeploy={(targetId) => {
+            setPublishTargetId(targetId);
+            setPublishModalOpen(true);
+          }}
+        />
 
         {/* Inline visual preview */}
         {canInlinePreview && inlineExpanded && (

@@ -10,6 +10,7 @@ import {
   IconDownload,
   IconEye,
 } from '@/components/features/icons/PremiumIcons';
+import { InstalledAppsList } from '@/components/features/app-host/InstalledAppsList';
 import { EmptyState } from '@/components/primitives/empty-state';
 import { ListDetailSkeleton } from '@/components/primitives/skeleton-templates';
 import { formatRelativeTime } from '@/lib/utils/relativeTime';
@@ -94,6 +95,7 @@ export const ArtifactsCenter: React.FC = () => {
           <IconFileText className="w-5 h-5 text-primary" />
           {t('title')}
         </h2>
+        <InstalledAppsList />
         <div className="space-y-2">
           {artifacts.map((a) => (
             <button

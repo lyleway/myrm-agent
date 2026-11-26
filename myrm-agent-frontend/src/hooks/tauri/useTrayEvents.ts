@@ -6,6 +6,7 @@ const TRAY_ROUTES: Record<string, string> = {
   'tray:new_chat': '/',
   'tray:settings': '/settings',
   'tray:workspace': '/work',
+  'tray:apps': '/artifacts',
 };
 
 export function useTrayEvents() {

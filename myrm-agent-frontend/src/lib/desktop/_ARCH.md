@@ -2,7 +2,7 @@
 
 ## 架构概述
 
-本地/Tauri 桌面自动化权限引导的纯函数 SSOT：从 probe `settings_deeplinks` 选取 URL，并通过 Tauri shell 或 Web fallback 打开系统设置。
+本地/Tauri 桌面自动化权限引导的纯函数 SSOT：从 probe `settings_deeplinks` 选取 URL，并通过 Tauri shell 或 Web fallback 打开系统设置；另含已安装应用的桌面窗口控制。
 
 ## 文件清单
 
@@ -12,7 +12,9 @@
 | `desktopPermissionsStatus.ts`          | 核心 | `DesktopPermissionsStatus` + `desktopPermissionsPath` — FE contract for `GET /webui/desktop/permissions`                                      | ✅    |
 | `desktopLockedUseDoctor.ts`            | 核心 | DesktopLockedUse doctor 解析：badge/detail/tone + `locked_use_enabled` 协调态                                      | ✅    |
 | `desktopSettingsAnchors.ts`            | 核心 | 系统设置内离席/帷幕卡片 scroll 锚点 SSOT                                                                           | ✅    |
+| `appWindow.ts`                         | 核心 | 已安装应用的桌面窗口控制：`openAppWindow` / `closeAppWindow` / `setAppWindowAlwaysOnTop` 各以布尔报告成败、不抛出，调用方失败时回落到页内路由 `/apps/[id]` | ✅    |
 | `__tests__/permissionDeepLink.test.ts` | 测试 | pick meta / system URL / Tauri open / platform guide fallback（含 darwin≠win32 回归）                                                         | —     |
+| `__tests__/appWindow.test.ts`          | 测试 | 三个命令的参数与成败报告                                                                                                                             | —     |
 | `__tests__/desktopLockedUseDoctor.test.ts` | 测试 | DesktopLockedUse doctor 解析与 i18n detail key 映射                                                                                           | —     |
 
 ## 依赖

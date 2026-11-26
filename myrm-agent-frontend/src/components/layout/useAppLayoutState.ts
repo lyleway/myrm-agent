@@ -47,17 +47,23 @@ function persistRoute(tab: string, url: string) {
   }
 }
 
-function getTabFromPathname(pathname: string): NavTab {
-  if (pathname === '/work' || pathname.startsWith('/work/')) {
-    return 'work';
-  }
-  if (
+/** Pages grouped under the Projects tab: the dashboard, its boards and schedules, artifacts and the apps installed from them. */
+function isProjectsPath(pathname: string): boolean {
+  return (
     pathname === '/projects' ||
     pathname.startsWith('/projects/') ||
     pathname.startsWith('/kanban') ||
     pathname.startsWith('/cron') ||
-    pathname.startsWith('/artifacts')
-  ) {
+    pathname.startsWith('/artifacts') ||
+    pathname.startsWith('/apps/')
+  );
+}
+
+function getTabFromPathname(pathname: string): NavTab {
+  if (pathname === '/work' || pathname.startsWith('/work/')) {
+    return 'work';
+  }
+  if (isProjectsPath(pathname)) {
     return 'projects';
   }
   return 'chat';
@@ -101,13 +107,7 @@ export function useAppLayoutState() {
     } else if (pathname === '/work' || pathname.startsWith('/work/')) {
       setLastWorkUrl(pathname);
       persistRoute('work', pathname);
-    } else if (
-      pathname === '/projects' ||
-      pathname.startsWith('/projects/') ||
-      pathname.startsWith('/kanban') ||
-      pathname.startsWith('/cron') ||
-      pathname.startsWith('/artifacts')
-    ) {
+    } else if (isProjectsPath(pathname)) {
       setLastProjectsUrl(pathname);
       persistRoute('projects', pathname);
     }
