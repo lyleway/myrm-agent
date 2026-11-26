@@ -8,7 +8,7 @@
 - Tauri `#[tauri::command]` handlers registered via `command_registry_macro.in`
 
 [POS]
-Leaf IPC command modules invoked from the main webview, session webviews, and pet-surface webview. Sidecar lifecycle registry lives under `runtime/process_registry/` (internal; no renderer IPC).
+Leaf IPC command modules invoked from the main webview, session webviews, installed-app webviews, and pet-surface webview. Sidecar lifecycle registry lives under `runtime/process_registry/` (internal; no renderer IPC).
 
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
@@ -18,6 +18,7 @@ Leaf IPC command modules invoked from the main webview, session webviews, and pe
 | `data_migration.rs` | 核心 | 数据目录迁移预检、流式同步（含逐条目进度回调与拷贝后体积对账）与自愈容灾引擎 | ✅ |
 | `pet_surface.rs` | 核心 | 透明置顶 `/pet-overlay` webview；bounds/show/hide/ignore/focus/toggle。页面地址由 `ProductOrigin` 构造的完整产品页地址（`WebviewUrl::External`）：发布版的 `WebviewUrl::App` 会回落到壳页并丢弃路径 | ✅ |
 | `session_window.rs` | 核心 | 多会话 CLI 二级 webview，页面为产品页来源上的 `/<session_id>?mode=focused`（`WebviewUrl::External`；会话 ID 经百分号编码，逃不出所在路径段）；同一会话再次打开时复用窗口并 `reveal_window` 到前台 | ✅ |
+| `app_window.rs` | 核心 | 已安装应用的独立窗口 `app-<artifact_id>`，页面为产品页来源上的 `/apps/<artifact_id>?mode=focused`（`WebviewUrl::External`）；同一应用再次打开时复用窗口并 `reveal_window` 到前台；窗口标签只接受产物 ID 字符集（进入 ACL 匹配与窗口状态存储，不能带通配或路径）；`close_app_window` / `set_app_window_always_on_top` 作用于调用方窗口，只允许应用窗口调用（IPC gate 与命令内的标签前缀校验各守一道），主窗口无法借它们关闭或置顶自己；窗口尺寸位置由 window-state 插件按标签记忆；无自己的 Dock 图标与进程，关闭即销毁（见 `app/window_policy.rs`） | ✅ |
 | `visual_approval_overlay.rs` | 核心 | 视觉审批 OS 高亮 overlay（macOS 同步建窗；Windows UI 线程异步建窗；其它平台 Err；前端 gate）：屏幕/图像坐标映射到最匹配显示器，在其上开透明置顶的点击穿透窗口。screen / image 模式各自用 payload 的 screen 或 viewport 尺寸与选中 monitor 比对，偏差 >5% 时 fail-closed 不建窗，返回 `{ degraded: true, reason: screen_dimension_mismatch }`（聊天内 bbox 仍为权威）；每次 show 以全新 label 建窗、先建新窗再销毁旧窗；hide 按 label 前缀全部销毁。窗口不受应用级窗口策略管辖（该策略只管辖主窗口，见 `app/window_policy.rs`；`is_overlay_label` 供清理残留高亮窗）。窗口点击穿透，故不进截图排除集 | ✅ |
 | `visual_approval_overlay_page.rs` | 核心 | 审批高亮页面：自定义协议 `myrm-overlay` 的入口 URL（框几何与标签全在查询参数里，页面无状态、窗口间不串页）、HTML 模板与协议响应（`app/chain.rs` 注册协议）；参数缺失或非法时返回透明占位页 | ✅ |
 | `recovery.rs` | 核心 | 崩溃状态收集与恢复 IPC；操作的数据目录经 `utils::data_dir` 解析，与后端使用的是同一个目录；`export_local_sqlite` 导出服务端主库 `data.db` 及其 `-wal` / `-shm`，目标必须是已存在的目录且不能是数据目录本身（文件复制到自身会被清空） | ✅ |
@@ -35,4 +36,5 @@ Leaf IPC command modules invoked from the main webview, session webviews, and pe
 | `mod.rs` | 辅助 | 模块导出 | — |
 
 Pet-surface webview 仅允许调用：`pet_surface_set_ignore_cursor`、`pet_surface_set_focusable`、`pet_surface_focus_main_window`、`pet_surface_toggle_main_window`（见 `ipc_security/policy.rs`；Tauri ACL 授权由同一份策略推导，见 `ipc_security/capability.rs`）。
+App webview 只允许调用只读命令（如 `load_system_config`、`get_backend_status`）与作用于自身的 `close_app_window` / `set_app_window_always_on_top`；会改变状态的命令（含 `open_app_window`、托盘、审批浮层、宠物层）一律拒绝（见 `ipc_security/policy.rs`）。
 Curtain webview 仅允许调用：`curtain_report_physical_input`（见 `ipc_security/policy.rs`）。

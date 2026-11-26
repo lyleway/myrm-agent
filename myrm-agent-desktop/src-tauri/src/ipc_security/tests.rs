@@ -174,6 +174,53 @@ fn allows_session_webview_for_stateful_command() {
 }
 
 #[test]
+fn app_window_may_read_and_control_itself_but_change_nothing_else() {
+    for command in [
+        "load_system_config",
+        "check_backend_health",
+        "close_app_window",
+        "set_app_window_always_on_top",
+    ] {
+        assert!(authorize_request(command, "app-art-1").is_ok(), "{command}");
+    }
+
+    for (command, reason) in [
+        ("open_app_window", "app_window_command_scope"),
+        ("inline_paste_back", "app_window_command_scope"),
+        ("show_pet_surface", "app_window_command_scope"),
+        ("set_tray_status", "app_window_command_scope"),
+        ("save_system_config", "main_only_command"),
+        ("open_session_window", "main_only_command"),
+    ] {
+        let denied = authorize_request(command, "app-art-1").expect_err(command);
+        assert_eq!(denied.reason_code, reason, "{command}");
+    }
+}
+
+#[test]
+fn commands_that_act_on_the_calling_window_are_app_only() {
+    for command in ["close_app_window", "set_app_window_always_on_top"] {
+        for label in ["main", "session-123", "pet-surface", "privacy-curtain-1-0"] {
+            let denied = authorize_request(command, label).expect_err(label);
+            assert_eq!(
+                denied.reason_code, "app_only_command",
+                "{command} @ {label}"
+            );
+        }
+    }
+}
+
+#[test]
+fn main_and_session_windows_may_open_app_windows() {
+    for label in ["main", "session-123"] {
+        assert!(
+            authorize_request("open_app_window", label).is_ok(),
+            "{label}"
+        );
+    }
+}
+
+#[test]
 fn blocks_unknown_webview_label() {
     let result = authorize_request("inline_paste_back", "overlay-window");
     assert!(result.is_err());

@@ -3,6 +3,7 @@ use tauri::ipc::Invoke;
 
 pub(super) const MAIN_WEBVIEW_LABEL: &str = "main";
 pub(super) const SESSION_WEBVIEW_PREFIX: &str = "session-";
+pub const APP_WEBVIEW_PREFIX: &str = "app-";
 pub(super) const PET_SURFACE_WEBVIEW_LABEL: &str = "pet-surface";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub enum DenyMode {
 enum SurfacePolicy {
     MainOnly,
     MainOrSession,
+    /// 命令作用于调用方窗口自身，只有应用窗口能调用。
+    AppOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +99,9 @@ fn policy_for_command(command: &str) -> Option<CommandPolicy> {
             | "pet_surface_focus_main_window"
             | "pet_surface_toggle_main_window"
             | "open_session_window"
+            | "open_app_window"
+            | "close_app_window"
+            | "set_app_window_always_on_top"
             | "set_tray_status"
             | "update_tray_info"
             | "show_privacy_curtain"
@@ -136,6 +142,8 @@ fn policy_for_command(command: &str) -> Option<CommandPolicy> {
             | "hide_privacy_curtain"
     ) {
         SurfacePolicy::MainOnly
+    } else if matches!(command, "close_app_window" | "set_app_window_always_on_top") {
+        SurfacePolicy::AppOnly
     } else {
         SurfacePolicy::MainOrSession
     };
@@ -161,6 +169,10 @@ fn is_session_webview_label(label: &str) -> bool {
     label.starts_with(SESSION_WEBVIEW_PREFIX)
 }
 
+fn is_app_webview_label(label: &str) -> bool {
+    label.starts_with(APP_WEBVIEW_PREFIX)
+}
+
 fn is_pet_surface_webview_label(label: &str) -> bool {
     label == PET_SURFACE_WEBVIEW_LABEL
 }
@@ -183,11 +195,12 @@ pub fn authorize_request(command: &str, webview_label: &str) -> Result<(), Denie
 
     let is_main = is_main_webview_label(webview_label);
     let is_session = is_session_webview_label(webview_label);
+    let is_app = is_app_webview_label(webview_label);
 
     let is_pet_surface = is_pet_surface_webview_label(webview_label);
     let is_curtain = is_curtain_webview_label(webview_label);
 
-    if !is_main && !is_session && !is_pet_surface && !is_curtain {
+    if !is_main && !is_session && !is_app && !is_pet_surface && !is_curtain {
         return Err(DeniedInvoke {
             command: command.to_string(),
             webview_label: webview_label.to_string(),
@@ -204,6 +217,33 @@ pub fn authorize_request(command: &str, webview_label: &str) -> Result<(), Denie
             webview_label: webview_label.to_string(),
             reason_code: "main_only_command",
             reason: "IPC command is restricted to main webview".to_string(),
+            risk: policy.risk,
+            deny_mode: policy.deny_mode,
+        });
+    }
+
+    if matches!(policy.surface, SurfacePolicy::AppOnly) && !is_app {
+        return Err(DeniedInvoke {
+            command: command.to_string(),
+            webview_label: webview_label.to_string(),
+            reason_code: "app_only_command",
+            reason: "IPC command is restricted to app webviews".to_string(),
+            risk: policy.risk,
+            deny_mode: policy.deny_mode,
+        });
+    }
+
+    // 应用窗口承载同一套前端，只读查询随之放行；任何会改变状态的命令一律不给，
+    // 它既不开其它窗口，也不碰托盘、审批浮层与宠物层。
+    if is_app
+        && matches!(policy.surface, SurfacePolicy::MainOrSession)
+        && policy.risk != CommandRisk::ReadOnly
+    {
+        return Err(DeniedInvoke {
+            command: command.to_string(),
+            webview_label: webview_label.to_string(),
+            reason_code: "app_window_command_scope",
+            reason: "IPC command is not allowed from app webview".to_string(),
             risk: policy.risk,
             deny_mode: policy.deny_mode,
         });

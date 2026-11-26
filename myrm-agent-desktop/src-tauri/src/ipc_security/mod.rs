@@ -21,7 +21,7 @@ mod ticket_store;
 
 pub use capability::register_product_capabilities;
 pub use confirmation::require_sensitive_action_confirmation;
-pub use policy::{authorize_invoke, handle_denied_invoke};
+pub use policy::{authorize_invoke, handle_denied_invoke, APP_WEBVIEW_PREFIX};
 pub use ticket_store::{consume_sensitive_ticket, issue_sensitive_ticket, SensitiveAction};
 
 #[tauri::command]

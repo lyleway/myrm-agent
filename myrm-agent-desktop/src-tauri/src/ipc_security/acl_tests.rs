@@ -83,6 +83,20 @@ const PRODUCT_PAGE_WITHHELD: &[&str] = &[
     "plugin:webview|create_webview_window",
 ];
 
+/// 应用窗口被授予的内核与官方插件命令：事件、版本、窗口只读查询与通知。
+const APP_WINDOW_GRANTED: &[&str] = &[
+    "plugin:app|version",
+    "plugin:event|listen",
+    "plugin:event|unlisten",
+    "plugin:event|emit",
+    "plugin:event|emit_to",
+    "plugin:window|is_visible",
+    "plugin:window|outer_position",
+    "plugin:notification|is_permission_granted",
+    "plugin:notification|request_permission",
+    "plugin:notification|notify",
+];
+
 /// 宠物浮层被授予的内核与官方插件命令。
 const PET_SURFACE_GRANTED: &[&str] = &[
     "plugin:event|listen",
@@ -192,11 +206,13 @@ fn acl_agrees_with_the_ipc_gate_for_every_registered_command() {
         .expect("overlay url")
         .to_string();
 
-    let cases: [(&str, &str); 12] = [
+    let cases: [(&str, &str); 16] = [
         ("main", shell_page_url()),
         ("main", &product_page),
         ("session-chat-1", shell_page_url()),
         ("session-chat-1", &product_page),
+        ("app-art-1", shell_page_url()),
+        ("app-art-1", &product_page),
         ("pet-surface", shell_page_url()),
         ("pet-surface", &product_page),
         ("privacy-curtain-1-0", &curtain_url),
@@ -204,6 +220,8 @@ fn acl_agrees_with_the_ipc_gate_for_every_registered_command() {
         // 标签只在模式之外一步之遥时也不得沾光。
         ("main2", &product_page),
         ("session", &product_page),
+        ("app", &product_page),
+        ("apps-1", &product_page),
         ("pet-surface-2", &product_page),
         ("mainframe", shell_page_url()),
     ];
@@ -235,10 +253,11 @@ fn critical_commands_stay_main_only_in_the_acl() {
             "migrate_data_dir",
             "restart_app",
             "open_session_window",
+            "open_app_window",
             "show_pet_surface",
             "issue_sensitive_action_ticket",
         ],
-        &[],
+        &["close_app_window", "set_app_window_always_on_top"],
     );
     assert_grants(
         &app,
@@ -248,12 +267,41 @@ fn critical_commands_stay_main_only_in_the_acl() {
             "load_system_config",
             "inline_paste_back",
             "show_pet_surface",
+            "open_app_window",
         ],
         &[
             "save_system_config",
             "migrate_data_dir",
             "restart_app",
             "open_session_window",
+            "issue_sensitive_action_ticket",
+            "show_privacy_curtain",
+            "close_app_window",
+            "set_app_window_always_on_top",
+        ],
+    );
+    assert_grants(
+        &app,
+        "app-art-1",
+        &pages,
+        &[
+            "load_system_config",
+            "get_backend_status",
+            "close_app_window",
+            "set_app_window_always_on_top",
+        ],
+        &[
+            "open_app_window",
+            "open_session_window",
+            "inline_paste_back",
+            "show_pet_surface",
+            "hide_pet_surface",
+            "set_tray_status",
+            "update_tray_info",
+            "show_visual_approval_overlay",
+            "save_system_config",
+            "migrate_data_dir",
+            "restart_app",
             "issue_sensitive_action_ticket",
             "show_privacy_curtain",
         ],
@@ -315,6 +363,14 @@ fn native_grants_follow_the_least_privilege_table() {
         );
     }
 
+    let app_withheld: Vec<&str> = PRODUCT_PAGE_GRANTED
+        .iter()
+        .chain(PRODUCT_PAGE_WITHHELD)
+        .copied()
+        .filter(|command| !APP_WINDOW_GRANTED.contains(command))
+        .collect();
+    assert_grants(&app, "app-art-1", &pages, APP_WINDOW_GRANTED, &app_withheld);
+
     let pet_withheld: Vec<&str> = PRODUCT_PAGE_GRANTED
         .iter()
         .chain(PRODUCT_PAGE_WITHHELD)
@@ -348,6 +404,7 @@ fn foreign_origins_get_nothing_even_in_the_main_window() {
         for command in REGISTERED_COMMANDS
             .iter()
             .chain(PRODUCT_PAGE_GRANTED)
+            .chain(APP_WINDOW_GRANTED)
             .chain(PET_SURFACE_GRANTED)
         {
             assert!(
