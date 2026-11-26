@@ -27,7 +27,7 @@
 | `quarantine.rs` | 核心 | com.apple.quarantine 扫描与静默修复 | — |
 | `updater_safety.rs` | 核心 | 启动期 OTA pubkey 占位符强校验 | ✅ |
 | `process_tree.rs` | 核心 | 进程强杀原语：强杀目标及此刻仍挂在它名下的后代（Windows `taskkill /T /F`；POSIX 发信号前先按 `ps` 的父子关系快照后代，再一次 SIGKILL，目标一死后代就被 reparent、之后找不到）；并提供各平台 `ps` 路径 `ps_binary` | ✅ |
-| `window_reveal.rs` | 核心 | 把已存在的窗口带到前台（先 `show` 与 `unminimize` 再 `set_focus`；会话窗、应用窗的复用分支共用） | — |
+| `window_reveal.rs` | 核心 | 把已存在的窗口带到前台（先 `show` 与 `unminimize` 再 `set_focus`；会话窗、应用窗的复用分支共用） | ✅ |
 | `protocol_page.rs` | 核心 | 自定义协议页面共用原语：入口 URL（`page_url`，含 Windows `http://<scheme>.localhost` 形态与查询参数）、`html_escape`、不缓存的 `html_response`；帷幕看板页与视觉审批高亮页共用，窗口页不走 `data:` URL 的原因记在模块头 | ✅ |
 
 ## 依赖

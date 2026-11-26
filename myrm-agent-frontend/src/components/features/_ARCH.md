@@ -26,6 +26,7 @@
 | `workspace/`                                  | 工作区与文件树                                                       | [_ARCH.md](workspace/_ARCH.md)                                                    |
 | `cron/`                                       | 定时任务 UI                                                          | [_ARCH.md](cron/_ARCH.md)                                                         |
 | `artifacts/`                                  | 工件与部署                                                           | [_ARCH.md](artifacts/_ARCH.md)                                                    |
+| `app-host/`                                   | 已安装应用的宿主页：逐项权限询问、最近活动、应用列表与打开入口       | [_ARCH.md](app-host/_ARCH.md)                                                     |
 | `companion/`                                  | 桌宠伴侣                                                             | [_ARCH.md](companion/_ARCH.md)                                                    |
 | `copilot/`                                    | Lean Co-Pilot：Run Observer + Session Advisor（旁路只读问答）        | [_ARCH.md](copilot/_ARCH.md)                                                      |
 | `e2ee/`                                       | E2EE 安全状态 badge + Popover 面板                                   | [_ARCH.md](e2ee/_ARCH.md)                                                         |
