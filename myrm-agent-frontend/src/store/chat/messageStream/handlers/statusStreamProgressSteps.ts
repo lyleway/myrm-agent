@@ -96,7 +96,10 @@ export function isStatusProgressStep(stepKey: string | undefined): boolean {
   return stepKey !== undefined && PROGRESS_STEP_KEYS.has(stepKey);
 }
 
-/** Recovery STATUS can arrive before the first MESSAGE chunk; ensure a placeholder exists. */
+/**
+ * Recovery STATUS can arrive before the first MESSAGE chunk; ensure a placeholder exists. `context_compaction` is one of
+ * them: the pre-reply gate compacts a long-quiet chat before the turn sends anything else, so no reply exists yet.
+ */
 function isEarlyRecoveryProgressStep(stepKey: string): boolean {
   return (
     stepKey === 'model_failover' ||
@@ -107,6 +110,7 @@ function isEarlyRecoveryProgressStep(stepKey: string): boolean {
     stepKey === 'empty_response_recovery' ||
     stepKey === 'tool_call_retry' ||
     stepKey === 'vision_fallback_recovery' ||
+    stepKey === 'context_compaction' ||
     stepKey === 'context_preflight_compact' ||
     stepKey === 'context_preflight_truncation' ||
     stepKey === 'context_presumed_overflow' ||
