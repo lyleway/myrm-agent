@@ -2,10 +2,13 @@
 
 [INPUT]
 - myrm_agent_harness.agent.skills.security.content_sanitizer::Redaction, SecretKind (POS: one redaction finding and its closed kind codes.)
+- myrm_agent_harness.utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with U+FFFD.)
 - app.core.skills.models::Skill (POS: skill domain model rendered by skill_to_response.)
 
 [OUTPUT]
 - Skill, usage/config, local-path and security-scan DTOs shared by the skills routers.
+- EncodableStr: the type of a response text field that a registry, a package or the scanner supplies; validating it
+  replaces each lone surrogate with U+FFFD, so the JSON body can be encoded.
 - RedactionResponse, redaction_responses: per-file findings in the review-dialog diff shape
   (skill export preview and expert export preview share it).
 - PackagePreviewResponse, UploadSkillResponse, SkillPackageInfoResponse: packaging endpoint payloads.
@@ -16,11 +19,17 @@ the skill_to_response forwarding wrapper.
 """
 
 from collections.abc import Mapping, Sequence
+from typing import Annotated
 
 from myrm_agent_harness.agent.skills.security.content_sanitizer import Redaction, SecretKind
-from pydantic import BaseModel
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
+from pydantic import AfterValidator, BaseModel
 
 from app.core.skills.models import Skill, UserEvolutionStrategy
+
+# A lone surrogate has no UTF-8 form, so one inside response text makes the JSON body unencodable (HTTP 500). Request
+# text is cleaned by the text sanitizer middleware; text a registry, a package or the scanner supplies enters here.
+EncodableStr = Annotated[str, AfterValidator(encodable_text)]
 
 
 class SkillRequiresResponse(BaseModel):
@@ -287,9 +296,9 @@ class UploadSkillResponse(BaseModel):
 
 
 class ScanFindingResponse(BaseModel):
-    threat_type: str
+    threat_type: EncodableStr
     severity: int
-    description: str
+    description: EncodableStr
     line_number: int | None = None
 
 
