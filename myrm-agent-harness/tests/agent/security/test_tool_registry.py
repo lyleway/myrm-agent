@@ -437,8 +437,8 @@ class TestPtcSafetyMetadata:
         annotations: MCPAnnotations = {"title": "dynamic"}
         tool_name = "__test_ptc_dynamic_tool__"
 
-        register_ptc_safety_metadata("skill-a", tool_name, meta, annotations)
-        assert get_ptc_safety_metadata("skill-a", tool_name) == (meta, annotations)
+        register_ptc_safety_metadata(tool_name, meta, annotations)
+        assert get_ptc_safety_metadata(tool_name) == (meta, annotations)
         assert resolve_safety_metadata(tool_name) == meta
 
 

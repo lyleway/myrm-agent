@@ -9,10 +9,12 @@ in agent.context_management.infra, so we accept them via callback injection
 
 [INPUT]
 - processing.full_content_delivery::ReadRange, clamp_read_ranges (POS: Omitted-line ranges of the stored copy and their clamp to a capped copy)
+- core.evicted_limits::MAX_STORED_CHARS (POS: how much text one evicted file keeps)
 
 [OUTPUT]
 - StoredFullText, store_full_text, emit_web_fetch_evicted_ref
 - set_evicted_content_callbacks (injection point for agent layer)
+- stored_copy_capacity: how much text a stored copy holds, or None when no store is registered
 
 [POS]
 Toolkit-layer persistence helper for web_fetch_tool full-content mode only.
@@ -26,6 +28,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Protocol
 
+from myrm_agent_harness.core.evicted_limits import MAX_STORED_CHARS
 from myrm_agent_harness.toolkits.web_fetch.processing.full_content_delivery import ReadRange, clamp_read_ranges
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,15 @@ def set_evicted_content_callbacks(
     _evicted_callbacks_var.set(
         _EvictedCallbacks(persist=persist_fn, build_footer=build_footer_fn, emit_ref=emit_ref_fn)
     )
+
+
+def stored_copy_capacity() -> int | None:
+    """The most text a stored copy keeps, or ``None`` when no store is registered.
+
+    A document longer than the fetch's default cap can be read in full only from a stored copy, so a caller with a
+    store asks the fetch for that much parsed text; without one the cut preview is all there is.
+    """
+    return MAX_STORED_CHARS if _evicted_callbacks_var.get() is not None else None
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,7 @@ from mcp.types import (
     TextContent,
 )
 
+from myrm_agent_harness.core.security.tool_registry import get_ptc_safety_metadata
 from myrm_agent_harness.toolkits.mcp.agent import MCPAgent
 from myrm_agent_harness.toolkits.mcp.annotations import ANNOTATIONS_METADATA_KEY
 from myrm_agent_harness.toolkits.mcp.client import MCPClientManager
@@ -936,52 +937,30 @@ def test_register_tool_annotations():
     )
 
     with patch("myrm_agent_harness.toolkits.mcp.tool_processing.register_ptc_safety_metadata") as mock_reg:
-        register_tool_annotations([tool], "my-server")
+        register_tool_annotations([tool])
 
     mock_reg.assert_called_once()
     call_args = mock_reg.call_args
-    assert call_args[0][0] == "mcp_my_server_skill"
-    assert call_args[0][1] == "test_tool"
-    safety = call_args[0][2]
+    assert call_args[0][0] == "test_tool"
+    safety = call_args[0][1]
     # A clean read-only claim opens parallel scheduling and nothing else.
     assert safety.is_concurrent_safe is True
     assert safety.is_read_only is False
     assert safety.is_idempotent is False
     assert safety.is_destructive is False
-    assert call_args[0][3] == {"openWorldHint": True}
+    assert call_args[0][2] == {"openWorldHint": True}
 
 
 def test_register_tool_annotations_host_serial_forces_non_concurrent():
     tool = _make_tool(metadata={ANNOTATIONS_METADATA_KEY: {"readOnlyHint": True, "destructiveHint": True}})
 
     with patch("myrm_agent_harness.toolkits.mcp.tool_processing.register_ptc_safety_metadata") as mock_reg:
-        register_tool_annotations([tool], "my-server", host_serial=True)
+        register_tool_annotations([tool], host_serial=True)
 
-    safety = mock_reg.call_args[0][2]
+    safety = mock_reg.call_args[0][1]
     assert safety.is_concurrent_safe is False
     assert safety.is_read_only is False
     assert safety.is_destructive is True
-
-
-# ---------------------------------------------------------------------------
-# _register_tool_annotations: server name normalization
-# ---------------------------------------------------------------------------
-def test_register_tool_annotations_name_normalization():
-    tool = _make_tool(metadata={})
-
-    with patch("myrm_agent_harness.toolkits.mcp.tool_processing.register_ptc_safety_metadata") as mock_reg:
-        register_tool_annotations([tool], "mcp_already_skill")
-
-    assert mock_reg.call_args[0][0] == "mcp_already_skill"
-
-
-def test_register_tool_annotations_plain_name():
-    tool = _make_tool(metadata={})
-
-    with patch("myrm_agent_harness.toolkits.mcp.tool_processing.register_ptc_safety_metadata") as mock_reg:
-        register_tool_annotations([tool], "github")
-
-    assert mock_reg.call_args[0][0] == "mcp_github_skill"
 
 
 # ---------------------------------------------------------------------------
@@ -1307,10 +1286,12 @@ class TestPrefixEdgeCases:
         assert tools == []
 
     def test_annotations_use_prefixed_names(self) -> None:
-        """_register_tool_annotations runs after prefix — tool.name is prefixed."""
+        """register_tool_annotations runs after prefix, so the record is keyed by the prefixed name."""
         tools = [_make_tool(name="search", metadata={"readOnlyHint": True})]
         result = MCPAgent.process_session_tools(tools, "gh", None, None, 10.0)
         assert result[0].name == "mcp__gh__search"
+        assert get_ptc_safety_metadata("mcp__gh__search") is not None
+        assert get_ptc_safety_metadata("search") is None
 
     def test_sanitize_none_input(self) -> None:
         from myrm_agent_harness.toolkits.mcp.config import sanitize_mcp_name_component

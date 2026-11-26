@@ -1,4 +1,4 @@
-"""Unit tests for AdaptiveCardFormatter in app.core.notifications.adaptive_cards."""
+"""Unit tests for format_notification and format_legacy_text in app.core.notifications.adaptive_cards."""
 
 from __future__ import annotations
 

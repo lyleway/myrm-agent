@@ -1,9 +1,10 @@
 """What a ``SkillAgent`` run hands to its executor task: the hooks it can reach and the user's turn.
 
-A host may resume ``SkillAgent.run`` in a fresh task per event (the server's SSE merge advances the
-stream with one ``asyncio.ensure_future(anext)`` per chunk). ContextVars bound in the first step are
-gone by then, yet the stream executor task, where tools run and hooks fire, must still see the run's
-hook registry: skill hooks from the explicit ``[use skill]`` invocation and the framework hooks.
+A host may resume ``SkillAgent.run`` in a fresh task per event (a host that advances the stream with
+one ``asyncio.ensure_future(anext)`` per chunk and does not share one context across the steps).
+ContextVars bound in the first step are gone by then, yet the stream executor task, where tools run
+and hooks fire, must still see the run's hook registry: skill hooks from the explicit ``[use skill]``
+invocation and the framework hooks.
 
 A message with attachments reaches the agent as content blocks; its explicit invocation counts the
 same as for plain text, as long as the tag leads the user's own words (the first block).

@@ -19,6 +19,7 @@ from myrm_agent_harness.toolkits.web_fetch.processing.spill import (
     emit_web_fetch_evicted_ref,
     set_evicted_content_callbacks,
     store_full_text,
+    stored_copy_capacity,
 )
 
 
@@ -71,6 +72,26 @@ async def test_ranges_beyond_the_capped_copy_are_left_out_of_the_guide(session) 
     assert "【1】 lines 10-20" in stored.read_guide
     assert "【2】" not in stored.read_guide
     assert "Stored copy capped at" in stored.read_guide
+
+
+@pytest.mark.asyncio
+async def test_the_capacity_a_caller_is_told_is_what_the_store_keeps_whole(session) -> None:
+    capacity = stored_copy_capacity()
+    assert capacity is not None
+
+    whole = await store_full_text("x" * capacity, [ReadRange("【1】", 1, 1)])
+    cut = await store_full_text("x" * (capacity + 1), [ReadRange("【1】", 1, 1)])
+
+    assert whole is not None
+    assert whole.storage_truncated is False
+    assert cut is not None
+    assert cut.storage_truncated is True
+
+
+def test_without_a_registered_store_there_is_no_capacity() -> None:
+    spill_mod._evicted_callbacks_var.set(None)
+
+    assert stored_copy_capacity() is None
 
 
 @pytest.mark.asyncio

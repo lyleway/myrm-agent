@@ -134,17 +134,19 @@ class ProfileManager:
             return _to_dict(profile) if profile else None
 
     async def activate(self, profile_key: str) -> dict[str, object] | None:
-        """Set a profile as active (deactivates all others)."""
+        """Set a profile as active (deactivates all others).
+
+        An unknown key returns ``None`` and leaves the profile that is active now in place.
+        """
         session_factory = get_session_factory()
         async with session_factory() as session:
-            # Deactivate all
-            await session.execute(update(SecurityProfile).values(is_active=False))
-            # Activate target
             result = await session.execute(select(SecurityProfile).where(SecurityProfile.profile_key == profile_key))
             profile = result.scalar_one_or_none()
             if profile is None:
-                await session.commit()
                 return None
+            await session.execute(
+                update(SecurityProfile).where(SecurityProfile.profile_key != profile_key).values(is_active=False)
+            )
             profile.is_active = True
             await session.commit()
             await session.refresh(profile)

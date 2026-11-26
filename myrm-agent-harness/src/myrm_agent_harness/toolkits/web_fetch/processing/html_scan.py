@@ -6,7 +6,6 @@
 [OUTPUT]
 - extract_title: Text of the first <title> element
 - strip_script_and_style: The page without its <script> and <style> blocks
-- strip_tags: The text with every <...> tag removed
 - body_content: The text between the opening <body> tag and the last </body>
 
 [POS]
@@ -57,24 +56,6 @@ def body_content(html: str) -> str | None:
 def strip_script_and_style(html: str) -> str:
     """Remove every ``<script>...</script>`` block, then every ``<style>...</style>`` block."""
     return _strip_blocks(_strip_blocks(html, _SCRIPT_BLOCK), _STYLE_BLOCK)
-
-
-def strip_tags(text: str) -> str:
-    """Remove every ``<...>`` sequence that holds at least one character; ``<>`` stays."""
-    parts: list[str] = []
-    pos = 0
-    while (tag_start := text.find("<", pos)) >= 0:
-        tag_end = text.find(">", tag_start + 1)
-        if tag_end < 0:
-            break
-        if tag_end == tag_start + 1:
-            parts.append(text[pos : tag_start + 1])
-            pos = tag_start + 1
-            continue
-        parts.append(text[pos:tag_start])
-        pos = tag_end + 1
-    parts.append(text[pos:])
-    return "".join(parts)
 
 
 def _strip_blocks(html: str, block: tuple[re.Pattern[str], re.Pattern[str]]) -> str:

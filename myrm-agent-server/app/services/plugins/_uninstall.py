@@ -145,11 +145,10 @@ async def uninstall_plugin(plugin_name: str) -> dict[str, object]:
     # D2: Tool Registry memory eviction
     evicted_tools = 0
     try:
-        from myrm_agent_harness.api import evict_skill_safety_metadata
+        from myrm_agent_harness.api import evict_tool_annotations
 
-        evicted_tools += evict_skill_safety_metadata(plugin_name)
         for sname in server_names:
-            evicted_tools += evict_skill_safety_metadata(sname)
+            evicted_tools += evict_tool_annotations(sname)
     except Exception as exc:
         logger.warning("Failed to evict tool registry metadata for '%s': %s", plugin_name, exc)
 

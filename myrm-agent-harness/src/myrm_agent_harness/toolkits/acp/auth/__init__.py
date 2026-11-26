@@ -4,7 +4,7 @@ Lets a delegated CLI (Codex / Claude Code / Gemini / Qwen …) run on the user's
 model subscription instead of a metered API key. Provides three framework-level
 mechanisms, all GUI/SaaS-driven by the business layer:
 
-- credential detection — is this backend logged in? (pre-flight checks, status badges)
+- login detection — is this backend logged in? The CLI's own report where it has one, else its credential file (pre-flight checks, status badges)
 - interactive login — drive ``<cli> login`` and stream URLs/codes to the user
 - credential import — the universal fallback: persist a credential captured elsewhere
 
@@ -12,11 +12,13 @@ mechanisms, all GUI/SaaS-driven by the business layer:
 - toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, known_backends, profile_for, cli_launch_args (POS: Authentication profile registry.)
 - toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.login_session::AuthEvent, AuthEventType, CliLoginSession (POS: CLI login session management.)
+- toolkits.acp.auth.login_state::LoginReport, probe_login, resolve_login_state (POS: Login state a CLI reports about itself.)
 
 [OUTPUT]
 - LoginStrategy, AuthProfile, profile_for, known_backends, cli_launch_args
 - AuthStatus, CredentialState, CredentialStore
 - AuthEventType, AuthEvent, CliLoginSession
+- LoginReport, probe_login, resolve_login_state
 
 [POS]
 Public surface of the ACP auth subsystem.
@@ -41,6 +43,7 @@ from myrm_agent_harness.toolkits.acp.auth.login_session import (
     AuthEventType,
     CliLoginSession,
 )
+from myrm_agent_harness.toolkits.acp.auth.login_state import LoginReport, probe_login, resolve_login_state
 
 __all__ = [
     "AuthEvent",
@@ -50,8 +53,11 @@ __all__ = [
     "CliLoginSession",
     "CredentialState",
     "CredentialStore",
+    "LoginReport",
     "LoginStrategy",
     "cli_launch_args",
     "known_backends",
+    "probe_login",
     "profile_for",
+    "resolve_login_state",
 ]

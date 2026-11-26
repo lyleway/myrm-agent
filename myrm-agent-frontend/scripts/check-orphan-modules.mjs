@@ -1,67 +1,28 @@
 #!/usr/bin/env node
 /**
- * 孤儿模块门禁：`src/` 下从产品入口不可达的模块都算孤儿，新增孤儿一律拦截；没有基线文件、没有豁免标记。
+ * 孤儿模块门禁：`src/` 下从产品入口不可达的模块都算孤儿，只要还有一个就失败；没有基线文件、没有豁免标记。
  *
  * 背景：单元测试 import 被测文件，一个从入口不可达的组件它的测试照样绿——测试绿不等于代码活着。
  * 本门禁补上这个结构性盲区；判定口径（入口、可达闭包、barrel、测试排除）见 `orphan-modules-scan.ts`。
  *
  * 处理方式只有两种：接入产品入口；或连同测试、`_ARCH.md` 文档行、i18n 键一起删除。
- * 不提供基线或豁免——存量豁免会让“暂时保留”变成永久保留。
- *
- * 两种口径：
- * - 默认绝对口径：全树只要还有孤儿就失败，用来手动盘点存量（`verify:orphans`），不接入 `pretest` 与 CI。
- * - `--base REV` diff 口径（CI 的 PR 与 push 门禁使用）：只有相对 HEAD 与 REV 的 merge-base 新出现的孤儿才失败，
- *   存量孤儿不阻塞，见 `orphan-modules-base.ts`。对照树无法确定时 fail-closed。
+ * 不提供基线或豁免——存量豁免会让“暂时保留”变成永久保留；一个改动要么接上产品再落地，要么不落地。
  *
  * 反向自检：候选模块数为 0 说明路径或解析器失效，直接失败而不是静默通过。
  *
- * 运行：bun scripts/check-orphan-modules.mjs [--base origin/main]
- * 退出码：0 = 无孤儿；1 = 发现孤儿或自检失败；2 = --base 指定的对照无法确定
+ * 运行：bun run verify:orphans（`LINT_GATES` 之一，本地 `bun run lint` 与 CI 共用）
+ * 退出码：0 = 无孤儿；1 = 发现孤儿或自检失败
  */
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
 
-import { BaseUnavailableError, introducedOrphans, materializeBase } from './orphan-modules-base.ts';
-import { CONSUMER_EXTENSIONS, scanProject } from './orphan-modules-project.mjs';
+import { scanProject } from './orphan-modules-project.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BASE_DIRECTORIES = ['src', 'scripts'];
-const EXIT_BASE_UNAVAILABLE = 2;
 
-function fail(message, code = 1) {
+function fail(message) {
   console.error(`[orphan-gate] ${message}`);
-  process.exit(code);
-}
-
-/** merge-base 上的孤儿集合；取不到或扫不出模块都算对照无法确定。 */
-function baseOrphans(rev) {
-  const scratch = mkdtempSync(join(tmpdir(), 'orphan-base-'));
-  try {
-    const sha = materializeBase({
-      projectRoot: rootDir,
-      rev,
-      destination: scratch,
-      directories: BASE_DIRECTORIES,
-      rootExtensions: CONSUMER_EXTENSIONS,
-    });
-    const result = scanProject(scratch);
-    if (result.scanned === 0) {
-      throw new BaseUnavailableError(`对照树 ${sha.slice(0, 10)} 的 src/ 没有可扫描的模块`);
-    }
-    return { sha, orphans: result.orphans };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
-}
-
-let options;
-try {
-  ({ values: options } = parseArgs({ options: { base: { type: 'string' } } }));
-} catch (error) {
-  fail(`参数错误: ${error.message}`);
+  process.exit(1);
 }
 
 let result;
@@ -75,34 +36,12 @@ if (result.scanned === 0) {
   fail('自检失败：未在 src/ 扫描到任何模块，路径或扩展名配置可能已失效——拒绝静默通过。');
 }
 
-let failing = result.orphans;
-let baseSha;
-if (options.base) {
-  try {
-    const existing = baseOrphans(options.base);
-    baseSha = existing.sha;
-    failing = introducedOrphans(result.orphans, existing.orphans);
-  } catch (error) {
-    if (!(error instanceof BaseUnavailableError)) {
-      throw error;
-    }
-    fail(`无法对照 --base ${options.base}: ${error.message}`, EXIT_BASE_UNAVAILABLE);
-  }
-}
-
-if (failing.length > 0) {
-  const verdict = baseSha
-    ? '本次改动之后成为孤儿（新增未接入，或切断了最后一个消费者）'
-    : '孤儿模块（从产品入口不可达）';
-  console.error(`[orphan-gate] ${failing.length} 个${verdict}：`);
-  for (const orphan of failing) {
+if (result.orphans.length > 0) {
+  console.error(`[orphan-gate] ${result.orphans.length} 个孤儿模块（从产品入口不可达）：`);
+  for (const orphan of result.orphans) {
     console.error(`    - ${orphan}`);
   }
   fail('\n处理方式：接入产品入口；或连同测试、_ARCH.md 文档行、i18n 键一起删除。没有基线与豁免标记。');
 }
 
-console.log(
-  baseSha
-    ? `[orphan-gate] OK：相对 merge-base ${baseSha.slice(0, 10)} 没有新增孤儿（存量孤儿 ${result.orphans.length} 个不计入）。`
-    : `[orphan-gate] OK：${result.scanned} 个模块均可从产品入口到达，无孤儿。`,
-);
+console.log(`[orphan-gate] OK：${result.scanned} 个模块均可从产品入口到达，无孤儿。`);

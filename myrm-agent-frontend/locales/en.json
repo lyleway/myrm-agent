@@ -1,23 +1,4 @@
 {
-  "extensionWidgets": {
-    "nanoContextTitle": "Nano-Context Usage",
-    "turns": "turns",
-    "todoTitle": "Quick Task Checklist",
-    "newTodoPlaceholder": "Add a quick task...",
-    "copyContent": "Copy Content",
-    "openExternal": "Open in new tab",
-    "download": "Download File",
-    "close": "Close",
-    "noImageSource": "No image source provided",
-    "pdfFallback": "PDF embedded preview not supported in this container",
-    "downloadPdf": "Download PDF to view directly",
-    "noPdfSource": "No PDF source URL available",
-    "unsupportedFormat": "Preview not available for this file type",
-    "testLatency": "Test Latency & Health",
-    "testing": "Testing...",
-    "retest": "Retest",
-    "unreachable": "Endpoint Unreachable"
-  },
   "curtain": {
     "board": {
       "primary": "AI is working — screen protected",
@@ -6721,17 +6702,6 @@
       "resolve": "Mark resolved",
       "revisionOutside": "Revision also touched unmarked lines: {lines}",
       "revisionLocal": "Revision stayed inside the marked areas."
-    },
-    "hub": {
-      "originSession": "Origin Chat",
-      "subtitle": "Centralized cross-session assets repository with bidirectional provenance to originating chats",
-      "searchPlaceholder": "Search artifacts by title, description or extension...",
-      "navToSession": "Go to Source Chat",
-      "emptyTitle": "No artifacts found",
-      "title": "Artifacts Provenance Hub",
-      "download": "Download",
-      "exportZip": "Export as ZIP Bundle",
-      "emptyDesc": "Deliverables and files generated during agent conversations will automatically appear here"
     },
     "architecture": {
       "jsonCopied": "JSON Copied",
@@ -14162,48 +14132,6 @@
       "resizeSuccess": "Terminal size updated"
     }
   },
-  "mobileCockpit": {
-    "voiceStagedInput": {
-      "title": "Voice Staged Review",
-      "listening": "Listening...",
-      "tapToSpeak": "Tap microphone to dictate requirements",
-      "reviewHint": "Speech staged. Review or adjust with one hand before sending",
-      "placeholder": "Transcribed voice text will appear here...",
-      "retry": "Redictate",
-      "clear": "Clear",
-      "send": "Send Voice Message",
-      "cancel": "Dismiss",
-      "unsupported": "Voice recognition not supported in this browser"
-    },
-    "hitlApproval": {
-      "title": "Approval Needed",
-      "riskLevel": "Risk Level",
-      "riskLow": "Low Risk",
-      "riskMedium": "Medium Risk",
-      "riskHigh": "High Risk (Sensitive)",
-      "riskCritical": "Critical Risk (Destructive)",
-      "commandOrAction": "Action to Execute",
-      "affectedScope": "Scope Impact",
-      "approveYes": "Approve (Yes)",
-      "rejectNo": "Reject (No)",
-      "steerGuide": "Intervene (Steer)",
-      "steerPlaceholder": "Type correction instruction or guidance...",
-      "steerSubmit": "Send Guidance & Continue",
-      "rejectReasonPlaceholder": "Optional: reason for rejection...",
-      "rejectConfirm": "Confirm Rejection",
-      "processing": "Processing..."
-    }
-  },
-  "skillAlignment": {
-    "title": "Pre-Flight Preference Alignment",
-    "subtitle": "Align key design palettes, layouts, and interaction patterns before the Agent streams code to eliminate rework",
-    "planFirstTitle": "Plan Before Execute",
-    "planFirstDesc": "Enforce Agent to stream a structured wireframe plan first, awaiting your confirmation before coding",
-    "customPlaceholder": "Enter custom design requirements or additional preferences...",
-    "confirm": "Confirm Alignment & Start",
-    "cancel": "Skip & Generate Directly",
-    "previewPrompt": "Structured Prompt Constraints"
-  },
   "settings": {
     "providerBalance": {
       "statusHealthy": "Healthy",
@@ -14927,10 +14855,11 @@
         "logoutSuccess": "Logged out",
         "badgeLoggedIn": "Logged in",
         "badgeLoggedOut": "Not logged in",
-        "badgeCliReady": "CLI ready",
         "badgeInstalled": "Installed",
         "install": "Install",
         "installInProgress": "Installing…",
+        "installRetry": "Retry",
+        "installClose": "Close",
         "installSuccess": "Installed successfully",
         "installing": "Installing {backend}",
         "installingDesc": "This may take a few minutes. The installation log appears below.",

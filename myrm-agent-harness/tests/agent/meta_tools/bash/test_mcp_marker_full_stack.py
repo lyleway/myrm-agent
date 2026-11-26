@@ -33,8 +33,8 @@ from myrm_agent_harness.agent.skills.mcp.ipc_proxy import CallerScope, IPCEndpoi
 from myrm_agent_harness.agent.skills.runtime.registry import skill_registry
 from myrm_agent_harness.backends.skills.types import MCPSkillData, SkillMetadata
 from myrm_agent_harness.core.security.tool_registry.registry import (
-    evict_skill_safety_metadata,
     register_ptc_safety_metadata,
+    unregister_ptc_safety_metadata,
 )
 from myrm_agent_harness.core.security.tool_registry.safety_table import SafetyMetadata
 from myrm_agent_harness.toolkits.code_execution.config import ExecutionConfig
@@ -88,7 +88,7 @@ async def tool(tmp_path: Path) -> AsyncIterator[BaseTool]:
     _MCP_CALLS.clear()
     skill_registry.clear()
     # A record no server claim can produce: ``list_pods`` looks read-only to every gate that reads the registry.
-    register_ptc_safety_metadata("mcp_demo_skill", "list_pods", SafetyMetadata(is_read_only=True), {})
+    register_ptc_safety_metadata("list_pods", SafetyMetadata(is_read_only=True), {})
     skill_registry.register(
         SkillMetadata(
             name="mcp_demo_skill",
@@ -127,7 +127,7 @@ async def tool(tmp_path: Path) -> AsyncIterator[BaseTool]:
         yield create_bash_code_execute_tool()
     reset_executor(token)
     skill_registry.clear()
-    evict_skill_safety_metadata("mcp_demo_skill")
+    unregister_ptc_safety_metadata("list_pods")
 
 
 def _config(tmp_path: Path) -> RunnableConfig:

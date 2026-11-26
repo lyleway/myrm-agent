@@ -26,7 +26,7 @@
 | `turn.py` | 模块 | Turn lifecycle: regenerate（`instruction` 引导文本先过风控闸门，被拦返回 400 `risk_held`，上一轮回答保持活动；它随后作为 `regenerate_instruction` 进入聊天流，那里再单独过一次闸）, sibling switch/list, truncate-after (edit-resend). 无 HTTP retry/undo：WebUI 的回退走 `rewind.py`（按消息 id 定位 + 确认），IM `/retry`·`/undo` 与压缩耗尽回滚直接调用 `ChatService.retry_last_turn`/`undo_last_turn`。 | ✅ |
 | `trajectory.py` | 模块 | `GET /{chat_id}/trajectory` — 抽取多轮执行轨迹（包含 tool_calls、参数、耗时、Token 与错误分类），供前端跨会话时序瀑布流与双轨 Diff 对比消费。 | ✅ |
 | `replay.py` | 模块 | `POST /{chat_id}/replay` — 会话重放与确定性验证接口，计算工具调用序列对齐率、Jaccard指数与确定性得分（0.0 ~ 1.0）。 | ✅ |
-| `export_pack.py` | 模块 | `HEAD & GET /{chat_id}/export-pack` — 会话事件日志、子Agent日志与工件文件的自包含流式 ZIP 导出管道，原生支持 `redact_secrets` 动态脱敏、O(1) 内存分块与 SHA256 清单。 | ✅ |
+| `export_pack.py` | 模块 | `HEAD & GET /{chat_id}/export-pack` — 会话事件日志、子Agent日志与工件文件的自包含 ZIP 导出管道：`redact_secrets`（默认开启）遮蔽事件日志里的凭据，工件按原样放入；ZIP 分块输出，但日志与工件整体读入内存；附 SHA256 清单。 | ✅ |
 | `memory_extract.py` | 模块 | `POST /{chat_id}/memory/retry-extract` — 对最近一轮 user/assistant 重新调度 memory extract；incognito / 无效 turn → 400；chat 不存在 → 404；返回 `scheduled` / `already_in_flight` | ✅ |
 | `thought_control.py` | 路由 | 思考链提前收敛与主动停止干预控制端点（`POST /{chat_id}/stop-thinking`），遏制长思考死循环与无限推理，强制提前作答 | ✅ |
 | `command_matrix.py` | 路由 | 系统指令矩阵目录（`GET /commands/matrix`）与基于会话状态机的情境感知智能推荐芯片端点（`POST /{chat_id}/commands/suggest`） | ✅ |

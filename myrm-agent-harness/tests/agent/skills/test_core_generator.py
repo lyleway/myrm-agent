@@ -714,7 +714,7 @@ class TestGenerateMetadataOnly:
                 MCPConfig(name="weather-skill", type="stdio", command="echo"),
             ]
         )
-        assert [skill.name for skill in skills] == ["mcp_weather_skill", "mcp_weather_skill_2"]
+        assert [skill.name for skill in skills] == ["mcp_weather_skill", "mcp_weather_2_skill"]
 
 
 class TestToolSectionLadder:

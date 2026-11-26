@@ -48,16 +48,15 @@ def client(tmp_path, monkeypatch):
 
 
 @pytest.mark.integration
-def test_auth_status_ready_for_delegation_live_detection(client: TestClient) -> None:
-    """readyForDelegation must follow real PATH detection + credential store (no mocks)."""
+def test_auth_status_live_detection(client: TestClient) -> None:
+    """installed must follow real PATH detection, and authenticated the credential store or the CLI (no mocks)."""
     resp = client.get("/api/v1/external-agents/auth/status")
     assert resp.status_code == 200
     backends = {row["backend"]: row for row in resp.json()["backends"]}
 
     claude = backends["claude"]
-    claude_on_path = shutil.which("claude") is not None
-    assert claude["installed"] is claude_on_path
-    assert claude["readyForDelegation"] is (claude["authenticated"] or claude["installed"])
-
+    assert claude["installed"] is (shutil.which("claude") is not None)
     for name, row in backends.items():
-        assert row["readyForDelegation"] is (row["authenticated"] or row["installed"]), name
+        assert "readyForDelegation" not in row, name
+        if not row["installed"]:
+            assert row["authenticated"] is False, name

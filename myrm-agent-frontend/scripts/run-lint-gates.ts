@@ -21,6 +21,7 @@ export const LINT_GATES: readonly string[] = [
   'verify:icu-syntax',
   'verify:intl-options',
   'verify:e2e-channel',
+  'verify:orphans',
   'lint:oxlint',
 ];
 

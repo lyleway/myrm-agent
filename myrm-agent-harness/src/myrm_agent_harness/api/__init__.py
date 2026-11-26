@@ -215,10 +215,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
         "myrm_agent_harness.core.security.missing_semantics",
         "evaluate_missing_capability",
     ),
-    "evict_skill_safety_metadata": (
-        "myrm_agent_harness.core.security.tool_registry.registry",
-        "evict_skill_safety_metadata",
-    ),
+    "evict_tool_annotations": ("myrm_agent_harness.toolkits.mcp.tool_processing", "evict_tool_annotations"),
     "close_subagent_checkpointer": ("myrm_agent_harness.api.subagents", "close_subagent_checkpointer"),
     "get_distribution_mode": ("myrm_agent_harness.runtime.install_guard.probe", "get_distribution_mode"),
     "get_ptc_safety_metadata": ("myrm_agent_harness.core.security.tool_registry.registry", "get_ptc_safety_metadata"),

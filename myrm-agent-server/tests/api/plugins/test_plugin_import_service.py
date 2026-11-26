@@ -1065,17 +1065,20 @@ class TestListAndUninstallPlugins:
             SafetyMetadata,
             get_ptc_safety_metadata,
             register_ptc_safety_metadata,
+            unregister_ptc_safety_metadata,
         )
 
         from app.services.plugins.import_service import uninstall_plugin
 
         plugin_name = "test-evict-plugin"
         server_name = "test-evict-server"
-        tool_name = "test_evict_tool"
+        tool_name = "mcp__test_evict_server__test_evict_tool"
+        # Another server whose name merely begins like the plugin's server
+        other_server_tool = "mcp__test_evict_server_extra__keep_me"
 
-        # Setup registered PTC tool
-        register_ptc_safety_metadata(plugin_name, tool_name, SafetyMetadata(), MCPAnnotations())
-        assert get_ptc_safety_metadata(plugin_name, tool_name) is not None
+        register_ptc_safety_metadata(tool_name, SafetyMetadata(), MCPAnnotations())
+        register_ptc_safety_metadata(other_server_tool, SafetyMetadata(), MCPAnnotations())
+        assert get_ptc_safety_metadata(tool_name) is not None
 
         config_service = SimpleNamespace(
             get=AsyncMock(
@@ -1124,10 +1127,12 @@ class TestListAndUninstallPlugins:
         assert res["plugin_name"] == plugin_name
         assert res["removed_servers"] == 1
         assert res["unbound_agents"] == 1
-        assert res["evicted_tools"] >= 1
+        assert res["evicted_tools"] == 1
         assert res["removed_files"] is True
-        # Tool metadata is now completely gone from memory
-        assert get_ptc_safety_metadata(plugin_name, tool_name) is None
+        # The plugin's tool metadata is gone from memory; the unrelated server's record is untouched
+        assert get_ptc_safety_metadata(tool_name) is None
+        assert get_ptc_safety_metadata(other_server_tool) is not None
+        unregister_ptc_safety_metadata(other_server_tool)
 
 
 class TestAgentPluginImportWithAgents:

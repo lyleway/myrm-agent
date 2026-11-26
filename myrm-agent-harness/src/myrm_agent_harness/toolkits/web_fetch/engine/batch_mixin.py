@@ -68,6 +68,7 @@ class FetchEngineBatchMixin:
             *,
             force_refresh: bool = False,
             allow_escalation: bool = True,
+            max_parsed_chars: int | None = None,
         ) -> Document | None: ...
 
     async def crawl_many(
@@ -77,6 +78,7 @@ class FetchEngineBatchMixin:
         max_concurrency: int = 10,
         force_refresh: bool = False,
         allow_escalation: bool = True,
+        max_parsed_chars: int | None = None,
     ) -> tuple[SuccessResult, FailedResult]:
         """Batch-crawl URLs in parallel under one concurrency cap; one slow URL cannot hold the call hostage.
 
@@ -84,7 +86,8 @@ class FetchEngineBatchMixin:
         timeout plus ``_UNWIND_GRACE_S``; once any page is in hand it gets ``_STRAGGLER_AFTER_S``. A URL the call
         stops waiting for is reported as failed, so a call holding a page never ends up empty-handed. Its fetch is
         left running under the engine's own crawl timeout: other callers may be coalesced on it, and its page or
-        failure still lands in the engine's caches.
+        failure still lands in the engine's caches. ``max_parsed_chars`` is passed to every crawl (see
+        ``FetchEngine.crawl``).
         """
         loop = asyncio.get_running_loop()
         hard_s = self._crawl_timeout + _UNWIND_GRACE_S
@@ -102,6 +105,7 @@ class FetchEngineBatchMixin:
                         url,
                         force_refresh=force_refresh,
                         allow_escalation=allow_escalation,
+                        max_parsed_chars=max_parsed_chars,
                     )
                     running[asyncio.create_task(fetch)] = (url, loop.time())
 

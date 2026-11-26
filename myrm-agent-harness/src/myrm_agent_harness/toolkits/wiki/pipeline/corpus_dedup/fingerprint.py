@@ -1,6 +1,7 @@
 """Deterministic fingerprinting for wiki raw corpus files.
 
 [INPUT]
+- utils.html_tags::strip_tags (POS: tag stripping linear in the text)
 - utils.markdown_frontmatter::parse_frontmatter (POS: leading frontmatter block parse, BOM-tolerant)
 - core.claims_contract::sha256_raw_file (POS: SHA256 of a raw file's bytes)
 - memory._internal.hash_utils::compute_normalized_hash (POS: normalized text hash)
@@ -31,11 +32,11 @@ from myrm_agent_harness.toolkits.wiki.core.claims_contract import sha256_raw_fil
 from myrm_agent_harness.toolkits.wiki.pipeline.corpus_dedup.types import (
     RawFileFingerprint,
 )
+from myrm_agent_harness.utils.html_tags import strip_tags
 from myrm_agent_harness.utils.markdown_frontmatter import parse_frontmatter
 
 FINGERPRINT_ALGORITHM_VERSION = "1"
 
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 _SIMHASH_BITS = 64
 _NEAR_DUP_HAMMING_THRESHOLD = 3
 
@@ -44,7 +45,7 @@ def extract_body_text(content: str) -> str:
     """Extract comparable body text from markdown or HTML."""
     text = parse_frontmatter(content)[1]
     if "<" in text and ">" in text:
-        text = unescape(_HTML_TAG_RE.sub(" ", text))
+        text = unescape(strip_tags(text, replacement=" "))
     return text
 
 

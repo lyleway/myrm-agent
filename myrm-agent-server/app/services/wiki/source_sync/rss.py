@@ -2,6 +2,7 @@
 
 [INPUT]
 - app.services.wiki.source_sync.publish_helpers (POS: publish_raw wrapper)
+- myrm_agent_harness.utils.html_tags::strip_tags (POS: tag stripping linear in the text)
 
 [OUTPUT]
 - sync_rss_feeds_to_wiki: pull RSS/Atom entries into wiki raw/
@@ -13,7 +14,6 @@ Deterministic RSS ingest path for wiki source sync; zero LLM.
 from __future__ import annotations
 
 import logging
-import re
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from urllib.parse import urlparse
@@ -21,13 +21,12 @@ from urllib.parse import urlparse
 import httpx
 from defusedxml import ElementTree as DefusedElementTree
 from myrm_agent_harness.toolkits.wiki import WikiStructure
+from myrm_agent_harness.utils.html_tags import strip_tags
 
 from app.services.wiki.source_sync.publish_helpers import build_frontmatter, publish_source_markdown, sanitize_path_segment
 from app.services.wiki.source_sync.schemas import WikiSourceSyncResult
 
 logger = logging.getLogger(__name__)
-
-_STRIP_TAGS = re.compile(r"<[^>]+>")
 
 
 async def sync_rss_feeds_to_wiki(
@@ -163,4 +162,4 @@ def _entry_link(node: ET.Element) -> str:
 def _strip_html(value: str) -> str:
     if not value:
         return ""
-    return _STRIP_TAGS.sub(" ", value).strip()
+    return strip_tags(value, replacement=" ").strip()

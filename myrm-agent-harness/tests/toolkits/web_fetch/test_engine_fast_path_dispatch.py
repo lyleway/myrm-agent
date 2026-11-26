@@ -115,8 +115,10 @@ async def test_a_hit_skips_the_ladder_and_is_cached(engine: FetchEngine, platfor
     assert first is not None and first.page_content == "fast"
     assert second is not None and second.page_content == "fast"
     fast_path.assert_awaited_once()  # the second crawl is a cache hit
-    assert fast_path.await_args.args == (platform.url,)
-    assert fast_path.await_args.kwargs == {**platform.extractor_kwargs, "proxy_pool": _PROXY_POOL}
+    fast_path_call = fast_path.await_args
+    assert fast_path_call is not None
+    assert fast_path_call.args == (platform.url,)
+    assert fast_path_call.kwargs == {**platform.extractor_kwargs, "proxy_pool": _PROXY_POOL}
     ladder.assert_not_awaited()
 
 
@@ -132,11 +134,14 @@ async def test_a_miss_goes_down_the_ladder_once_with_the_callers_arguments(
     assert result is not None and result.page_content == "ladder"
     fast_path.assert_awaited_once()
     ladder.assert_awaited_once()
-    assert ladder.await_args.args == (platform.url,)
-    assert ladder.await_args.kwargs == {
+    ladder_call = ladder.await_args
+    assert ladder_call is not None
+    assert ladder_call.args == (platform.url,)
+    assert ladder_call.kwargs == {
         "etag": None,
         "last_modified": None,
         "allow_escalation": False,
+        "max_parsed_chars": None,
     }
 
 
@@ -230,7 +235,10 @@ async def test_a_url_without_a_fast_path_goes_straight_to_the_ladder(engine: Fet
             "wechat",
             None,
             None,
-            ["Weixin article fast-path missed, falling back to HTTP/L4", "Weixin article fetch failed after degradation"],
+            [
+                "Weixin article fast-path missed, falling back to HTTP/L4",
+                "Weixin article fetch failed after degradation",
+            ],
         ),
         ("x", page("x"), None, ["Twitter/X post fast-path succeeded"]),
         ("x", None, page("l"), ["Twitter/X post fast-path missed, degrading to standard fetch"]),
@@ -288,8 +296,10 @@ async def test_the_validators_go_to_the_ladder_and_the_ladders_come_back_to_the_
                 result = await engine.crawl(platform.url)
 
             assert result is not None and result.page_content == "new"
-            assert ladder.await_args.kwargs["etag"] == f"etag-{platform.name}"
-            assert ladder.await_args.kwargs["last_modified"] == "Mon"
+            ladder_call = ladder.await_args
+            assert ladder_call is not None
+            assert ladder_call.kwargs["etag"] == f"etag-{platform.name}"
+            assert ladder_call.kwargs["last_modified"] == "Mon"
             cached = engine._crawl_cache.get(normalize_url(platform.url))
             assert cached is not None
             assert (cached.etag, cached.last_modified) == (f"new-{platform.name}", "Tue")

@@ -71,14 +71,54 @@ def test_external_agent_auth_status(client: TestClient) -> None:
 def test_external_agent_install_unknown_backend_streams_error(
     client: TestClient,
 ) -> None:
-    """Unknown backend yields progress error via SSE (no network install)."""
+    """An unknown backend ends in an error event, never in a success."""
     with client.stream("POST", "/api/v1/external-agents/install/not-a-backend") as resp:
         assert resp.status_code == 200
         events = _collect_sse_events(resp)
 
-    progress_msgs = [e.get("message") for e in events if e.get("type") == "progress"]
-    assert any(isinstance(m, str) and "Unknown backend" in m for m in progress_msgs)
-    assert any(e.get("type") == "success" for e in events)
+    errors = [e.get("message") for e in events if e.get("type") == "error"]
+    assert any(isinstance(m, str) and "Unknown backend" in m for m in errors)
+    assert not any(e.get("type") == "success" for e in events)
+
+
+def test_external_agent_install_failure_is_an_error_not_a_success(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the toolchain cannot produce a working CLI the stream says so and sends no success."""
+    from myrm_agent_harness.toolkits.acp.toolchains import ToolchainError
+
+    class FailingManager:
+        async def install_backend(self, _backend: str) -> AsyncIterator[str]:
+            yield "Installing @anthropic-ai/claude-code via npm..."
+            raise ToolchainError("npm exited with code 1.\nnpm ERR! network request failed")
+
+    monkeypatch.setattr("myrm_agent_harness.toolkits.acp.toolchains.IsolatedToolchainManager", FailingManager)
+
+    with client.stream("POST", "/api/v1/external-agents/install/claude") as resp:
+        events = _collect_sse_events(resp)
+
+    assert [e["type"] for e in events] == ["progress", "error"]
+    assert "network request failed" in str(events[-1]["message"])
+
+
+def test_external_agent_install_invalidates_detection_even_when_it_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed install may still have left a CLI behind, so the next status read must look again."""
+    from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.toolchains import ToolchainError
+
+    class FailingManager:
+        async def install_backend(self, _backend: str) -> AsyncIterator[str]:
+            raise ToolchainError("boom")
+            yield  # pragma: no cover
+
+    monkeypatch.setattr("myrm_agent_harness.toolkits.acp.toolchains.IsolatedToolchainManager", FailingManager)
+    BackendDetector._cache_without_version = []
+    BackendDetector._cache_without_version_at = 1e12
+
+    with client.stream("POST", "/api/v1/external-agents/install/claude") as resp:
+        _collect_sse_events(resp)
+
+    assert BackendDetector._cache_without_version is None
 
 
 def test_external_agent_install_claude_mocked_no_network(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

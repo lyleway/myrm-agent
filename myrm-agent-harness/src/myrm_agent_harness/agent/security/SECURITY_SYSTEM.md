@@ -1359,7 +1359,7 @@ LangChain 工具有具体名称（如 `bash_code_execute_tool`），而安全策
 `resolve_safety_metadata(tool_name)` 使用三级 fallback 策略：
 
 1. **内置工具静态表** (`TOOL_SAFETY_METADATA`)：最高优先级，所有内置工具在此声明
-2. **MCP 动态注册表** (`_PTC_TOOL_FLAT_INDEX`)：连接 MCP 服务端、列出工具时，由 `toolkits/mcp/annotations.judge` 把服务端的 hint annotations 判成安全记录后写入
+2. **MCP 动态注册表** (`_PTC_TOOL_SAFETY`，键是带前缀的工具名 `mcp__{server}__{tool}`，一个名字一条记录)：连接 MCP 服务端、列出工具时，由 `toolkits/mcp/annotations.judge` 把服务端的 hint annotations 判成安全记录后写入
 3. **fail-closed 默认值**：未知工具获得保守默认（is_concurrent_safe=False）
 
 MCP annotations 是服务端对自己工具的声明，宿主无法核实，所以只能让宿主更谨慎，判定入口唯一（`judge`）：

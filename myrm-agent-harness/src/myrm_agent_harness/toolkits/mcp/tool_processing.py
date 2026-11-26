@@ -6,14 +6,14 @@ sanitization, safety annotations, name prefixing) live here as stateless
 module-level functions.
 
 [INPUT]
-- config::sanitize_mcp_name_component, should_register_mcp_tool (POS: MCP configuration, name sanitization, tool name parsing, and per-server tool filter function)
+- config::mcp_tool_prefix, sanitize_mcp_name_component, should_register_mcp_tool (POS: MCP configuration, name sanitization, tool name parsing, and per-server tool filter function)
 - errors::MCPToolFailure (POS: MCP-specific error types; the marked ``str`` a failed call is rendered as)
 - schema::FlattenMeta, canonicalize_schema_for_cache, flatten_deep_schema, flatten_json_schema, has_dot_keys, nest_flat_arguments, coerce_arguments_by_schema, prepare_mcp_call_arguments (POS: MCP inbound tool schema normalization)
 - annotations::judge, recorded_annotations (POS: the only place a server's self-reported hints turn into host behavior)
-- core.security.tool_registry::register_ptc_safety_metadata (POS: Tool metadata and permission mapping)
+- core.security.tool_registry::register_ptc_safety_metadata, evict_ptc_safety_metadata_by_prefix (POS: Tool metadata and permission mapping)
 
 [OUTPUT]
-- apply_tool_filter, enforce_description_limits, sanitize_tools, register_tool_annotations, prefix_tool_names
+- apply_tool_filter, enforce_description_limits, sanitize_tools, register_tool_annotations, evict_tool_annotations, prefix_tool_names
 - wrap_tools_with_timeout (with auth-error detection + MCPAuthExpiredEvent notification; failures it renders as text are ``MCPToolFailure``)
 
 [POS]
@@ -36,10 +36,14 @@ from typing import Any, cast
 
 from langchain_core.tools import BaseTool
 
-from myrm_agent_harness.core.security.tool_registry import register_ptc_safety_metadata
+from myrm_agent_harness.core.security.tool_registry import (
+    evict_ptc_safety_metadata_by_prefix,
+    register_ptc_safety_metadata,
+)
 
 from .annotations import judge, recorded_annotations
 from .config import (
+    mcp_tool_prefix,
     parse_mcp_tool_name,
     sanitize_mcp_name_component,
     should_register_mcp_tool,
@@ -190,17 +194,16 @@ def sanitize_tools(tools: list[BaseTool]) -> None:
             tool.coroutine = _coercion_wrapper
 
 
-def register_tool_annotations(tools: list[BaseTool], server_name: str, host_serial: bool = False) -> None:
-    """Record each tool's safety metadata in the PTC safety registry, judged from what its server declared."""
-    skill_name = server_name.replace("-", "_").lower()
-    if not skill_name.startswith("mcp_"):
-        skill_name = f"mcp_{skill_name}"
-    if not skill_name.endswith("_skill"):
-        skill_name = f"{skill_name}_skill"
-
+def register_tool_annotations(tools: list[BaseTool], host_serial: bool = False) -> None:
+    """Record each prefixed tool's safety metadata in the registry, judged from what its server declared."""
     for tool in tools:
         safety_meta, claims = judge(recorded_annotations(tool), host_serial=host_serial)
-        register_ptc_safety_metadata(skill_name, tool.name, safety_meta, claims)
+        register_ptc_safety_metadata(tool.name, safety_meta, claims)
+
+
+def evict_tool_annotations(server_name: str) -> int:
+    """Drop the registry records of every tool of one server and return how many were dropped."""
+    return evict_ptc_safety_metadata_by_prefix(mcp_tool_prefix(server_name))
 
 
 def prefix_tool_names(tools: list[BaseTool], server_name: str) -> None:
@@ -215,10 +218,9 @@ def prefix_tool_names(tools: list[BaseTool], server_name: str) -> None:
     Also prevents permission bypass when an MCP tool name
     coincidentally matches a built-in tool name.
     """
-    safe_server = sanitize_mcp_name_component(server_name)
+    prefix = mcp_tool_prefix(server_name)
     for tool in tools:
-        safe_tool = sanitize_mcp_name_component(tool.name)
-        tool.name = f"mcp__{safe_server}__{safe_tool}"
+        tool.name = f"{prefix}{sanitize_mcp_name_component(tool.name)}"
 
 
 def _is_mcp_auth_error(exc: Exception) -> bool:

@@ -3,6 +3,7 @@
 [INPUT]
 - file path: EPUB/ODF 容器文件
 - myrm_agent_harness.toolkits.file_parsers.base::FileParser (POS: 解析器基类)
+- myrm_agent_harness.utils.html_tags::strip_tags (POS: tag stripping linear in the text)
 
 [OUTPUT]
 - EpubParser: EPUB 纯文本提取
@@ -21,29 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
 from myrm_agent_harness.toolkits.file_parsers.base import FileParser
+from myrm_agent_harness.utils.html_tags import strip_tags
 
 logger = logging.getLogger(__name__)
-
-_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def _strip_tags(markup: str) -> str:
-    """Replace every tag of ``markup`` with a space, in time linear in its length.
-
-    ``_TAG_RE`` tries each "<" against the whole rest of the text, so a run of "<" with no ">" after it costs
-    quadratic time (200,000 of them: ~20 s with the interpreter lock held, from a few hundred compressed bytes).
-    A "<" past the last ">" can never close, so that tail is passed through and only the head is substituted,
-    which leaves the result exactly what the pattern alone would give. ``web_fetch.processing.html_scan.strip_tags``
-    is the same scan with an empty replacement; this package cannot import it, because web_fetch imports this one.
-    """
-    head_end = markup.rfind(">") + 1
-    return _TAG_RE.sub(" ", markup[:head_end]) + markup[head_end:]
 
 
 class EpubParser(FileParser):
@@ -64,7 +50,7 @@ class EpubParser(FileParser):
                 if not (name.endswith(".xhtml") or name.endswith(".html")):
                     continue
                 raw = archive.read(name).decode("utf-8", errors="ignore")
-                normalized = " ".join(_strip_tags(raw).split())
+                normalized = " ".join(strip_tags(raw, replacement=" ").split())
                 if normalized:
                     chunks.append(normalized)
 

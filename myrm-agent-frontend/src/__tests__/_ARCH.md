@@ -15,7 +15,7 @@ Vitest 全局测试基础设施与**跨模块集成测试**入口。`setup.ts` �
 | `hooks/`                          | 无对应 hook 文件的纯函数测试                                               |
 | `intent-dispatcher/`              | `lib/intent-dispatcher` schema、深链路由与桌面 OAuth 回调                  |
 | `store/`                          | 根级 store（`useFlowPadStore`、`useMemoryStore` 等）                       |
-| `tauri-mode/`                     | Tauri 运行时分支（`AttachButton`、`ImagePreview`）                         |
+| `tauri-mode/`                     | Tauri 运行时分支（`AttachButton`）                                         |
 | `vision/`                         | 多模态 / 语音视觉管线                                                      |
 
 ## 测试组织约定

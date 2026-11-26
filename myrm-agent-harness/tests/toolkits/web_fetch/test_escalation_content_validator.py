@@ -8,6 +8,7 @@ import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.engine.base import FetchEngine
 from myrm_agent_harness.toolkits.web_fetch.escalation.content_validator import is_valid_escalation_content
+from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
 from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import EscalationFetchResult
 
 
@@ -89,8 +90,8 @@ async def test_escalation_mixin_skips_challenge_page_and_uses_next_provider() ->
     )
 
     engine = FetchEngine()
-    engine._escalation_providers = [bad_provider, good_provider]
-    doc, _ = await engine._try_escalation("https://example.com/article")
+    with bind_web_fetch_escalation_context(providers=[bad_provider, good_provider]):
+        doc, _ = await engine._try_escalation("https://example.com/article")
     assert doc is not None
     assert doc.metadata["escalation_provider"] == "firecrawl"
     assert "Real Article" in doc.page_content

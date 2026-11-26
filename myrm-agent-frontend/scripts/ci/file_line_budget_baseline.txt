@@ -58,7 +58,6 @@ src/components/features/settings/sections/ai-tools/SkillsSection.tsx
 src/components/features/settings/sections/enterprise/EnterpriseMembersTab.tsx
 src/components/features/settings/sections/hosting/HostingTargetsPanel.tsx
 src/components/features/settings/sections/integration/ConnectSection.tsx
-src/components/features/settings/sections/integration/ExternalAgentAuthControls.tsx
 src/components/features/settings/sections/integration/channels/VoiceSection.tsx
 src/components/features/settings/sections/integration/channels/useChannelsState.ts
 src/components/features/settings/sections/integration/credentials/CredentialsDialogs.tsx
