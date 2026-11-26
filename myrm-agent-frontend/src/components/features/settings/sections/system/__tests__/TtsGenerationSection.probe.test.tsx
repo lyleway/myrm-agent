@@ -74,7 +74,7 @@ describe('TtsGenerationSection connection test', () => {
     ['nothing is chosen yet', {}],
     ['the stored provider is one only channel replies can use', { ttsProvider: 'edge', ttsApiKey: 'sk-stored' }],
     [
-      'the stored provider is one the card no longer offers',
+      'the stored provider is one the card does not offer',
       { ttsProvider: 'openai', ttsModel: 'tts-1', ttsVoice: 'alloy', ttsApiKey: 'sk-stored' },
     ],
   ])('cannot be started while %s', async (_case, voice) => {

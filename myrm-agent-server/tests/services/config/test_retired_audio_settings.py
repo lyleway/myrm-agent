@@ -5,8 +5,8 @@ app.services.config.retired_audio_settings::migrate_retired_audio_settings
 app.services.config.service::ConfigService/_encrypt_if_sensitive
 
 [OUTPUT]
-That the retired OpenAI text-to-speech provider (voice row and web read-aloud) and the pre-filled ``whisper-1`` speech-to-text
-model are rewritten together with their provider-only fields, that every other setting and every user-typed model survives,
+That the retired OpenAI text-to-speech provider (voice row and web read-aloud) and the ``whisper-1`` speech-to-text model
+pin are rewritten together with their provider-only fields, that every other setting and every other model survives,
 that a second run writes nothing, and that a row sealed under a lost key is left alone.
 
 [POS]
@@ -108,7 +108,7 @@ async def test_the_retired_tts_provider_becomes_edge_and_loses_only_its_own_fiel
 
 
 @pytest.mark.parametrize("stt_provider", ["openai", "groq", "deepgram", "xai", "local"])
-async def test_the_prefilled_stt_model_is_dropped_for_every_provider(
+async def test_the_whisper_1_pin_is_dropped_for_every_provider(
     sessions: async_sessionmaker[AsyncSession], stt_provider: str
 ) -> None:
     await _store(sessions, "voice", {"sttProvider": stt_provider, "sttModel": "whisper-1", "sttLanguage": "en"})

@@ -40,6 +40,12 @@ def _unreadable_user_configs() -> Iterator[None]:
         yield
 
 
+def _awaited_args(mock: AsyncMock) -> tuple[object, ...]:
+    call = mock.await_args
+    assert call is not None, "expected the mock to have been awaited"
+    return call.args
+
+
 def test_media_provider_status_includes_fal(client: TestClient) -> None:
     """GET /api/v1/agents/media-provider-status must list fal with its models."""
     with (
@@ -120,11 +126,11 @@ def test_test_media_config_tts_prefers_voice_settings_key(client: TestClient) ->
 
     assert resp.status_code == 200
     assert resp.json()["data"]["status"] == "ok"
-    assert probe.await_args.args[1] == {"xi-api-key": "voice-key"}
+    assert _awaited_args(probe)[1] == {"xi-api-key": "voice-key"}
 
 
-def test_test_media_config_tts_rejects_retired_provider(client: TestClient) -> None:
-    """A provider the TTS tool no longer offers is reported as unsupported, never probed."""
+def test_test_media_config_tts_rejects_an_unsupported_provider(client: TestClient) -> None:
+    """A provider outside the TTS tool's catalog is reported as unsupported, never probed."""
     with (
         _user_configs(voice={"ttsProvider": "openai", "ttsApiKey": "voice-key"}),
         patch("app.api.agents.general_agent.media_config._probe_endpoint", new_callable=AsyncMock) as probe,
@@ -202,4 +208,4 @@ def test_test_media_config_volcengine_probe_uses_the_configured_voice(client: Te
         )
 
     assert resp.json()["data"]["status"] == "ok"
-    assert probe.await_args.args == ("voice-key", "doubao-tts", "zh_female_x")
+    assert _awaited_args(probe) == ("voice-key", "doubao-tts", "zh_female_x")

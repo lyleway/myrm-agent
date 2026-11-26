@@ -111,7 +111,9 @@ async def test_generate_attaches_the_reference_the_media_callback_returns() -> N
 
     assert result.persisted_ref == "media://aud1"
     callback.assert_awaited_once()
-    args = callback.await_args.args
+    call = callback.await_args
+    assert call is not None
+    args = call.args
     assert args[0] == b"audio-bytes"
     assert args[1] == "audio/mpeg"
     assert args[2].prompt == "persist me"

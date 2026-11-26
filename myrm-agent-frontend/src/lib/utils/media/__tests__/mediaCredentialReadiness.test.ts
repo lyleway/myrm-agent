@@ -90,7 +90,7 @@ describe('imageToolSetup', () => {
     expect(imageToolSetup([openaiProvider], undefined)).toBe('notSelected');
   });
 
-  it.each(['dall-e-3', 'gpt-image-1', ''])('is notSelected for %j, a model the engine no longer offers', (model) => {
+  it.each(['dall-e-3', 'gpt-image-1', ''])('is notSelected for %j, a model the engine does not offer', (model) => {
     expect(imageToolSetup([openaiProvider], { ...imageConfig, model })).toBe('notSelected');
   });
 
@@ -108,7 +108,7 @@ describe('videoToolSetup', () => {
     expect(videoToolSetup([], { ...videoConfig, model: '' }, {})).toBe('notSelected');
   });
 
-  it('is notSelected for a stored provider the server no longer lists', () => {
+  it('is notSelected for a stored provider the server does not list', () => {
     const stale = { ...videoConfig, provider: 'openai' as VideoGenerationConfig['provider'], model: 'sora' };
 
     expect(videoToolSetup([openaiProvider], stale, { gemini: geminiStatus({ hasApiKey: true }) })).toBe('notSelected');

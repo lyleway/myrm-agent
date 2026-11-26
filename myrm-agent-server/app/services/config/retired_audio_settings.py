@@ -1,9 +1,10 @@
-"""Move stored audio settings off options the product no longer offers.
+"""Rewrite stored audio settings that hold a retired text-to-speech provider or speech-to-text model.
 
-Two stored values stop being valid: the OpenAI text-to-speech provider (channel replies and web read-aloud), and
-``whisper-1`` as the speech-to-text model, which older settings pages wrote into every saved voice row although the user
-never chose it. Left in place the first keeps failing on every reply and the second is sent to providers that do not
-know the name.
+Two stored values are retired: the OpenAI text-to-speech provider (channel replies and web read-aloud), which has no
+synthesis implementation and so fails on every reply, and ``whisper-1`` as the speech-to-text model, a pin that
+overrides the per-provider default of ``channels/voice/stt/models.py`` although only OpenAI-compatible servers
+recognise that name. The provider is switched to Edge (browser on the web) and the model pin is dropped so that
+default applies.
 
 [INPUT]
 - app.services.config.service::config_service
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 _MIGRATION_DEVICE = "retired-audio-settings"
 
-# Fields that only made sense for the removed provider: its model, its voice names (Edge rejects them), its key, and the
-# OpenAI-compatible endpoint that is now only meaningful as a Voicebox address.
+# Fields tied to the OpenAI provider: its model, its voice names (Edge rejects them), its key, and the base URL (only the
+# Voicebox provider reads a custom base URL).
 _RETIRED_TTS_FIELDS = ("ttsModel", "ttsVoice", "ttsApiKey", "ttsBaseUrl")
 
 _Migrate = Callable[[dict[str, object]], dict[str, object] | None]
