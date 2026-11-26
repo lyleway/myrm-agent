@@ -6,8 +6,6 @@
 
 export type WidgetColSpan = '1' | '2' | '3';
 
-export type AutoRefreshIntervalSeconds = 0 | 15 | 30 | 60 | 300;
-
 export interface PinnedDashboardWidget {
   id: string;
   title: string;
@@ -15,9 +13,7 @@ export interface PinnedDashboardWidget {
   content: string;
   sourceChatId?: string;
   pinnedAt: number;
-  lastRefreshedAt: number;
   colSpan: WidgetColSpan;
-  autoRefreshInterval: AutoRefreshIntervalSeconds;
   tags: string[];
 }
 
@@ -28,7 +24,6 @@ export interface PinWidgetPayload {
   content: string;
   sourceChatId?: string;
   colSpan?: WidgetColSpan;
-  autoRefreshInterval?: AutoRefreshIntervalSeconds;
   tags?: string[];
 }
 
@@ -46,9 +41,6 @@ export interface DashboardWorkspaceState {
   toggleDrawer: () => void;
   updateWidgetColSpan: (id: string, colSpan: WidgetColSpan) => void;
   updateWidgetTitle: (id: string, title: string) => void;
-  updateWidgetRefreshInterval: (id: string, interval: AutoRefreshIntervalSeconds) => void;
-  updateWidgetContent: (id: string, content: string) => void;
-  refreshWidget: (id: string) => void;
   setSearchQuery: (query: string) => void;
   setActiveTagFilter: (tag: string | null) => void;
   reorderWidgets: (startIndex: number, endIndex: number) => void;

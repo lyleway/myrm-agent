@@ -24,7 +24,6 @@ describe('useDashboardWorkspaceStore', () => {
     expect(state.widgets[0].id).toBe('w-1');
     expect(state.widgets[0].title).toBe('Metrics Panel');
     expect(state.widgets[0].colSpan).toBe('2');
-    expect(state.widgets[0].autoRefreshInterval).toBe(0);
     expect(state.widgets[0].tags).toEqual(['html']);
     expect(state.isWidgetPinned('w-1')).toBe(true);
   });
@@ -98,29 +97,6 @@ describe('useDashboardWorkspaceStore', () => {
     // Empty title protection
     store.updateWidgetTitle('w-span', '   ');
     expect(useDashboardWorkspaceStore.getState().widgets[0].title).toBe('Updated Title');
-  });
-
-  it('updates auto refresh interval, content, and refreshes timestamp', () => {
-    const store = useDashboardWorkspaceStore.getState();
-    store.pinWidget({
-      id: 'w-refresh',
-      title: 'Auto Refreshing Feed',
-      language: 'html',
-      content: '<div>Old Content</div>',
-    });
-
-    const originalTimestamp = useDashboardWorkspaceStore.getState().widgets[0].lastRefreshedAt;
-
-    store.updateWidgetRefreshInterval('w-refresh', 30);
-    expect(useDashboardWorkspaceStore.getState().widgets[0].autoRefreshInterval).toBe(30);
-
-    store.updateWidgetContent('w-refresh', '<div>New Content</div>');
-    expect(useDashboardWorkspaceStore.getState().widgets[0].content).toBe('<div>New Content</div>');
-
-    store.refreshWidget('w-refresh');
-    expect(useDashboardWorkspaceStore.getState().widgets[0].lastRefreshedAt).toBeGreaterThanOrEqual(
-      originalTimestamp,
-    );
   });
 
   it('controls drawer visibility toggles', () => {

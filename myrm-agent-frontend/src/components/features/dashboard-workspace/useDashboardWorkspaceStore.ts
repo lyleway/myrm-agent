@@ -7,7 +7,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type {
-  AutoRefreshIntervalSeconds,
   DashboardWorkspaceState,
   PinnedDashboardWidget,
   PinWidgetPayload,
@@ -36,9 +35,7 @@ export const useDashboardWorkspaceStore = create<DashboardWorkspaceState>()(
           content: payload.content,
           sourceChatId: payload.sourceChatId,
           pinnedAt: now,
-          lastRefreshedAt: now,
           colSpan: payload.colSpan ?? '2',
-          autoRefreshInterval: payload.autoRefreshInterval ?? 0,
           tags: payload.tags ?? [payload.language || 'html'],
         };
 
@@ -98,39 +95,6 @@ export const useDashboardWorkspaceStore = create<DashboardWorkspaceState>()(
           widgets: state.widgets.map((w) => {
             if (w.id === id) {
               return { ...w, title: trimmed };
-            }
-            return w;
-          }),
-        }));
-      },
-
-      updateWidgetRefreshInterval: (id: string, interval: AutoRefreshIntervalSeconds) => {
-        set((state) => ({
-          widgets: state.widgets.map((w) => {
-            if (w.id === id) {
-              return { ...w, autoRefreshInterval: interval };
-            }
-            return w;
-          }),
-        }));
-      },
-
-      updateWidgetContent: (id: string, content: string) => {
-        set((state) => ({
-          widgets: state.widgets.map((w) => {
-            if (w.id === id) {
-              return { ...w, content, lastRefreshedAt: Date.now() };
-            }
-            return w;
-          }),
-        }));
-      },
-
-      refreshWidget: (id: string) => {
-        set((state) => ({
-          widgets: state.widgets.map((w) => {
-            if (w.id === id) {
-              return { ...w, lastRefreshedAt: Date.now() };
             }
             return w;
           }),

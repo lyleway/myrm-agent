@@ -128,7 +128,7 @@ describe('DashboardWorkspaceDrawer', () => {
     expect(useDashboardWorkspaceStore.getState().widgets[0].colSpan).toBe('1');
   });
 
-  it('handles widget unpin and refresh actions', () => {
+  it('handles widget unpin', () => {
     useDashboardWorkspaceStore.getState().openDrawer();
     useDashboardWorkspaceStore.getState().pinWidget({
       id: 'w-action-1',
@@ -143,6 +143,22 @@ describe('DashboardWorkspaceDrawer', () => {
 
     expect(useDashboardWorkspaceStore.getState().widgets).toHaveLength(0);
     expect(screen.getByText('工作台尚无固定组件')).toBeInTheDocument();
+  });
+
+  it('offers no refresh controls: a pinned widget has no data source to refresh from', () => {
+    useDashboardWorkspaceStore.getState().openDrawer();
+    useDashboardWorkspaceStore.getState().pinWidget({
+      id: 'w-no-refresh',
+      title: 'Static Widget',
+      language: 'html',
+      content: '<div>Widget</div>',
+    });
+
+    render(<DashboardWorkspaceDrawer />);
+
+    expect(screen.queryByRole('button', { name: /刷新/ })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/刷新/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   });
 
   it('closes drawer when close button clicked', () => {
