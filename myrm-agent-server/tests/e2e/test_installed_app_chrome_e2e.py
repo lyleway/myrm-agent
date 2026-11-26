@@ -27,8 +27,6 @@ from collections import Counter
 import pytest
 
 from tests.support.chrome_mcp_e2e import (
-    ChromeMcpClient,
-    McpPage,
     dismiss_blocking_modals,
     get_e2e_api_url,
     get_e2e_ui_url,
@@ -36,106 +34,34 @@ from tests.support.chrome_mcp_e2e import (
     http_json_once,
     open_mcp_page,
     prepare_e2e_ui_session,
+    wait_e2e_provider_ready,
     wait_for_react_e2e_bridge,
     wait_for_state,
     warm_ui_route,
 )
+from tests.support.e2e_provider_seed import seed_live_e2e_providers
 from tests.support.e2e_runtime_guard import E2EResourceLedger
 from tests.support.installed_app_e2e import (
     APPS_PATH,
     ATTACH_CHAT_JS,
+    CONFIRM_UNINSTALL_JS,
     DIALOG_STATE_JS,
     DISMISS_MIGRATION_JS,
     INSTALL_FROM_CARD_JS,
     NO_DIALOG_JS,
     NOT_NOW,
     SAVE,
+    SEED_PATH,
+    UNINSTALL_ITEM,
     activity_counts,
     app_detail,
     click_dialog_button,
     installed_ids,
+    open_menu_item,
     page_wait_sec,
+    run_app,
+    wait_for_banner,
 )
-
-_SEED_PATH = "/api/v1/chats/test/seed-installed-app-fixture"
-_REVIEW_BANNER_JS = """(() => {
-  const label = /^(Permissions to review|有权限待确认)$/;
-  const banner = Array.from(document.querySelectorAll('[data-testid="app-host"] header button')).find(
-    (candidate) => label.test((candidate.textContent || '').trim()),
-  );
-  if (banner && __CLICK__) banner.click();
-  return { ready: Boolean(banner) };
-})()"""
-
-# The sandboxed page cannot be clicked from outside, so the host posts the message that stands for the user's click and
-# reads the outcomes the page reports back. A notification toast is short-lived: an observer remembers it was shown.
-_RUN_APP_JS = """(async () => {
-  const round = __ROUND__;
-  const frame = document.querySelector('[data-testid="app-host"] iframe');
-  if (!frame?.contentWindow) return { ok: false, err: 'no-frame' };
-  if (!window.__e2eToastObserver) {
-    window.__e2eToastSeen = false;
-    window.__e2eToastObserver = new MutationObserver(() => {
-      if (document.body.innerText.includes('Pulse ping')) window.__e2eToastSeen = true;
-    });
-    window.__e2eToastObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
-  }
-  const answer = (type, predicate) => new Promise((resolve) => {
-    const onMessage = (event) => {
-      if (event.source !== frame.contentWindow || event.data?.type !== type || !predicate(event.data)) return;
-      window.removeEventListener('message', onMessage);
-      resolve(event.data);
-    };
-    window.addEventListener('message', onMessage);
-    setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, 45000);
-  });
-  const ponged = answer('e2e-pong', () => true);
-  const pinger = setInterval(() => frame.contentWindow.postMessage({ type: 'e2e-ping' }, '*'), 400);
-  const pong = await ponged;
-  clearInterval(pinger);
-  if (!pong) return { ok: false, err: 'page-not-ready' };
-  const result = answer('e2e-result', (data) => data.round === round);
-  frame.contentWindow.postMessage({ type: 'e2e-run', round }, '*');
-  const reply = await result;
-  return { ok: reply !== null, outcomes: reply?.outcomes ?? null, toastSeen: window.__e2eToastSeen === true };
-})()"""
-
-_UNINSTALL_FROM_MENU_JS = """(async () => {
-  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  const find = (selector, label) => Array.from(document.querySelectorAll(selector)).find(
-    (candidate) => label.test((candidate.textContent || '').trim()),
-  );
-  const trigger = document.querySelector('[data-testid="app-host"] header button[aria-label]:last-of-type');
-  if (!trigger) return { ok: false, err: 'menu-trigger-not-found' };
-  trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
-  const deadline = Date.now() + 30000;
-  let item = null;
-  while (Date.now() < deadline && !item) {
-    item = find('[role="menuitem"]', /^(Uninstall|卸载)$/);
-    if (!item) await wait(200);
-  }
-  if (!item) return { ok: false, err: 'uninstall-item-not-found' };
-  item.click();
-  let confirm = null;
-  while (Date.now() < deadline && !confirm) {
-    confirm = find('[role="alertdialog"] button', /^(Uninstall|卸载)$/);
-    if (!confirm) await wait(200);
-  }
-  if (!confirm) return { ok: false, err: 'confirm-not-found' };
-  confirm.click();
-  const redirectBy = Date.now() + 60000;
-  while (Date.now() < redirectBy) {
-    if (location.pathname === '/artifacts') return { ok: true };
-    await wait(300);
-  }
-  return { ok: false, err: 'not-redirected', path: location.pathname };
-})()"""
-
-
-def _run_app(client: ChromeMcpClient, page: McpPage, round_number: int) -> dict[str, object]:
-    result = client.evaluate(page, _RUN_APP_JS.replace("__ROUND__", str(round_number)), timeout_sec=90.0)
-    assert isinstance(result, dict) and result.get("ok") is True, result
-    return result
 
 
 @pytest.mark.chrome_e2e(execution_mode="SHARED", access_scope="NAMESPACE_WRITE", workload="STANDARD")
@@ -147,7 +73,11 @@ def test_an_installed_app_uses_the_bridge_only_for_what_the_user_allowed_chrome_
     api_url = get_e2e_api_url()
     ui_url = get_e2e_ui_url().rstrip("/")
     prepare_e2e_ui_session(api_url)
-    seeded = http_json("POST", f"{api_url}{_SEED_PATH}")
+    # The chat page of a fresh runtime only opens once a model is configured, the way a user's first setup does.
+    seed_live_e2e_providers(api_url)
+    if not wait_e2e_provider_ready(timeout_sec=90.0):
+        pytest.fail("Provider not ready — run ./myrm-dev ready --chrome")
+    seeded = http_json("POST", f"{api_url}{SEED_PATH}")
     assert isinstance(seeded, dict), seeded
     chat_id, artifact_id = str(seeded["chat_id"]), str(seeded["artifact_id"])
     e2e_resource_ledger.register("chat", chat_id)
@@ -179,8 +109,8 @@ def test_an_installed_app_uses_the_bridge_only_for_what_the_user_allowed_chrome_
             # "Not now" decides nothing: the capabilities stay off and the app's calls are refused.
             click_dialog_button(client, page, NOT_NOW)
             wait_for_state(client, page, NO_DIALOG_JS, timeout_sec=30.0, page_url=app_url)
-            wait_for_state(client, page, _REVIEW_BANNER_JS.replace("__CLICK__", "false"), timeout_sec=30.0, page_url=app_url)
-            undecided = _run_app(client, page, 1)
+            wait_for_banner(client, page, app_url, click=False)
+            undecided = run_app(client, page, 1)
             assert undecided["outcomes"] == [
                 "notify:permission_denied",
                 "fetch-declared:permission_denied",
@@ -190,7 +120,7 @@ def test_an_installed_app_uses_the_bridge_only_for_what_the_user_allowed_chrome_
             assert app_detail(api_url, artifact_id)["grants"] == []
 
             # The banner reopens the question; saving allows what the app asked for.
-            wait_for_state(client, page, _REVIEW_BANNER_JS.replace("__CLICK__", "true"), timeout_sec=30.0, page_url=app_url)
+            wait_for_banner(client, page, app_url, click=True)
             wait_for_state(client, page, DIALOG_STATE_JS, timeout_sec=30.0, page_url=app_url)
             click_dialog_button(client, page, SAVE)
             wait_for_state(client, page, NO_DIALOG_JS, timeout_sec=30.0, page_url=app_url)
@@ -201,7 +131,7 @@ def test_an_installed_app_uses_the_bridge_only_for_what_the_user_allowed_chrome_
             assert by_capability["fetch"]["decision"] == "allow" and by_capability["fetch"]["scope"] == ["example.com"], stored
 
             # Allowed: the notification is shown, the declared host answers through the server, the other host is refused.
-            allowed = _run_app(client, page, 2)
+            allowed = run_app(client, page, 2)
             assert allowed["outcomes"] == ["notify:ok", "fetch-declared:ok", "fetch-undeclared:host_not_granted"], allowed
             assert allowed["toastSeen"] is True, allowed
 
@@ -218,7 +148,8 @@ def test_an_installed_app_uses_the_bridge_only_for_what_the_user_allowed_chrome_
             )
 
             # Uninstall from the app menu: the app and its page are gone, the artifact stays.
-            removed = client.evaluate(page, _UNINSTALL_FROM_MENU_JS, timeout_sec=90.0)
+            open_menu_item(client, page, UNINSTALL_ITEM)
+            removed = client.evaluate(page, CONFIRM_UNINSTALL_JS, timeout_sec=90.0)
             assert isinstance(removed, dict) and removed.get("ok") is True, removed
         assert artifact_id not in installed_ids(api_url)
         assert http_json_once("GET", f"{api_url}{APPS_PATH}/{artifact_id}")[0] == 404

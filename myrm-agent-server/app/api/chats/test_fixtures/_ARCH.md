@@ -26,7 +26,7 @@ local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.
 | `file_edit_batch.py` | file_edit batch live/read_ui + workspace-only seed |
 | `file_mutation.py` | file mutation seed |
 | `guardrail_bash.py` | guardrail bash Badge seed |
-| `installed_app.py` | 已安装应用 seed（`POST /chats/test/seed-installed-app-fixture`：一条助手回答携带一份声明了 notify 与 fetch（`example.com`）的 HTML 应用制品，由产品自己的制品处理器登记；页面收到宿主发来的 `e2e-run` 后各调一次允许的主机、未声明的主机与通知，并把结果回传宿主） |
+| `installed_app.py` | 已安装应用 seed（`POST /chats/test/seed-installed-app-fixture`：一条助手回答携带一份声明了 notify 与 fetch（`example.com`）的 HTML 应用制品，由产品自己的制品处理器登记；页面收到宿主发来的 `e2e-run` 后各调一次允许的主机、未声明的主机与通知并回传结果，收到 `e2e-burst` 则同一瞬间连发指定次数的通知；`POST /chats/test/seed-installed-app-fixture/revise` 以另一组 `fetch` 主机重新登记同一页面，等于智能体改了页面） |
 | `media_cards.py` | 生成媒体卡片 seed（`POST /chats/test/seed-media-cards-fixture`：图像任务 / 视频任务 / 同步图像编辑 / 语音各一条已登记条目，媒体经落库回调真实存储；`address=file` 为任务结果指向不可加载地址的负向对照，`address=expired` 为任务记录已不存在） |
 | `memory_lifecycle.py` | memory lifecycle seed |
 | `prior_chat.py` | composer @chat: mention seed |
