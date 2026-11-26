@@ -6,7 +6,8 @@
 [OUTPUT]
 - Fails when a skill name or a path component at the limit is refused, when one over it (or with a NUL or a lone
   surrogate) escapes the install as an exception, loses its error code, shows the user the offending name, leaves
-  anything on disk or in the quarantine, or when the skill name still limits how long an installed skill's name can be.
+  anything on disk or in the quarantine, when a refusal echoes a skill name that still holds a lone surrogate (a JSON
+  response cannot carry it), or when the skill name still limits how long an installed skill's name can be.
 
 [POS]
 Every name of a package is chosen by its publisher. The first write to a name the file system cannot hold raises an
@@ -47,6 +48,12 @@ OVER_THE_LIMIT = {
     "directory component of 256 bytes": "references/" + "d" * 256 + "/guide.md",
     "NUL in a component": "references/a\x00b",
     "lone surrogate in a component": "references/a\ud800b",
+}
+# Skill names that are refused and cannot be encoded as UTF-8 (a directory name that was not valid UTF-8 reads back
+# as one): the refusal echoes the name, so it has to leave the pipeline in a form a JSON response can carry.
+UNENCODABLE_SKILL_NAMES = {
+    "lone surrogate": ("demo\ud800", "INVALID_PACKAGE_PATH"),
+    "separator and lone surrogate": ("bad/\ud800", "INVALID_SKILL_NAME"),
 }
 
 
@@ -119,6 +126,17 @@ async def test_a_skill_name_the_file_system_cannot_hold_is_a_refused_install(
     )
     assert not install_root.exists()
     assert list(quarantine_root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name, error_code", UNENCODABLE_SKILL_NAMES.values(), ids=UNENCODABLE_SKILL_NAMES.keys())
+async def test_a_refusal_echoes_the_skill_name_in_a_form_a_json_response_can_carry(
+    tmp_path: Path, name: str, error_code: str
+) -> None:
+    result = await install_skill_files(tmp_path / "skills", "demo-id", name, {"SKILL.md": SKILL_MD})
+
+    assert (result.success, result.error_code) == (False, error_code)
+    assert result.skill_name == name.replace("\ud800", "\ufffd")
 
 
 def test_the_fixed_sentence_names_no_path_and_no_number() -> None:

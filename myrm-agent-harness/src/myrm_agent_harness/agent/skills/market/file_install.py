@@ -7,6 +7,7 @@
 - backends.skills.scanning.archive_security::classify_archive_security_issue, format_archive_security_user_message (POS: Canonical archive-security contract for typed/untyped ZIP guard errors.)
 - backends.skills.scanning.package_audit::check_lifecycle_scripts (POS: In-memory lifecycle script gate)
 - backends.skills.versioning::validate_version_guard (POS: Downgrade guard)
+- utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 - .helpers::read_origin, write_origin, scan_all_text_files (POS: Provenance file and in-memory scan)
 - .transaction::SkillInstallTransaction, build_skill_receipt, write_receipt_file (POS: Atomic promotion and receipts)
 
@@ -44,6 +45,7 @@ from myrm_agent_harness.backends.skills.scanning.path_security import (
     PathRedirectSecurityError,
 )
 from myrm_agent_harness.backends.skills.versioning import SkillDowngradeBlockedError, validate_version_guard
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 from .helpers import read_origin, scan_all_text_files, write_origin
 from .transaction import SkillInstallTransaction, build_skill_receipt, write_receipt_file
@@ -75,7 +77,7 @@ def is_safe_skill_dir_name(name: str) -> bool:
 def _is_storable(part: str) -> bool:
     try:
         raw = part.encode("utf-8")
-    except UnicodeEncodeError:  # 孤立代理字符没有文件系统形式
+    except UnicodeEncodeError:  # 孤立代理字符没有 UTF-8 形式
         return False
     return len(raw) <= _MAX_NAME_BYTES and b"\0" not in raw
 
@@ -84,8 +86,8 @@ def _find_unstorable_name(skill_name: str, file_paths: Iterable[str]) -> str | N
     """The first name of a package beyond the portable limits: the skill name, then each component of each path.
 
     Every name is chosen by the publisher; the first write to one that is too long or holds a NUL raises an
-    OSError or ValueError, so it has to be refused before the quarantine is created. Each name is judged on its
-    own: the total path length and Windows reserved names are not checked.
+    OSError or ValueError, and a lone surrogate has no UTF-8 form, so each has to be refused before the quarantine
+    is created. Each name is judged on its own: the total path length and Windows reserved names are not checked.
     """
     names = chain([skill_name], (part for path in file_paths for part in path.split("/")))
     return next((name for name in names if not _is_storable(name)), None)
@@ -141,20 +143,22 @@ async def install_skill_files(
             progress_callback(skill_id, stage, msg)
 
     # 0. 安装目录名必须是单个相对路径段：frontmatter 的 name 完全由
-    # 技能发布方控制，未经校验会拼出目录穿越或让 mkdtemp 直接崩溃
+    # 技能发布方控制，未经校验会拼出目录穿越或让 mkdtemp 直接崩溃。
+    # 本步两道门的拒绝结果都回显这个名字，它可能含孤立代理字符，须先换成 U+FFFD，否则 JSON 响应序列化会抛异常
     if not is_safe_skill_dir_name(name):
         reason = f"Invalid skill name for install directory: {name!r}"
         logger.warning("Skill install rejected: %s", reason)
         _emit("rejected", reason)
         return SkillInstallResult(
             success=False,
-            skill_name=name,
+            skill_name=encodable_text(name),
             error=reason,
             error_code="INVALID_SKILL_NAME",
         )
 
-    # 同属第 0 步：技能名与包内路径分量同样由发布方决定，过长或含 NUL 的名字在第一次写盘时就会抛 OSError/ValueError
-    # （隔离目录的创建、写入循环、提升都会碰到），必须在创建任何目录之前拒绝；名字本身只写日志
+    # 同属第 0 步：技能名与包内路径分量同样由发布方决定。过长或含 NUL 的名字在第一次写盘时就会抛 OSError/ValueError
+    # （隔离目录的创建、写入循环、提升都会碰到），孤立代理字符没有 UTF-8 形式，按 UTF-8 判断才能让各主机的结论一致，
+    # 所以都必须在创建任何目录之前拒绝；名字本身只写日志
     unstorable = _find_unstorable_name(name, files)
     if unstorable is not None:
         logger.warning(
@@ -168,7 +172,7 @@ async def install_skill_files(
         _emit("rejected", INVALID_PACKAGE_PATH_MESSAGE)
         return SkillInstallResult(
             success=False,
-            skill_name=name,
+            skill_name=encodable_text(name),
             error=INVALID_PACKAGE_PATH_MESSAGE,
             error_code="INVALID_PACKAGE_PATH",
         )
