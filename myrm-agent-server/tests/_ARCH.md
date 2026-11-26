@@ -127,7 +127,6 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/workbench/test_workbench_api.py` | 单元 | 工作台文件树 / 文件内容 / 终端：限定在会话工作区内（越界路径与指向工作区外的软链接都被拒，非法 chat id 不会落到进程目录）、破坏性命令被拦截而工作区内的普通清理放行、不读服务进程 stdin、超时杀掉整个进程树、超出上限的输出被截断并标记 |
 | `channels/storage/test_credentials_store.py` | 单元 | 渠道凭据默认落在 `state_dir` 下而非进程目录，换个目录重新启动后登录仍在，显式目录优先 |
 | `api/files/test_vault_api.py` | 单元 | vault 对象读取：按 `chat_id` 取该会话工作区、按指向对象的 artifact 反查所属会话、无主对象回退默认根、缺失对象 404 |
-| `api/files/test_provenance_api.py` | 单元 | 来源中心列表与详情里的产物大小，各取自该产物所属会话的工作区而非进程目录 |
 | `api/files/test_hosting_integration.py` | 集成 | 发布主链路（真实预检、vault、编排；仅外部 HTTP 被替身）：预检、发布、WebSocket 轮询、重发布、多目标发布 |
 | `api/files/test_hosting_targets_api.py` | 单元 | 托管目标与凭据 API（真实路由与数据库）：凭据只写不读、删除目标连带删除凭据行、目标 CRUD 生命周期、不存在的目标 404、连通性测试 |
 | `platform_utils/test_workspace_root.py` | 单元 | `get_workspace_root`：运行之外取进程工作目录，运行之内取该次运行绑定的根 |

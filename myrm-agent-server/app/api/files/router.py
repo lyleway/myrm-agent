@@ -18,7 +18,6 @@ from app.api.files import (
     local_actions,
     organize,
     pdf_extract,
-    provenance_api,
     revert,
     storage,
     suggest,
@@ -34,7 +33,6 @@ router = APIRouter()
 
 router.include_router(upload.router, tags=["files-upload"])
 router.include_router(vault_api.router, prefix="/vault", tags=["files-vault"])
-router.include_router(provenance_api.router, prefix="/artifacts", tags=["files-artifact-provenance"])
 # Ahead of artifact_api: GET /artifacts/shares would otherwise be taken by GET /artifacts/{artifact_id}.
 router.include_router(artifact_share_api.router, prefix="/artifacts", tags=["files-artifact-share"])
 router.include_router(artifact_api.router, prefix="/artifacts", tags=["files-artifacts"])
