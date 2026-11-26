@@ -32,6 +32,7 @@ from app.api.approvals.batch import router as batch_router
 from app.api.approvals.credentials import router as credentials_router
 from app.api.approvals.test_routes import router as test_routes_router
 from app.database.models.approval import ApprovalRecord
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
 from app.services.approvals.registry import ApprovalRegistry
 
 logger = logging.getLogger(__name__)
@@ -245,6 +246,7 @@ async def resolve_approval(
         approval_id=approval_id,
         decision=normalized_decision,
         edited_payload=req.edited_payload,
+        comment=req.comment,
     )
 
     if not record:
@@ -252,6 +254,10 @@ async def resolve_approval(
 
     if record.action_type == "outbound_draft":
         # Resolving it already sent or released the held reply, and no agent run waits on it.
+        return ApprovalRecordResponse.from_orm(record)
+
+    if record.action_type == EXTERNAL_AGENT_PERMISSION:
+        # Resolving it already woke the delegated turn that asked. No agent run is resumed, and the chat is still running.
         return ApprovalRecordResponse.from_orm(record)
 
     if record.action_type == "knowledge_patch":

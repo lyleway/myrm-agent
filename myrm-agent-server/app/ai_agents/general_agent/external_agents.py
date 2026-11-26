@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker
     from myrm_agent_harness.utils import CancellationToken
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,7 @@ class ExternalAgentsMixin:
                     pool,
                     workspace=self._delegation_workspace(),
                     session_scope=chat_scope,
+                    permissions=self._permission_broker(),
                 )
                 tools.append(delegate_tool)
                 logger.info(
@@ -193,6 +194,16 @@ class ExternalAgentsMixin:
         from app.platform_utils.workspace_root import get_workspace_root
 
         return str(get_workspace_root())
+
+    def _permission_broker(self) -> PermissionBroker:
+        """Who decides when a delegated agent asks to do something: the person in this chat, through its approvals."""
+        from app.services.external_agents.permission_broker import ChatPermissionBroker
+
+        return ChatPermissionBroker(
+            agent_id=getattr(self, "agent_id", None) or "default",
+            chat_id=getattr(self, "chat_id", None),
+            workspace=self._delegation_workspace(),
+        )
 
     async def _ensure_runtime_pool(self) -> None:
         """Initialize RuntimePool without creating the full LangChain Agent.
@@ -234,6 +245,7 @@ class ExternalAgentsMixin:
                 session_id=delegation_session_id(agent_name, _runtime_pool_scope_id(self)),
                 workspace=self._delegation_workspace(),
                 images=staged.paths,
+                permissions=self._permission_broker(),
                 cancel_token=cancel_token,
                 locale=self.locale or "en",
             )

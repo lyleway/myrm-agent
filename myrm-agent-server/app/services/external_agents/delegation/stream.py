@@ -39,7 +39,7 @@ from app.services.external_agents.delegation.errors import delegate_error_event
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping
 
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool, RuntimeEvent
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker, RuntimeEvent
     from myrm_agent_harness.utils import CancellationToken
 
 logger = logging.getLogger(__name__)
@@ -257,12 +257,15 @@ async def stream_direct_delegate(
     session_id: str,
     workspace: str,
     images: list[str] | None = None,
+    permissions: PermissionBroker | None = None,
     cancel_token: CancellationToken | None = None,
     locale: str = "en",
 ) -> AsyncGenerator[SseEvent]:
     """Run one turn of ``agent_name`` on ``pool`` in ``workspace`` and stream it as frontend events.
 
     ``images`` are the local files of the images attached to ``prompt``, for a CLI that takes them natively.
+    ``permissions`` is who decides when the agent asks to do something (see ``ChatPermissionBroker``); without it the
+    agent is refused everything but reading.
 
     Closing the stream (a client that went away) closes the turn, which stops the external process. A tripped
     ``cancel_token`` does the same even while the external agent is silent, and ends the stream with a
@@ -279,7 +282,16 @@ async def stream_direct_delegate(
     yield turn.connecting()
 
     async with (
-        aclosing(pool.run_turn(agent_name, prompt, session_id=session_id, workspace=workspace, images=images or None)) as events,
+        aclosing(
+            pool.run_turn(
+                agent_name,
+                prompt,
+                session_id=session_id,
+                workspace=workspace,
+                images=images or None,
+                permissions=permissions,
+            )
+        ) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:

@@ -14,10 +14,10 @@ import type { ExternalAgentAuthMode, ExternalAgentPermissionMode, ExternalAgentT
 import ExternalAgentEnvEditor from './ExternalAgentEnvEditor';
 import {
   AGENT_PRESETS,
-  PERMISSION_MODE_HINTS,
   PERMISSION_MODE_OPTIONS,
   effectiveAuthMode,
   normalizePermissionMode,
+  permissionHintKey,
   toDraft,
   type ExternalAgentDraft,
 } from './externalAgentModel';
@@ -36,7 +36,16 @@ interface ExternalAgentFormProps {
 }
 
 const ExternalAgentForm = memo(
-  ({ draft, isNew, isTesting, subscriptionLoginAllowed, onChange, onSave, onCancel, onTest }: ExternalAgentFormProps) => {
+  ({
+    draft,
+    isNew,
+    isTesting,
+    subscriptionLoginAllowed,
+    onChange,
+    onSave,
+    onCancel,
+    onTest,
+  }: ExternalAgentFormProps) => {
     const t = useTranslations('settings.developer.externalAgents');
     const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
 
@@ -118,21 +127,21 @@ const ExternalAgentForm = memo(
           <div className="space-y-1.5" data-testid="external-agent-permission-mode">
             <label className="text-xs font-medium text-muted-foreground">{t('permissionMode')}</label>
             <Select
-              value={normalizePermissionMode(draft.type, draft.permissionMode)}
+              value={normalizePermissionMode(draft.permissionMode)}
               onValueChange={(v: ExternalAgentPermissionMode) => onChange({ ...draft, permissionMode: v })}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PERMISSION_MODE_OPTIONS[draft.type].map((option) => (
+                {PERMISSION_MODE_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value} data-testid={`permission-option-${option.value}`}>
                     {t(option.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground/60">{t(PERMISSION_MODE_HINTS[draft.type])}</p>
+            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(draft.type, draft.command))}</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t('maxTurns')}</label>

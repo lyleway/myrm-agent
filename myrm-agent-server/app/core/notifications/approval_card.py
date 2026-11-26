@@ -4,6 +4,7 @@
 - app.channels.i18n::channel_t (POS: localized channel copy catalog)
 - app.channels.types::DraftTimeoutAction (POS: what happens when a held reply expires)
 - app.channels.types.components::ActionButton, ButtonStyle, ComponentRow (POS: interactive card components)
+- app.services.approvals.external_agent_permission::ACTION_TYPE (POS: the approval type of an external agent's permission request)
 - app.services.approvals.outbound_draft::draft_code (POS: how a held reply is named in chat)
 - app.services.channels.cp_egress_client::should_route_via_control_plane (POS: whether replies leave through the text-only control-plane egress)
 
@@ -18,7 +19,8 @@ Every quoted text comes from a request or a held message, not from us, so it is 
 would make a chat platform ping a whole channel or label a link as something else.
 A held channel reply (``outbound_draft``) shows the incoming message and the drafted text, so the
 reviewer can decide without opening the app; where there are no buttons it also spells out the
-``/draft`` commands that decide it in chat.
+``/draft`` commands that decide it in chat. An external agent's permission request names what it wants to do
+(its ``reason``) under a header that says who is asking, never the internal action type.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from pathlib import PurePath
 from app.channels.i18n import channel_t
 from app.channels.types import DraftTimeoutAction
 from app.channels.types.components import ActionButton, ButtonStyle, ComponentRow
+from app.services.approvals.external_agent_permission import ACTION_TYPE as EXTERNAL_AGENT_PERMISSION
 from app.services.approvals.outbound_draft import draft_code
 from app.services.channels.cp_egress_client import should_route_via_control_plane
 
@@ -68,6 +71,8 @@ def build_approval_card(
     action_type = str(data.get("action_type") or "action")
     if action_type == _OUTBOUND_DRAFT:
         content = _outbound_draft_content(data, locale)
+    elif action_type == EXTERNAL_AGENT_PERMISSION:
+        content = _permission_content(data, locale)
     else:
         content = _generic_content(data, action_type, locale)
 
@@ -112,6 +117,13 @@ def _generic_content(data: Mapping[str, object], action_type: str, locale: str |
     )
     reason = _preview(data.get("reason"), _REASON_PREVIEW_CHARS)
     return f"{header}\n\n{_quote(reason)}" if reason else header
+
+
+def _permission_content(data: Mapping[str, object], locale: str | None) -> str:
+    """What an external agent asks to do, in the words of the request."""
+    title = _t(locale, "approval_permission_title")
+    reason = _preview(data.get("reason"), _REASON_PREVIEW_CHARS)
+    return f"{title}\n\n{_quote(reason)}" if reason else title
 
 
 def _outbound_draft_content(data: Mapping[str, object], locale: str | None) -> str:

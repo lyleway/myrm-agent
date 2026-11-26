@@ -323,6 +323,7 @@ knowledge_patch_review_reason = Knowledge update suggested from a gap in past co
 approval_card_title = ⚠️ **Approval Required: { $action }**
 approval_card_severity = Severity: `{ $severity }`
 approval_card_open_app = Open the Myrm AI app to review and decide.
+approval_permission_title = 🔐 **An external agent asks for your permission**
 approval_draft_title = ✏️ **Reply awaiting your review**
 approval_draft_incoming = **Incoming message**
 approval_draft_reply = **Drafted reply**

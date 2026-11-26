@@ -33,7 +33,7 @@ class _FakeBackend:
         self._close_error = close_error
 
     async def run_turn(
-        self, prompt: str, session_id: str, *, mcp_servers=None, images=None
+        self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None
     ) -> AsyncIterator[RuntimeEvent]:
         return
         yield  # pragma: no cover - makes this an async generator
@@ -60,9 +60,7 @@ class _Factory:
         self.created: dict[str, list[_FakeBackend]] = {}
         self._failing_close = failing_close
 
-    def __call__(
-        self, name: str, config: RuntimeConfig, *, workspace: str, event_bus=None, cli_session_store=None
-    ) -> _FakeBackend:
+    def __call__(self, name: str, config: RuntimeConfig, *, workspace: str, cli_session_store=None) -> _FakeBackend:
         error = RuntimeError("close failed") if name in self._failing_close else None
         backend = _FakeBackend(close_error=error)
         self.created.setdefault(name, []).append(backend)

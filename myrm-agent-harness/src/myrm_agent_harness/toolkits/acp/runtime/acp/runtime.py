@@ -4,8 +4,7 @@ Spawns an external ACP-compatible agent process (Claude Code, Codex CLI, etc.)
 and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, McpServerConfig, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
-- toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer. Provides decoupled event dispatch mechanism for the Runtime system with session isolation and type filtering.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
@@ -37,7 +36,6 @@ from collections.abc import AsyncGenerator
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING
 
-from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -53,6 +51,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     BackendCapabilities,
     BackendStatus,
     McpServerConfig,
+    PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -99,7 +98,6 @@ class AcpRuntime(BaseRuntime):
         config: RuntimeConfig,
         *,
         workspace: str,
-        event_bus: EventBus | None = None,
     ) -> None:
         super().__init__(runtime_name, config, backend_type="acp", workspace=workspace)
         self._conn: ClientSideConnection | None = None
@@ -109,7 +107,6 @@ class AcpRuntime(BaseRuntime):
         self._handler: AcpCallbackHandler | None = None
         self._supports_session_close = False
         self._prompt_images = False
-        self._event_bus = event_bus
 
     @property
     def capabilities(self) -> BackendCapabilities:
@@ -119,6 +116,7 @@ class AcpRuntime(BaseRuntime):
             supports_streaming=True,
             supports_tools=True,
             supports_images=True,
+            supports_permission_requests=True,
         )
 
     @property
@@ -134,6 +132,7 @@ class AcpRuntime(BaseRuntime):
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         if not self.is_alive:
             yield create_event(
@@ -160,7 +159,7 @@ class AcpRuntime(BaseRuntime):
         if handler is None:
             msg = "Handler not initialized"
             raise RuntimeError(msg)
-        handler.reset()
+        handler.begin_turn(permissions, session_id)
 
         blocks: list[ImageBlock] = []
         if images and self._prompt_images:
@@ -180,6 +179,7 @@ class AcpRuntime(BaseRuntime):
                 yield event
             drained = True
         finally:
+            handler.end_turn()
             if not prompt_task.done():
                 prompt_task.cancel()
             try:
@@ -294,12 +294,7 @@ class AcpRuntime(BaseRuntime):
             Implementation,
         )
 
-        self._handler = AcpCallbackHandler(
-            self._config,
-            session_id="",
-            workspace=self._workspace,
-            event_bus=self._event_bus,
-        )
+        self._handler = AcpCallbackHandler(self._config, session_id="", agent=self._name, workspace=self._workspace)
         safe_env = build_safe_env(self._config)
 
         command = self._config.command

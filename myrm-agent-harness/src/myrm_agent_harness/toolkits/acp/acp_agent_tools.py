@@ -9,7 +9,7 @@ interface via the unified RuntimePool.
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
 - myrm_agent_harness.toolkits.acp.runtime.cli.dialect::has_native_turn_limit (POS: Per-CLI launch knowledge of CliRuntime)
 - myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
-- myrm_agent_harness.toolkits.acp.types::DelegationPool (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
+- myrm_agent_harness.toolkits.acp.types::DelegationPool, PermissionBroker (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
 - myrm_agent_harness.utils.runtime.cancel_hook::on_token_cancelled (POS: Cancellation bridge for streams that must be stopped from outside)
 - myrm_agent_harness.utils.runtime.progress_sink::ToolProgressSink, get_tool_progress_sink (POS: Progress event push mechanism. Tools implicitly obtain a sink via ContextVar to push intermediate progress events to the Agent SSE stream)
@@ -51,7 +51,7 @@ from myrm_agent_harness.utils.runtime.progress_sink import ToolProgressSink, get
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker
 
 
 class DelegateUsage(TypedDict):
@@ -82,6 +82,7 @@ def create_invoke_acp_agent_tool(
     *,
     workspace: str,
     session_scope: str | None = None,
+    permissions: PermissionBroker | None = None,
 ) -> BaseTool:
     """Create the invoke_acp_agent tool.
 
@@ -89,6 +90,8 @@ def create_invoke_acp_agent_tool(
         pool: Pre-configured pool (a ``RuntimePool`` or any ``DelegationPool``) with registered backends.
         workspace: Absolute directory every delegated turn starts in; the host names it, the tool never infers it.
         session_scope: Optional chat/session id for stable CLI resume keys.
+        permissions: Who is asked, mid-turn, before a ``safe`` agent edits or runs something; without one such an
+            agent may only read.
 
     Returns:
         A LangChain tool function.
@@ -160,6 +163,7 @@ context and capabilities.
                     workspace=workspace,
                     mode=mode,
                     session_scope=session_scope,
+                    permissions=permissions,
                 )
                 elapsed = time.monotonic() - t0
                 truncated = result.endswith("[truncated — response exceeded limit]")
@@ -251,6 +255,7 @@ async def _run_turn_and_collect(
     workspace: str,
     mode: str,
     session_scope: str | None = None,
+    permissions: PermissionBroker | None = None,
 ) -> tuple[str, DelegateMeta]:
     """Stream events from pool.run_turn(), collect text, and track metadata.
 
@@ -283,7 +288,11 @@ async def _run_turn_and_collect(
 
     # The watcher stops the delegated process the moment the token trips, even while its stream is silent.
     async with (
-        aclosing(pool.run_turn(agent_name, task, session_id=session_id, workspace=workspace, mode=mode)) as events,
+        aclosing(
+            pool.run_turn(
+                agent_name, task, session_id=session_id, workspace=workspace, mode=mode, permissions=permissions
+            )
+        ) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:

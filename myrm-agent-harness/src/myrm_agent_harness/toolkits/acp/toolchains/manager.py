@@ -5,6 +5,7 @@ touches the host's global npm. An install either leaves a CLI that starts or rai
 reports success it did not observe, waits without a bound, or leaves a child process behind.
 
 [INPUT]
+- core.security.bounded_communicate::communicate_bounded (POS: communicate() with a cap on each pipe, stopping the process through the caller on a deadline or a cancel)
 - core.security.process_env::EnvInheritPolicy, sanitize_env (POS: Child process environment isolation SSOT)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
 - utils.os_compat::SIGKILL, get_process_group_kwargs, kill_spawned_group (POS: Unified abstractions for POSIX/Windows differences (file locks, process groups))
@@ -39,6 +40,7 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from pathlib import Path
 
+from myrm_agent_harness.core.security.bounded_communicate import communicate_bounded
 from myrm_agent_harness.core.security.process_env import EnvInheritPolicy, sanitize_env
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
 from myrm_agent_harness.utils.os_compat import SIGKILL, get_process_group_kwargs, kill_spawned_group
@@ -63,6 +65,8 @@ DOWNLOAD_IDLE_SECONDS = 60.0
 DOWNLOAD_TOTAL_SECONDS = 900.0
 NPM_INSTALL_SECONDS = 900.0
 VERSION_CHECK_SECONDS = 30.0
+# What a CLI's ``--version`` may print before the rest is dropped; the first line is all that is used.
+_VERSION_OUTPUT_BYTES = 64 * 1024
 _LOCK_NOTICE_SECONDS = 30.0
 _OUTPUT_TAIL_LINES = 8
 _TERMINATE_GRACE_SECONDS = 5.0
@@ -286,6 +290,7 @@ class IsolatedToolchainManager:
             proc = await asyncio.create_subprocess_exec(
                 str(binary),
                 "--version",
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._npm_env(),
@@ -295,17 +300,22 @@ class IsolatedToolchainManager:
             msg = f"{backend_name} was installed but cannot start: {exc}"
             raise ToolchainError(msg) from exc
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=VERSION_CHECK_SECONDS)
+            output = await communicate_bounded(
+                proc,
+                timeout=VERSION_CHECK_SECONDS,
+                on_abort=lambda: _stop_group(proc),
+                max_bytes=_VERSION_OUTPUT_BYTES,
+            )
         except TimeoutError:
             msg = f"{backend_name} was installed but did not answer --version within {int(VERSION_CHECK_SECONDS)}s."
             raise ToolchainError(msg) from None
         finally:
             await _stop_group(proc)
         if proc.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip().splitlines()[-_OUTPUT_TAIL_LINES:]
+            detail = output.stderr.decode("utf-8", errors="replace").strip().splitlines()[-_OUTPUT_TAIL_LINES:]
             msg = f"{backend_name} was installed but cannot start (exit code {proc.returncode})."
             raise ToolchainError("\n".join([msg, *detail]))
-        version = stdout.decode("utf-8", errors="replace").strip().splitlines()
+        version = output.stdout.decode("utf-8", errors="replace").strip().splitlines()
         return f"Successfully installed {backend_name} {version[0] if version else ''}".strip()
 
 

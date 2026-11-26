@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEvent, RuntimeEventType
+from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeConfig, RuntimeEvent, RuntimeEventType
 
 _MOCK_AGENT = Path(__file__).parents[2] / "_mock_acp_agent.py"
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -19,7 +19,7 @@ def make_png(directory: Path, name: str, size: int) -> tuple[Path, bytes]:
     return path, body
 
 
-def make_pool(*agent_args: str) -> RuntimePool:
+def make_pool(*agent_args: str, permission_mode: PermissionMode = "safe", timeout_seconds: int = 60) -> RuntimePool:
     pool = RuntimePool(max_concurrent=1)
     pool.register(
         "mock",
@@ -27,7 +27,8 @@ def make_pool(*agent_args: str) -> RuntimePool:
             backend_type="acp",
             command=sys.executable,
             args=[str(_MOCK_AGENT), *agent_args],
-            timeout_seconds=60,
+            timeout_seconds=timeout_seconds,
+            permission_mode=permission_mode,
         ),
     )
     return pool

@@ -7,6 +7,7 @@ environment variable sanitization, timeout control, and response truncation.
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
 - toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
+- toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 
 [OUTPUT]
 - BaseRuntime: Abstract base for RuntimeBackend implementations; a runtime belongs to one workspace for its whole life.
@@ -28,6 +29,7 @@ from contextlib import aclosing
 
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
+from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -36,6 +38,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     BackendStatus,
     BackendType,
     McpServerConfig,
+    PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -183,12 +186,13 @@ class BaseRuntime:
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Execute a turn with timeout control and streaming truncation.
 
         Wraps ``_do_run_turn`` with ``asyncio.timeout``, applies per-character
         truncation on TEXT_DELTA events, and emits an error event on timeout
-        or unexpected failure.
+        or unexpected failure. The time limit does not run while ``permissions`` waits for a person.
         """
         char_count = 0
         max_chars = self._config.max_response_chars
@@ -196,31 +200,38 @@ class BaseRuntime:
 
         try:
             # ``aclosing`` ends the turn generator (and so its process) the moment this stream stops, not at GC.
-            async with (
-                asyncio.timeout(self._config.timeout_seconds),
-                aclosing(self._do_run_turn(prompt, session_id, mcp_servers=mcp_servers, images=images)) as events,
-            ):
-                async for event in events:
-                    if truncated:
-                        if event.type == RuntimeEventType.TEXT_DELTA:
-                            continue
-                        yield event
-                        continue
-
-                    if event.type == RuntimeEventType.TEXT_DELTA:
-                        content = event.data.get("content", "")
-                        if isinstance(content, str):
-                            char_count += len(content)
-                            if char_count > max_chars:
-                                yield create_event(
-                                    RuntimeEventType.TEXT_DELTA,
-                                    session_id,
-                                    content="\n\n[truncated — response exceeded limit]",
-                                )
-                                truncated = True
+            async with asyncio.timeout(self._config.timeout_seconds) as clock:
+                turn_permissions = None if permissions is None else TurnPermissions(permissions, clock)
+                try:
+                    async with aclosing(
+                        self._do_run_turn(
+                            prompt, session_id, mcp_servers=mcp_servers, images=images, permissions=turn_permissions
+                        )
+                    ) as events:
+                        async for event in events:
+                            if truncated:
+                                if event.type == RuntimeEventType.TEXT_DELTA:
+                                    continue
+                                yield event
                                 continue
 
-                    yield event
+                            if event.type == RuntimeEventType.TEXT_DELTA:
+                                content = event.data.get("content", "")
+                                if isinstance(content, str):
+                                    char_count += len(content)
+                                    if char_count > max_chars:
+                                        yield create_event(
+                                            RuntimeEventType.TEXT_DELTA,
+                                            session_id,
+                                            content="\n\n[truncated — response exceeded limit]",
+                                        )
+                                        truncated = True
+                                        continue
+
+                            yield event
+                finally:
+                    if turn_permissions is not None:
+                        turn_permissions.close()
         except TimeoutError:
             logger.error(
                 "runtime_timeout name=%s session=%s timeout=%ds", self._name, session_id, self._config.timeout_seconds
@@ -289,6 +300,7 @@ class BaseRuntime:
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         raise NotImplementedError
         yield  # pragma: no cover — makes this an async generator

@@ -48,6 +48,8 @@ class RecordingStore:
 # anything; one failing turn can end in a max-turns / API-error ``result`` line. Which command it plays is decided by
 # its own file name; scenario.json next to it picks what a turn does (one dict for every call, or a list by call index).
 # ``stall_before_stdin`` makes it start reading its stdin only after that many seconds, like a CLI still running its start hooks.
+# ``asks`` (Claude only) is a list of ``{"tool_name", "input"}``: given ``--permission-prompt-tool``, the stand-in puts each
+# to the MCP tool named by ``--mcp-config`` over HTTP, as Claude Code does, and reports the answers in its text.
 _SCRIPT = """\
 #!__PYTHON__
 import json, os, signal, sys, time, uuid
@@ -95,6 +97,25 @@ def hang_if(key):
         time.sleep(120)
 
 
+def ask_host(config_path, tool_name, tool_input):
+    # Claude Code's permission prompt: initialize the MCP endpoint of --mcp-config, then call its tool.
+    import urllib.request
+
+    server = json.load(open(config_path))["mcpServers"]["myrm_permissions"]
+    headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", **server["headers"]}
+
+    def post(request_id, method, params):
+        body = json.dumps({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}).encode()
+        request = urllib.request.Request(server["url"], data=body, headers=headers)
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
+
+    client = {"name": "claude-code", "version": "2"}
+    post(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": client})
+    answer = post(2, "tools/call", {"name": "approve", "arguments": {"tool_name": tool_name, "input": tool_input}})
+    return json.loads(answer["result"]["content"][0]["text"])
+
+
 disk = os.path.join(here, "conversations.json")
 known = read_json(disk, [])
 
@@ -124,6 +145,12 @@ if name == "claude":
     emit({"type": "system", "subtype": "init", "session_id": session_id, "cwd": cwd})
     hang_if("hang_after_init")
     time.sleep(scenario.get("silent_seconds", 0))
+    answers = []
+    if "--permission-prompt-tool" in argv and scenario.get("asks"):
+        config_path = argv[argv.index("--mcp-config") + 1]
+        for ask in scenario["asks"]:
+            answers.append(ask_host(config_path, ask["tool_name"], ask["input"]))
+        json.dump(answers, open(os.path.join(here, "answers.json"), "w"))
     for number, status in enumerate(scenario.get("retry_statuses", [])):
         # Claude reports every retry of a failed request with the status the API answered; the turn can go on after.
         error = "authentication_failed" if status == 401 else "server_error"
@@ -131,6 +158,8 @@ if name == "claude":
               "retry_delay_ms": 500.0, "error_status": status, "error": error, "session_id": session_id})
     hang_if("hang_after_retries")
     text = scenario.get("text", session_id)
+    if answers:
+        text = "; ".join(answer["behavior"] for answer in answers)
     for number in range(scenario.get("tools", 0)):
         call = {"type": "tool_use", "id": "toolu_%d" % number, "name": "Bash", "input": {"command": "echo %d" % number}}
         emit({"type": "assistant", "message": {"id": "msg_t%d" % number, "content": [call]}})

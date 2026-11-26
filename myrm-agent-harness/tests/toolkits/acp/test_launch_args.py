@@ -10,7 +10,7 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args, resolve_cli_args
 
-_MODES = ["safe", "ask", "allow_all", "bypass"]
+_MODES = ["safe", "allow_all"]
 
 # What the settings page puts in a new agent's args box (see ``AGENT_PRESETS`` of the frontend).
 _PRESETS = {
@@ -77,3 +77,30 @@ def test_the_baseline_itself_is_never_repeated() -> None:
 
 def test_an_unknown_cli_gets_its_args_untouched() -> None:
     assert resolve_cli_args("my-own-agent", ["-c", "a=1", "-c", "a=1"], "safe") == ["-c", "a=1", "-c", "a=1"]
+
+
+@pytest.mark.parametrize("mode", ["ask", "bypass", "", "SAFE"])
+@pytest.mark.parametrize("backend", sorted(_PRESETS))
+def test_a_mode_nobody_defined_refuses_to_launch_instead_of_running_under_the_cli_default(
+    backend: str, mode: str
+) -> None:
+    with pytest.raises(ValueError, match="Unknown permission mode"):
+        resolve_cli_args(backend, [], mode)
+
+
+def test_a_stale_permission_prompt_tool_in_the_config_cannot_replace_the_hosts() -> None:
+    configured = [
+        "-p",
+        "--permission-prompt-tool",
+        "mcp__other__approve",
+        "--permission-prompt-tool=mcp__x__y",
+        "--model",
+        "m",
+    ]
+
+    resolved = resolve_cli_args("claude", configured, "safe")
+
+    assert "--permission-prompt-tool" not in resolved
+    assert not any(arg.startswith("--permission-prompt-tool=") for arg in resolved)
+    assert "mcp__other__approve" not in resolved
+    assert resolved[-2:] == ["--model", "m"]

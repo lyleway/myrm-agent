@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import { OutboundDraftApprovalBody } from '@/components/approval/OutboundDraftApprovalBody';
 import type { ApprovalPayload } from '@/store/useApprovalStore';
 import { BatchCostApprovalContent } from './BatchCostApprovalContent';
+import { ExternalAgentPermissionContent } from './ExternalAgentPermissionContent';
 import { HighRiskDomActionContent } from './HighRiskDomActionContent';
 import { KnowledgePatchContent } from './KnowledgePatchContent';
 import { McpElicitationContent } from './McpElicitationContent';
@@ -68,6 +69,8 @@ export function ApprovalContent({ approval, editedArgs, onEditedArgsChange }: Ap
       return <OutboundDraftApprovalBody payload={approval.payload} />;
     case 'mcp_elicitation':
       return <McpElicitationContent approval={approval} />;
+    case 'external_agent_permission':
+      return <ExternalAgentPermissionContent approval={approval} />;
     default:
       return <PayloadText title={t('payloadData')} text={JSON.stringify(approval.payload, null, 2)} />;
   }

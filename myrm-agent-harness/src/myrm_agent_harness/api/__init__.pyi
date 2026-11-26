@@ -155,6 +155,7 @@ from myrm_agent_harness.core.security.redact.command_line import (
     command_preview as command_preview,
 )
 from myrm_agent_harness.core.security.redact.engine import (
+    escape_invisible_unicode as escape_invisible_unicode,
     redact_field_text as redact_field_text,
     redact_sensitive_text as redact_sensitive_text,
 )

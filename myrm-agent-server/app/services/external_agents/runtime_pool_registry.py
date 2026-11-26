@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import McpServerConfig, RuntimeConfig, RuntimeEvent
+    from myrm_agent_harness.toolkits.acp.types import McpServerConfig, PermissionBroker, RuntimeConfig, RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +282,7 @@ class ChatScopedRuntimePoolFacade:
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         async with self._registry.track_turn(self._chat_scope_id):
             self._pool = await self._registry.ensure_tracked(self._chat_scope_id, self._config_fingerprint, self._pool)
@@ -290,7 +291,14 @@ class ChatScopedRuntimePoolFacade:
             # starts early.
             async with aclosing(
                 self._pool.run_turn(
-                    name, prompt, session_id, workspace=workspace, mode=mode, mcp_servers=mcp_servers, images=images
+                    name,
+                    prompt,
+                    session_id,
+                    workspace=workspace,
+                    mode=mode,
+                    mcp_servers=mcp_servers,
+                    images=images,
+                    permissions=permissions,
                 )
             ) as events:
                 async for event in events:

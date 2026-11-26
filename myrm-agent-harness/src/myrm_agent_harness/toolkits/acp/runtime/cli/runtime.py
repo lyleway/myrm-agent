@@ -8,6 +8,8 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
+- toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
+- toolkits.acp.runtime.cli.permission_bridge::PermissionBridge (POS: Loopback MCP endpoint through which Claude Code puts its permission prompts to the host)
 - toolkits.acp.runtime.cli.dialect::dialect_for, is_session_id (POS: Per-CLI launch knowledge of CliRuntime)
 - toolkits.acp.runtime.cli.failure::classify_failure (POS: Error vocabulary of CliRuntime)
 - toolkits.acp.runtime.image_blocks::load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
@@ -29,8 +31,9 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator, Sequence
-from contextlib import aclosing
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
@@ -46,6 +49,7 @@ from myrm_agent_harness.toolkits.acp.runtime.cli.process import CliLaunchError, 
 from myrm_agent_harness.toolkits.acp.runtime.cli.session import CliSessionBook
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import load_image_blocks
+from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -60,6 +64,9 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     create_event,
 )
+
+if TYPE_CHECKING:
+    from myrm_agent_harness.toolkits.acp.runtime.cli.permission_bridge import PermissionBridge
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +147,7 @@ class CliRuntime(BaseRuntime):
             supports_streaming=True,
             supports_tools=False,
             supports_images=dialect is not None and dialect.takes_images,
+            supports_permission_requests=dialect is not None and dialect.asks_host,
         )
 
     @property
@@ -153,6 +161,7 @@ class CliRuntime(BaseRuntime):
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         if mcp_servers:
             # CliRuntime 不支持 session-level MCP 注入；pool.run_turn 已拦截，
@@ -183,6 +192,34 @@ class CliRuntime(BaseRuntime):
             blocks = await asyncio.to_thread(load_image_blocks, images)
             args, prompt = dialect.with_image_blocks(args, prompt, blocks)
 
+        async with AsyncExitStack() as stack:
+            if permissions is not None and dialect is not None and self._asks_host(dialect):
+                bridge = await stack.enter_async_context(self._permission_bridge(permissions, session_id))
+                args = dialect.with_permission_bridge(args, bridge.prompt_tool, bridge.config_path)
+            async with aclosing(self._run_turn_attempts(args, prompt, session_id, cwd, env, dialect)) as events:
+                async for event in events:
+                    yield event
+
+    def _asks_host(self, dialect: CliDialect) -> bool:
+        """Whether this turn can put the CLI's permission prompts to the host: ``safe`` is the mode that asks."""
+        return dialect.asks_host and self._config.permission_mode == "safe"
+
+    def _permission_bridge(self, permissions: TurnPermissions, session_id: str) -> PermissionBridge:
+        # Imported here: the MCP and ASGI machinery is only loaded by a turn that is actually bridged.
+        from myrm_agent_harness.toolkits.acp.runtime.cli.permission_bridge import PermissionBridge
+
+        return PermissionBridge(permissions, agent=self._name, session_id=session_id)
+
+    async def _run_turn_attempts(
+        self,
+        args: list[str],
+        prompt: str,
+        session_id: str,
+        cwd: str,
+        env: dict[str, str],
+        dialect: CliDialect | None,
+    ) -> AsyncGenerator[RuntimeEvent]:
+        """Resume the session when it can be, retry once as a fresh one when the CLI rejects it, then close the turn."""
         resume_args, notice = await self._resume_args(session_id, cwd, dialect, args)
         if notice is not None:
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=notice)
@@ -205,7 +242,7 @@ class CliRuntime(BaseRuntime):
                     async for event in events:
                         yield event
         except CliLaunchError as exc:
-            logger.warning("cli_launch_failed name=%s command=%s", self._name, command_preview(command, 200))
+            logger.warning("cli_launch_failed name=%s command=%s", self._name, command_preview(args[0], 200))
             yield create_event(
                 RuntimeEventType.ERROR,
                 session_id,

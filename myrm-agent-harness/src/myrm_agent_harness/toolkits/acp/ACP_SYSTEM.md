@@ -25,7 +25,7 @@
 ║  event_translator.py          ║  └─ CliRuntime                 ║
 ╠═══════════════════════════════╩═══════════════════════════════╣
 ║                    横切关注点 (core/)                          ║
-║  types.py · core/EventBus                                    ║
+║  types.py · core/probe                                       ║
 ║  core/BackendDetector                                         ║
 ╚═══════════════════════════════════════════════════════════════╝
 ```
@@ -59,6 +59,7 @@ RuntimeBackend (Protocol)
 - `supports_mcp`：是否支持 MCP Server 注入
 - `supports_streaming`：是否支持流式传输
 - `supports_tools`：是否支持原生工具调用
+- `supports_permission_requests`：`safe` 下是否会把权限请求交给回合的 `PermissionBroker`（Claude CLI 与 ACP 后端为真，Codex / Gemini / Qwen 等 CLI 为假，`safe` 对它们即只读）
 - `supports_images`：是否接收随回合附带的图片文件（`run_turn(images=…)`；`CliRuntime` 对 Claude / Codex 为真、其余 CLI 为假；`AcpRuntime` 恒为真，是否真的发送由该 agent 在 `initialize` 里声明的 `promptCapabilities.image` 决定）
 
 **2 种实现**：
@@ -89,7 +90,7 @@ RuntimeEvent (frozen dataclass)
 └── timestamp: float
 ```
 
-**RuntimeEventType 枚举（9 种）**：
+**RuntimeEventType 枚举（8 种）**：
 
 | 事件类型 | 说明 | data 字段 |
 |---------|------|----------|
@@ -97,7 +98,6 @@ RuntimeEvent (frozen dataclass)
 | `reasoning_delta` | 思维链增量 | content: str |
 | `tool_start` | 工具调用开始 | tool_name, tool_input, tool_call_id, summary（一行摘要，可为空） |
 | `tool_result` | 工具调用结果 | tool_call_id, output（CLI 后端截断到 2000 字符）, is_error |
-| `permission_request` | 权限请求 | tool_name, tool_input, options, response_future: asyncio.Future[PermissionDecision] |
 | `usage_update` | Token 用量更新 | input_tokens, output_tokens, cache_read, cache_write |
 | `status_update` | 后端状态变化 | status: str, message: str &#124; None |
 | `error` | 错误事件 | error: AcpError |
@@ -107,7 +107,7 @@ RuntimeEvent (frozen dataclass)
 - `reasoning_delta` — 支持思维链展示
 - `usage_update` — 实时 Token 监控
 - `status_update` — 后端状态变化通知（starting, compacting, reconnecting 等），UI 可精确展示后端状态；会话连续性通知由 `types.ContinuityStatus` 定义：`session_expired`（CLI 已不认识上次的会话，本回合改开新会话）与 `session_workspace_changed`（工作目录变了，不续接），宿主据此提示用户而不是当作错误；图片没有交给 agent 时（后端不收图，或 ACP agent 没声明 `promptCapabilities.image`）回合以一条 `images_not_sent`（`types.IMAGES_NOT_SENT_STATUS`，带 `images` 张数）开头，由 `types.images_not_sent_event` 构造，宿主据此如实告诉用户
-- `permission_request` 包含 `response_future` — 权限回调内部 await Future，订阅者通过 `future.set_result(decision)` 响应，30 秒无应答按 `DENY_ONCE` 拒绝（见 3.5）
+- 权限请求不是事件：它是回合内的一次问答，由 `PermissionBroker` 回答（见 3.4），所以事件流里没有它
 
 ### 3.3 结构化错误体系
 
@@ -131,32 +131,52 @@ AcpError (frozen dataclass)
 
 **价值**：生产系统必须有结构化错误码，上层可根据 `retryable` 自动重试，根据 `code` 精准定位问题。
 
-### 3.4 EventBus（统一事件总线）
+### 3.4 PermissionBroker（权限请求的宿主入口）
 
-**价值**：解耦事件生产者和消费者，支持外部订阅（UI、日志、监控）。
+**价值**：外部 Agent 要做超出读取的事时，由宿主让人逐条决定。框架只给一个窄协议，不依赖任何审批实现，所以宿主以外的使用者（脚本、另一套产品）同样能接入。
 
 ```
-EventBus
-├── subscribe(event_type | None, callback, *, session_id: str | None) -> subscription_id
-├── unsubscribe(subscription_id) -> None
-└── emit(event: RuntimeEvent) -> None
+PermissionBroker (Protocol)
+└── decide(request: PermissionRequest) -> PermissionVerdict    # 等人决定；人要多久由宿主定
+
+PermissionRequest (frozen dataclass)   # agent、session_id（宿主给该回合的 id）、tool_name、kind、title、input、paths、tool_call_id
+PermissionVerdict (frozen dataclass)   # allowed；message 是拒绝的理由，只有能被告知的 Agent 才收到
 ```
 
-**增强**：
-- Session 级过滤：subscribe 可指定 session_id，只接收该会话的事件
-- 异步回调：支持 async callable
+**`TurnPermissions`（`runtime/turn_permissions.py`）**：把宿主的 broker 包成回合内可放心使用的版本，后端不必再处理三件事：
+
+- broker 抛异常按拒绝处理（记 `permission_broker_failed` WARNING）；
+- 等人决定期间，回合的时间上限（`timeout_seconds`，即 Agent 干活的时间）暂停，人答复后剩余预算原样恢复——人想多久由宿主的 broker 定，不会把干活的时间花在等人上；
+- 回合结束时仍在等的请求被取消，此后到达的请求直接拒绝，不会再有人被问一个已经结束的回合。
+
+没有 broker 的回合（定时、后台任务）没有人可问：`safe` 下的 Agent 只能读取。
 
 ### 3.5 权限模式（permission_mode）
 
-**裁决位置**：`RuntimeConfig.permission_mode` 没有可替换的权限管理器，由后端各自就地消费：ACP 后端的 `runtime/acp/callback.py::AcpCallbackHandler.request_permission` 裁决 agent 发来的权限请求；CLI 后端的 `auth.resolve_cli_args` 把模式映射成各 CLI 自己的权限参数，裁决交给 CLI 本身。
+**两种模式**（`PermissionMode = Literal["safe", "allow_all"]`，库默认 `safe`）：
 
-**4 种权限模式**（ACP 后端的裁决规则）：
-- `safe`：只放行读操作（工具名含 read / search / list / glob），其余拒绝
-- `ask`：通过 EventBus 发出 `permission_request` 事件并等待订阅者裁决；30 秒无应答按 `DENY_ONCE` 拒绝；未注入 EventBus 时按 `safe` 处理
-- `allow_all`：自动批准所有工具（选 agent 所列选项中第一个 allow_once / allow_always）
-- `bypass`：框架侧不做判断，直接回 allow_always（由外部后端自身的权限机制接管）
+- `safe`：外部 Agent 不经人同意不能改任何东西。能询问的 Agent 逐条询问，不能询问的 Agent 只能读取。
+- `allow_all`：Agent 无人值守地做事。
 
-**异步响应机制**：`ask` 模式下，回调产生包含 `asyncio.Future[PermissionDecision]` 的 permission_request 事件，await Future 等待外部决策，再把决策映射回 agent 提供的 allow / reject 选项；其余三种模式在回调内直接给出结果，无需外部参与
+模式名只有这两个；宿主存下来的旧词表（`ask`、`bypass`）不属于库，由业务层在读取处归为 `safe`。
+
+**`safe` 怎么问**，按后端（`BackendCapabilities.supports_permission_requests` 声明该后端会不会问）：
+
+| 后端 | `safe` 的做法 | 没有 broker 时 |
+|------|--------------|----------------|
+| ACP（`runtime/acp/permission_policy.py::AcpPermissionPolicy`） | 读类动作（`read` / `search` / `think`）直接放行；其余每个 `session/request_permission` 变成一条 `PermissionRequest` 交给 broker，答复映射回 Agent 自己给的 allow / reject 选项（没有合适的选项就取消并记 `acp_permission_no_matching_option`）。人同意过的编辑记下它点名的文件，随后的 `fs/write_text_file` 不再问第二次；Agent 不先请求权限、直接写文件时，写之前问一次 | 拒绝（`acp_permission_refused_unattended`） |
+| Claude CLI（`runtime/cli/permission_bridge.py::PermissionBridge`） | `--permission-mode default` 加 `--permission-prompt-tool`：本回合起一个只监听 127.0.0.1 的 MCP 端点（端口由系统分配、每回合随机 bearer token、`0600` 的 `--mcp-config` 文件，回合结束即清除），Claude 把每个需要权限的工具调用交给它的 `approve(tool_name, input, tool_use_id)`，答案是 Claude 照办的 JSON：`allow` 带原输入，或 `deny` 带模型会读到的理由 | 不起端点，Claude 保持 `default` 的拒绝 |
+| Codex / Gemini / Qwen CLI | 不能询问：`codex exec` 的审批策略固定为 `never`，gemini / qwen 的无头回合里没有能答复询问的通道，只取 `plan`（只读）与 `yolo`。`safe` 即只读（`--sandbox read-only` / `--approval-mode plan`） | 同左，不需要 broker |
+
+`allow_all`：ACP 自动选 Agent 所列的 allow 选项；CLI 用各自的放行档位（Claude `bypassPermissions`、Codex `--sandbox workspace-write`、Gemini / Qwen `--approval-mode yolo`）。
+
+**文件回调说真话**（`runtime/acp/callback.py`）：`fs/read_text_file` 与 `fs/write_text_file` 只服务工作区内的文件，按字节读写，所以 Agent 写下的就是落盘的（含换行符）；不是合法 UTF-8 的文件直接拒绝，不会被有损读取再写回损坏；每一次拒绝与失败都以 JSON-RPC 错误如实告诉 Agent。
+
+**Claude 权限询问的真二进制事实**（claude 2.1.330，`tests/toolkits/acp/runtime/cli/test_real_claude_permission_prompt.py`；真 `claude -p` 由脚本化的假 Anthropic API 驱动，不登录、不调用真实模型）：
+
+- `approve` 返回一个文本块，内容是 `{"behavior":"allow","updatedInput":<input>}` 或 `{"behavior":"deny","message":…}`；拒绝的 `message` 以 `is_error: true` 的 `tool_result` 到达模型。
+- Claude 自己在 60 秒后拒绝一条权限询问，没有任何答复时 300 秒后也会拒绝；只有 `--mcp-config` 里该服务器条目的 `timeout`（毫秒）能同时解除这两个上限（`MCP_TOOL_TIMEOUT` 环境变量只解除 60 秒，所以不用它）。桥接把它设为一天（`_PROMPT_TIMEOUT_MS`）：人要多久由宿主的 broker 定，回合结束时等待随之结束。
+- 实测一次 310 秒后才答复的询问仍被等到并执行（该测试耗时 311.5 秒，超过项目的 300 秒默认超时，所以单独标了 420 秒）；一天这个取值本身没有被等满过。
 
 ### 3.6 BackendDetector（后端自动检测）
 
@@ -176,11 +196,11 @@ EventBus
 **价值**：统一管理任意 `RuntimeBackend` 实例，配置驱动 + 并发控制（`asyncio.Semaphore`）。
 
 ```
-RuntimePool(*, max_concurrent: int = 4, event_bus: EventBus | None = None, cli_session_store: CliSessionStore | None = None)
+RuntimePool(*, max_concurrent: int = 4, cli_session_store: CliSessionStore | None = None)
 ├── register(name, config: RuntimeConfig) -> None
 ├── get(name, workspace) -> RuntimeBackend  # 按（名字, 工作区）惰性创建的共享后端
 ├── prompt(name, task, *, workspace, mode) -> str   # 委托 run_turn()，收集 text_delta
-├── run_turn(name, prompt, session_id, *, workspace, mode, mcp_servers, images) -> AsyncGenerator[RuntimeEvent]  # Semaphore 并发控制
+├── run_turn(name, prompt, session_id, *, workspace, mode, mcp_servers, images, permissions) -> AsyncGenerator[RuntimeEvent]  # Semaphore 并发控制
 ├── cancel(name, session_id) -> None        # 级联取消 → 正在跑该会话回合的后端的 backend.cancel()；没有在跑的回合时什么也不做
 ├── available_backends -> list[str]
 ├── release_resident() -> None              # 只释放常驻进程型（ACP）后端，保留 CLI 后端及其 --resume 状态
@@ -197,6 +217,7 @@ RuntimePool(*, max_concurrent: int = 4, event_bus: EventBus | None = None, cli_s
 - **CLI 会话持久化 `cli_session_store`**：宿主可注入 `CliSessionStore`（`load` / `save`，键为 harness session id，一个 store 服务一个会话作用域），让 CLI 后端的 `--resume` id 跨宿主进程重启存活。只注入共享的 persistent 后端；oneshot 私有后端是回合结束即消失的全新会话，既不读也不写 store。store 的任何异常只记 warning 并降级（丢连续性，不丢回合）；harness 在回合收尾处直接 await store 且不设超时，调用时延由实现方自己约束；harness 本身不依赖任何存储实现
 - **进程生命周期**：不做周期性存活巡检。`CliRuntime` 每回合一个进程，回合之间没有进程是正常空闲态；`AcpRuntime` 常驻进程退出后，下一次 `run_turn` 发现 `is_alive` 为假就重新拉起进程（`_ensure_connection`）。进程是否卡住不属于存活检测，由 `timeout_seconds` 兜底；CLI / ACP 回合静默期间 `CliRuntime` 与 `AcpRuntime` 每 15 s 发一个 `working` 状态（见 §6 “静默心跳”），宿主的空闲看门狗据此知道它还活着
 - **委托窄协议 `DelegationPool`（`types.py`）**：委托调用方只依赖 `available_backends` / `get_config` / `run_turn`（必带 `workspace`）/ `cancel`；`RuntimePool` 与宿主侧包装器（如按会话登记在途回合的 facade）都满足它，`create_invoke_acp_agent_tool` 接受它
+- **权限 `permissions`**：`run_turn(permissions=broker)` 把一个 `PermissionBroker` 交给本回合，由 `TurnPermissions` 包好后传给后端；只有声明 `supports_permission_requests` 的后端会问它，其余后端与没有 broker 的回合里，`safe` 的 Agent 只能读取
 - **MCP 注入能力守卫**：`run_turn()` 在转发 `mcp_servers` 前检查 `backend.capabilities.supports_mcp`，不支持的 backends（如 `CliRuntime`）收到 `None` 而非原始配置，杜绝向不支持 MCP 注入的后端传递配置引发会话崩溃；跳过时记录 `pool_mcp_skipped` WARNING 便于观测
 - **图片能力守卫**：`run_turn(images=[本地图片文件…])` 与 MCP 同形——只有声明 `supports_images` 的后端才收到文件列表，其余收到 `None`（记 `pool_images_skipped` INFO，不是告警：宿主提示词里仍有图片路径一行作为兜底；回合以一条 `images_not_sent` status_update 开头，让宿主能如实告诉用户这张图没有直接交给 agent）；直接调用 `CliRuntime` 传入它不接收的图片会记 `cli_runtime_images_ignored` WARNING；`AcpRuntime` 面对没有声明图片提示能力的 agent，只发文本块并记 `acp_runtime_images_skipped` INFO，回合以同一条 `images_not_sent` status_update 开头
 
@@ -271,7 +292,6 @@ acp/
 ├── _ARCH.md                # 模块索引
 ├── core/                   # 共享基础设施
 │   ├── __init__.py
-│   ├── event_bus.py        # EventBus
 │   ├── probe.py            # run_probe：向 CLI 提一个短问题（--version、auth status），精确环境、输出与时间有界，超时杀整棵进程树
 │   └── backend_detector.py # CLI 探测（detect + detect_with_auth 安装+登录态一次性视图；版本与登录态并发询问）
 ├── auth/                   # 订阅鉴权子系统（业务无关机制）
@@ -292,16 +312,19 @@ acp/
 │   ├── _base.py            # BaseRuntime、build_safe_env、两个运行时共用的静默心跳（KEEPALIVE_SECONDS / working_status）
 │   ├── image_blocks.py     # 回合图片文件 → base64 块（ImageBlock）：按文件头判定格式，读不了或不是图片的略去并记 WARNING；CliRuntime 与 AcpRuntime 共用
 │   ├── pool.py             # RuntimePool
+│   ├── turn_permissions.py # TurnPermissions：回合内的权限请求守卫（broker 出错按拒绝、等人时暂停时间上限、回合结束撤销等待）
 │   ├── acp/                # ACP 后端子包
 │   │   ├── __init__.py
 │   │   ├── runtime.py      # AcpRuntime：ACP 子进程 + JSON-RPC（静默心跳；ACP SDK 缺失 → BACKEND_NOT_FOUND）
-│   │   ├── callback.py     # ACP 回调处理器
+│   │   ├── callback.py     # ACP 回调处理器（会话更新、工作区内按字节读写的文件回调；权限请求交给 permission_policy）
+│   │   ├── permission_policy.py # AcpPermissionPolicy：`safe` 下放行读类动作、其余交给 broker，记住人同意过的文件
 │   │   └── stalled_agent.py # 对不再读 stdin 的 agent 有界停止：5 s 后结束 agent 及它启动的全部进程
 │   └── cli/                # CLI 后端子包
 │       ├── __init__.py
 │       ├── dialect.py      # 各 CLI 的命令行差异（续接语法、原生轮次上限、增量文本、图片传递、默认环境变量 env_defaults）与会话 id 形态校验
 │       ├── failure.py      # 失败分类：用 CLI 自己的话（result 行 / turn.failed / 退出码）给出错误码
 │       ├── parser.py       # 各输出格式共享的事件构造（工具调用/结果、usage、turn.failed、thinking、Codex item.*）与失败文本整理 condense_failure_text
+│       ├── permission_bridge.py # PermissionBridge：Claude 权限询问的本机回环 MCP 端点（每回合一个，随机 token）
 │       ├── process.py      # CLI 进程：逐行 stdout（静默满一个周期产出 None 供心跳）、有界 stderr 尾部、唯一的停止入口（SIGTERM → SIGKILL）；程序不存在抛 CliLaunchError
 │       ├── runtime.py      # CliRuntime：启动、续接、失效重试、会话 id 落盘、静默心跳、401 快速失败、回合收尾
 │       ├── session.py      # CLI 会话记录簿 CliSessionBook（内存优先 + 写穿到宿主 CliSessionStore）
@@ -320,11 +343,10 @@ acp/
 | 能力 | 实现 |
 |------|------|
 | 可插拔后端 | `RuntimeBackend` Protocol：ACP 与 CLI 两种实现，带 `cancel()` / `resume()` / `get_info()`（§3.1） |
-| 权限管理 | 4 种模式：`safe` / `ask` / `allow_all` / `bypass`（§3.5） |
-| 事件流 | EventBus + session 过滤（§3.4） |
+| 权限管理 | 2 种模式：`safe`（能问的 Agent 逐条问人，不能问的只读）/ `allow_all`（§3.5），宿主经 `PermissionBroker` 回答（§3.4） |
 | 会话 | `persistent` / `oneshot` 两种会话模式；CLI 的 `--resume` id 可经 `CliSessionStore` 跨宿主进程重启保留（§3.7） |
 | 后端检测 | 路径检测 + 可选版本检测，进程级缓存（§3.6） |
-| 事件类型 | 9 种（含 `status_update`）（§3.2） |
+| 事件类型 | 8 种（含 `status_update`）（§3.2） |
 | 错误处理 | 结构化错误码 + `retryable`（§3.3） |
 | 安全模型 | 环境清理、白名单、工作目录内 FS 回调 |
 | MCP 集成 | Session MCP 注入，受 `supports_mcp` 能力守卫约束（§3.7） |
@@ -344,15 +366,17 @@ acp/
 | runtime/acp/runtime.py | 实现 | ACP 协议后端 |
 | runtime/cli/runtime.py | 实现 | CLI spawn 后端 |
 | runtime/pool.py | 管理器 | 单实例内多后端管理 |
-| core/event_bus.py | 事件系统 | 类似生命周期钩子，业务层订阅 |
+| runtime/turn_permissions.py | 守卫 | 回合内的权限请求：broker 出错按拒绝、等人时暂停时间上限、回合结束撤销等待 |
+| runtime/acp/permission_policy.py | 实现 | ACP 后端 `safe` 的裁决：读类放行、其余交给 broker |
+| runtime/cli/permission_bridge.py | 实现 | Claude CLI 的权限询问端点 |
 | core/backend_detector.py | 工具 | 后端自动检测 |
 
 ### 业务层自定义（通过 Protocol 注入）
 
 | 能力 | 框架提供的扩展点 | 业务层实现示例 |
 |------|----------------|-------------|
-| 权限交互 UI | EventBus + permission_request 事件 | 订阅事件 → 展示 UI → `future.set_result()`（尚未接入：未注入 EventBus 时 ask 模式降级为只读） |
-| 监控集成 | EventBus 事件 | 推送到 Prometheus / DataDog |
+| 权限交互 UI | `PermissionBroker` Protocol（`run_turn(permissions=…)`） | `decide(request)` 里把请求展示给人，返回 `PermissionVerdict`（myrm-agent-server 的 `ChatPermissionBroker`：每条请求是该聊天里的一条 `external_agent_permission` 审批） |
+| 监控集成 | `run_turn` 的事件流 | 逐事件消费并推送到 Prometheus / DataDog |
 | 自定义后端 | RuntimeBackend Protocol | HTTP API Agent / 自研 Agent |
 
 ### 业务层接入（myrm-agent-server）
@@ -366,7 +390,7 @@ acp/
 **增强功能**：
 - **本地模式自动发现**：本地部署时自动探测 claude/codex/gemini CLI
 - **配置校验**：无效配置跳过并记录日志，不阻断 Agent 启动
-- **权限配置**：每个外部 Agent 可独立配置 `permissionMode`
+- **权限配置**：每个外部 Agent 可独立配置 `permissionMode`（`safe` 或 `allow_all`）；`safe` 下 Agent 的每次改动都是该聊天里的一条 `external_agent_permission` 审批（WebUI 抽屉、IM 卡片与 REST、批量、过期清理走同一个汇合点），600 秒无人答复按拒绝，回合结束或服务重启时遗留的请求被撤回
 - **多渠道支持**：Web Chat 和 Channel 路径均支持外部 Agent
 - **容错处理**：外部 Agent 配置失败不影响主 Agent 功能
 - **前端名称唯一性校验**：保存时检测重复 Agent 名称，防止配置冲突
@@ -428,7 +452,7 @@ acp/
 2. **抽象层次稳定**：`RuntimeBackend` 统一 ACP 与 CLI 两种接入方式，扩展成本低
 3. **生命周期完整**：run_turn + cancel + resume + close + get_info
 4. **结构化错误**：错误码 + retryable + 详情字段
-5. **事件模型克制**：9 种事件类型覆盖委托与观测需求
+5. **事件模型克制**：8 种事件类型覆盖委托与观测需求
 6. **安全默认**：环境清理、白名单、工作目录内 FS 回调
 7. **边界清晰**：明确非目标列表，避免范围蔓延
 8. **Server 层职责单一**：桥接与翻译与 Runtime 正交
@@ -442,6 +466,7 @@ acp/
 16. **MCP 注入能力守卫**：`supports_mcp` 在 `RuntimePool` 层统一校验，避免向不支持的 ACP 后端注入 MCP 导致 session 崩溃；直接调用 `CliRuntime` 与 ACP Server 侧 host MCP 均显式告警，防御路径零静默降级
 
 **已知局限**：
-- 外部 CLI 的权限语义受其自身命令行契约限制，无法表达交互式逐次询问
+- 能不能逐条询问取决于 Agent 自己：Claude Code（`--permission-prompt-tool`）与 ACP Agent（`session/request_permission`）能问；Codex、Gemini、Qwen 的命令行不能问，`safe` 对它们只意味着只读，要逐条询问需要换用协议驱动
+- ACP 的拒绝没有携带理由的位置，人写的拒绝理由只有 Claude Code 收得到
 - 宿主进程自身被强杀时，已启动的外部 CLI 进程不在清理保证内
 - 会话续接与原生轮次上限只覆盖 Claude / Codex；其他 CLI 按配置原样启动

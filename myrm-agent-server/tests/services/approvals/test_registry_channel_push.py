@@ -51,6 +51,7 @@ def wires(session_factory: async_sessionmaker[AsyncSession]) -> Iterator[_Wires]
     wires = _Wires(gateway=AsyncMock(), bus=MagicMock(), locale=AsyncMock(return_value="en"))
     with (
         patch("app.services.approvals.registry.get_session", get_session),
+        patch("app.services.approvals.chat_peer_card.get_session", get_session),
         patch("app.services.approvals.registry.get_event_bus", return_value=wires.bus),
         patch("app.core.channel_bridge.get_channel_gateway", return_value=wires.gateway),
         patch("app.core.channel_bridge.locale_provider.resolve_user_locale", wires.locale),

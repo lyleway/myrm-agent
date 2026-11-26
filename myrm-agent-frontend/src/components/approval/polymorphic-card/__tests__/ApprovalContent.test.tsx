@@ -14,6 +14,10 @@ vi.mock('../BatchCostApprovalContent', async () => (await import('./approvalStub
 vi.mock('../HighRiskDomActionContent', async () => (await import('./approvalStubs')).highRiskModule);
 vi.mock('../McpElicitationContent', async () => (await import('./approvalStubs')).mcpElicitationModule);
 vi.mock(
+  '../ExternalAgentPermissionContent',
+  async () => (await import('./approvalStubs')).externalAgentPermissionModule,
+);
+vi.mock(
   '@/components/approval/OutboundDraftApprovalBody',
   async () => (await import('./approvalStubs')).outboundDraftModule,
 );
@@ -30,6 +34,7 @@ describe('ApprovalContent', () => {
     ['batch_cost_approval', 'BatchCostApprovalContent'],
     ['high_risk_dom_action', 'HighRiskDomActionContent'],
     ['mcp_elicitation', 'McpElicitationContent'],
+    ['external_agent_permission', 'ExternalAgentPermissionContent'],
   ])('lays out a %s approval with %s, handing it the whole approval', (actionType, stub) => {
     const approval = makeApproval(actionType, { content: 'c' });
 

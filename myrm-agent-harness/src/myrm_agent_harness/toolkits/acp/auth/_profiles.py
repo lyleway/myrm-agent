@@ -186,12 +186,12 @@ def cli_launch_args(backend_or_command: str) -> list[str]:
 #
 # Every value below is taken from the CLI's own documentation:
 # - claude: `--permission-mode` accepts default / acceptEdits / plan / auto / dontAsk /
-#   bypassPermissions. `acceptEdits` is the non-interactive step that approves edit-class
-#   operations, so it is the closest CLI-side match for "approve each step".
+#   bypassPermissions. `default` is the mode that asks before anything beyond a read; a
+#   headless run has nobody to ask, so it either hands the question to the host through
+#   `--permission-prompt-tool` (see ``CliDialect.with_permission_bridge``) or refuses.
 # - codex: the `exec` entry point already hardcodes approval-policy `never` (headless
 #   never prompts) and does not accept `--ask-for-approval`, so `-s/--sandbox` is the
-#   only lever. `--dangerously-bypass-approvals-and-sandbox` is the sandbox escape hatch
-#   (it implies full access) and therefore replaces the selector instead of joining it.
+#   only lever, and `safe` can only mean read-only.
 # - gemini: `--approval-mode` validates the value with yargs against default / auto_edit /
 #   yolo / plan, where plan is read-only.
 # - qwen: forked from gemini but validates plan / default / auto-edit / yolo, so the edit
@@ -199,27 +199,19 @@ def cli_launch_args(backend_or_command: str) -> list[str]:
 _PERMISSION_MODE_ARGS: dict[str, dict[str, tuple[str, ...]]] = {
     "claude": {
         "safe": ("--permission-mode", "default"),
-        "ask": ("--permission-mode", "acceptEdits"),
         "allow_all": ("--permission-mode", "bypassPermissions"),
-        "bypass": ("--permission-mode", "bypassPermissions"),
     },
     "codex": {
         "safe": ("--sandbox", "read-only"),
-        "ask": ("--sandbox", "workspace-write"),
         "allow_all": ("--sandbox", "workspace-write"),
-        "bypass": ("--dangerously-bypass-approvals-and-sandbox",),
     },
     "gemini": {
         "safe": ("--approval-mode", "plan"),
-        "ask": ("--approval-mode", "auto_edit"),
         "allow_all": ("--approval-mode", "yolo"),
-        "bypass": ("--approval-mode", "yolo"),
     },
     "qwen": {
         "safe": ("--approval-mode", "plan"),
-        "ask": ("--approval-mode", "auto-edit"),
         "allow_all": ("--approval-mode", "yolo"),
-        "bypass": ("--approval-mode", "yolo"),
     },
 }
 
@@ -232,9 +224,10 @@ _PERMISSION_MODE_ARGS: dict[str, dict[str, tuple[str, ...]]] = {
 # mapping owns.
 _PERMISSION_FLAGS_BY_BACKEND: dict[str, tuple[frozenset[str], frozenset[str], tuple[str, ...]]] = {
     "claude": (
-        frozenset({"--permission-mode", "--dangerously-skip-permissions", "--full-auto"}),
-        frozenset({"--permission-mode"}),
-        ("--permission-mode=",),
+        # ``--permission-prompt-tool`` is how a headless turn asks the host (``CliDialect.with_permission_bridge``).
+        frozenset({"--permission-mode", "--dangerously-skip-permissions", "--full-auto", "--permission-prompt-tool"}),
+        frozenset({"--permission-mode", "--permission-prompt-tool"}),
+        ("--permission-mode=", "--permission-prompt-tool="),
     ),
     "codex": (
         # Only flags this mapping replaces belong here. Hook trust is a separate concern
@@ -327,8 +320,13 @@ def resolve_cli_args(
     # otherwise, so a half-added backend can never reach the merge below undefined.
     _permission_backends()
 
-    merged: list[str] = []
-    merged.extend(_PERMISSION_MODE_ARGS[profile.backend].get(permission_mode, ()))
+    mode_args = _PERMISSION_MODE_ARGS[profile.backend].get(permission_mode)
+    if mode_args is None:
+        # A mode the table does not know would start the CLI under its own permission defaults, which is never what
+        # the caller asked for; refusing to launch is the only fail-closed answer.
+        msg = f"Unknown permission mode {permission_mode!r}; expected one of {sorted(_PERMISSION_MODE_ARGS[profile.backend])}"
+        raise ValueError(msg)
+    merged: list[str] = list(mode_args)
     merged.extend(profile.cli_launch_args)
     owned = _strip_permission_flags(profile.backend, configured_args)
     merged.extend(_without_restated(owned, profile.cli_launch_args))

@@ -273,6 +273,7 @@ class _FailingPool:
         mode: str = "persistent",
         mcp_servers: object = None,
         images: list[str] | None = None,
+        permissions: object = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         yield create_event(RuntimeEventType.ERROR, session_id, error=self._error)
 

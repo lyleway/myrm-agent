@@ -12,8 +12,7 @@ resident ACP processes of an idle pool while CLI backends keep their resume stat
 
 
 [INPUT]
-- myrm_agent_harness.toolkits.acp.core.event_bus::EventBus (POS: ACP event bus layer)
-- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
+- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime (POS: runtime backend implementations)
 
 [OUTPUT]
@@ -32,10 +31,10 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from uuid import uuid4
 
-from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus
 from myrm_agent_harness.toolkits.acp.types import (
     CliSessionStore,
     McpServerConfig,
+    PermissionBroker,
     RuntimeBackend,
     RuntimeConfig,
     RuntimeEvent,
@@ -56,14 +55,13 @@ def _create_runtime(
     config: RuntimeConfig,
     *,
     workspace: str,
-    event_bus: EventBus | None = None,
     cli_session_store: CliSessionStore | None = None,
 ) -> RuntimeBackend:
     """Factory: create the appropriate RuntimeBackend based on config.backend_type."""
     if config.backend_type == "acp":
         from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 
-        return AcpRuntime(name, config, workspace=workspace, event_bus=event_bus)
+        return AcpRuntime(name, config, workspace=workspace)
 
     if config.backend_type == "cli":
         from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
@@ -96,7 +94,6 @@ class RuntimePool:
         self,
         *,
         max_concurrent: int = 4,
-        event_bus: EventBus | None = None,
         cli_session_store: CliSessionStore | None = None,
     ) -> None:
         self._configs: dict[str, RuntimeConfig] = {}
@@ -106,7 +103,6 @@ class RuntimePool:
         self._running: dict[tuple[str, str], RuntimeBackend] = {}
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._backend_locks: dict[BackendKey, asyncio.Lock] = {}
-        self._event_bus = event_bus
         self._cli_session_store = cli_session_store
 
     @property
@@ -138,9 +134,7 @@ class RuntimePool:
             available = ", ".join(self._configs) or "(none)"
             msg = f"Unknown backend '{name}'. Available: {available}"
             raise KeyError(msg)
-        return _create_runtime(
-            name, config, workspace=workspace, event_bus=self._event_bus, cli_session_store=cli_session_store
-        )
+        return _create_runtime(name, config, workspace=workspace, cli_session_store=cli_session_store)
 
     def get(self, name: str, workspace: str) -> RuntimeBackend:
         """Get or lazily create the shared (persistent) RuntimeBackend of ``name`` in ``workspace``.
@@ -187,6 +181,7 @@ class RuntimePool:
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Stream events from a backend turn with concurrency control.
 
@@ -201,6 +196,9 @@ class RuntimePool:
         ``images`` are local image files for this turn; only a backend that declares ``supports_images`` gets them.
         For the others the turn opens with an ``images_not_sent`` status update, and a host keeps the file path in its
         prompt as the fallback.
+
+        ``permissions`` is who is asked when a ``safe`` agent wants to do more than read, for a backend that declares
+        ``supports_permission_requests``; without it, or on a backend without it, the agent may only read.
         """
         if mode not in {"persistent", "oneshot"}:
             msg = f"Invalid mode: {mode}"
@@ -243,16 +241,17 @@ class RuntimePool:
                 self._running[(name, session_id)] = backend
                 try:
                     async with aclosing(
-                        backend.run_turn(prompt, session_id, mcp_servers=effective_mcp or None, images=images or None)
+                        backend.run_turn(
+                            prompt,
+                            session_id,
+                            mcp_servers=effective_mcp or None,
+                            images=images or None,
+                            permissions=permissions,
+                        )
                     ) as events:
                         if images_withheld:
-                            notice = images_not_sent_event(session_id, images_withheld)
-                            if self._event_bus is not None:
-                                await self._event_bus.emit(notice)
-                            yield notice
+                            yield images_not_sent_event(session_id, images_withheld)
                         async for event in events:
-                            if self._event_bus is not None:
-                                await self._event_bus.emit(event)
                             yield event
                 finally:
                     if self._running.get((name, session_id)) is backend:

@@ -4,7 +4,8 @@
  *
  * [OUTPUT]
  * - DEFAULT_AGENT, AGENT_PRESETS: the blank entry and the one-click presets of the add form
- * - PERMISSION_MODE_OPTIONS, PERMISSION_MODE_HINTS, normalizePermissionMode: the modes each backend type can honour
+ * - PERMISSION_MODE_OPTIONS, permissionHintKey, normalizePermissionMode: the permission modes on offer and what each
+ *   means for the agent being edited
  * - backendKeyFromCommand: command → known login backend
  * - ExternalAgentDraft, EnvRow, toDraft, newEnvRow, envRowProblems, effectiveAuthMode, cleanAgent: the editable
  *   form of an agent and the rules for turning it back into what is stored
@@ -75,37 +76,37 @@ export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
   },
 ];
 
+/** The permission modes every agent offers. */
+export const PERMISSION_MODE_OPTIONS: { value: ExternalAgentPermissionMode; labelKey: string }[] = [
+  { value: 'allow_all', labelKey: 'permissionAllowAll' },
+  { value: 'safe', labelKey: 'permissionSafe' },
+];
+
+/** CLI backends whose own permission flags can be set per mode, and whether they can ask the user (the others only read). */
+const CLI_BACKENDS_THAT_ASK = new Set(['claude']);
+const CLI_BACKENDS_THAT_ONLY_READ = new Set(['codex', 'gemini', 'qwen']);
+
 /**
- * Permission modes each backend can actually honour. CLI backends receive fixed
- * command-line flags, while ACP backends get their permission requests answered by the
- * bridge on the user's behalf. Neither exposes an interactive prompt today, so no
- * backend may advertise one.
+ * The hint under the permission select: what `safe` means for this agent. An agent that can ask is asked; a command-line
+ * agent that cannot ask only reads; a command we do not know has no flags to set, so it keeps its own behaviour.
  */
-export const PERMISSION_MODE_OPTIONS: Record<
-  ExternalAgentType,
-  { value: ExternalAgentPermissionMode; labelKey: string }[]
-> = {
-  cli: [
-    { value: 'allow_all', labelKey: 'permissionAllowAll' },
-    { value: 'safe', labelKey: 'permissionSafe' },
-  ],
-  acp: [
-    { value: 'allow_all', labelKey: 'permissionAllowAll' },
-    { value: 'safe', labelKey: 'permissionSafe' },
-  ],
-};
+export function permissionHintKey(type: ExternalAgentType, command: string): string {
+  if (type === 'acp') {
+    return 'permissionHintAsk';
+  }
+  const backend = backendKeyFromCommand(command);
+  if (backend !== null && CLI_BACKENDS_THAT_ASK.has(backend)) {
+    return 'permissionHintAsk';
+  }
+  if (backend !== null && CLI_BACKENDS_THAT_ONLY_READ.has(backend)) {
+    return 'permissionHintReadOnly';
+  }
+  return 'permissionHintUnrestricted';
+}
 
-export const PERMISSION_MODE_HINTS: Record<ExternalAgentType, string> = {
-  cli: 'permissionHintCli',
-  acp: 'permissionHintAcp',
-};
-
-/** Coerce a stored mode to one the given backend type can honour (fallback: fail-closed). */
-export function normalizePermissionMode(
-  type: ExternalAgentType,
-  mode: ExternalAgentPermissionMode,
-): ExternalAgentPermissionMode {
-  return PERMISSION_MODE_OPTIONS[type].some((option) => option.value === mode) ? mode : 'safe';
+/** Coerce a stored mode to one on offer; a name of an older vocabulary falls back to `safe` (fail-closed). */
+export function normalizePermissionMode(mode: string): ExternalAgentPermissionMode {
+  return mode === 'allow_all' ? 'allow_all' : 'safe';
 }
 
 /** One line of the environment editor. Blank and unfinished lines exist only while the form is open. */
@@ -180,7 +181,7 @@ export function cleanAgent(draft: ExternalAgentDraft, subscriptionLoginAllowed =
     name: draft.name.trim(),
     command: draft.command.trim(),
     args: (draft.args ?? []).filter((a) => a.trim() !== ''),
-    permissionMode: normalizePermissionMode(draft.type, draft.permissionMode),
+    permissionMode: normalizePermissionMode(draft.permissionMode),
   };
   if (!subscriptionLoginAllowed) {
     cleaned.authMode = 'api_key';
