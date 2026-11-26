@@ -12,13 +12,40 @@ import pytest
 from tests.support.chrome_mcp_e2e import (
     dismiss_blocking_modals,
     get_e2e_api_url,
-    get_e2e_ui_url,
-    http_json,
     open_settings_subroute,
     prepare_e2e_ui_session,
-    reload_mcp_page,
     wait_for_state,
     warm_ui_route,
+)
+from tests.support.chrome_mcp_editor_e2e import (
+    ADD_EDITOR_READY_JS,
+    CLICK_ADD_SERVICE_BUTTON_JS,
+    CLICK_SAVE_CONFIG_JS,
+    CLICK_STDIO_OPTION_JS,
+    OPEN_CONNECTION_TYPE_JS,
+    STDIO_FIELDS_READY_JS,
+    confirm_reload_dialog_after_save,
+    fill_input_by_label_js,
+)
+from tests.support.chrome_mcp_settings_e2e import (
+    CLICK_DIALOG_CANCEL_JS,
+    CLICK_IMPORT_JSON_BUTTON_JS,
+    CLICK_IMPORT_SUBMIT_JS,
+    MCP_IMPORT_MODAL_READY_JS,
+    MCP_PAGE_READY_JS,
+    RELOAD_DIALOG_CLOSED_JS,
+    RELOAD_DIALOG_STATE_JS,
+    confirm_reload_dialog,
+    mcp_page_state_js,
+    put_mcp_configs,
+    reload_mcp_settings_page,
+    seed_empty_mcp_configs,
+    server_config_in_api,
+    server_exists_in_api,
+    set_import_textarea_js,
+    wait_for_server_absent,
+    wait_for_server_present,
+    wait_until,
 )
 
 _PROBE_SERVER_NAME = "e2e-reload-probe"
@@ -26,33 +53,8 @@ _IMPORT_SERVER_NAME = "e2e-import-probe"
 _ADD_SERVER_NAME = "e2e-add-probe"
 _E2E_STDIO_MCP_STUB = Path(__file__).resolve().parents[1] / "support" / "e2e_minimal_stdio_mcp_server.py"
 
-
-def _mcp_page_state_js(required_text: str | None = None) -> str:
-    """Probe the MCP settings section; failure payload says *why* it is not ready.
-
-    ``deferredBusy`` mirrors ``SettingsLayout``'s ``aria-busy`` (deferred locale bundle still
-    loading) and ``mainSample`` is the ``<main>`` text, so a stuck skeleton, a degraded locale
-    and a missing server row are distinguishable instead of all showing only the sidebar.
-    """
-    has_required = f"text.includes({json.dumps(required_text)})" if required_text else "true"
-    return f"""(() => {{
-  const text = document.body?.innerText || '';
-  const hasHeading = /MCP 服务配置|MCP Service/i.test(text);
-  const hasRequired = {has_required};
-  const layout = document.querySelector('[data-testid="settings-layout"]');
-  return {{
-    ready: hasHeading && hasRequired,
-    hasHeading,
-    hasRequired,
-    deferredBusy: layout?.getAttribute('aria-busy') === 'true',
-    mainSample: (document.querySelector('main')?.innerText || '').slice(0, 300),
-  }};
-}})()"""
-
-
-_MCP_PAGE_READY_JS = _mcp_page_state_js()
-_MCP_PAGE_HAS_PROBE_JS = _mcp_page_state_js(_PROBE_SERVER_NAME)
-_MCP_PAGE_HAS_ADD_PROBE_JS = _mcp_page_state_js(_ADD_SERVER_NAME)
+_MCP_PAGE_HAS_PROBE_JS = mcp_page_state_js(_PROBE_SERVER_NAME)
+_MCP_PAGE_HAS_ADD_PROBE_JS = mcp_page_state_js(_ADD_SERVER_NAME)
 
 _TOGGLE_PROBE_SWITCH_JS = """(() => {
   const nameNode = Array.from(document.querySelectorAll('p')).find((p) =>
@@ -81,49 +83,6 @@ _CLICK_PROBE_DELETE_JS = """(() => {
   return { ok: true };
 })()"""
 
-_RELOAD_DIALOG_STATE_JS = """(() => {
-  const alert = Array.from(document.querySelectorAll('[role="alertdialog"]')).find((node) => {
-    const text = node.textContent || '';
-    return /重新加载 MCP 工具|Reload MCP tools/i.test(text);
-  });
-  if (!alert) {
-    return {
-      ready: false,
-      titleMatch: false,
-      descMatch: false,
-      hasCancel: false,
-      hasConfirm: false,
-      buttons: [],
-    };
-  }
-  const text = alert.textContent || '';
-  const titleMatch = /重新加载 MCP 工具|Reload MCP tools/i.test(text);
-  const descMatch = /提示词缓存|prompt-cache|Prompt-Cache/i.test(text);
-  const buttons = Array.from(alert.querySelectorAll('button')).map((b) =>
-    (b.textContent || '').trim()
-  );
-  const hasCancel = buttons.some((b) => /^(取消|Cancel)$/i.test(b));
-  const hasConfirm = buttons.some((b) =>
-    /^(保存并应用|Save and apply)$/i.test(b)
-  );
-  return {
-    ready: titleMatch && descMatch && hasCancel && hasConfirm,
-    titleMatch,
-    descMatch,
-    hasCancel,
-    hasConfirm,
-    buttons,
-  };
-})()"""
-
-_RELOAD_DIALOG_CLOSED_JS = """(() => {
-  const alert = Array.from(document.querySelectorAll('[role="alertdialog"]')).find((node) => {
-    const text = node.textContent || '';
-    return /重新加载 MCP 工具|Reload MCP tools/i.test(text);
-  });
-  return { ready: !alert };
-})()"""
-
 _DELETE_DIALOG_STATE_JS = """(() => {
   const text = document.body?.innerText || '';
   const titleMatch = /Confirm Delete|确认删除/i.test(text);
@@ -131,34 +90,6 @@ _DELETE_DIALOG_STATE_JS = """(() => {
   const hasCancel = buttons.some((b) => /^(取消|Cancel)$/i.test(b));
   const hasConfirm = buttons.some((b) => /^(Confirm Delete|确认删除)$/i.test(b));
   return { ready: titleMatch && hasCancel && hasConfirm, titleMatch, hasCancel, hasConfirm };
-})()"""
-
-_CLICK_DIALOG_CANCEL_JS = """(() => {
-  const alert = Array.from(document.querySelectorAll('[role="alertdialog"]')).find((node) => {
-    const text = node.textContent || '';
-    return /重新加载 MCP 工具|Reload MCP tools/i.test(text);
-  });
-  const scope = alert || document;
-  const btn = Array.from(scope.querySelectorAll('button')).find((b) =>
-    /^(取消|Cancel)$/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'cancel-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_CLICK_DIALOG_CONFIRM_JS = """(() => {
-  const alert = Array.from(document.querySelectorAll('[role="alertdialog"]')).find((node) => {
-    const text = node.textContent || '';
-    return /重新加载 MCP 工具|Reload MCP tools/i.test(text);
-  });
-  const scope = alert || document;
-  const btn = Array.from(scope.querySelectorAll('button')).find((b) =>
-    /^(保存并应用|Save and apply)$/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'confirm-not-found' };
-  btn.click();
-  return { ok: true };
 })()"""
 
 _CLICK_DELETE_CONFIRM_JS = """(() => {
@@ -170,314 +101,9 @@ _CLICK_DELETE_CONFIRM_JS = """(() => {
   return { ok: true };
 })()"""
 
-_MCP_IMPORT_MODAL_READY_JS = """(() => {
-  const heading = Array.from(document.querySelectorAll('h3')).find((h) =>
-    /Import MCP Configuration|导入 MCP 配置/i.test(
-      (h.textContent || '').trim()
-    )
-  );
-  const modal = heading?.closest('.fixed.inset-0');
-  const textarea = modal?.querySelector('textarea');
-  return { ready: !!textarea, err: textarea ? null : 'import-textarea-not-found' };
-})()"""
-
-_CLICK_IMPORT_JSON_BUTTON_JS = """(() => {
-  const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-    /Import JSON|导入 JSON/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'import-button-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_MCP_ADD_EDITOR_READY_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  const heading = Array.from(modal?.querySelectorAll('h3') || []).find((h) =>
-    /Add Service|添加服务/i.test(
-      (h.textContent || '').trim()
-    )
-  );
-  const nameField = modal?.querySelector('input');
-  return { ready: !!heading && !!nameField };
-})()"""
-
-_CLICK_ADD_SERVICE_BUTTON_JS = """(() => {
-  const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-    /Add Service|添加服务/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'add-button-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_OPEN_CONNECTION_TYPE_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  if (!modal) return { ok: false, err: 'add-modal-not-found' };
-  const typeLabel = Array.from(modal.querySelectorAll('label, p.text-sm')).find((node) =>
-    /Connection Type|连接类型/i.test(
-      (node.textContent || '').replace(/\\s+/g, ' ').trim()
-    )
-  );
-  const trigger = typeLabel?.closest('.flex.flex-col')?.querySelector('button[type="button"]') || null;
-  if (!trigger) return { ok: false, err: 'connection-type-trigger-not-found' };
-  const findStdio = () =>
-    Array.from(modal.querySelectorAll('button[type="button"]')).find((b) => {
-      if (b === trigger) return false;
-      return Array.from(b.querySelectorAll('span')).some(
-        (s) => (s.textContent || '').trim().toUpperCase() === 'STDIO'
-      );
-    }) || null;
-  if (findStdio()) {
-    return { ok: true, alreadyOpen: true };
-  }
-  trigger.click();
-  return { ok: true, alreadyOpen: false };
-})()"""
-
-_CLICK_STDIO_OPTION_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  if (!modal) return { ok: false, err: 'add-modal-not-found' };
-  const typeLabel = Array.from(modal.querySelectorAll('label, p.text-sm')).find((node) =>
-    /Connection Type|连接类型/i.test(
-      (node.textContent || '').replace(/\\s+/g, ' ').trim()
-    )
-  );
-  const trigger = typeLabel?.closest('.flex.flex-col')?.querySelector('button[type="button"]') || null;
-  const stdioOption = Array.from(modal.querySelectorAll('button[type="button"]')).find((b) => {
-    if (b === trigger) return false;
-    return Array.from(b.querySelectorAll('span')).some(
-      (s) => (s.textContent || '').trim().toUpperCase() === 'STDIO'
-    );
-  });
-  if (!stdioOption) return { ok: false, err: 'stdio-option-not-found' };
-  stdioOption.click();
-  return { ok: true };
-})()"""
-
-_MCP_STDIO_FIELDS_READY_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  const commandLabel = Array.from(modal?.querySelectorAll('label, p.text-sm') || []).find((node) =>
-    /Command|命令/i.test((node.textContent || '').replace(/\\s+/g, ' ').trim())
-  );
-  return { ready: !!commandLabel };
-})()"""
-
-
-def _set_import_textarea_js(value: str) -> str:
-    escaped = json.dumps(value)
-    return f"""(() => {{
-  const heading = Array.from(document.querySelectorAll('h3')).find((h) =>
-    /Import MCP Configuration|导入 MCP 配置/i.test(
-      (h.textContent || '').trim()
-    )
-  );
-  const modal = heading?.closest('.fixed.inset-0');
-  const el = modal?.querySelector('textarea');
-  if (!el) return {{ ok: false, err: 'import-textarea-not-found' }};
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
-  if (!setter) return {{ ok: false, err: 'setter-not-found' }};
-  setter.call(el, {escaped});
-  el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-  el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-  return {{ ok: true }};
-}})()"""
-
-
-def _fill_input_by_label_js(label_pattern: str, value: str) -> str:
-    escaped_value = json.dumps(value)
-    escaped_pattern = json.dumps(label_pattern)
-    return f"""(() => {{
-  const modal = document.querySelector('.fixed.inset-0');
-  if (!modal) return {{ ok: false, err: 'add-modal-not-found' }};
-  const pattern = new RegExp({escaped_pattern}, 'i');
-  const candidates = Array.from(modal.querySelectorAll('label, p.text-sm'));
-  const label = candidates.find((node) => {{
-    const text = (node.textContent || '').replace(/\\s+/g, ' ').trim();
-    return pattern.test(text);
-  }});
-  if (!label) return {{ ok: false, err: 'label-not-found' }};
-  const container = label.closest('.flex.flex-col') || label.parentElement;
-  const el = container?.querySelector('input, textarea');
-  if (!el) return {{ ok: false, err: 'input-not-found' }};
-  const proto = el instanceof HTMLTextAreaElement
-    ? window.HTMLTextAreaElement.prototype
-    : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-  if (!setter) return {{ ok: false, err: 'setter-not-found' }};
-  setter.call(el, {escaped_value});
-  el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-  el.dispatchEvent(new Event('change', {{ bubbles: true }}));
-  return {{ ok: true }};
-}})()"""
-
-
-_CLICK_IMPORT_SUBMIT_JS = """(() => {
-  const modal = Array.from(document.querySelectorAll('h3')).find((h) =>
-    /Import MCP Configuration|导入 MCP 配置/i.test(
-      (h.textContent || '').trim()
-    )
-  )?.closest('.fixed.inset-0');
-  const scope = modal || document;
-  const btn = Array.from(scope.querySelectorAll('button')).find((b) =>
-    /^(Import|导入)$/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'import-submit-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_CLICK_SAVE_CONFIG_JS = """(() => {
-  const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-    /Save Configuration|保存配置/i.test((b.textContent || '').trim())
-  );
-  if (!btn) return { ok: false, err: 'save-config-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_MCP_MODAL_VALIDATION_ERROR_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  if (!modal) return { ready: true, hasError: false };
-  const errBox = modal.querySelector('.text-red-600, .text-red-400');
-  if (!errBox) return { ready: true, hasError: false };
-  return {
-    ready: false,
-    hasError: true,
-    error: (errBox.textContent || '').trim().slice(0, 500),
-  };
-})()"""
-
-_ADD_MODAL_OPEN_JS = """(() => {
-  const modal = document.querySelector('.fixed.inset-0');
-  const heading = Array.from(modal?.querySelectorAll('h3') || []).find((h) =>
-    /Add Service|添加服务/i.test(
-      (h.textContent || '').trim()
-    )
-  );
-  return { ready: !!heading };
-})()"""
-
-_MCP_SAVE_VALIDATION_IDLE_JS = """(() => {
-  const allBtns = Array.from(document.querySelectorAll('button'));
-  const saveBtn = allBtns.find((b) =>
-    /Save Configuration|保存配置/i.test((b.textContent || '').trim())
-  );
-  const validatingBtn = allBtns.find((b) =>
-    /Validating|验证中/i.test((b.textContent || '').trim())
-  );
-  if (!saveBtn && validatingBtn) {
-    return { ready: false, validating: true, text: (validatingBtn.textContent || '').trim() };
-  }
-  if (!saveBtn) return { ready: true, phase: 'no-save-btn' };
-  const text = (saveBtn.textContent || '').trim();
-  const validating = saveBtn.disabled || /Validating|验证/i.test(text);
-  return { ready: !validating, validating, text };
-})()"""
-
-_CLICK_SCAN_ACK_CONFIRM_JS = """(() => {
-  const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-    /Acknowledge and continue|了解风险并继续/i.test(
-      (b.textContent || '').trim()
-    )
-  );
-  if (!btn) return { ok: false, err: 'scan-ack-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_CLICK_DESCRIPTION_CUSTOM_JS = """(() => {
-  const heading = Array.from(document.querySelectorAll('h3')).find((h) =>
-    /Choose Description|选择描述/i.test(
-      (h.textContent || '').trim()
-    )
-  );
-  if (!heading) return { ok: false, err: 'description-dialog-not-found' };
-  const root = heading.closest('.fixed.inset-0') || document.body;
-  const customLabel = Array.from(root.querySelectorAll('span')).find((s) =>
-    /Custom Description|自定义描述/i.test(
-      (s.textContent || '').trim()
-    )
-  );
-  const btn = customLabel?.closest('button');
-  if (!btn) return { ok: false, err: 'description-custom-not-found' };
-  btn.click();
-  return { ok: true };
-})()"""
-
-_LOCALHOST_PAGE_JS = """(() => {
-  const host = location.hostname;
-  return {
-    ready: host === '127.0.0.1' || host === 'localhost',
-    href: location.href,
-  };
-})()"""
-
-
-def _fetch_mcp_servers_record() -> dict[str, object]:
-    payload = http_json("GET", f"{get_e2e_api_url()}/api/v1/config/mcpServers")
-    assert isinstance(payload, dict)
-    return payload
-
-
-def _list_mcp_server_names() -> list[str]:
-    record = _fetch_mcp_servers_record()
-    value = record.get("value")
-    if not isinstance(value, dict):
-        return []
-    configs = value.get("mcpConfigs")
-    if not isinstance(configs, list):
-        return []
-    names: list[str] = []
-    for item in configs:
-        if isinstance(item, dict) and isinstance(item.get("name"), str):
-            names.append(item["name"])
-    return names
-
 
 def _probe_enabled_in_api() -> bool:
-    record = _fetch_mcp_servers_record()
-    value = record.get("value")
-    if not isinstance(value, dict):
-        return False
-    configs = value.get("mcpConfigs")
-    if not isinstance(configs, list):
-        return False
-    for item in configs:
-        if isinstance(item, dict) and item.get("name") == _PROBE_SERVER_NAME:
-            return item.get("enabled") is True
-    return False
-
-
-def _server_exists_in_api(name: str) -> bool:
-    return name in _list_mcp_server_names()
-
-
-def _server_config_in_api(name: str) -> dict[str, object] | None:
-    record = _fetch_mcp_servers_record()
-    value = record.get("value")
-    if not isinstance(value, dict):
-        return None
-    configs = value.get("mcpConfigs")
-    if not isinstance(configs, list):
-        return None
-    for item in configs:
-        if isinstance(item, dict) and item.get("name") == name:
-            return item
-    return None
-
-
-def _put_mcp_configs(configs: list[dict[str, object]]) -> None:
-    record = _fetch_mcp_servers_record()
-    version = str(record.get("version") or "0")
-    http_json(
-        "PUT",
-        f"{get_e2e_api_url()}/api/v1/config/mcpServers",
-        {
-            "deviceId": "web",
-            "expectedVersion": version,
-            "value": {"mcpConfigs": configs},
-        },
-    )
+    return (server_config_in_api(_PROBE_SERVER_NAME) or {}).get("enabled") is True
 
 
 def _seed_probe_mcp_server(*, enabled: bool = True) -> None:
@@ -491,129 +117,20 @@ def _seed_probe_mcp_server(*, enabled: bool = True) -> None:
         "headers": {},
         "extra_params": {},
     }
-    _put_mcp_configs([probe])
-    deadline = time.monotonic() + 20.0
-    while time.monotonic() < deadline:
-        if _server_exists_in_api(_PROBE_SERVER_NAME):
-            if not enabled or _probe_enabled_in_api():
-                return
-        time.sleep(0.4)
-    raise AssertionError("failed to seed MCP probe server")
-
-
-def _seed_empty_mcp_configs() -> None:
-    _put_mcp_configs([])
-    deadline = time.monotonic() + 20.0
-    while time.monotonic() < deadline:
-        if _list_mcp_server_names() == []:
-            return
-        time.sleep(0.4)
-    raise AssertionError("failed to seed empty MCP configs")
-
-
-def _wait_for_server_absent(name: str, timeout_sec: float = 20.0) -> None:
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        if not _server_exists_in_api(name):
-            return
-        time.sleep(0.4)
-    raise AssertionError(f"server {name!r} still present in API")
-
-
-def _wait_for_server_present(name: str, timeout_sec: float = 20.0) -> None:
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        if _server_exists_in_api(name):
-            return
-        time.sleep(0.4)
-    raise AssertionError(f"server {name!r} not present in API")
+    put_mcp_configs([probe])
+    wait_until(
+        lambda: server_exists_in_api(_PROBE_SERVER_NAME) and (not enabled or _probe_enabled_in_api()),
+        timeout_sec=20.0,
+        failure="failed to seed MCP probe server",
+    )
 
 
 def _wait_for_probe_disabled(timeout_sec: float = 45.0) -> None:
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        if not _probe_enabled_in_api():
-            return
-        time.sleep(0.4)
-    raise AssertionError("confirm must persist disabled MCP server")
-
-
-def _confirm_reload_dialog(client, page, *, timeout_sec: float = 45.0) -> None:
-    dialog = wait_for_state(client, page, _RELOAD_DIALOG_STATE_JS, timeout_sec=timeout_sec)
-    assert dialog.get("ready") is True, json.dumps(dialog, ensure_ascii=False)
-    confirmed = client.evaluate(page, _CLICK_DIALOG_CONFIRM_JS, timeout_sec=10.0)
-    assert isinstance(confirmed, dict) and confirmed.get("ok") is True, confirmed
-    wait_for_state(client, page, _RELOAD_DIALOG_CLOSED_JS, timeout_sec=30.0)
-
-
-def _confirm_reload_dialog_after_save(client, page, *, timeout_sec: float = 120.0) -> None:
-    """Wait for async MCP save validation, intermediate ack dialogs, then reload confirm."""
-    wait_for_state(client, page, _MCP_SAVE_VALIDATION_IDLE_JS, timeout_sec=90.0)
-    err = client.evaluate(page, _MCP_MODAL_VALIDATION_ERROR_JS, timeout_sec=10.0)
-    if isinstance(err, dict) and err.get("hasError") is True:
-        raise AssertionError(f"MCP add/save validation failed: {err.get('error')!r}")
-    deadline = time.monotonic() + timeout_sec
-    last: dict[str, object] = {}
-    save_retries = 0
-    while time.monotonic() < deadline:
-        remaining = max(0.0, deadline - time.monotonic())
-        handled_intermediate = False
-        for intermediate_js in (
-            _CLICK_SCAN_ACK_CONFIRM_JS,
-            _CLICK_DESCRIPTION_CUSTOM_JS,
-        ):
-            try:
-                result = client.evaluate(page, intermediate_js, timeout_sec=min(8.0, remaining))
-            except (RuntimeError, TimeoutError):
-                result = {"ok": False}
-            if isinstance(result, dict) and result.get("ok") is True:
-                handled_intermediate = True
-                time.sleep(0.6)
-                break
-        if handled_intermediate:
-            continue
-        try:
-            raw = client.evaluate(page, _RELOAD_DIALOG_STATE_JS, timeout_sec=min(10.0, remaining))
-        except (RuntimeError, TimeoutError):
-            raw = last
-        last = raw if isinstance(raw, dict) else {"value": raw}
-        if last.get("ready") is True:
-            _confirm_reload_dialog(client, page, timeout_sec=min(45.0, remaining))
-            return
-        try:
-            modal_open = client.evaluate(page, _ADD_MODAL_OPEN_JS, timeout_sec=min(8.0, remaining))
-        except (RuntimeError, TimeoutError):
-            modal_open = {"ready": False}
-        if save_retries < 2 and isinstance(modal_open, dict) and modal_open.get("ready") is True:
-            save_retries += 1
-            retried = client.evaluate(page, _CLICK_SAVE_CONFIG_JS, timeout_sec=10.0)
-            assert isinstance(retried, dict) and retried.get("ok") is True, retried
-            wait_for_state(client, page, _MCP_SAVE_VALIDATION_IDLE_JS, timeout_sec=min(60.0, remaining))
-            continue
-        time.sleep(0.4)
-    raise AssertionError(f"reload confirm dialog after save did not appear: {last}")
-
-
-_APP_LAYOUT_READY_JS = """(() => ({
-  ready: !!document.querySelector('[data-testid="app-layout"]'),
-}))()"""
-
-
-def _reload_mcp_page(client, page) -> None:
-    target_url = f"{get_e2e_ui_url().rstrip('/')}/settings/mcp"
-    last: dict[str, object] = {}
-    for attempt in range(3):
-        reload_mcp_page(client, page, target_url=target_url)
-        try:
-            wait_for_state(client, page, _APP_LAYOUT_READY_JS, timeout_sec=120.0)
-            dismiss_blocking_modals(client, page)
-            return
-        except AssertionError as exc:
-            if attempt >= 2:
-                raise
-            last = {"attempt": attempt + 1, "error": str(exc)}
-            time.sleep(2.0 * (attempt + 1))
-    raise AssertionError(f"MCP page reload did not recover: {last}")
+    wait_until(
+        lambda: not _probe_enabled_in_api(),
+        timeout_sec=timeout_sec,
+        failure="confirm must persist disabled MCP server",
+    )
 
 
 @pytest.mark.chrome_e2e(
@@ -643,7 +160,7 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         # --- Path 1: disable toggle cancel + confirm ---
         _seed_probe_mcp_server()
         assert _probe_enabled_in_api() is True
-        _reload_mcp_page(client, page)
+        reload_mcp_settings_page(client, page)
         dismiss_blocking_modals(client, page)
         ready = wait_for_state(client, page, _MCP_PAGE_HAS_PROBE_JS, timeout_sec=90.0)
         assert ready.get("ready") is True, json.dumps(ready, ensure_ascii=False)
@@ -651,23 +168,23 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
 
         toggled = client.evaluate(page, _TOGGLE_PROBE_SWITCH_JS, timeout_sec=15.0)
         assert isinstance(toggled, dict) and toggled.get("ok") is True, toggled
-        dialog = wait_for_state(client, page, _RELOAD_DIALOG_STATE_JS, timeout_sec=30.0)
+        dialog = wait_for_state(client, page, RELOAD_DIALOG_STATE_JS, timeout_sec=30.0)
         assert dialog.get("ready") is True, json.dumps(dialog, ensure_ascii=False)
-        cancelled = client.evaluate(page, _CLICK_DIALOG_CANCEL_JS, timeout_sec=10.0)
+        cancelled = client.evaluate(page, CLICK_DIALOG_CANCEL_JS, timeout_sec=10.0)
         assert isinstance(cancelled, dict) and cancelled.get("ok") is True, cancelled
-        wait_for_state(client, page, _RELOAD_DIALOG_CLOSED_JS, timeout_sec=15.0)
+        wait_for_state(client, page, RELOAD_DIALOG_CLOSED_JS, timeout_sec=15.0)
         assert _probe_enabled_in_api() is True, "cancel must not persist disable"
 
         ready_after_cancel = wait_for_state(client, page, _MCP_PAGE_HAS_PROBE_JS, timeout_sec=30.0)
         assert ready_after_cancel.get("ready") is True, json.dumps(ready_after_cancel, ensure_ascii=False)
         toggled_again = client.evaluate(page, _TOGGLE_PROBE_SWITCH_JS, timeout_sec=15.0)
         assert isinstance(toggled_again, dict) and toggled_again.get("ok") is True, toggled_again
-        _confirm_reload_dialog(client, page)
+        confirm_reload_dialog(client, page)
         _wait_for_probe_disabled(timeout_sec=45.0)
 
         # --- Path 2: delete ---
         _seed_probe_mcp_server()
-        _reload_mcp_page(client, page)
+        reload_mcp_settings_page(client, page)
         ready_delete = wait_for_state(client, page, _MCP_PAGE_HAS_PROBE_JS, timeout_sec=90.0)
         assert ready_delete.get("ready") is True, json.dumps(ready_delete, ensure_ascii=False)
 
@@ -677,39 +194,39 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         assert delete_dialog.get("ready") is True, json.dumps(delete_dialog, ensure_ascii=False)
         confirmed_delete = client.evaluate(page, _CLICK_DELETE_CONFIRM_JS, timeout_sec=10.0)
         assert isinstance(confirmed_delete, dict) and confirmed_delete.get("ok") is True, confirmed_delete
-        _confirm_reload_dialog(client, page)
-        _wait_for_server_absent(_PROBE_SERVER_NAME)
+        confirm_reload_dialog(client, page)
+        wait_for_server_absent(_PROBE_SERVER_NAME)
 
         # --- Path 3: import JSON ---
-        _seed_empty_mcp_configs()
-        _reload_mcp_page(client, page)
-        ready_import = wait_for_state(client, page, _MCP_PAGE_READY_JS, timeout_sec=90.0)
+        seed_empty_mcp_configs()
+        reload_mcp_settings_page(client, page)
+        ready_import = wait_for_state(client, page, MCP_PAGE_READY_JS, timeout_sec=90.0)
         assert ready_import.get("ready") is True, json.dumps(ready_import, ensure_ascii=False)
 
-        opened = client.evaluate(page, _CLICK_IMPORT_JSON_BUTTON_JS, timeout_sec=15.0)
+        opened = client.evaluate(page, CLICK_IMPORT_JSON_BUTTON_JS, timeout_sec=15.0)
         assert isinstance(opened, dict) and opened.get("ok") is True, opened
-        import_modal = wait_for_state(client, page, _MCP_IMPORT_MODAL_READY_JS, timeout_sec=30.0)
+        import_modal = wait_for_state(client, page, MCP_IMPORT_MODAL_READY_JS, timeout_sec=30.0)
         assert import_modal.get("ready") is True, json.dumps(import_modal, ensure_ascii=False)
-        filled = client.evaluate(page, _set_import_textarea_js(import_payload), timeout_sec=15.0)
+        filled = client.evaluate(page, set_import_textarea_js(import_payload), timeout_sec=15.0)
         assert isinstance(filled, dict) and filled.get("ok") is True, filled
-        submitted = client.evaluate(page, _CLICK_IMPORT_SUBMIT_JS, timeout_sec=15.0)
+        submitted = client.evaluate(page, CLICK_IMPORT_SUBMIT_JS, timeout_sec=15.0)
         assert isinstance(submitted, dict) and submitted.get("ok") is True, submitted
-        _confirm_reload_dialog(client, page, timeout_sec=90.0)
-        _wait_for_server_present(_IMPORT_SERVER_NAME)
+        confirm_reload_dialog(client, page, timeout_sec=90.0)
+        wait_for_server_present(_IMPORT_SERVER_NAME)
 
         # --- Path 4: add/save form ---
-        _seed_empty_mcp_configs()
-        _reload_mcp_page(client, page)
-        ready_add = wait_for_state(client, page, _MCP_PAGE_READY_JS, timeout_sec=90.0)
+        seed_empty_mcp_configs()
+        reload_mcp_settings_page(client, page)
+        ready_add = wait_for_state(client, page, MCP_PAGE_READY_JS, timeout_sec=90.0)
         assert ready_add.get("ready") is True, json.dumps(ready_add, ensure_ascii=False)
 
-        opened_add = client.evaluate(page, _CLICK_ADD_SERVICE_BUTTON_JS, timeout_sec=15.0)
+        opened_add = client.evaluate(page, CLICK_ADD_SERVICE_BUTTON_JS, timeout_sec=15.0)
         assert isinstance(opened_add, dict) and opened_add.get("ok") is True, opened_add
-        add_editor = wait_for_state(client, page, _MCP_ADD_EDITOR_READY_JS, timeout_sec=30.0)
+        add_editor = wait_for_state(client, page, ADD_EDITOR_READY_JS, timeout_sec=30.0)
         assert add_editor.get("ready") is True, json.dumps(add_editor, ensure_ascii=False)
         name_filled = client.evaluate(
             page,
-            _fill_input_by_label_js(
+            fill_input_by_label_js(
                 "Service Name|服务名称",
                 _ADD_SERVER_NAME,
             ),
@@ -718,18 +235,18 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         assert isinstance(name_filled, dict) and name_filled.get("ok") is True, name_filled
         selected_stdio: dict[str, object] = {"ok": False}
         for attempt in range(4):
-            opened_type = client.evaluate(page, _OPEN_CONNECTION_TYPE_JS, timeout_sec=15.0)
+            opened_type = client.evaluate(page, OPEN_CONNECTION_TYPE_JS, timeout_sec=15.0)
             assert isinstance(opened_type, dict) and opened_type.get("ok") is True, opened_type
             for _ in range(10):
                 time.sleep(0.15)
-                selected_stdio = client.evaluate(page, _CLICK_STDIO_OPTION_JS, timeout_sec=15.0)
+                selected_stdio = client.evaluate(page, CLICK_STDIO_OPTION_JS, timeout_sec=15.0)
                 if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
                     break
             if isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True:
                 break
             time.sleep(0.5 * (attempt + 1))
         assert isinstance(selected_stdio, dict) and selected_stdio.get("ok") is True, selected_stdio
-        stdio_ready = wait_for_state(client, page, _MCP_STDIO_FIELDS_READY_JS, timeout_sec=15.0)
+        stdio_ready = wait_for_state(client, page, STDIO_FIELDS_READY_JS, timeout_sec=15.0)
         assert stdio_ready.get("ready") is True, json.dumps(stdio_ready, ensure_ascii=False)
         for label_pattern, value in (
             ("Command|命令", sys.executable),
@@ -740,18 +257,18 @@ def test_mcp_reload_confirm_dialog_all_paths_single_session() -> None:
         ):
             filled_field = client.evaluate(
                 page,
-                _fill_input_by_label_js(label_pattern, value),
+                fill_input_by_label_js(label_pattern, value),
                 timeout_sec=15.0,
             )
             assert isinstance(filled_field, dict) and filled_field.get("ok") is True, (
                 label_pattern,
                 filled_field,
             )
-        saved = client.evaluate(page, _CLICK_SAVE_CONFIG_JS, timeout_sec=15.0)
+        saved = client.evaluate(page, CLICK_SAVE_CONFIG_JS, timeout_sec=15.0)
         assert isinstance(saved, dict) and saved.get("ok") is True, saved
-        _confirm_reload_dialog_after_save(client, page, timeout_sec=120.0)
-        _wait_for_server_present(_ADD_SERVER_NAME)
-        saved_config = _server_config_in_api(_ADD_SERVER_NAME)
+        confirm_reload_dialog_after_save(client, page, timeout_sec=120.0)
+        wait_for_server_present(_ADD_SERVER_NAME)
+        saved_config = server_config_in_api(_ADD_SERVER_NAME)
         assert saved_config is not None, "saved MCP config missing from API"
         assert saved_config.get("cacheTtlSeconds") == 60, saved_config
         assert saved_config.get("cacheableTools") == ["ping"], saved_config
