@@ -144,19 +144,15 @@ async def compact_chat(
                 focus_topic=focus_topic,
                 max_context_tokens=max_context_tokens,
             )
-        except (asyncio.TimeoutError, Exception) as summarize_exc:
-            if isinstance(summarize_exc, asyncio.TimeoutError):
-                await record_compaction_failure_cooldown(
-                    db,
-                    chat_id,
-                    f"timeout: {summarize_exc}",
-                )
-                return CompactResult(
-                    compacted=False,
-                    original_tokens=original_tokens,
-                    message_count=len(db_messages),
-                    reason=CompactReason.TIMEOUT,
-                )
+        except asyncio.TimeoutError as timeout_exc:
+            await record_compaction_failure_cooldown(db, chat_id, f"timeout: {timeout_exc}")
+            return CompactResult(
+                compacted=False,
+                original_tokens=original_tokens,
+                message_count=len(db_messages),
+                reason=CompactReason.TIMEOUT,
+            )
+        except Exception as summarize_exc:
             await record_compaction_failure_cooldown(db, chat_id, str(summarize_exc))
             raise
 
