@@ -166,6 +166,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/delegation/test_delegation_interruption.py` | 集成 | 服务停止时的委托任务：真实路由器 `stop()` 让运行中的委托任务各自按发送者语言（en/zh-CN）在原聊天与话题里收到「已中断、请重发」通知并释放配额，运行仍能收尾；用户刚 `/stop`、刚到时限、已完成的任务不会被重复通知；不肯停的运行不会拖住关停（有限宽限期）；通知发不出去也不让关停失败 |
 | `channels/delegation/test_delegation_launch_failure.py` | 集成 | `/delegate` 的回执发不出去时不留任务也不占并发名额：真实路由器下，回执发送抛错后协调器无任务、配额仍可用；连续失败超过配额上限后仍能正常委派；回执在登记任务与占名额之前发出 |
 | `channels/delegation/test_delegation_approval_window.py` | 集成 | 委托运行的审批等待取任务时限：运行从带时限的消息起步而请求者原消息不被改动，经真实渠道安全配置组装后 harness 的等待为任务时限（上限为 harness 上限 3600 秒），智能体档案显式设定的等待仍优先，前台回合沿用配置值，被聊天应答恢复的运行再次请求审批时沿用配置值（时限不随恢复消息带走） |
+| `core/test_plan_update_consumers.py` | 单元 | 不展示计划的流消费者忽略 `plan_update` 快照：IM 回合不产生进度也不记工具步骤、定时运行不记步骤（成功且仍可安全重跑）、评测运行的工具轨迹不变；快照若被记成工具步骤，会分别出现在 IM 进度、定时运行的步骤（其「有副作用工具」判断读它）和评测轨迹里 |
 | `core/channel_bridge/test_execute_preamble_security_config.py` | 单元 | 回合安全覆盖的构建（`build_security_overlay`）：回合审批等待覆盖配置值且不改动入参、无配置时也生效、小数时限至少等一秒、非正数/布尔/非数值被忽略、与会话 YOLO 并存；`yolo_state` 无时限即无超时授权，不是「时间戳 + 正数时限」的坏形状不授权；/learn 作者查询（文本、文本块列表）标记回合且不改动已保存的权限，普通查询不标记 |
 | `core/channel_bridge/test_channel_turn_security_survives_sync.py` | 集成 | 渠道回合装配出的智能体经真实的每轮配置重载（`sync_wrapper_security_from_store` + `SecurityPolicyExtension`）后：会话 YOLO（含无时限、取代已存的失效计时）与委托审批窗口对已保存配置的用户仍然生效，过了时限的会话 YOLO 照常失效，/learn 回合不会解开已保存配置对 skill_manage 的拒绝；普通回合照已保存配置执行，没有保存过配置的用户取装配时的值 |
 | `channels/delegation/test_delegation_heartbeat.py` | 单元 | 委托运行心跳：长运行原地更新同一条消息并带任务编号与步数，短于一个间隔不发，任务时限内的次数上限，随运行结束、被 `/stop`、停在审批处而结束（交接期间不发） |

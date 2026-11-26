@@ -26,7 +26,7 @@
 | `step_builder.py` | 核心 | 智能体步骤执行数据格式化（面向 WebUI 的多类型工具状态渲染契约） |
 | `stream_buffer.py` | 核心 | 内存滑动窗口流式重放缓冲与 Last-Event-ID 重连恢复。一个缓冲只属于一次运行，结束后只重放、不再接收新事件；订阅者闲置满 `HEARTBEAT_INTERVAL_SEC`（15 秒）就收到 `HEARTBEAT_FRAME`（`event: heartbeat`、空体的协议保活帧），两者作为常量导出，server 的 attach 流用同一帧同一间隔，页面据此判连接存活；`GlobalStreamRegistry.get_or_create` 把某个 id 现有的缓冲交给重连的客户端，`start_run` 给新一次运行换一个新缓冲（审批通过后的续跑沿用被停下那一轮的 message id，若拿到它已结束的缓冲，客户端收到的是那一轮的重放而不是续跑），被换下的缓冲留给还在读它的人读完；`remove(run_id, buffer)` 带缓冲时只清掉仍登记的那一个，换下的缓冲排定的延时清理不会误结束新一次运行的流 |
 | `stream_compactor.py` | 核心 | 高频文本片段流式合并压实器（降低前端事件风暴与渲染开销） |
-| `stream_dispatcher.py` | 核心 | 流式执行引擎事件分发 Mixin（覆盖 Tool Stdout、UI 更新、任务步骤、AgentStatus 状态机透传（含 `restart`：丢弃正在流出的草稿）与 `__interrupt__` 分片分发——中断转事件见 `interrupt_events.py`；并把每个 `updates` 分片里的最后一条 AIMessage 记为 `_latest_reply`，见 `latest_reply.py`） |
+| `stream_dispatcher.py` | 核心 | 流式执行引擎事件分发 Mixin（覆盖 Tool Stdout、UI 更新、任务步骤、`_FORWARDED_UNCHANGED` 集合里的自定义事件（能力缺口、技能缺口、浏览器接管、`plan_update` 计划快照：载荷是字典就原样转给 UI，不在集合里的自定义事件被丢弃，所以新增事件类型从往集合里加一项开始）、AgentStatus 状态机透传（含 `restart`：丢弃正在流出的草稿）与 `__interrupt__` 分片分发——中断转事件见 `interrupt_events.py`；并把每个 `updates` 分片里的最后一条 AIMessage 记为 `_latest_reply`，见 `latest_reply.py`） |
 | `stream_executor.py` | 核心 | 流式执行引擎生命周期封装（Agent.astream 调度、重试恢复与异常拦截；被 Stop 打断的模型请求以 `OperationCancelledError` 早退，与循环内 Stop 同一收尾；开跑时把本次运行追踪器的 `index_for` 绑进 `source_indexer_var`，工具给来源编号时用，并经 `source_numbering.restore_source_numbering` 读线程检查点，让编号接着同一线程此前发过的往下编） |
 | `stream_fatal_error.py` | 核心 | 致命错误上报 Mixin：把一次运行的异常转成带诊断的 GUI 错误事件（故障归属、恢复建议、冷却剩余时间）、以脱敏文本记入运行统计（`AgentRunStatistics.record_error`，随 SESSION_END 钩子载荷离开进程）、写入事件日志并抛出 `MyrmLLMError`；`StreamExecutor` 经多继承使用 |
 | `types.py` | 核心 | 流式事件类型定义与 core.events.types 兼容重导出 |

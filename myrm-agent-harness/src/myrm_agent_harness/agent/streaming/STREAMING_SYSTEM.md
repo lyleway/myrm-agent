@@ -38,7 +38,7 @@ dispatcher  handlers      events         recovery*
 
 | Mixin / 模块 | 职责 |
 |--------------|------|
-| `stream_dispatcher.py` | chunk → output_queue；`__interrupt__` 分片交 `interrupt_events.py` 逐中断转事件，卡片 id 即该中断的 LangGraph id（swarm_fission 专路由）；`_record_cancellation` 是 Stop 的统一收尾（标记 `was_cancelled` 并发出 `cancelled` 事件） |
+| `stream_dispatcher.py` | chunk → output_queue；`custom` 分片里的事件只有点名的才会到 UI：`_FORWARDED_UNCHANGED` 里的类型（含 `plan_update`）把字典载荷原样转出，其余自定义事件被丢弃（只有经 `utils.event_utils` 写入运行的 StreamWriter 的事件才会出现在 `custom` 分片里）；`__interrupt__` 分片交 `interrupt_events.py` 逐中断转事件，卡片 id 即该中断的 LangGraph id（swarm_fission 专路由）；`_record_cancellation` 是 Stop 的统一收尾（标记 `was_cancelled` 并发出 `cancelled` 事件） |
 | `recovery/stream_recovery.py` | 主恢复策略组合：overflow、failover、安全拒答回退、瞬时重试，并混入下列各恢复 mixin |
 | `recovery/stream_recovery_turn_end.py` | 一轮结束后的处理：迭代上限的无工具总结、空回复恢复（判断对象是本轮最后一次回复 `_latest_reply`，空回复不在 `collected_messages` 里；推理被输出上限截断的回复归截断恢复，放弃后不再当空回复重问） |
 | `recovery/stream_recovery_redrive.py` | 「追加一条提示再跑一遍」的统一入口（新一轮重建输入，续跑轮从检查点续） |

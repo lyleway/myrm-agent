@@ -14,6 +14,7 @@ import { AgentEventType } from './types';
 /** Values from myrm_agent_harness.core.events.types.AgentEventType (keep in sync). */
 export const HARNESS_AGENT_EVENT_TYPE_VALUES = [
   'tasks_steps',
+  'plan_update',
   'tool_heartbeat',
   'sources',
   'message',

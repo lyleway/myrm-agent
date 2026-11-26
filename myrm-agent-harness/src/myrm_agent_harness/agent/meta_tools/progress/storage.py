@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from myrm_agent_harness.agent.context_management.infra.evicted import normalize_delivery_chat_id
@@ -128,7 +129,7 @@ def merge_todo_items(
     return [by_id[item_id] for item_id in order if item_id in by_id]
 
 
-def parse_todo_payload(raw_items: list[object], *, allow_empty_content: bool = False) -> list[TodoItem]:
+def parse_todo_payload(raw_items: Sequence[object], *, allow_empty_content: bool = False) -> list[TodoItem]:
     """Parse raw todo objects into validated TodoItem instances.
 
     Args:

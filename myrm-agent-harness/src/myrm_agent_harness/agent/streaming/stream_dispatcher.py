@@ -7,7 +7,7 @@
 - agent.streaming.latest_reply::latest_model_reply (POS: 一次 updates 分片携带的最后一条助手回复，含 collected_messages 不收的空回复)
 
 [OUTPUT]
-- StreamDispatcherMixin: dispatches events, forwards structured agent_status fields, records a run's cancellation and the run's latest model reply.
+- StreamDispatcherMixin: dispatches events, forwards structured agent_status fields and the custom events of ``_FORWARDED_UNCHANGED`` (capability and skill gaps, browser takeover, plan snapshots), records a run's cancellation and the run's latest model reply.
 
 [POS]
 StreamDispatcherMixin dispatches astream chunks to the output_queue and preserves GUI-safe status payload fields.
@@ -45,6 +45,18 @@ if TYPE_CHECKING:
     from myrm_agent_harness.agent.streaming.stream_executor import StreamContext
 
 logger = get_agent_logger(__name__)
+
+# Custom events whose dict payload reaches the UI as it is, under the event's own name. An event that is not named here
+# or handled in ``_dispatch_custom`` is dropped, so a new event type starts with its entry in this set.
+_FORWARDED_UNCHANGED = frozenset(
+    {
+        AgentEventType.CAPABILITY_GAP.value,
+        AgentEventType.SKILL_GAP.value,
+        AgentEventType.BROWSER_TAKEOVER_REQUESTED.value,
+        AgentEventType.BROWSER_TAKEOVER_COMPLETED.value,
+        AgentEventType.PLAN_UPDATE.value,
+    }
+)
 
 
 class StreamDispatcherMixin:
@@ -329,53 +341,10 @@ class StreamDispatcherMixin:
                         event_dict_3[field] = event_data[field]
             await self._emit_event(event_dict_3, ctx)
 
-        elif event_name == AgentEventType.CAPABILITY_GAP.value:
+        elif event_name in _FORWARDED_UNCHANGED:
             event_data = data.get("data", {})
             if isinstance(event_data, dict):
-                await self._emit_event(
-                    {
-                        "type": AgentEventType.CAPABILITY_GAP.value,
-                        "data": event_data,
-                        "messageId": ctx.message_id,
-                    },
-                    ctx,
-                )
-
-        elif event_name == AgentEventType.SKILL_GAP.value:
-            event_data = data.get("data", {})
-            if isinstance(event_data, dict):
-                await self._emit_event(
-                    {
-                        "type": AgentEventType.SKILL_GAP.value,
-                        "data": event_data,
-                        "messageId": ctx.message_id,
-                    },
-                    ctx,
-                )
-
-        elif event_name == AgentEventType.BROWSER_TAKEOVER_REQUESTED.value:
-            event_data = data.get("data", {})
-            if isinstance(event_data, dict):
-                await self._emit_event(
-                    {
-                        "type": AgentEventType.BROWSER_TAKEOVER_REQUESTED.value,
-                        "data": event_data,
-                        "messageId": ctx.message_id,
-                    },
-                    ctx,
-                )
-
-        elif event_name == AgentEventType.BROWSER_TAKEOVER_COMPLETED.value:
-            event_data = data.get("data", {})
-            if isinstance(event_data, dict):
-                await self._emit_event(
-                    {
-                        "type": AgentEventType.BROWSER_TAKEOVER_COMPLETED.value,
-                        "data": event_data,
-                        "messageId": ctx.message_id,
-                    },
-                    ctx,
-                )
+                await self._emit_event({"type": event_name, "data": event_data, "messageId": ctx.message_id}, ctx)
 
     def _restore_pseudonyms(self, text: str) -> str:
         """Restore pseudonymized placeholders in streamed text chunks.

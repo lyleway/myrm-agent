@@ -62,7 +62,7 @@ async def _write_workspace_todos(chat_id: str, store: TodoStore) -> None:
     not os.environ.get("LITE_API_KEY") and not os.environ.get("BASIC_API_KEY"),
     reason="E2E test requires LITE_API_KEY or BASIC_API_KEY",
 )
-def test_planning_todo_write_persists_and_emits_tasks_steps(client: TestClient) -> None:
+def test_planning_todo_write_persists_and_emits_plan_update(client: TestClient) -> None:
     chat_id = f"planning_e2e_{uuid.uuid4().hex[:10]}"
     create_response = client.post("/api/v1/chats/", json={"chat_id": chat_id})
     assert create_response.status_code == 200
@@ -89,12 +89,12 @@ def test_planning_todo_write_persists_and_emits_tasks_steps(client: TestClient) 
     if error_events:
         check_e2e_errors(events)
 
-    todo_step_events = [
-        event for event in events if event.get("type") == "tasks_steps" and event.get("tool_name") == "todo_write"
-    ]
-    if not todo_step_events:
+    plan_updates = [event for event in events if event.get("type") == "plan_update"]
+    if not plan_updates:
         check_e2e_errors(events)
-    assert todo_step_events, f"Expected tasks_steps events for todo_write, events={events}"
+    assert plan_updates, f"Expected a plan_update event for todo_write, events={events}"
+    snapshot = plan_updates[-1].get("data")
+    assert isinstance(snapshot, dict) and snapshot.get("goal") == "Integration test"
 
     store = asyncio.run(_read_workspace_todos(chat_id))
     assert store is not None, "todo_write should persist todos.json in workspace SSOT"
@@ -203,10 +203,8 @@ def test_planning_todo_write_blocked_status_and_replanning(client: TestClient) -
     events = _collect_agent_stream(client, payload)
     check_e2e_errors(events)
 
-    todo_step_events = [
-        event for event in events if event.get("type") == "tasks_steps" and event.get("tool_name") == "todo_write"
-    ]
-    assert todo_step_events, "Expected tasks_steps events for todo_write"
+    plan_updates = [event for event in events if event.get("type") == "plan_update"]
+    assert plan_updates, "Expected a plan_update event for todo_write"
 
     store = asyncio.run(_read_workspace_todos(chat_id))
     assert store is not None, "todo_write should persist todos.json in workspace SSOT"

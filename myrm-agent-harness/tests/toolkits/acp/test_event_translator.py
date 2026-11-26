@@ -107,6 +107,17 @@ class TestSkipAndUnknownEvents:
     def test_unknown_event_returns_none(self) -> None:
         assert translate_agent_event("s1", {"type": "completely_unknown"}, set()) is None
 
+    def test_a_plan_snapshot_is_not_translated_to_a_tool_call(self) -> None:
+        snapshot = {
+            "goal": "Migrate",
+            "revision": 1,
+            "todos": [{"id": "1", "content": "Read code", "status": "pending"}],
+        }
+        active: set[str] = set()
+
+        assert translate_agent_event("s1", {"type": "plan_update", "data": snapshot}, active) is None
+        assert active == set()
+
     def test_empty_type_returns_none(self) -> None:
         assert translate_agent_event("s1", {"type": ""}, set()) is None
 

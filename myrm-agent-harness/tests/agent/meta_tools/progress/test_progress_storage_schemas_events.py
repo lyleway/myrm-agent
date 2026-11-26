@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from myrm_agent_harness.agent.meta_tools.progress.events import emit_todo_progress_events
+from myrm_agent_harness.agent.meta_tools.progress.events import emit_plan_update
 from myrm_agent_harness.agent.meta_tools.progress.schemas import TodoItem, TodoStatus, TodoStore
 from myrm_agent_harness.agent.meta_tools.progress.storage import (
     delete_todos_sync_from_workspace,
@@ -19,6 +19,7 @@ from myrm_agent_harness.agent.meta_tools.progress.storage import (
     workspace_todos_exist,
     write_todos_sync_to_workspace,
 )
+from myrm_agent_harness.agent.meta_tools.progress.todo_write_tool import create_todo_write_tool
 from myrm_agent_harness.core.context_vars import chat_id_var, scoped_value
 
 
@@ -255,34 +256,37 @@ def test_a_list_in_the_old_flat_layout_is_not_a_chat_list(tmp_path) -> None:
     assert read_todos_sync_from_workspace(str(tmp_path), "any_chat") is None
 
 
-def test_emit_todo_progress_events_dispatches_root_and_steps() -> None:
-    store = TodoStore(
-        goal="My goal",
-        todos=[
-            TodoItem(id="1", content="step one", status=TodoStatus.COMPLETED),
-            TodoItem(id="2", content="step two", status=TodoStatus.CANCELLED),
-            TodoItem(id="3", content="step three", status=TodoStatus.BLOCKED),
-        ],
-    )
-    with patch("myrm_agent_harness.agent.meta_tools.progress.events.dispatch_custom_event") as mock_dispatch:
-        emit_todo_progress_events(store)
-    assert mock_dispatch.call_count == 4
-    root_call = mock_dispatch.call_args_list[0].args
-    assert root_call[0] == "tasks_steps"
-    assert root_call[1]["step_key"] == "progress_root"
-    assert "revision" in root_call[1]
-    step_statuses = [call.args[1]["status"] for call in mock_dispatch.call_args_list[1:]]
-    assert step_statuses == ["success", "skipped", "blocked"]
-    assert all("revision" in call.args[1] for call in mock_dispatch.call_args_list[1:])
-
-
-def test_emit_todo_progress_events_swallows_dispatch_errors() -> None:
+def test_a_failed_emit_is_logged_and_does_not_fail_the_caller(caplog) -> None:
     store = TodoStore(todos=[TodoItem(id="1", content="x", status=TodoStatus.PENDING)])
     with patch(
-        "myrm_agent_harness.agent.meta_tools.progress.events.dispatch_custom_event",
-        side_effect=RuntimeError("sse down"),
+        "myrm_agent_harness.agent.meta_tools.progress.events.emit_custom_event_sync",
+        side_effect=RuntimeError("stream closed"),
     ):
-        emit_todo_progress_events(store)
+        emit_plan_update(store)
+    assert "Failed to emit plan_update: stream closed" in caplog.text
+
+
+def test_emitting_outside_a_run_is_silent(caplog) -> None:
+    emit_plan_update(TodoStore(todos=[TodoItem(id="1", content="x", status=TodoStatus.PENDING)]))
+    assert caplog.records == []
+
+
+def test_the_plan_file_already_holds_the_new_revision_when_the_signal_goes_out(tmp_path) -> None:
+    revisions_on_disk: list[int | None] = []
+
+    def read_the_file_at_emit(store: TodoStore) -> None:
+        stored = read_todos_sync_from_workspace(str(tmp_path))
+        revisions_on_disk.append(stored.revision if stored else None)
+
+    todo_write = create_todo_write_tool(str(tmp_path))
+    with patch(
+        "myrm_agent_harness.agent.meta_tools.progress.todo_write_tool.emit_plan_update",
+        side_effect=read_the_file_at_emit,
+    ):
+        todo_write.invoke({"todos": [{"id": "1", "content": "step one", "status": "pending"}]})
+        todo_write.invoke({"todos": [{"id": "1", "content": "step one", "status": "completed"}], "merge": True})
+
+    assert revisions_on_disk == [1, 2]
 
 
 def test_todo_status_to_plan_status_mapping() -> None:
