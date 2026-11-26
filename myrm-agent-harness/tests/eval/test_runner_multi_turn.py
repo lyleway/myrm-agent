@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from myrm_agent_harness.eval.protocols import (
@@ -321,7 +319,7 @@ class TestMultiTurnEdgeCases:
             async def create_session(self) -> str:
                 return "s"
 
-            def get_sandbox_executor(self, session_id: str | None = None) -> Any:
+            def get_sandbox_executor(self, session_id: str | None = None) -> None:
                 return None
 
             async def execute(self, message: str, *, session_id: str | None = None) -> AgentResponse:

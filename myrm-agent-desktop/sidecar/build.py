@@ -306,7 +306,8 @@ def build_backend(*, skip_harness_install: bool = False) -> None:
     _verify_bundle(server_python, harness_dir)
 
     if SYSTEM != "windows":
-        os.chmod(SIDECAR_EXECUTABLE, 0o755)  # noqa: S103 - the entry point must be executable for every user of the install
+        # The entry point must be executable for every user of the install.
+        SIDECAR_EXECUTABLE.chmod(0o755)
     if SYSTEM == "darwin":
         _assert_macos_architecture(SIDECAR_EXECUTABLE)
 

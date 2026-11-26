@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -123,7 +122,7 @@ class TestEvalRunnerSingleTurn:
                 self._counter += 1
                 return f"s-{self._counter}"
 
-            def get_sandbox_executor(self, session_id: str | None = None) -> Any:
+            def get_sandbox_executor(self, session_id: str | None = None) -> None:
                 return None
 
         runner = EvalRunner(SlowExecutor(), max_concurrency=5)
@@ -188,7 +187,7 @@ class TestEdgeCases:
             async def create_session(self) -> str:
                 raise ConnectionError("DB unavailable")
 
-            def get_sandbox_executor(self, session_id: str | None = None) -> Any:
+            def get_sandbox_executor(self, session_id: str | None = None) -> None:
                 return None
 
         runner = EvalRunner(FailSessionExecutor())
