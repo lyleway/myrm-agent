@@ -11,7 +11,7 @@ from app.services.agent.params.converter import (
     _is_learn_skill_authoring_query,
     convert_to_general_agent_params,
 )
-from app.services.agent.params.models import AgentRequest
+from app.services.agent.params.models import AgentRequest, ModelSelection
 from tests.api.agent.conftest import _build_mock_user_configs
 from tests.api.agent.utils import get_model_selection
 
@@ -45,7 +45,7 @@ class TestLearnWebuiConverterIntegration:
             message_id="test-msg-learn-explore",
             chat_id="test-chat-learn-explore",
             query="/learn the deployment workflow we just did",
-            model_selection=get_model_selection(),
+            model_selection=ModelSelection.model_validate(get_model_selection()),
             action_mode="agent",
             security_preset="explore",
         )
