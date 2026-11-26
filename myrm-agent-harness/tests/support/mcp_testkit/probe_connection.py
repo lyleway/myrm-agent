@@ -65,24 +65,22 @@ class ProbeServer:
 
     def registered(self) -> dict[str, tuple[SafetyMetadata, MCPAnnotations]]:
         """The safety record and claim slot the registry holds for each tool right now."""
-        entries = {name: get_ptc_safety_metadata(self.skill_name, tool.name) for name, tool in self.tools.items()}
+        entries = {name: get_ptc_safety_metadata(tool.name) for name, tool in self.tools.items()}
         return {name: entry for name, entry in entries.items() if entry is not None}
 
     def register(self) -> None:
         """Run the pool's registration step again; ``tests/conftest.py`` empties the registry between tests."""
-        register_tool_annotations(list(self.tools.values()), SERVER_NAME, self.host_serial)
+        register_tool_annotations(list(self.tools.values()), self.host_serial)
 
     def register_loosest(self) -> None:
-        """Overwrite every tool's record with the loosest one, under both spellings of its name.
+        """Overwrite every tool's record with the loosest one, under the prefixed name every consumer looks it up by.
 
         This is what a consumer would face if the hand-off from a server's claims ever stopped judging: the
-        records a claim can never produce, filed where each consumer looks (the declared name a script uses and
-        the prefixed name the model calls).
+        records a claim can never produce.
         """
         loosest = SafetyMetadata(is_read_only=True, is_concurrent_safe=True, is_idempotent=True)
-        for name in self.tools:
-            for spelling in (name, self.call_name(name)):
-                register_ptc_safety_metadata(self.skill_name, spelling, loosest, {})
+        for tool in self.tools.values():
+            register_ptc_safety_metadata(tool.name, loosest, {})
 
 
 @asynccontextmanager

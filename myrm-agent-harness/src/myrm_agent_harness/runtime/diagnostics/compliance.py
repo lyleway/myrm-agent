@@ -2,7 +2,7 @@
 
 Provides the Six-Question Eviction Compliance Checklist (太一/政企采购合规六问自检):
 1. Q1_ROUTES_CLEAN: Are deprecated/uninstalled plugin endpoints fully evicted from routing tables?
-2. Q2_REGISTRY_CLEAN: Is the Tool Registry memory flat-index completely clean of phantom tools?
+2. Q2_REGISTRY_CLEAN: Is the Tool Registry memory completely clean of phantom tools?
 3. Q3_CRON_CLEAN: Are background cron jobs and polling consumers associated with uninstalled plugins stopped/purged?
 4. Q4_FILESYSTEM_CLEAN: Are temporary bundles, lock files, and isolated storage free of orphan artifacts?
 5. Q5_PROCESS_CLEAN: Are orphan MCP subprocesses and connection pools gracefully terminated?
@@ -17,13 +17,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class ComplianceStatus(str, Enum):
+class ComplianceStatus(StrEnum):
     """Compliance verification status for each question."""
 
     COMPLIANT = "compliant"
@@ -83,55 +83,41 @@ class ComplianceAuditEngine:
 
     @staticmethod
     def audit_tool_registry_cleanliness(
-        active_skill_names: set[str] | list[str] | None = None,
+        active_server_names: set[str] | list[str] | None = None,
     ) -> list[ComplianceViolation]:
-        """Audit the Tool Registry memory flat-index for orphan tool registrations."""
-        from myrm_agent_harness.core.security.tool_registry.registry import (
-            _PTC_LOCK,
-            _PTC_SAFETY_METADATA,
-            _PTC_TOOL_FLAT_INDEX,
-        )
+        """Audit the Tool Registry memory for tools of MCP servers that are no longer active.
 
-        violations: list[ComplianceViolation] = []
-        active_set = set(active_skill_names) if active_skill_names is not None else None
+        Without ``active_server_names`` there is nothing to compare against, so nothing is reported.
+        """
+        from myrm_agent_harness.core.security.tool_registry.registry import _PTC_LOCK, _PTC_TOOL_SAFETY
+        from myrm_agent_harness.toolkits.mcp.config import mcp_tool_prefix, parse_mcp_tool_name
 
+        if active_server_names is None:
+            return []
+
+        active_prefixes = tuple(mcp_tool_prefix(name) for name in active_server_names)
         with _PTC_LOCK:
-            # Check 1: Inconsistency between tree metadata and flat index
-            indexed_tools_in_tree = {tname for skill_tools in _PTC_SAFETY_METADATA.values() for tname in skill_tools}
-            flat_tools = set(_PTC_TOOL_FLAT_INDEX.keys())
+            ghost_targets = {
+                parsed[0] if (parsed := parse_mcp_tool_name(name)) else name
+                for name in _PTC_TOOL_SAFETY
+                if not name.startswith(active_prefixes)
+            }
 
-            orphans_in_flat = flat_tools - indexed_tools_in_tree
-            for orphan in orphans_in_flat:
-                violations.append(
-                    ComplianceViolation(
-                        question_id="Q2_REGISTRY_CLEAN",
-                        target=orphan,
-                        reason=f"Tool '{orphan}' exists in flat index but missing from skill hierarchy",
-                        severity="high",
-                        remediation_hint=f"Call unregister_ptc_safety_metadata to clean orphan tool '{orphan}'",
-                    )
-                )
-
-            # Check 2: If active_skill_names provided, check for evicted skills still residing in memory
-            if active_set is not None:
-                for skill_name in list(_PTC_SAFETY_METADATA.keys()):
-                    if skill_name not in active_set:
-                        violations.append(
-                            ComplianceViolation(
-                                question_id="Q2_REGISTRY_CLEAN",
-                                target=skill_name,
-                                reason=f"Skill '{skill_name}' is not in active plugins list but still registered in memory",
-                                severity="high",
-                                remediation_hint=f"Call evict_skill_safety_metadata('{skill_name}') to remove ghost tools",
-                            )
-                        )
-
-        return violations
+        return [
+            ComplianceViolation(
+                question_id="Q2_REGISTRY_CLEAN",
+                target=target,
+                reason=f"Server '{target}' is not in the active server list but its tools are still registered in memory",
+                severity="high",
+                remediation_hint=f"Call evict_tool_annotations('{target}') to remove ghost tools",
+            )
+            for target in sorted(ghost_targets)
+        ]
 
     @classmethod
     def evaluate_full_compliance(
         cls,
-        active_skill_names: set[str] | list[str] | None = None,
+        active_server_names: set[str] | list[str] | None = None,
         custom_checks: list[tuple[str, bool, str, str]] | None = None,
     ) -> ComplianceReport:
         """Run the comprehensive Six-Question Compliance Audit."""
@@ -146,7 +132,7 @@ class ComplianceAuditEngine:
         }
 
         # Run Tool Registry audit
-        reg_violations = cls.audit_tool_registry_cleanliness(active_skill_names)
+        reg_violations = cls.audit_tool_registry_cleanliness(active_server_names)
         if reg_violations:
             questions["Q2_REGISTRY_CLEAN"] = False
             violations.extend(reg_violations)

@@ -574,14 +574,14 @@ class TestSkillNameCollisions:
             SimpleNamespace(name="weather-skill", description=""),
         ]
         out = asyncio.run(mcp_skill_generator.generate_metadata_only(configs))
-        assert [skill.name for skill in out] == ["mcp_weather_skill", "mcp_weather_skill_2"]
+        assert [skill.name for skill in out] == ["mcp_weather_skill", "mcp_weather_2_skill"]
 
     def test_l2_import_path_uses_metadata_name(self) -> None:
         meta = _skill_meta("weather-skill", ["get_wind"])
-        meta.name = "mcp_weather_skill_2"
+        meta.name = "mcp_weather_2_skill"
         out = mcp_skill_generator.generate_skill_content(meta)
-        assert "mcp_weather_skill_2" in out
-        assert "from skills.mcp_weather_skill_2" in out
+        assert "mcp_weather_2_skill" in out
+        assert "from skills.mcp_weather_2_skill" in out
         assert "mcp_weather_skill`" not in out
 
 

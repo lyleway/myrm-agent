@@ -463,7 +463,6 @@ class TestMixedMessageGuard:
         then the lookup must run."""
         tool_name = "mcp__meteo__get_temperature"
         register_ptc_safety_metadata(
-            "mcp_meteo_skill",
             tool_name,
             SafetyMetadata(is_read_only=True, is_concurrent_safe=True),
             {"readOnlyHint": True},

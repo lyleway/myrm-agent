@@ -134,7 +134,7 @@ class MCPAgent:
         enforce_description_limits(tools)
         sanitize_tools(tools)
         wrap_tools_with_timeout(tools, execute_timeout, max_output_chars, oversized_result_handler)
-        register_tool_annotations(tools, server_name, host_serial)
+        register_tool_annotations(tools, host_serial)
         return tools
 
     def get_tool_server_name(self, tool: BaseTool) -> str:

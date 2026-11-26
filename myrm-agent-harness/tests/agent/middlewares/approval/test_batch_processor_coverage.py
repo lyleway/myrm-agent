@@ -34,6 +34,7 @@ from myrm_agent_harness.agent.security.types import (
     ReviewResult,
     SecurityConfig,
 )
+from tests.agent.middlewares.approval.ptc_script_tool import connected_script_tool
 
 
 class MockRuntime:
@@ -365,10 +366,6 @@ class TestPTCPathPolicy:
             "myrm_agent_harness.agent.security.ptc_verifier.extract_ptc_intent",
             lambda cmd: ("filesystem", "read_file", {"path": "/etc/passwd"}),
         )
-        monkeypatch.setattr(
-            "myrm_agent_harness.agent.security.tool_registry.get_ptc_safety_metadata",
-            lambda skill, tool: None,
-        )
 
         config = SecurityConfig(ruleset=(PermissionRule("code_interpreter", "*", PermissionAction.ASK),))
 
@@ -403,10 +400,6 @@ class TestPTCPathPolicy:
             "myrm_agent_harness.agent.security.ptc_verifier.extract_ptc_intent",
             lambda cmd: ("filesystem", "read_file", {"path": "/tmp/safe/file.txt"}),
         )
-        monkeypatch.setattr(
-            "myrm_agent_harness.agent.security.tool_registry.get_ptc_safety_metadata",
-            lambda skill, tool: (SafetyMetadata(is_read_only=True, is_concurrent_safe=True), {}),
-        )
 
         config = SecurityConfig(ruleset=(PermissionRule("code_interpreter", "*", PermissionAction.ASK),))
 
@@ -419,14 +412,16 @@ class TestPTCPathPolicy:
             ),
         ]
 
-        approved, _denied, pending = await evaluate_tool_batch(
-            tool_calls,
-            config,
-            is_cron=False,
-            workspace_root="/tmp/safe",
-            session_key="s",
-            args_hashes={},
-        )
+        record = SafetyMetadata(is_read_only=True, is_concurrent_safe=True)
+        with connected_script_tool("filesystem", "filesystem", "read_file", record, {}):
+            approved, _denied, pending = await evaluate_tool_batch(
+                tool_calls,
+                config,
+                is_cron=False,
+                workspace_root="/tmp/safe",
+                session_key="s",
+                args_hashes={},
+            )
 
         assert len(approved) == 0
         assert len(pending) == 1
@@ -445,13 +440,6 @@ class TestPTCPathPolicy:
                 {"path": "/other/dir/config.yaml"},
             ),
         )
-        monkeypatch.setattr(
-            "myrm_agent_harness.agent.security.tool_registry.get_ptc_safety_metadata",
-            lambda skill, tool: (
-                SafetyMetadata(is_read_only=False, is_concurrent_safe=True),
-                {"destructiveHint": True},
-            ),
-        )
 
         config = SecurityConfig(
             ruleset=(PermissionRule("code_interpreter", "*", PermissionAction.ASK),),
@@ -466,14 +454,16 @@ class TestPTCPathPolicy:
             ),
         ]
 
-        _approved, _denied, pending = await evaluate_tool_batch(
-            tool_calls,
-            config,
-            is_cron=False,
-            workspace_root="/tmp/workspace",
-            session_key="s",
-            args_hashes={},
-        )
+        record = SafetyMetadata(is_read_only=False, is_concurrent_safe=True)
+        with connected_script_tool("filesystem", "filesystem", "write_file", record, {"destructiveHint": True}):
+            _approved, _denied, pending = await evaluate_tool_batch(
+                tool_calls,
+                config,
+                is_cron=False,
+                workspace_root="/tmp/workspace",
+                session_key="s",
+                args_hashes={},
+            )
 
         has_ptc_reason = any("PTC" in reason for _, _, _, reason, _ in pending)
         assert len(pending) >= 1 and has_ptc_reason, "PTC with path outside workspace should be pending with PTC reason"
@@ -701,14 +691,6 @@ class TestLLMReviewer:
         )
         from myrm_agent_harness.agent.security.tool_registry import SafetyMetadata
 
-        monkeypatch.setattr(
-            "myrm_agent_harness.agent.security.tool_registry.get_ptc_safety_metadata",
-            lambda skill, tool: (
-                SafetyMetadata(is_read_only=False, is_concurrent_safe=True),
-                {"readOnlyHint": False, "destructiveHint": True},
-            ),
-        )
-
         config = SecurityConfig(
             ruleset=(PermissionRule("code_interpreter", "*", PermissionAction.ASK),),
             auto_mode_enabled=True,
@@ -723,14 +705,16 @@ class TestLLMReviewer:
             ),
         ]
 
-        await evaluate_tool_batch(
-            tool_calls,
-            config,
-            is_cron=False,
-            workspace_root="/tmp",
-            session_key="s",
-            args_hashes={},
-        )
+        record = SafetyMetadata(is_read_only=False, is_concurrent_safe=True)
+        with connected_script_tool("fs", "fs", "read", record, {"readOnlyHint": False, "destructiveHint": True}):
+            await evaluate_tool_batch(
+                tool_calls,
+                config,
+                is_cron=False,
+                workspace_root="/tmp",
+                session_key="s",
+                args_hashes={},
+            )
 
         assert len(received_commands) == 1
         assert "PTC Annotations" in received_commands[0]
