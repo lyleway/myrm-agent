@@ -5,7 +5,7 @@
  * - ../AppHostView::AppHostView
  *
  * [OUTPUT]
- * - Tests: loading states, the first-time permission question, the menu (permissions, uninstall), that the page is
+ * - Tests: loading states, the permission question on open, the menu (permissions, uninstall), that the page is
  *   embedded with the client injected, and that it fills the window exactly when no shell is shown.
  *
  * [POS]
@@ -126,7 +126,7 @@ describe('AppHostView', () => {
     expect(root).not.toHaveClass('h-dvh');
   });
 
-  it('asks about the declared permissions the first time the app is opened', async () => {
+  it('asks about the declared permissions when the app is opened with nothing decided', async () => {
     mocks.fetchAppDetail.mockResolvedValue(detail());
 
     render(<AppHostView artifactId="art-1" />);
@@ -164,9 +164,9 @@ describe('AppHostView', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 
-  it('keeps a reminder after "not now" that reopens the question', async () => {
+  it('keeps asking after "not now": a reminder on the page, the question again on the next visit', async () => {
     mocks.fetchAppDetail.mockResolvedValue(detail());
-    render(<AppHostView artifactId="art-1" />);
+    const { unmount } = render(<AppHostView artifactId="art-1" />);
     fireEvent.click(await screen.findByRole('button', { name: 'later' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
@@ -174,6 +174,11 @@ describe('AppHostView', () => {
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(mocks.saveGrant).not.toHaveBeenCalled();
+
+    unmount();
+    render(<AppHostView artifactId="art-1" />);
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 
   it('stops reminding once the decisions are saved', async () => {

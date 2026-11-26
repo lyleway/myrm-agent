@@ -17,9 +17,9 @@ the existing ``redact_pii`` infrastructure.
 
 [OUTPUT]
 - convert_trace: convert a single trace to the specified format
-- deduplicate: remove duplicate samples by content hash
+- deduplicate: remove samples whose whole-sample hash repeats (metadata included)
 - redact_trace_credentials: mask the credentials in the trace fields a sample carries
-- redact_trace_pii: apply PII redaction to trace text fields
+- redact_trace_pii: apply PII redaction to the task input and output
 
 [POS]
 Stateless format conversion. Each function is a pure transform
@@ -57,7 +57,7 @@ def convert_trace(trace: ExecutionTrace, fmt: ExportFormat) -> dict[str, object]
 
 
 def content_hash(sample: dict[str, object]) -> str:
-    """Compute SHA-256 hash of a sample's textual content for deduplication."""
+    """Compute the SHA-256 hash of a whole sample, metadata included, for deduplication."""
     raw = json.dumps(sample, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -96,11 +96,11 @@ def _redact_tool_call(call: ToolCallRecord) -> ToolCallRecord:
 
 
 def redact_trace_pii(trace: ExecutionTrace) -> tuple[ExecutionTrace, int]:
-    """Apply PII redaction to the text fields of an ExecutionTrace.
+    """Apply PII redaction to the task input and output of an ExecutionTrace.
 
-    Returns a new trace with redacted fields and the total redaction count.
-    Since ExecutionTrace is mutable (slots=True, not frozen), we modify
-    the fields in-place and return the same object.
+    Redacts in place: ExecutionTrace is mutable (slots=True, not frozen), so the
+    same object is returned together with the total redaction count. The tool-call
+    fields are not scanned for PII; their credentials are masked separately.
     """
     from myrm_agent_harness.agent.security.detection.pii_redactor import redact_pii
 

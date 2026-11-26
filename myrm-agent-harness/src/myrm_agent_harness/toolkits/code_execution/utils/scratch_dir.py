@@ -4,14 +4,15 @@
 (none — standard library only)
 
 [OUTPUT]
-- scratch_dir: ``<workspace>/.myrm/<name>``, where the harness keeps its transient ``name`` files
+- scratch_dir: ``<workspace>/.myrm/<name>``, where the harness keeps its ``name`` files
 - ensure_scratch_dir: that directory, created and hidden from git
 
 [POS]
-Where the harness puts transient files of its own into a workspace: command scripts and output logs. The workspace
-is often a project under version control and the agent can run ``git add -A``, so each directory ignores itself with
-a ``.gitignore`` that holds ``*``. Nothing of the user's own ignore rules is touched, and a file the harness never
-meant to share (an output log holds whatever its command printed) cannot be committed by accident.
+Where the harness puts files of its own into a workspace: command scripts, output logs and the todo lists of the
+chats. The workspace is often a project under version control and the agent can run ``git add -A``, so each
+directory ignores itself with a ``.gitignore`` that holds ``*``. Nothing of the user's own ignore rules is touched,
+and a file the harness never meant to share (an output log holds whatever its command printed) cannot be committed
+by accident.
 """
 
 from __future__ import annotations

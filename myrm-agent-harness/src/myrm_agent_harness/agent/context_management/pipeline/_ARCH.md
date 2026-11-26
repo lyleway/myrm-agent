@@ -8,8 +8,8 @@ Pipeline module.
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Pipeline module. | — |
-| base.py | Core | Pipeline processor base class. Defines the processor interface (BaseProcessor) and context data stru | ✅ |
-| engine.py | Core | Pipeline engine. Serializes chat-scoped context mutations with the session lock, then runs processors sequentially with per-processor failure isolation. | ✅ |
+| base.py | Core | Pipeline processor base class. Defines the processor interface (BaseProcessor) and the context data structure (ProcessorContext), whose `tokens_saved_by` records what each processor saved on its own. | ✅ |
+| engine.py | Core | Pipeline engine. Serializes chat-scoped context mutations with the session lock, then runs processors sequentially with per-processor failure isolation, crediting each processor's savings to its own name in `tokens_saved_by`. | ✅ |
 
 | Submodule | Description |
 |-----------|-------------|

@@ -174,6 +174,7 @@ async def build_general_agent(
         agent_wrapper,
         effective_chat_id,
         runtime,
+        llm=llm,
         lite_llm=llm_bundle.lite_llm,
         mount_plan=mount_plan,
     )

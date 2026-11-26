@@ -8,7 +8,7 @@
  * - ./AppActivityList (POS: recent bridge activity of the app)
  *
  * [OUTPUT]
- * - AppPermissionsDialog: lets the user decide what an installed app may use; `review` is the first-time question,
+ * - AppPermissionsDialog: lets the user decide what an installed app may use; `review` asks about what is still undecided,
  *   `manage` is the standing page behind the host menu, with the app's recent activity.
  *
  * [POS]

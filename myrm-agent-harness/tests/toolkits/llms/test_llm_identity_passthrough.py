@@ -14,7 +14,10 @@ from types import SimpleNamespace
 
 import pytest
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 
+from myrm_agent_harness.agent.context_management.pipeline.base import ProcessorContext
+from myrm_agent_harness.agent.context_management.pipeline.processors import ThinkingBlockCleaner
 from myrm_agent_harness.toolkits.llms.adapters.chat_model.model import TransportChatModel
 from myrm_agent_harness.toolkits.llms.allowed_tools_capability import (
     CAPABILITY_REJECTS_ALLOWED_TOOLS,
@@ -43,6 +46,7 @@ def _chat_llm(**kwargs: object) -> TransportChatModel:
         model=str(kwargs.get("model", "gpt-4o")),
         api_base=(kwargs.get("api_base") or None),  # type: ignore[arg-type]
         model_name=(kwargs.get("model_name") or None),  # type: ignore[arg-type]
+        wire_protocol=kwargs.get("wire_protocol", "chat_completions"),  # type: ignore[arg-type]
     )
 
 
@@ -78,6 +82,14 @@ class TestManagedLLMPassthrough:
         assert top.model == "gpt-4o"
         assert top.api_base == "https://api-a.example.com/v1"
         assert top.base_url == "https://api-a.example.com/v1"
+
+    def test_wire_protocol_delegates_to_main_llm_through_every_layer(self) -> None:
+        inner = _chat_llm(model="gpt-5", wire_protocol="responses")
+        assert ManagedLLM(main_llm=inner).wire_protocol == "responses"
+        assert ManagedLLM(main_llm=ManagedLLM(main_llm=inner)).wire_protocol == "responses"
+
+    def test_wire_protocol_is_none_when_main_llm_declares_none(self) -> None:
+        assert ManagedLLM(main_llm=SimpleNamespace(model="m")).wire_protocol is None  # type: ignore[arg-type]
 
     def test_base_url_falls_back_to_api_base_without_underlying_alias(self) -> None:
         inner = SimpleNamespace(
@@ -124,6 +136,39 @@ class TestKeyPoolLLMPassthrough:
         assert kp.model_name == "gpt-4o-v2"
         assert kp.api_base == "https://api-a.example.com/v1"
         assert kp.base_url == "https://api-a.example.com/v1"
+
+    def test_wire_protocol_delegates_to_primary_instance(self) -> None:
+        llm = _chat_llm(model="gpt-5", wire_protocol="responses")
+        kp = KeyPoolLLM(instances={"k1": llm, "k2": llm}, pool=CredentialPool(["k1", "k2"]))
+        assert kp.wire_protocol == "responses"
+
+
+class TestWireProtocolReachesTheThinkingCleaner:
+    """The cleaner reads the wire protocol off the pipeline's LLM; behind a wrapper it must still see the real one."""
+
+    @staticmethod
+    def _wrappers(wire_protocol: str) -> list[BaseChatModel]:
+        inner = _chat_llm(model="gpt-5", wire_protocol=wire_protocol)
+        pool = KeyPoolLLM(instances={"k1": inner, "k2": inner}, pool=CredentialPool(["k1", "k2"]))
+        return [inner, ManagedLLM(main_llm=inner), ManagedLLM(main_llm=pool), pool]
+
+    @staticmethod
+    async def _has_responses_items_to_clean(llm: BaseChatModel) -> bool:
+        history = [
+            HumanMessage(content="q"),
+            AIMessage(content="a", additional_kwargs={"responses_reasoning_items": [{"id": "rs_1"}]}),
+            HumanMessage(content="next"),
+        ]
+        context = ProcessorContext(messages=history, user_query="next", llm=llm)
+        return await ThinkingBlockCleaner().should_process(context)
+
+    async def test_responses_reasoning_items_are_kept_behind_every_wrapper(self) -> None:
+        for llm in self._wrappers("responses"):
+            assert await self._has_responses_items_to_clean(llm) is False
+
+    async def test_responses_reasoning_items_are_cleaned_for_other_wire_protocols(self) -> None:
+        for llm in self._wrappers("chat_completions"):
+            assert await self._has_responses_items_to_clean(llm) is True
 
 
 class TestCapabilityLearningRoundtrip:

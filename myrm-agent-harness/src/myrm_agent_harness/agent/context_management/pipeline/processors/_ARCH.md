@@ -22,8 +22,8 @@ Pipeline processors module.
 | media_resolver.py | Core | Resolves non-base64 image URLs (HTTP/file/API references) to base64 data URLs right before LLM invocation. Supports `file://` local paths, HTTP(S) StorageProvider URLs, and `/api/media/` paths via injected `FileContentReader`. Every resolved image passes through `compress_if_needed` (responsive send-time compression: oversized Tauri/third-party images downsampled to 2048px; small images and animated GIFs/WebP pass through untouched; CPU-bound compression runs via `asyncio.to_thread` so the event loop is never blocked). Positioned after MediaFilter so only surviving images are resolved. | ✅ |
 | media_budget_governor.py | Core | MediaBudgetGovernorProcessor & CumulativeImageBudgetGovernor: manages multi-turn cumulative image payload limits (default 10MB budget) via 3-Tier Progressive Visual Ladder (Focus 2048px → Context 512px WebP downsample → Semantic text summary) and emergency_evict_from_message_dicts for in-flight 400/413 payload recovery. Protects against HTTP 400 Payload Too Large while preserving prompt cache invariance. | ✅ |
 | normalize_processor.py | Core | Provides NormalizeProcessor. | ✅ |
-| post_compaction_reread_processor.py | Core | Post-compaction active file reread. After compaction (tokens_saved > 0), reads top-5 recently modified files from ArtifactTracker and injects their content as HumanMessage, eliminating redundant read_file tool calls. | ✅ |
-| post_compaction_refetch_guard_processor.py | Core | One-shot tail hint when repeated archive restores for the same path are detected after compaction (anti refetch loop). | ✅ |
+| post_compaction_reread_processor.py | Core | Post-compaction active file reread. Runs when a compaction processor (`compress`, `session_notes`, `summarize`) itself saved tokens (`tokens_saved_by`); thinking cleanup, media filtering and TTL pruning do not trigger it. Reads the top-5 recently modified files from ArtifactTracker, opened and redacted the way the file tools open and show them, and appends their content at the request tail as one HumanMessage, eliminating redundant read_file tool calls. Budget: a quarter of the window it was built with, between 5k and 50k tokens. | ✅ |
+| post_compaction_refetch_guard_processor.py | Core | One-shot tail hint (a HumanMessage, so the cached prefix stays intact) when repeated archive restores for the same path are detected after compaction (anti refetch loop). | ✅ |
 | reasoning_anchor_processor.py | Core | ReasoningAnchorProcessor: extracts decision, constraint, and finding anchors into SessionAnchorLedger before ThinkingBlockCleaner, and injects preserved anchors into the user's latest message. The block is frozen per user turn (`SessionAnchorLedger.render_for_turn`), so the message stays byte-identical across the tool rounds of one turn and the Prompt Prefix Cache keeps matching; reasoning that leads into a tool call yields no tail-sentence anchor, since its last sentence is a plan, not a conclusion. | ✅ |
 | selective_eviction_processor.py | Core | SelectiveEvictionProcessor: deterministic mark-driven selective eviction of transient hints and scratchpads prior to heavy tool-call compression and LLM summarization, strictly honoring Tool Pair Invariant and whitelist immunity for pinned rules. | ✅ |
 | session_notes_processor.py | Core | Provides SessionNotesProcessor. | ✅ |
@@ -35,3 +35,6 @@ Pipeline processors module.
 
 - `observability`
 - `utils`
+- `core/context_vars.py`
+- `core/security/path/typed_path.py`
+- `core/security/redact/`

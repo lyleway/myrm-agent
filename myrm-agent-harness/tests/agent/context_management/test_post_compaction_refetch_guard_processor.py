@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from myrm_agent_harness.agent.context_management.pipeline.base import ProcessorContext
 from myrm_agent_harness.agent.context_management.pipeline.processors.post_compaction_refetch_guard_processor import (
@@ -56,6 +56,8 @@ async def test_injects_hint_when_archive_refetch_loops() -> None:
     assert await processor.should_process(context) is True
     updated = await processor.process(context)
     assert len(updated.messages) == 2
+    assert type(updated.messages[-1]) is HumanMessage
+    assert not any(isinstance(m, SystemMessage) for m in updated.messages)
     assert "Repeated archive restores were detected" in str(updated.messages[-1].content)
     assert updated.metadata["post_compaction_refetch_guard_injected"] is True
 

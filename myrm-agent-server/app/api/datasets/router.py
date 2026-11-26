@@ -11,7 +11,7 @@ in ShareGPT, Alpaca, or OpenAI JSONL formats.
 [OUTPUT]
 - POST /export: trigger a dataset export
 - GET /formats: list available export formats
-- GET /reports/{filename}: download an exported JSONL file
+- GET /files, GET /files/{filename}: list and download the exported JSONL files
 
 [POS]
 HTTP thin layer for dataset export. All heavy logic in harness.

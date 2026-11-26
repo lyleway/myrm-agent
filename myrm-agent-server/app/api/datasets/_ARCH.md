@@ -2,7 +2,7 @@
 
 ## 架构概述
 
-数据集导出 HTTP 入口层。将事件日志轨迹数据导出为标准微调格式（ShareGPT / Alpaca / OpenAI JSONL），支持 PII 脱敏、质量过滤和增量导出。上级：[../_ARCH.md](../_ARCH.md)。
+数据集导出 HTTP 入口层。将事件日志轨迹数据导出为标准微调格式（ShareGPT / Alpaca / OpenAI JSONL），支持 PII 脱敏（仅任务输入与最终回答）、质量过滤和增量导出。上级：[../_ARCH.md](../_ARCH.md)。
 
 ## 文件
 

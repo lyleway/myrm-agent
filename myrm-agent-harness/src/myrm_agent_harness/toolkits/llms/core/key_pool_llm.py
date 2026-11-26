@@ -237,7 +237,7 @@ class KeyPoolLLM(BaseChatModel):
         return self.bind(**primary_binding.kwargs)
 
     # ------------------------------------------------------------------
-    # Identity passthrough (model / api_base / base_url)
+    # Identity passthrough (model / api_base / base_url / wire_protocol)
     # ------------------------------------------------------------------
     # All pooled instances share the same model + endpoint, so delegate to
     # the stable primary instance. Downstream consumers (capability learning,
@@ -262,6 +262,11 @@ class KeyPoolLLM(BaseChatModel):
     def base_url(self) -> str | None:
         """API base URL alias of the pooled LLM instances."""
         return getattr(self._instances[self._primary_key], "base_url", None) or self.api_base
+
+    @property
+    def wire_protocol(self) -> str | None:
+        """Wire protocol of the pooled LLM instances (None when they declare none)."""
+        return getattr(self._instances[self._primary_key], "wire_protocol", None)
 
     @property
     def _llm_type(self) -> str:

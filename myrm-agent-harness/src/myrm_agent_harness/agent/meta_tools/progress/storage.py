@@ -7,13 +7,15 @@ Chats of one project share its workspace directory, so each chat keeps its own l
 - infra.atomic_write::atomic_write (POS: crash-safe writes)
 - context_management.infra.evicted::normalize_delivery_chat_id (POS: session id to chat id, the same key the evicted-content directories use)
 - core.context_vars::chat_id_var (POS: the chat of the running agent)
+- toolkits.code_execution.utils.scratch_dir::ensure_scratch_dir, scratch_dir (POS: The harness's own directories inside a workspace, hidden from git)
 
 [OUTPUT]
 - read/write/merge todos under workspace `.myrm/progress/<chat>/`
 - todo_scope, todos_path, workspace_todos_exist helpers
 
 [POS]
-Persists main-agent todo state in chat workspace (atomic JSON).
+Persists main-agent todo state in chat workspace (atomic JSON). The workspace is often a project under version
+control, so the progress directory ignores itself and no plan file reaches the user's `git status`.
 """
 
 from __future__ import annotations
@@ -27,10 +29,11 @@ from myrm_agent_harness.agent.context_management.infra.evicted import normalize_
 from myrm_agent_harness.agent.meta_tools.progress.schemas import TodoItem, TodoStatus, TodoStore
 from myrm_agent_harness.core.context_vars import chat_id_var
 from myrm_agent_harness.infra.atomic_write import atomic_write
+from myrm_agent_harness.toolkits.code_execution.utils.scratch_dir import ensure_scratch_dir, scratch_dir
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_RELATIVE_DIR = ".myrm/progress"
+_PROGRESS_SCRATCH_NAME = "progress"
 TODOS_FILENAME = "todos.json"
 DEFAULT_TODO_SCOPE = "default"
 
@@ -49,7 +52,7 @@ def todo_scope(chat_id: str | None = None) -> str:
 
 
 def todos_path(workspace_root: str, chat_id: str | None = None) -> Path:
-    return Path(workspace_root) / PROGRESS_RELATIVE_DIR / todo_scope(chat_id) / TODOS_FILENAME
+    return scratch_dir(workspace_root, _PROGRESS_SCRATCH_NAME) / todo_scope(chat_id) / TODOS_FILENAME
 
 
 def read_todos_sync_from_workspace(workspace_root: str, chat_id: str | None = None) -> TodoStore | None:
@@ -67,8 +70,8 @@ def read_todos_sync_from_workspace(workspace_root: str, chat_id: str | None = No
 
 
 def write_todos_sync_to_workspace(workspace_root: str, store: TodoStore, chat_id: str | None = None) -> None:
-    path = todos_path(workspace_root, chat_id)
-    atomic_write(path, store.model_dump_json(indent=2))
+    ensure_scratch_dir(workspace_root, _PROGRESS_SCRATCH_NAME)
+    atomic_write(todos_path(workspace_root, chat_id), store.model_dump_json(indent=2))
 
 
 def workspace_todos_exist(*, workspace_root: str | None) -> bool:
@@ -78,8 +81,7 @@ def workspace_todos_exist(*, workspace_root: str | None) -> bool:
     """
     if not workspace_root:
         return False
-    progress_dir = Path(workspace_root) / PROGRESS_RELATIVE_DIR
-    return any(progress_dir.glob(f"*/{TODOS_FILENAME}"))
+    return any(scratch_dir(workspace_root, _PROGRESS_SCRATCH_NAME).glob(f"*/{TODOS_FILENAME}"))
 
 
 def delete_todos_sync_from_workspace(workspace_root: str, chat_id: str | None = None) -> None:

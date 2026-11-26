@@ -6824,7 +6824,7 @@
         },
         "fetch": {
           "title": "Network access",
-          "description": "Load data from these sites only:"
+          "description": "Exchange data with these sites only:"
         },
         "activity": {
           "title": "Recent activity",
