@@ -170,7 +170,7 @@ export function TaskDeliverableBundle({ goal, chatId }: TaskDeliverableBundlePro
       }
       setDownloading(true);
       try {
-        const res = await fetchWithTimeout('/artifacts/download-bundle', {
+        const res = await fetchWithTimeout('/files/artifacts/download-bundle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ artifact_ids: idsToDownload, chat_id: chatId }),

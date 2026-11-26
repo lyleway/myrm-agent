@@ -1,6 +1,6 @@
 'use client';
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { GoalState } from '../goalStatusTypes';
 
@@ -29,6 +29,7 @@ vi.mock('@/components/features/artifacts/artifactUtils', () => ({
   },
 }));
 
+import { fetchWithTimeout } from '@/lib/api';
 import { TaskDeliverableBundle } from '../TaskDeliverableBundle';
 
 const makeGoal = (overrides: Partial<GoalState> = {}): GoalState => ({
@@ -96,6 +97,13 @@ describe('TaskDeliverableBundle', () => {
     expect(exportSelectedBtn).toBeInTheDocument();
 
     fireEvent.click(exportSelectedBtn);
+
+    // The zip is requested from the files API, the route the server actually serves, with exactly the selected ids.
+    await waitFor(() => expect(fetchWithTimeout).toHaveBeenCalledTimes(1));
+    const [endpoint, init] = vi.mocked(fetchWithTimeout).mock.calls[0];
+    expect(endpoint).toBe('/files/artifacts/download-bundle');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ artifact_ids: ['art-1', 'art-2'], chat_id: 'chat-1' });
   });
 
   it('returns null when deliverables is empty or has < 2 items', () => {
