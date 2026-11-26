@@ -12,7 +12,6 @@ from app.config.browser import (
     get_browser_egress_guard,
     get_browser_launch_options,
     get_browser_pool_config,
-    get_configured_browser_pool,
 )
 
 
@@ -126,18 +125,6 @@ class TestIgnoreHttpsErrorsSwitch:
         assert after.ignore_https_errors is True
         assert after == dataclasses.replace(before, ignore_https_errors=True)
 
-    def test_the_configured_pool_is_created_with_the_choice(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv(_IGNORE_HTTPS_ERRORS_ENV, "true")
-        monkeypatch.setattr("app.config.browser.is_local_mode", lambda: False)
-
-        with (
-            patch("app.config.browser.get_browser_egress_guard", return_value=None),
-            patch(_CREATE_POOL) as create_pool,
-        ):
-            get_configured_browser_pool()
-
-        assert create_pool.call_args.kwargs["config"].ignore_https_errors is True
-
 
 class TestGetBrowserLaunchOptions:
     def test_local_mode_visible_fallback_launch(self) -> None:
@@ -155,7 +142,6 @@ class TestGetBrowserLaunchOptions:
 
 
 _CREATE_GUARD = "myrm_agent_harness.toolkits.browser.pool.create_egress_guard"
-_CREATE_POOL = "myrm_agent_harness.toolkits.browser.pool.get_global_browser_pool"
 
 
 class TestGetBrowserEgressGuard:
@@ -185,14 +171,3 @@ class TestGetBrowserEgressGuard:
             patch(_CREATE_GUARD, return_value=None),
         ):
             assert get_browser_egress_guard() is None
-
-    def test_the_configured_pool_is_created_with_the_guard_of_the_deployment(self) -> None:
-        guard = MagicMock(name="guard")
-
-        with (
-            patch("app.config.browser.get_browser_egress_guard", return_value=guard),
-            patch(_CREATE_POOL) as create_pool,
-        ):
-            get_configured_browser_pool()
-
-        assert create_pool.call_args.kwargs["egress_guard"] is guard

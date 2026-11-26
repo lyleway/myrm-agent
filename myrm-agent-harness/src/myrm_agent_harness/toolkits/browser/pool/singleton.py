@@ -5,11 +5,14 @@
 - .config::BrowserPoolConfig (POS: browser pool config)
 
 [OUTPUT]
-- get_global_browser_pool: get global pool singleton
-- reset_global_browser_pool_for_tests: shut down and clear pool singleton (test teardown)
+- get_global_browser_pool: get the global pool singleton, creating it on the first call
+- peek_global_browser_pool: the singleton if one exists; never creates it
+- shutdown_global_browser_pool: shut down and forget the singleton (application shutdown, test teardown)
 
 [POS]
-Manages the GlobalBrowserPool singleton lifecycle, including atexit/SIGTERM cleanup hooks.
+Manages the GlobalBrowserPool singleton lifecycle: the first caller creates it, so the first caller's configuration
+is the pool's configuration; observers peek instead of creating; shutdown closes the pool, keeps it from relaunching
+browsers (the closed pool refuses work) and forgets it; atexit/SIGTERM hooks close whatever is still registered.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _global_pool: GlobalBrowserPool | None = None
-_TEST_SHUTDOWN_TIMEOUT_SEC = 30.0
+_SHUTDOWN_TIMEOUT_SEC = 30.0
 
 # Longest an exit hook waits for the pool to close. Closing a healthy pool takes a few seconds
 # (each browser gets 5 s to close gracefully before it is force-killed).
@@ -115,7 +118,8 @@ def get_global_browser_pool(
 ) -> GlobalBrowserPool:
     """Get GlobalBrowserPool singleton.
 
-    First call creates the instance; subsequent calls return the same instance.
+    First call creates the instance; subsequent calls return the same instance and ignore their arguments, so the
+    caller that creates the pool must supply the complete configuration.
 
     Args:
         max_browsers: Maximum Browser instance count
@@ -144,11 +148,21 @@ def get_global_browser_pool(
     return _global_pool
 
 
-async def reset_global_browser_pool_for_tests() -> None:
-    """Shut down and clear the global pool singleton.
+def peek_global_browser_pool() -> GlobalBrowserPool | None:
+    """Return the global pool if one exists, without creating it.
 
-    Intended for pytest teardown between tests. Unlike ``get_global_browser_pool()``,
-    this never creates a pool when none exists.
+    For callers that only act on a running pool (health probes, configuration hot reload): a pool created just to be
+    observed would fix the configuration of whoever happened to ask first.
+    """
+    return _global_pool
+
+
+async def shutdown_global_browser_pool() -> None:
+    """Shut down the global pool and forget it; the next ``get_global_browser_pool()`` creates a new one.
+
+    Never creates a pool when none exists. The shutdown is bounded, so a wedged browser cannot stall the caller;
+    the pool is forgotten either way, and its closed state keeps a holder of the old instance from relaunching
+    browsers.
     """
     global _global_pool
 
@@ -157,7 +171,7 @@ async def reset_global_browser_pool_for_tests() -> None:
         return
 
     try:
-        await asyncio.wait_for(pool.shutdown(), timeout=_TEST_SHUTDOWN_TIMEOUT_SEC)
+        await asyncio.wait_for(pool.shutdown(), timeout=_SHUTDOWN_TIMEOUT_SEC)
     except TimeoutError:
         logger.warning("Global browser pool shutdown timed out; dropping the singleton")
     finally:

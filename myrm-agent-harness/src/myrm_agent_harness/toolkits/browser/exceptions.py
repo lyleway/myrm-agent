@@ -6,8 +6,9 @@ semantic meaning and exception chaining support.
 Architecture:
     BrowserError (root)
     ├── BrowserPoolError
-    │   └── BrowserLaunchError
-    │       └── EngineUnavailableError
+    │   ├── BrowserLaunchError
+    │   │   └── EngineUnavailableError
+    │   └── BrowserPoolClosedError
     ├── BrowserSessionError
     │   └── BrowserNavigationError
     ├── BrowserToolError
@@ -35,6 +36,7 @@ Usage:
 - BrowserPoolError: Pool management errors
 - BrowserLaunchError: Browser launch failures
 - EngineUnavailableError: Requested engine refused before any session state changed
+- BrowserPoolClosedError: Work asked of a pool that was shut down
 - BrowserSessionError: Session operation errors
 - BrowserNavigationError: Navigation failure with the url, status and error text and the recovery steps for them
 - BrowserToolError: Tool execution errors
@@ -154,6 +156,14 @@ class EngineUnavailableError(BrowserLaunchError):
     Raised by pre-flight checks (the optional engine is not installed, or the active
     browser is an attached real browser that cannot be swapped), so unlike a plain
     ``BrowserLaunchError`` the session is guaranteed untouched.
+    """
+
+
+class BrowserPoolClosedError(BrowserPoolError):
+    """The pool was shut down, so it launches no browser and hands out no page.
+
+    A caller that still holds the pool after shutdown (a session that outlived it) gets this error instead of
+    bringing the browsers back after the application closed them.
     """
 
 

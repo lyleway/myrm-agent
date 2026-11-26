@@ -8,8 +8,9 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 
 | 路径 | 地位 | 职责 |
 |------|------|------|
-| `conftest.py` | 核心 | 进程级 `.env` + [T] secrets bootstrap、隔离 workspace（`MYRM_DATA_DIR` 指向进程私有的临时目录 `myrm_test_<pid>_*`，测试模块不得在导入期改写它——被 `-m` 排除的模块同样会被导入；自动写入 `.metadata_never_index` 阻断 macOS Spotlight 索引风暴；`MYRM_DEV_STATE_DIR` 未设置时取 `myrm-test-data-*/state`——该目录在 `MYRM_DATA_DIR` 未设置或指向真实 `~/.myrm` 时创建，已配置了别的数据目录则取其下的 `state`；这两个临时目录都由创建它们的进程在退出时删除，不随重复运行堆积）、`test_secrets` session fixture、integration/e2e 路径每测后 `reset_global_browser_pool_for_tests()`、session 结束 + `@chrome_e2e` timeout 时 `reset_database_engine()` + `reap_chrome_e2e_session_hygiene()` + `shutdown_cached_memory_managers()`、浏览器进程树 cleanup（`tests/support/browser_process_cleanup`）；`_chrome_e2e_epoch_pin` 会话级保持 `MYRM_E2E_SESSION_PREPIN_API` 与 `_SESSION_EPOCH_PIN_RUNTIMES` 并在 `pytest_sessionfinish` 统一释放 holder 引用（含同会话 skip 结果缓存防连拉 3 次）；`@pytest.mark.chrome_e2e` 三维 profile + **PRIVATE 必填 `private_reason`** + **`global_write_non_namespace`⇒`GLOBAL_WRITE` 语义校验**（与 `scripts/dev/e2e_session/profile.py` 对齐） |
+| `conftest.py` | 核心 | 进程级 `.env` + [T] secrets bootstrap、隔离 workspace（`MYRM_DATA_DIR` 指向进程私有的临时目录 `myrm_test_<pid>_*`，测试模块不得在导入期改写它——被 `-m` 排除的模块同样会被导入；自动写入 `.metadata_never_index` 阻断 macOS Spotlight 索引风暴；`MYRM_DEV_STATE_DIR` 未设置时取 `myrm-test-data-*/state`——该目录在 `MYRM_DATA_DIR` 未设置或指向真实 `~/.myrm` 时创建，已配置了别的数据目录则取其下的 `state`；这两个临时目录都由创建它们的进程在退出时删除，不随重复运行堆积）、`test_secrets` session fixture、integration/e2e 路径每测后 `shutdown_global_browser_pool()`、session 结束 + `@chrome_e2e` timeout 时 `reset_database_engine()` + `reap_chrome_e2e_session_hygiene()` + `shutdown_cached_memory_managers()`、浏览器进程树 cleanup（`tests/support/browser_process_cleanup`）；`_chrome_e2e_epoch_pin` 会话级保持 `MYRM_E2E_SESSION_PREPIN_API` 与 `_SESSION_EPOCH_PIN_RUNTIMES` 并在 `pytest_sessionfinish` 统一释放 holder 引用（含同会话 skip 结果缓存防连拉 3 次）；`@pytest.mark.chrome_e2e` 三维 profile + **PRIVATE 必填 `private_reason`** + **`global_write_non_namespace`⇒`GLOBAL_WRITE` 语义校验**（与 `scripts/dev/e2e_session/profile.py` 对齐） |
 | `support/browser_process_cleanup.py` | 辅助 | pytest 进程树内 browser 自动化子进程 teardown |
+| `support/browser_pool_build.py` | 辅助 | 经真实单例与真实建池入口 `ensure_browser_pool` 建全局浏览器池而不起浏览器：只替换池类（`PoolDouble` 记录建池参数与运行中池上的调用），每个配方成分在事件循环上让出一次以复现并发交错；每测换新的建池锁（在某个测试循环里被争用过的锁绑定在该循环上） |
 | `support/test_browser_process_cleanup.py` | 单元 | browser_process_cleanup 单测 |
 | `support/pending_task_report.py` | 辅助 | 线程式 pytest 超时只给线程栈（事件循环线程停在 `select`，看不出哪个 await 没完成）：`pending_task_report()` 列出所有运行中事件循环里未完成任务（`__init__` 没走完、读不出运行状态的循环对象被跳过，诊断不因它崩溃），每个任务给出从它的协程经异步生成器的一步和被等待的任务一直到最后等的那个 Future 的整条 await 链（与 `cancelling` 状态），`report_pending_tasks_after(秒)` 在代码块超时未结束时把它写到真实 stderr |
 | `support/test_pending_task_report.py` | 单元 | 报告点名卡住的任务与它所等的协程；穿过异步生成器的一步与被等待的任务，一直到最后的 Future；进程里有 `__init__` 没走完的循环对象（垃圾回收器看得到、`is_running()` 抛 `AttributeError`）时报告照常生成；超时的代码块会写报告（报告要遍历全部存活对象，大进程里要近 1 s；测试把 `sys.__stderr__` 换成记录器、等报告写完的那次 flush，不在写的过程中读 capfd——读会截断捕获文件，写到一半的报告变成 NUL 字节），按时结束的不写 |
@@ -553,6 +554,9 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `services/chat/test_chat_channel_lookup.py` | 模块 | `get_newest_channel_chat_under`：取会话键下最新的聊天，id 以该键开头的另一对端不被取到，没有聊天时为空 |
 | `lifecycle/test_instance_auto_backup_schedule.py` | 模块 | 调度器注册整实例定时备份检查：任务 id `instance_auto_backup`、每小时间隔、启动后约 5 分钟首次触发、不影响同调度器的相邻任务；数据库维护任务 `db_maintenance` 每 6 小时、首次在启动后约 3 分钟（不与首屏请求抢事件循环） |
 | `lifecycle/test_checkpoint_history_schedule.py` | 模块 | 调度器注册 checkpoint 历史裁剪：任务 id `checkpoint_history_prune`、每 6 小时、启动后约 10 分钟首次触发、不影响同调度器的相邻任务；任务把裁剪交给服务 |
+| `lifecycle/test_browser_warmup.py` | 模块 | 应用的浏览器池由唯一的建池入口预热、从不在使用者脚下被替换：无池时按完整配方建池并预热；启动期间请求已建好的池原样保留（不关闭、不重建）；请求与预热同时需要池时共用同一个池；200 个请求 + 20 次预热并发只建一次、配方完整、从不关闭；关闭会关闭并遗忘池，没有池时不创建 |
+| `config/test_ensure_browser_pool.py` | 模块 | `ensure_browser_pool` 的契约：池带完整配方（容量、配置含云端点、启动参数、扩展桥、代理池、出口守卫）；运营方证书开关到达池；已存在的池原样返回且不再解析任何成分；别处建的池从不被替换；200 个并发调用只建一次；建池失败不留池、下一个调用重建 |
+| `config/test_browser_proxy_resolution.py` | 模块 | `resolve_browser_proxy_pool`：库里启用的代理优先于 `MYRM_PROXIES`；关闭或为空时回退环境变量；配置不可读时回退环境变量；都没有则无池 |
 | `lifecycle/test_browser_profile_gc_schedule.py` | 模块 | 调度器注册浏览器临时 profile 目录回收：任务 id `browser_profile_gc`、每 6 小时、启动后约 15 分钟首次触发、不影响相邻任务；任务以 `dry_run=False` 且保持库默认的 24 小时年龄闸真实回收，并在工作线程执行（目录遍历与进程表读取不占事件循环）；回收失败只记警告、不逃逸给调度器 |
 | `lifecycle/test_db_maintenance_backup.py` | 模块 | 数据库维护任务里的整库备份在工作线程执行（不占事件循环）；备份失败只记警告、其余清扫照常运行 |
 | `lifecycle/test_remote_backup_sync_schedule.py` | 模块 | 调度器注册云端记忆定时备份检查：任务 id `remote_backup_auto_sync`、每小时间隔、启动后约 5 分钟首次触发；任务把已存设置交给 tick（从未配置时按「未设置」交付，被已丢失密钥封存的设置经真实 `ConfigService.get` 按「不可读」交付并暂停同步）；任务内任何失败都不逃逸给调度器 |
@@ -729,6 +733,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/config/test_readiness_empty_install.py` | 模块 | 全新安装、没选默认模型的供应商、封存供应商配置的密钥丢失，都按「供应商未就绪」的正常答案返回（不降级），引导标志取自数据库；配置齐全即就绪；真正的加载失败仍报降级 |
 | `services/channels/test_credential_hot_register.py` | 模块 | 凭据保存后的热加载：每个声明凭据的渠道，其配置键都在 `CREDENTIAL_KEY_TO_CHANNEL` 里（voice 声明的 `twilioCredentials` 不在表内，以严格 xfail 记录）；GitHub 与 OneBot 的保存经真实 `from_credentials` 构建渠道并交给网关 `swap_channel` |
 | `api/config/test_search_services_validation.py` | 模块 | searchServices Omni 422：unknown slug、duplicate enabled priority、non-selectable enabled slug |
+| `api/config/test_browser_hot_reload.py` | 模块 | 保存云浏览器或代理设置只重配运行中的池、绝不建池：没有池时什么也不建不重载；运行中的池取到保存的云端点与代理（关闭则清空）；设置可读之前建成的池就地补全（同一个池、从不关闭）；保存发生在建池期间时，重载等建池结束并落到建成的池上；不合法的值不动运行中的池 |
 | `api/config/test_omni_config.py` | 模块 | Omni-Config schema/sync/history/rollback；batch sync duplicate search priority 422 |
 | `api/config/test_retrieval_save_reaches_faq.py` | 模块 | 保存的 embedding 模型到达 FAQ 拦截器：真实路由（`PUT /config/{key}` 与 UI 实际使用的 `POST /config/sync`）+ 真实配置库 + 真实检索配置加载器，只替换 embedding 后端与向量库；保存后的下一次 FAQ 取用用的是最后保存的模型 |
 | `services/faq/test_faq_factory_retrieval.py` | 模块 | FAQ 拦截器装配：embedding 取自 WebUI 检索设置而非环境变量；配置不变时复用同一个拦截器与同一个向量库客户端，模型/密钥/地址任一变化即重建，未配置时丢弃，读配置临时失败不丢缓存 |
@@ -792,7 +797,8 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `integration/test_durable_outbound_integration.py` | 模块 | Durable outbound 全链路集成（15 cases：含 QueueFull 自动 recover、edit_placeholder、send_tracked、edit fallback、null-send→DLQ） |
 | `api/health/test_liveness_pending_outbound.py` | 模块 | GET `/health/liveness` 返回 `pendingOutboundCount` |
 | `api/health/test_liveness_gateway_runtime.py` | 模块 | GET `/health/liveness` 返回 `gatewayRuntime` 零载荷块；gateway 异常时 `state=degraded`；Prometheus `myrm_gateway_*` gauge 刷新 |
-| `api/health/test_browser_doctor.py` | 模块 | 健康 browser 端点：`/health/browser`（pool health 正常/异常降级且根因进日志）+ `/health/browser/doctor`（relay 检查作为 `extra_checks` 传入 + launch_test 透传 + 真实 `run_doctor` 下 relay 行进入 `checks` 与 `summary`）+ `/health/browser/orphans` GET/DELETE（automation 扫描、confirm 安全门、预览只报会被清理的沙箱数与临时 profile 数、预览与清理共用 harness 默认年龄阈值、沙箱与 profile 的释放空间求和、两类目录的 failed 合并透传、空孤儿、失败时根因进日志；目录清理一律桩掉，测试不触碰真实目录） |
+| `api/health/test_browser_pool_health.py` | 模块 | 健康 browser 端点 `/health/browser`：pool health 正常/异常降级且根因进日志；池尚未建成时按空闲池报 healthy（0 个浏览器），且绝不因只读探测而建池 |
+| `api/health/test_browser_doctor.py` | 模块 | 健康 browser 端点：`/health/browser/doctor`（relay 检查作为 `extra_checks` 传入 + launch_test 透传 + 真实 `run_doctor` 下 relay 行进入 `checks` 与 `summary`）+ `/health/browser/orphans` GET/DELETE（automation 扫描、confirm 安全门、预览只报会被清理的沙箱数与临时 profile 数、预览与清理共用 harness 默认年龄阈值、沙箱与 profile 的释放空间求和、两类目录的 failed 合并透传、空孤儿、失败时根因进日志；目录清理一律桩掉，测试不触碰真实目录） |
 | `api/health/test_browser_connectivity.py` | 模块 | `/health/browser/test-cloud-connection`（not_configured/disabled/invalid/connected/failed/无 WS 库）+ `/health/browser/test-proxy-connection`（not_configured/disabled/invalid/connected/http error/异常；mock config_service + websockets/httpx） |
 | `api/health/test_database_recovery.py` | 模块 | 数据库容灾对真实 SQLite：备份管理器的备份与恢复、`rescue_database` 及分步打捞流程、重置数据库接口；`database_is_damaged` 只在文件本身损坏时为真：完好、缺失、零字节、被另一连接锁住与没有读权限的库为假，文件头不是数据库、被截断、数据页被写坏、第 1 页（schema）被写坏为真，路径含空格、`#`、`%`（桌面版数据库在 `Application Support` 下）也能探测；`reports_corruption` 认得真实 SQLite 在坏文件上抛的错误（含扩展结果码、SQLAlchemy 的 `orig` 与异常链），对「没有这张表」这类错误与循环的异常链不误报也不死循环 |
 | `api/health/test_readiness_warmup_hook.py` | 单元 | `/health/ready` 在数据库就绪时通知后台预热（前端据此放行首屏），数据库不可用时不通知；三项依赖检查以替身注入，不打开任何存储 |
@@ -1132,6 +1138,6 @@ pytest marker 是收集过滤器。四层金字塔（server 侧）：
 
 - `tests/conftest.py` → `tests/support/test_secrets.py`（**唯一** [T] 加载入口）
 - 新 API/集成测优先 `from tests.support.minimal_app import build_minimal_app` + `preset_for_test_path()`，禁止 `from app.main import app`
-- `tests/conftest.py` → integration/e2e/lifecycle 路径 autouse `reset_global_browser_pool_for_tests()`（防 Chromium 跨测累积）；sessionfinish 释放 DB engine 与 `_memory_manager_cache`
+- `tests/conftest.py` → integration/e2e/lifecycle 路径 autouse `shutdown_global_browser_pool()`（防 Chromium 跨测累积）；sessionfinish 释放 DB engine 与 `_memory_manager_cache`
 - `tests/unit/test_system_storage.py`：系统存储 API 单元测（**禁止**在 `tests/unit/` 下创建 `api/` 子包，会与 `tests/api/` 在 `import_mode=importlib` 下冲突）
 - `app/startup/env_loader.py` **不**读取 `.env.test`

@@ -7,17 +7,20 @@
 - .driver_leftovers::terminate_driver_browsers (POS: ends the browsers a dead driver left running)
 - .egress_guard::EgressGuard (POS: connection guard of the launched browsers; stopped at shutdown, kept across a proxy hot reload)
 - .proxy::ProxyPool (POS: proxy pool that can be replaced while the pool runs)
+- ..exceptions::BrowserPoolClosedError (POS: raised for work asked of a pool that was shut down)
 - ..utils.page_health::is_driver_closed_error (POS: tells a close that failed on an exited Playwright driver from other failures)
 
 [OUTPUT]
-- PoolLifecycleMixin: lifecycle loop, `_close_browser_instance`, `shutdown`, `update_proxy_pool`, `update_remote_endpoint` for GlobalBrowserPool
+- PoolLifecycleMixin: lifecycle loop, `_close_browser_instance`, `shutdown`, `_raise_if_closed`, `update_proxy_pool`, `update_remote_endpoint` for GlobalBrowserPool
 
 [POS]
 Everything that starts, ends or reconfigures the pool as a whole. The loop runs the crash watchdog's tick every 30 s
 and stops on its own when the pool is empty; closing an instance closes its page pools and contexts first and the
 browser itself only when the pool launched it (a user's browser is never closed on the user's behalf). A launched
 browser whose driver has exited cannot be closed that way, so its processes are ended instead. Shutdown ends the egress
-guard last, after the browsers whose connections it carried.
+guard last, after the browsers whose connections it carried, and leaves the pool closed for good: a caller that still
+holds it gets `BrowserPoolClosedError` (`_raise_if_closed`) and the loop is not started again, because a late call
+would otherwise relaunch browsers that nothing closes again.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
+from ..exceptions import BrowserPoolClosedError
 from ..utils.page_health import is_driver_closed_error
 from .browser_launcher import BrowserInstance, BrowserLauncher
 from .config import BrowserEngine, BrowserPoolConfig, LaunchMode
@@ -53,6 +57,7 @@ class PoolLifecycleMixin:
     - _egress_guard: EgressGuard | None
     - _context_factory: ContextFactory
     - _lifecycle_task: asyncio.Task[None] | None
+    - _closed: whether ``shutdown`` has run
     - _total_acquires / _total_releases: counters reported at shutdown
     """
 
@@ -65,6 +70,7 @@ class PoolLifecycleMixin:
     _egress_guard: EgressGuard | None
     _context_factory: ContextFactory
     _lifecycle_task: asyncio.Task[None] | None
+    _closed: bool
     _total_acquires: int
     _total_releases: int
 
@@ -73,10 +79,15 @@ class PoolLifecycleMixin:
         async def _lifecycle_tick(self) -> None: ...
 
     def _ensure_lifecycle_loop(self) -> None:
-        """Start the lifecycle background loop if not already running."""
-        if self._lifecycle_task is not None and not self._lifecycle_task.done():
+        """Start the lifecycle background loop if not already running (never for a closed pool)."""
+        if self._closed or (self._lifecycle_task is not None and not self._lifecycle_task.done()):
             return
         self._lifecycle_task = asyncio.create_task(self._lifecycle_loop())
+
+    def _raise_if_closed(self) -> None:
+        """Refuse work on a pool that was shut down, so a late call cannot launch browsers nothing will close."""
+        if self._closed:
+            raise BrowserPoolClosedError("The browser pool was shut down")
 
     async def _lifecycle_loop(self) -> None:
         """Background loop: health-check crashed browsers and evict idle ones.
@@ -129,7 +140,12 @@ class PoolLifecycleMixin:
                     await terminate_driver_browsers(browser_inst.driver_token)
 
     async def shutdown(self) -> None:
-        """Close all resources (called at app shutdown)."""
+        """Close all resources (called at app shutdown); the pool accepts no work afterwards.
+
+        The pool is marked closed before anything is awaited, so no acquisition that starts later can launch a
+        browser while the others are being closed.
+        """
+        self._closed = True
         logger.info(
             f"GlobalBrowserPool shutdown — stats: acquires={self._total_acquires}, "
             f"releases={self._total_releases}, browsers={len(self._browsers)}",

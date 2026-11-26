@@ -113,6 +113,7 @@ Extension Bridge 与 SessionVault 让 Agent 复用已登录会话，且无需读
 - **取消安全的取页**：`acquire_page` 经 `pool/page_acquisition.py::PageAcquisition` 持有全局并发许可（及已从 `PagePool` 取出的页面），直到页面被计入「在用」（`commit`）才交给 `release_page`；取页途中被取消或失败（冷启动浏览器、创建上下文、重置空闲页、等池锁），许可与已取出的页面原路归还，崩溃处理器已为该页归还许可时不重复归还。全局许可信号量是进程级单例、从不对账，漏一个就永久少一个槽位。唯一的有界残留：创建页面的调用本身被取消时没有页面句柄可归还，该页留在其上下文里，直到上下文销毁。
 - **崩溃判定以浏览器为准**：`CrashWatchdog` 的存活探针先问浏览器进程本身（浏览器级 CDP `Browser.getVersion`），应答即视为存活；不应答时再用池内页面求第二意见，两者都不应答才判定崩溃。单页面长时间导航不会被判为浏览器崩溃。Playwright driver 已退出的浏览器是例外：探针抛 `DriverClosedError`，不问页面直接判死（见下一条）。
 - **Playwright driver 退出**：driver（Playwright 的 Node 进程）被杀或崩溃后，`browser.is_connected()` 仍为 True、不触发 `disconnected` 事件，此后每个协议调用（含 `page.close()`、`context.close()`、`browser.close()`）都抛出消息为 `<方法>: Connection closed while reading from the driver` 的普通 `Exception`，所以 `is_driver_closed_error` 只能按消息（连同 `__cause__` / `__context__` 链）识别它。没有事件通知池，由几处调用点各自处理：取页撞上它时，`acquire_page` 先让 `CrashWatchdog` 立即巡检一次、踢掉已死的浏览器，再重试一次（第二次失败原样上报，其他失败从不重试）；启动器的启动与 CDP 连接撞上它时丢弃缓存的 driver，下一次尝试换新 driver；工具调用中途撞上它时，那次调用本身仍然失败（错误原样交给模型），`cancel_boundary` 同时把当前标签页换成空白页，下一次调用带重置提示；每 30 s 一次的巡检同样把这样的浏览器判死。浏览器进程本身的处置见「残留进程回收」。
+- **关闭后的池永久关闭**：`GlobalBrowserPool.shutdown()` 先把池置为关闭状态，此后 `acquire_page` 与 `warmup` 抛 `BrowserPoolClosedError`，也不再启动生命周期循环。仍持有池的调用方（比应用活得更久的会话）因此只收到这个错误，而不会让浏览器在应用关闭之后又被拉起（真实 Chromium 实测：只清空单例引用时，迟到的 `acquire_page` 仍会拉起一个浏览器进程与后台循环，此后没有任何一方会关闭它们；回归测试 `tests/toolkits/browser/pool/test_closed_pool_real_browser.py`）。`acquire_page` 在取许可前检查一次（关闭的池不会再收回许可，等待只会拖到超时），取到池锁后再检查一次（关闭在持有该锁时关浏览器，排在后面的取页者因此被拒绝，而不是复活一个浏览器）。单例侧：`peek_global_browser_pool()` 只返回已存在的池、从不创建；`shutdown_global_browser_pool()`（30 s 有界）关闭池并忘掉它，没有池时不创建。
 - **池主动关闭不算崩溃**：池或会话自己关闭托管浏览器时，先给该实例打上 `expected_close`，随后触发的 `disconnected` 事件按「预期断开」记 INFO、不计崩溃；未经任何一方请求的断开（macOS 真实 Chromium 以 CDP `Browser.crash` 实测）记 WARNING 并计入 `crash_count_browser`。两种断开都会归还该实例持有的许可，并关闭其页面池与上下文（`_close_browser_instance`）。浏览器与页面崩溃不计入域名熔断（熔断器只由导航结果驱动）。
 - **页面崩溃只归还在用页面的许可**：页面 `crash` 事件只为调用方持有的页面（属于某个 `PagePool` 的在用集合）归还全局并发许可；空闲在池里的页面、或调用方已 `release_page` 的页面崩溃时不持有许可，处理器直接忽略，既不多还许可，也不留下无人清理的标记。全局许可信号量从不对账，多还一个就永久多放一个并发槽位，所以只有在用页面才归还（macOS 真实 Chromium 实测：并发上限 3 时，空闲页崩溃 3 次后许可数仍为 3）。
 - **残留进程回收**：池关闭浏览器时先做优雅 `close()`（5 s 超时，失败记日志）。托管启动的 Chromium 带两个环境变量，各管一种残留：
@@ -1094,7 +1095,7 @@ Manual refresh: GET /webui/desktop/snapshot?source=live&chat_id=… (a new captu
 from myrm_agent_harness.toolkits.browser import BrowserSession
 from myrm_agent_harness.toolkits.browser.pool import ContextType, get_global_browser_pool
 
-# 获取全局浏览器池
+# 获取全局浏览器池（首个调用者的参数即池的配置；只想看池是否存在用 peek_global_browser_pool()，应用退出时 await shutdown_global_browser_pool()）
 pool = get_global_browser_pool()
 await pool.warmup()
 

@@ -8,7 +8,8 @@
 //!
 //! [POS]
 //! 复用已存在窗口的共用原语：会话窗（`commands::session_window`）与应用窗（`commands::app_window`）
-//! 在窗口已存在时共用，`show` / `unminimize` / `set_focus` 的顺序只在这里定义一次。
+//! 在窗口已存在时共用，失败以 `Err` 回传前端。主窗口的唤起（单实例、托盘、appshot、行内输入）
+//! 各自忽略错误，不经过这里。
 
 use tauri::WebviewWindow;
 

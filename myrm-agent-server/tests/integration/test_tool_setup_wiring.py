@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
@@ -215,16 +215,8 @@ async def _browser_session_kwargs(mixin: ToolSetupMixin, chat_id: str, tools: li
 
     with (
         patch(
-            "myrm_agent_harness.toolkits.browser.pool.get_global_browser_pool",
-            return_value=MagicMock(),
-        ),
-        patch(
-            "app.config.browser.get_browser_pool_config",
-            return_value=MagicMock(),
-        ),
-        patch(
-            "app.config.browser.get_browser_launch_options",
-            return_value={},
+            "app.config.browser.ensure_browser_pool",
+            AsyncMock(return_value=MagicMock()),
         ),
         patch(
             "app.core.security.browser_vault.get_agent_session_vault",
@@ -316,8 +308,6 @@ async def test_cron_tools_turn1_eager_when_enabled() -> None:
 
 def test_memory_search_tool_description_excludes_web_corpus() -> None:
     """memory_search_tool description must not advertise a web corpus."""
-    from unittest.mock import AsyncMock
-
     from myrm_agent_harness.toolkits.memory.agent_surface.memory_agent_tools import (
         create_memory_tools,
     )

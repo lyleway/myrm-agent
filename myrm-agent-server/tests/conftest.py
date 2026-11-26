@@ -493,11 +493,11 @@ def _reset_global_browser_pool_after_test(
 
     try:
         from myrm_agent_harness.toolkits.browser.pool import (
-            reset_global_browser_pool_for_tests,
+            shutdown_global_browser_pool,
         )
 
         with suppress(Exception):
-            _run_async_teardown(reset_global_browser_pool_for_tests())
+            _run_async_teardown(shutdown_global_browser_pool())
     except Exception as exc:
         _logger.warning("Failed to reset GlobalBrowserPool after test: %s", exc)
 
