@@ -18,6 +18,8 @@ Harness 仓维护脚本：框架-业务边界 enforcement、PyPI 发布校验、
 | `check_package_root_layout.py` | Gate | 包根禁止平铺实现模块（仅允许 `__init__.py`）；`tests/` 根禁止散落测试模块（仅允许 `__init__.py` / `conftest.py`）；回归 legacy 平铺文件名 | — |
 | `assemble_production.py` | 辅助 | 生产包组装 | ✅ |
 | `verify_release_tag.py` | 辅助 | tag 与 `project.version` 一致性校验 | ✅ |
+| `fresh_install_smoke.py` | 辅助 | 干净安装冒烟 CLI：把已构建的 wheel 装进空 venv，先不带 extra（委派工具包可导入，向 ACP 后端委派的回合以错误事件说明要装 `acp` extra），再带 `acp` extra 装入后向桩 ACP 代理委派一回合并读到流式回答；以 `-I` 运行驱动，仓库源码不会混进导入；`harness-test.yml` 的 `fresh-install` 作业调用，单元测试在源码树里装满全部 extra，看不见 extra 漏声明或 wheel 漏模块 | ✅ |
+| `fresh_install_smoke_driver.py` | 辅助 | 干净安装冒烟在空环境内运行的驱动：只依赖已装 wheel 与标准库，写法即独立使用者的写法（注册后端、跑一回合、读事件），按阶段断言事件序列 | ✅ |
 | `framework_requirements.py` | 辅助 | 读取 `pyproject.toml` 里 LangChain / LangGraph 系依赖的区间：`--floor` 输出最低版本、`--latest` 输出完整区间（每周框架金丝雀据此安装）、`--check` 在缺下限或上限时失败 | ✅ |
 | `verify_pypi_publish.py` | 辅助 | PyPI 发布后索引校验（6 core 必选；musl 已索引则必选） | ✅ |
 | `validate_pypi_wheels.py` | 辅助 | wheel 数量/版本 + zip artifact 校验 | ✅ |

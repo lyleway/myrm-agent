@@ -170,6 +170,31 @@ jobs:
               annotate("ci-sample-tail", samples[-8:])
           EOF
 
+  # The unit job installs every extra into the source tree. This one installs the built wheel alone, the way a
+  # user of the framework does, so an extra that misses a dependency or a module the wheel leaves out fails here.
+  fresh-install:
+    name: Fresh install (wheel alone, stub ACP agent)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d8db0a86d3d88f3017a4e6b8a1e2b234e7a0a1b5 # v4.0.0
+        with:
+          version: "0.12.7"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Build the wheel
+        run: uv build --python 3.13 --wheel --out-dir "$RUNNER_TEMP/wheel"
+
+      - name: Install it into an empty environment and delegate one turn
+        run: uv run --python 3.13 --no-project python scripts/fresh_install_smoke.py "$RUNNER_TEMP"/wheel/myrm_agent_harness-*.whl
+
   windows-computer-use:
     name: Windows computer-use (real Win32)
     runs-on: windows-latest

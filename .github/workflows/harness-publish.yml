@@ -127,12 +127,21 @@ jobs:
           path: myrm-agent-harness/dist/myrm_agent_harness-*.whl
           if-no-files-found: error
 
+  # The delegation runtime is written against the latest claude, codex, gemini, qwen and opencode: a release that
+  # no longer starts or speaks to them must not be uploaded. Building runs alongside; only the upload waits.
+  contract:
+    name: Real CLI contract
+    if: startsWith(github.ref, 'refs/tags/')
+    uses: ./.github/workflows/harness-cli-contract.yml
+    secrets: inherit
+
   validate-wheels:
     name: Validate wheels before upload
     if: startsWith(github.ref, 'refs/tags/')
     needs:
       - build-core
       - release-wheel
+      - contract
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
