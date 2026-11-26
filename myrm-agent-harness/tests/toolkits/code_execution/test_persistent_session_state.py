@@ -332,41 +332,39 @@ class TestAutoTeeAndDiskQuota:
             await session.close()
 
     @pytest.mark.asyncio
-    async def test_disk_quota_truncation(self, tmp_path: Path) -> None:
+    async def test_disk_quota_truncation(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that the disk quota truncates the tee file and injects warnings."""
         import glob
-        from unittest.mock import patch
 
         config = make_config(timeout=30, work_dir=str(tmp_path))
         session = LocalPersistentSession(config)
 
-        test_limit = 1 * 1024 * 1024  # 1MB limit for fast testing
+        # Small limits keep the output small: a megabyte streamed through a shell is scrubbed on the way, seconds of
+        # CPU that grow with the load of the host.
+        test_limit = 100 * 1024
+        monkeypatch.setattr(stream_output_processor, "_TEE_MAX_BYTES", test_limit)
+        monkeypatch.setattr(stream_output_processor, "_SSE_VALVE_BYTES", test_limit // 2)
 
         await session.start()
         try:
-            with patch(
-                "myrm_agent_harness.toolkits.code_execution.session.stream_output_processor._TEE_MAX_BYTES",
-                test_limit,
-            ):
-                cmd = "python3 -c \"print('B' * 2000000)\""
+            cmd = "python3 -c \"print('B' * 150000)\""
 
-                with captured_stdout_chunks() as chunks:
-                    result = await session.execute(cmd)
+            with captured_stdout_chunks() as chunks:
+                result = await session.execute(cmd)
 
-                assert result.success
-                assert "Terminal stream suspended to prevent UI freeze" in "".join(chunks)
+            assert result.success
+            assert "Terminal stream suspended to prevent UI freeze" in "".join(chunks)
 
-                tee_dir = os.path.join(config.work_dir, ".myrm", "tee")
-                log_files = glob.glob(os.path.join(tee_dir, "cmd_*.log"))
-                latest_log = max(log_files, key=os.path.getmtime)
+            tee_dir = os.path.join(config.work_dir, ".myrm", "tee")
+            log_files = glob.glob(os.path.join(tee_dir, "cmd_*.log"))
+            latest_log = max(log_files, key=os.path.getmtime)
 
-                file_size = os.path.getsize(latest_log)
-                assert file_size <= test_limit + 1024
-                assert file_size >= test_limit * 0.8  # at least 80% written
+            file_size = os.path.getsize(latest_log)
+            assert file_size <= test_limit + 1024
+            assert file_size >= test_limit * 0.8  # at least 80% written
 
-                with open(latest_log, encoding="utf-8") as f:
-                    content = f.read()
-                    assert "[System Warning: Tee log file exceeded 50MB hard limit and was truncated.]" in content
-
+            with open(latest_log, encoding="utf-8") as f:
+                content = f.read()
+                assert "[System Warning: Tee log file exceeded 50MB hard limit and was truncated.]" in content
         finally:
             await session.close()
