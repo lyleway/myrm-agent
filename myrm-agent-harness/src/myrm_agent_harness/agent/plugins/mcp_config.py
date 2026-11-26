@@ -11,10 +11,11 @@ config with ``enabled: false`` (the default in ``mcp_migration_item_to_config_di
 
 [INPUT]
 -- .models::PluginMcpServer (POS: shared parser output dataclasses)
+-- utils.clean_json::load_clean_json (POS: Parse step for the plugin.json and mcp.json of a plugin package that comes from an archive the user uploaded or a market supplied.)
 
 [OUTPUT]
 -- decode_mcp_json / parse_mcp_servers / validate_mcp_top_level: per-server
-   variant validation → normalized PluginMcpServer records.
+   variant validation → normalized PluginMcpServer records; every decoded string is UTF-8 encodable.
 
 [POS]
 Per-server mcp.json variant parser for the framework-level plugin parser.
@@ -28,6 +29,8 @@ import re
 from dataclasses import replace
 from typing import Any
 from urllib.parse import urlsplit
+
+from myrm_agent_harness.utils.clean_json import load_clean_json
 
 from .manifest import MCP_SCHEMA, schema_version
 from .models import PluginMcpServer
@@ -52,10 +55,10 @@ class McpConfigError(ValueError):
 
 
 def decode_mcp_json(raw: bytes | None) -> dict[str, Any] | None:
-    """Decode mcp.json bytes into its top-level dict.
+    """Decode mcp.json bytes into its top-level dict; every string, key or value, is UTF-8 encodable.
 
-    Returns ``None`` when absent or not a JSON object. Raises ``McpConfigError``
-    for type/shape failures.
+    Returns ``None`` when absent. Raises ``McpConfigError`` when the payload is not valid
+    JSON or not a top-level object.
     """
     if raw is None:
         return None
@@ -63,7 +66,7 @@ def decode_mcp_json(raw: bytes | None) -> dict[str, Any] | None:
     if text.startswith("\ufeff"):
         text = text[1:]
     try:
-        decoded = json.loads(text)
+        decoded = load_clean_json(text)
     except json.JSONDecodeError as exc:
         raise McpConfigError(f"mcp.json is not valid JSON: {exc}", code="mcp_invalid_json") from exc
     if not isinstance(decoded, dict):
