@@ -9,9 +9,11 @@ code_execution.platform::detect_platform (POS: Cross-platform runtime detection 
 code_execution.security.validator::validate_command; core.security.process_env::sanitize_env (POS: Command validation and environment sanitising)
 core.security.ocap::CapabilityAction, enforce_capability_access (POS: Capability scope)
 core.security.redact::command_preview (POS: masked, cut command for a log line)
+session.command_stream::SESSION_CLOSED_BEFORE_START (POS: Result of a command that reached a closed session)
 
 [OUTPUT]
-LocalBashMixin: ``execute_bash`` (validated, audited run in the persistent shell with the command's own environment),
+LocalBashMixin: ``execute_bash`` (validated, audited run in the persistent shell with the command's own environment;
+a command refused by a shell that was closed while it waited runs once on the shell that replaced it),
 command preparation and the sanitized environment a shell starts with.
 
 [POS]
@@ -58,12 +60,14 @@ class _BashHost(Protocol):
     """What the bash path needs from the executor it is mixed into."""
 
     config: ExecutionConfig
-    metrics: ExecutionMetrics
     _helper: ExecutionHelper
     _file_scanner: LocalFilesScanner
     _command_rewriter: CommandRewriter
     _venv_manager: VenvManager
     _current_workspace: Path | None
+
+    @property
+    def metrics(self) -> ExecutionMetrics: ...
 
     def _scoped_context(self, context: ExecutionContext) -> ExecutionContext: ...
 
@@ -95,6 +99,7 @@ class LocalBashMixin:
         from myrm_agent_harness.toolkits.code_execution.security.validator import (
             validate_command,
         )
+        from myrm_agent_harness.toolkits.code_execution.session.command_stream import SESSION_CLOSED_BEFORE_START
 
         # Enforce Missing Semantics contract on sandbox isolation
         if self.config.local.require_sandbox_isolation:
@@ -181,6 +186,11 @@ class LocalBashMixin:
         timeout = context.timeout or self.config.local.max_execution_time
         record_execution()
         session_result = await session.execute(command, timeout, cancel_token=context.cancel_token, env=command_env)
+        if session_result.error == SESSION_CLOSED_BEFORE_START:
+            # The shell this command queued on was closed while it waited (the registry replaced it), so the command
+            # never reached a shell: it runs once, on the shell that replaced it.
+            session = await self._get_or_create_bash_session(context, env)
+            session_result = await session.execute(command, timeout, cancel_token=context.cancel_token, env=command_env)
 
         execution_time = time.time() - start_time
 
