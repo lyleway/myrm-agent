@@ -417,6 +417,10 @@ def parallel_load_blocks_mux_restart() -> bool:
     """Shell helper: exit 0 when restart must be blocked, 1 when allowed."""
     verdict = evaluate_mux_health()
     status = read_mux_status(force=True)
+    if verdict.state is MuxDaemonState.HEALTHY and status is None:
+        # A responsive daemon whose load cannot be read may be serving parallel
+        # Agents: unreadable is not idle.
+        return True
     contexts = mux_context_count(status)
     leases = wave_lease_count(status)
     allow = should_allow_mux_restart(verdict, wave_leases=leases, mux_contexts=contexts)
