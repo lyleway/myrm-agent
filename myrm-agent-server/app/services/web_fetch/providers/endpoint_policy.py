@@ -1,7 +1,7 @@
 """External L4 endpoint policy, validation, and DNS-pinned resolution.
 
 [INPUT]
-- myrm_agent_harness.utils.url_utils.blocking::SSRF_BLOCKED_HOSTNAMES, is_blocked_ip (POS: SSRF IP & hostname SSOT)
+- myrm_agent_harness.utils.url_utils::SSRF_BLOCKED_HOSTNAMES, is_blocked_ip (POS: SSRF IP & hostname SSOT)
 
 [OUTPUT]
 - EndpointPolicyError: Raised when a custom L4 api_base violates endpoint policy.
@@ -21,10 +21,7 @@ import os
 import socket
 from urllib.parse import urlsplit
 
-from myrm_agent_harness.utils.url_utils.blocking import (
-    SSRF_BLOCKED_HOSTNAMES,
-    is_blocked_ip,
-)
+from myrm_agent_harness.utils.url_utils import SSRF_BLOCKED_HOSTNAMES, is_blocked_ip
 
 DEFAULT_FIRECRAWL_API_BASE = "https://api.firecrawl.dev"
 

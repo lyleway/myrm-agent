@@ -8,12 +8,11 @@ web_search); the skill market and manage tools by the descriptions they end up w
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from myrm_agent_harness.agent.meta_tools.skills.manage.skill_manage_tool import resolve_skill_manage_tool_description
 from myrm_agent_harness.agent.meta_tools.skills.market.skill_market_tool import resolve_skill_market_tool_description
-from myrm_agent_harness.toolkits.memory.config import RecallMode
 
 from app.ai_agents.general_agent.tool_setup import ToolSetupMixin
 
