@@ -11,7 +11,8 @@ create_persistent_session: Factory function for creating sessions.
 
 [POS]
 Concrete PersistentSession for local execution. Integrates OS-level sandbox
-(bwrap/seatbelt/AppContainer) and manages the actual shell subprocess creation.
+(bwrap/seatbelt/AppContainer), manages the actual shell subprocess creation and releases the sandbox's resources as
+part of the session's close.
 """
 
 from __future__ import annotations
@@ -75,8 +76,9 @@ class LocalPersistentSession(PersistentSession):
     def is_sandboxed(self) -> bool:
         return self._sandbox_status is not None and self._sandbox_status.enabled
 
-    async def close(self) -> None:
-        await super().close()
+    async def _close_unlocked(self) -> None:
+        # Part of the shielded close, so the sandbox is released even when the caller of ``close()`` is cancelled.
+        await super()._close_unlocked()
         if hasattr(self._sandbox_provider, "cleanup"):
             self._sandbox_provider.cleanup()
 

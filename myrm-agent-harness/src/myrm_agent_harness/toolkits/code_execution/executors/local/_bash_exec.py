@@ -9,11 +9,12 @@ code_execution.platform::detect_platform (POS: Cross-platform runtime detection 
 code_execution.security.validator::validate_command; core.security.process_env::sanitize_env (POS: Command validation and environment sanitising)
 core.security.ocap::CapabilityAction, enforce_capability_access (POS: Capability scope)
 core.security.redact::command_preview (POS: masked, cut command for a log line)
-session.command_stream::SESSION_CLOSED_BEFORE_START (POS: Result of a command that reached a closed session)
+session.command_stream::SESSION_CLOSED_BEFORE_START (POS: Result of a command a closed session refused)
 
 [OUTPUT]
 LocalBashMixin: ``execute_bash`` (validated, audited run in the persistent shell with the command's own environment;
-a command refused by a shell that was closed while it waited runs once on the shell that replaced it),
+a command refused by a session that closed before it reached its shell, while it waited or while that shell was
+starting, runs once on the shell that replaced it),
 command preparation and the sanitized environment a shell starts with.
 
 [POS]
@@ -187,8 +188,8 @@ class LocalBashMixin:
         record_execution()
         session_result = await session.execute(command, timeout, cancel_token=context.cancel_token, env=command_env)
         if session_result.error == SESSION_CLOSED_BEFORE_START:
-            # The shell this command queued on was closed while it waited (the registry replaced it), so the command
-            # never reached a shell: it runs once, on the shell that replaced it.
+            # The session closed before this command reached its shell (it was waiting for it, or the shell was still
+            # starting), so the command did not run: it runs once more, on the shell the registry hands out now.
             session = await self._get_or_create_bash_session(context, env)
             session_result = await session.execute(command, timeout, cancel_token=context.cancel_token, env=command_env)
 
