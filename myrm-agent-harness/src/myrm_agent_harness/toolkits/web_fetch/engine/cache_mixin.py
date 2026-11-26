@@ -69,12 +69,12 @@ class FetchEngineCacheMixin:
     async def _handle_fetch_error(
         self,
         url: str,
-        cache_key: str,
+        url_key: str,
         future: InFlightFetch,
         error: Exception,
     ) -> Document | None:
-        """Unified fetch error handling."""
-        self._fail_cache.set(cache_key, True)
+        """Unified fetch error handling; the failure is remembered under the URL, whatever cap the fetch ran with."""
+        self._fail_cache.set(url_key, True)
 
         if isinstance(error, SSRFSecurityError):
             logger.warning(f"URL blocked by outbound policy: {url} — {error}")

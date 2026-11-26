@@ -6,7 +6,8 @@ The guide's omitted-line ranges are also read back through the real ``file_read_
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Sequence
+from typing import Protocol
 
 import pytest
 from langchain_core.documents import Document
@@ -14,6 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
 from myrm_agent_harness.agent.context_management.infra.evicted import (
+    MAX_STORED_CHARS,
     build_delivery_footer,
     persist_evicted_content,
 )
@@ -36,7 +38,11 @@ _ENVELOPE = re.compile(
     re.DOTALL,
 )
 
-_Crawl = Callable[[Sequence[tuple[str, Document]], Sequence[tuple[str, None]]], list[dict[str, object]]]
+
+class _Crawl(Protocol):
+    def __call__(
+        self, success: Sequence[tuple[str, Document]], failed: Sequence[tuple[str, None]] = ()
+    ) -> list[dict[str, object]]: ...
 
 
 def _doc(url: str, body: str, title: str = "") -> tuple[str, Document]:
@@ -53,6 +59,12 @@ def _split(content: object) -> tuple[str, str]:
     match = _ENVELOPE.fullmatch(content)
     assert match is not None, content[:300]
     return match["payload"], match["outside"]
+
+
+def _metadata(result: dict[str, object]) -> dict[str, object]:
+    metadata = result["metadata"]
+    assert isinstance(metadata, dict)
+    return metadata
 
 
 @pytest.fixture
@@ -122,7 +134,18 @@ async def test_pages_within_budget_are_delivered_whole(crawl: _Crawl) -> None:
         "raw_chars": len(payload),
     }
     assert result["evicted_ref"] is None
-    assert calls == [{"urls": ["https://a.test/1", "https://b.test/2"]}]
+    assert calls == [{"urls": ["https://a.test/1", "https://b.test/2"], "max_parsed_chars": None}]
+
+
+@pytest.mark.asyncio
+async def test_with_a_store_the_crawl_is_asked_for_the_text_the_store_can_keep(
+    crawl: _Crawl, evicted_session: list[tuple[str, dict[str, object]]]
+) -> None:
+    calls = crawl([_doc("https://a.test/1", "alpha")])
+
+    await _fetch_full_content(["https://a.test/1"])
+
+    assert calls == [{"urls": ["https://a.test/1"], "max_parsed_chars": MAX_STORED_CHARS}]
 
 
 @pytest.mark.asyncio
@@ -154,11 +177,11 @@ async def test_every_page_stays_visible_and_the_guide_sits_outside_the_untrusted
         assert f"【{page}】 lines " in outside
     assert "saved to sandbox storage" not in payload
     assert "file_read_tool" not in payload
-    assert result["metadata"]["truncated"] is True
+    assert _metadata(result)["truncated"] is True
 
     stored = _stored_file(tmp_path, result).read_text(encoding="utf-8")
     total_lines = count_lines_in_text(stored)
-    assert result["metadata"]["raw_chars"] == len(stored)
+    assert _metadata(result)["raw_chars"] == len(stored)
     assert result["evicted_total_lines"] == total_lines
     assert evicted_session == [
         (
@@ -192,7 +215,7 @@ async def test_partial_failures_are_listed_inside_the_untrusted_envelope(crawl: 
     payload, outside = _split(result["content"])
     assert payload.endswith("[web_fetch]: Could not retrieve content from:\n- https://dead.test/x\n\n")
     assert "dead.test" not in outside
-    assert result["metadata"]["sources"] == [{"url": "https://ok.test/a", "title": ""}]
+    assert _metadata(result)["sources"] == [{"url": "https://ok.test/a", "title": ""}]
 
 
 @pytest.mark.asyncio
@@ -254,7 +277,7 @@ async def test_cut_pages_carry_no_read_promise_when_nothing_could_be_stored(craw
     payload, outside = _split(result["content"])
     assert "[Truncated:" in payload
     assert "file_read_tool" not in outside
-    assert result["metadata"]["truncated"] is True
+    assert _metadata(result)["truncated"] is True
     assert result["evicted_ref"] is None
 
 
@@ -282,7 +305,9 @@ async def test_custom_engine_flags_are_honoured(monkeypatch: pytest.MonkeyPatch)
         def __init__(self, **kwargs: object) -> None:
             created.append(kwargs)
 
-        async def crawl_many(self, urls: list[str]) -> tuple[list[tuple[str, Document]], list[tuple[str, None]]]:
+        async def crawl_many(
+            self, urls: list[str], *, max_parsed_chars: int | None
+        ) -> tuple[list[tuple[str, Document]], list[tuple[str, None]]]:
             return [_doc(urls[0], "private page")], []
 
     monkeypatch.setattr("myrm_agent_harness.toolkits.web_fetch.FetchEngine", FakeEngine)

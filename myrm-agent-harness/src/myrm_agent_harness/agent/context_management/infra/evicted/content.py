@@ -8,6 +8,7 @@ work consistently across bash, web_fetch, MCP, and FilterProcessor backup paths.
 - core.context_vars::workspace_root_var, chat_id_var (POS: foundation ContextVar registry: the run's workspace root and chat id)
 - infra.atomic_write::async_atomic_write (POS: atomic file write with crash-consistency guarantee)
 - evicted.markers::format_storage_cap_marker (POS: single source for the on-disk truncation marker text and its parsing)
+- core.evicted_limits::MAX_STORED_CHARS (POS: how much text one evicted file keeps, shared with the toolkits that size their output to it)
 
 [OUTPUT]
 - cap_content_for_storage, build_evicted_basename, build_delivery_footer
@@ -33,6 +34,7 @@ from myrm_agent_harness.agent.context_management.infra.evicted.markers import (
     format_storage_cap_marker,
 )
 from myrm_agent_harness.core.context_vars import chat_id_var, workspace_root_var
+from myrm_agent_harness.core.evicted_limits import MAX_STORED_CHARS
 from myrm_agent_harness.infra.atomic_write import async_atomic_write
 
 if TYPE_CHECKING:
@@ -40,7 +42,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MAX_STORED_CHARS = 2_000_000
 MAX_PREVIEW_STDOUT_CHARS = 8_000
 
 _SOURCE_SANITIZE_RE = re.compile(r"[^a-zA-Z0-9_-]")
