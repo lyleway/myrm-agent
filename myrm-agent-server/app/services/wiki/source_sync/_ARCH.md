@@ -19,7 +19,7 @@ Wiki 外部来源确定性同步：Feishu 文档 / Gmail 标签 / Google Drive �
 | `feishu/` | 连接器 | Feishu 域 — 门面 + 纯函数渲染；见 [`feishu/_ARCH.md`](feishu/_ARCH.md) | ✅ |
 | `gmail/` | 连接器 | Gmail 域 — 门面 + HTML 渲染；见 [`gmail/_ARCH.md`](gmail/_ARCH.md) | ✅ |
 | `gdrive.py` | 连接器 | Google OAuth + Drive API → raw/gdrive/ | ✅ |
-| `rss.py` | 连接器 | RSS/Atom HTTP → raw/rss/ | ✅ |
+| `rss.py` | 连接器 | RSS/Atom HTTP → raw/rss/; an entry's markup is stripped by `utils.html_tags.strip_tags` (linear in the text, whatever the feed holds) | ✅ |
 | `zotero.py` | 连接器 | Zotero Web API v3 文献库 → raw/zotero/<月份>/<item key>.md（top-level items 最新修改优先 + 子项高亮/注释标注 best-effort；`_is_allowed_base_url` 校验 scheme+netloc 防 SSRF） | ✅ |
 | `integration_mirror.py` | 钩子 | IntegrationSyncResult.new_items → raw/integrations/（入队器由 `runner` 注入） | ✅ |
 | `read_it_later_hygiene.py` | 迁移 | 存量 agent-type read-it-later Cron → router `__wiki_source_sync__` | ✅ |

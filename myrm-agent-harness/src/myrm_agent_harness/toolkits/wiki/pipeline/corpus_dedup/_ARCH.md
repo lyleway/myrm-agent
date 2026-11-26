@@ -19,7 +19,7 @@ Three guarantees sit on top of the scan:
 | `__init__.py` | Package | Public exports for scanner, governor, eligibility, store, types, snippets | ✅ |
 | `path_utils.py` | SSOT | `normalize_raw_relative_path` — raw-dir-relative path keys | ✅ |
 | `types.py` | Types | DedupTier, DispositionAction, DuplicateGroup, PlannedGroup (a group before it is stored), HeldFile, FileEnqueuer (what a release hands files to), DuplicateMemberSnippet, ScanResult, DedupStats, VaultHygieneSnapshot | ✅ |
-| `fingerprint.py` | Core | Exact/normalized/simhash fingerprint builders; the comparable body is the text after a leading frontmatter block (a horizontal rule and what lies between two of them are content); `FINGERPRINT_ALGORITHM_VERSION` | ✅ |
+| `fingerprint.py` | Core | Exact/normalized/simhash fingerprint builders; the comparable body is the text after a leading frontmatter block (a horizontal rule and what lies between two of them are content), with its markup reduced to text by `utils.html_tags.strip_tags` (linear in the file, whatever the markup); `FINGERPRINT_ALGORITHM_VERSION` | ✅ |
 | `fingerprint_cache.py` | Core | `FingerprintCache` — whole-corpus load, batched upsert and prune of the `file_fingerprints` table; `discard_all_fingerprints` | ✅ |
 | `compile_holds.py` | Core | `CompileHoldLedger` — durable `compile_holds` table (hold, list, compare-and-delete drop, newer-than query) | ✅ |
 | `disposition_ledger.py` | Core | `DispositionLedger` — durable `excluded_paths` / `trashed_paths` / `dismissed_pairs` tables (the user's decisions) and the hygiene listing of the first two | ✅ |
