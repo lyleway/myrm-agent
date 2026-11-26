@@ -190,16 +190,17 @@ wechat_d4e5f6   ← 额外实例 2
 
 **Rich Message System 自动降级机制**：
 
-`downgrade_components()` 在发送前自动转换不支持的交互组件为纯文本 fallback：
+`downgrade_components()` 在发送前自动转换渠道不支持的交互组件与媒体为纯文本 fallback：
 
-1. **能力检测**：读取 `ChannelCapabilities`（`buttons` / `quick_replies` / `select_menus`）
+1. **能力检测**：读取 `ChannelCapabilities`（`buttons` / `quick_replies` / `select_menus` / `media` / `file_upload`）
 2. **按行降级**：
    - `ActionButton` → 有 `url` 时为 `"• {label} → {url}"`；只有 `action_id` 的按钮没有文字等价物（没有任何处理器会解析由回调 id 推出的命令），整个按钮省略；要给文字渠道留可输入的替代，用显式的 `QuickReply(required=True)`
    - `SelectMenu` → `"• {placeholder}: option1, option2, ..."`
-   - `QuickReply` (required=True) → `"1️⃣ {label}\n2️⃣ {label2}\n\n↩️ 回复数字选择"`
+   - `QuickReply` (required=True) → `"1 {label}\n2 {label2}\n\n↩ 回复数字选择"`（英文说明为 `↩ Reply with a number to select`）
    - `QuickReply` (required=False) → 静默丢弃（避免杂乱）
+   - 媒体（渠道不支持 `media`）与文档（渠道不支持 `file_upload`）→ 有 `url` 时追加 `"[Image: {url}]"` 形式的文字行（类型名取 `MediaType` 的值并首字母大写），只有本地路径时追加「未发送附件」提示（`attachment_omitted_note`），两者都没有的直接去掉
 3. **国际化**：通过 `get_locale_from_metadata()` 归一化 locale（中文区分 `zh-CN` 与 `zh-TW`），catalog 渲染按引擎回退链取文案（`zh-TW` → `zh` → `zh-Hant` → `zh-CN` → `en`，随捆绑目录落到 `zh-CN`；默认 en，业务层经 `metadata["locale"]` 注入）
-4. **日志记录**：INFO级别记录降级事件，格式：`Downgrading components for channel 'whatsapp': buttons, quick_replies(2) → text fallback`
+4. **日志记录**：INFO级别记录降级事件，格式：`Downgrading components/media for channel 'whatsapp': buttons, quick_replies(2) → text fallback`（被降级的媒体计为 `media(N)`）
 5. **文本追加**：将 fallback 文本追加到 `msg.content` 末尾，用 `\n\n` 分隔
 
 **示例**：
