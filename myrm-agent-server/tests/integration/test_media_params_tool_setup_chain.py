@@ -98,7 +98,7 @@ def test_an_incomplete_tts_pick_selects_nothing() -> None:
         assert tts_params is None
 
 
-def test_a_retired_tts_provider_selects_nothing() -> None:
+def test_an_unsupported_tts_provider_selects_nothing() -> None:
     saved_pick = {"ttsProvider": "openai", "ttsModel": "tts-1", "ttsVoice": "alloy", "ttsApiKey": "sk-tts"}
 
     _, _, tts_params = _extract_media_generation_params(None, _providers("openai"), ["tts"], saved_pick)
