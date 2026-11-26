@@ -14,7 +14,7 @@ SSOT: `{workspace_root}/.myrm/progress/<chat>/todos.json` — one list per chat.
 |------|------|-------------|-------|
 | `__init__.py` | Package | Public exports for progress meta-tool | ✅ |
 | `schemas.py` | Config | `TodoItem`, `TodoStore`, plan-compat adapter for Goal API | ✅ |
-| `storage.py` | Core | Read/write/merge/delete a chat's todos in the workspace (atomic write via `infra.atomic_write`); `todo_scope` maps a chat id to its directory, defaulting to the running chat (`chat_id_var`); `workspace_todos_exist` is true when any chat has a list | ✅ |
+| `storage.py` | Core | Read/write/merge/delete a chat's todos in the workspace (atomic write via `infra.atomic_write`); `todo_scope` maps a chat id to its directory, defaulting to the running chat (`chat_id_var`); `workspace_todos_exist` is true when any chat has a list; every write first makes `.myrm/progress/` ignore itself in git (`ensure_scratch_dir`), so a plan never reaches the `git status` of the user's project | ✅ |
 | `events.py` | Core | Emit `tasks_steps` for ProgressSteps UI and attach `tool_result_details` for session-tree binding | ✅ |
 | `todo_write_tool.py` | Core | LangChain `todo_write` factory (main agent, no sub-agent LLM) | ✅ |
 
@@ -41,6 +41,7 @@ SSOT: `{workspace_root}/.myrm/progress/<chat>/todos.json` — one list per chat.
 ## Key Dependencies
 
 - `agent.middlewares._session_context` (workspace root)
+- `toolkits.code_execution.utils.scratch_dir` (the self-ignoring `.myrm/progress/` directory)
 - LangGraph `dispatch_custom_event` for SSE progress
 
 ## Do not place here
