@@ -77,7 +77,8 @@ export function useArtifactPublishing(artifact: Artifact): ArtifactPublishing {
       return;
     }
     let cancelled = false;
-    // The preflight only tunes the button; an unreachable server reads as "not deployable".
+    // The preflight only tunes the button. An unreachable server leaves the result unknown: the button looks unready, but
+    // the dialog still opens and checks the chosen target itself.
     void fetchArtifactDeployPreflight(artifact.id)
       .catch(() => null)
       .then((result) => {
