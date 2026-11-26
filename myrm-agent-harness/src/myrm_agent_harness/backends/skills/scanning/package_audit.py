@@ -8,11 +8,12 @@ Audits package.json files for supply chain attack vectors:
 - Entry points and build artifacts that are missing, empty or escape the package
 - A manifest the audit cannot take (bad JSON, a repeated key, too deep, over 1 MB, a symbolic link) is a high
   ``invalid_manifest`` finding: the installer reads it all the same, so it is never clean. So is a tree the audit cannot
-  look at in full (a folder it cannot list, more entries or manifests than it audits)
+  look at in full (a folder it cannot list, more entries or manifests than it audits, and, in a skill that has a
+  manifest, a symbolic link to a folder outside the skill, which a package manager can follow)
 
 [INPUT]
 - backends.skills.scanning.manifest_entries::collect_export_targets, resolve_artifact_file (POS: where the files a package.json declares live on disk)
-- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
+- backends.skills.scanning.tree_walk::walk_tree, WalkedFile, WalkLink, WalkProblem (POS: bounded walk over a skill directory, no depth cap)
 - core.security.path::read_text_bounded, ReadRefusal (POS: text read that stops at a character limit and never waits on a FIFO or device)
 - utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 
@@ -37,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from myrm_agent_harness.backends.skills.scanning.manifest_entries import collect_export_targets, resolve_artifact_file
-from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkProblem, walk_tree
+from myrm_agent_harness.backends.skills.scanning.tree_walk import WalkedFile, WalkLink, WalkProblem, walk_tree
 from myrm_agent_harness.core.security.path import ReadRefusal, read_text_bounded
 from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
@@ -57,6 +58,7 @@ _MANIFEST_NAME = "package.json"
 _HOOK_FILES = frozenset({"binding.gyp", ".npm-extension.cjs", ".npm-extension.mjs", ".pnpmfile.cjs", ".pnpmfile.mjs"})
 _MAX_MANIFESTS = 100
 _MAX_MANIFEST_CHARS = 1024 * 1024
+_LEADS_OUT = "a symbolic link leads out of the skill folder"
 _MAX_FINDING_TEXT_CHARS = 500
 
 
@@ -210,8 +212,11 @@ def audit_skill_directory(skill_dir: str | Path) -> list[PackageAuditFinding]:
     """Audit every package.json and install-time hook file under a skill directory, at any depth.
 
     ``node_modules`` is not entered (see ``tree_walk``). What the audit cannot look at in full is a high finding: a
-    folder it cannot list, a tree of more than ``tree_walk.MAX_ENTRIES`` entries, and the manifest after the first
-    ``_MAX_MANIFESTS``, which is not audited.
+    folder it cannot list, a tree of more than ``tree_walk.MAX_ENTRIES`` entries, the manifest after the first
+    ``_MAX_MANIFESTS``, which is not audited, and a symbolic link to a folder outside the skill, which a package manager
+    can follow (a workspace glob or a ``file:`` dependency through it) to manifests the audit cannot see; one finding
+    names the first such link. A package manager starts from a manifest, so in a skill without one such a link is not a
+    finding.
 
     Args:
         skill_dir: Path to the skill directory
@@ -224,10 +229,13 @@ def audit_skill_directory(skill_dir: str | Path) -> list[PackageAuditFinding]:
         return []
 
     findings: list[PackageAuditFinding] = []
+    first_link: WalkLink | None = None
     manifests = 0
     for found in walk_tree(root, _is_audited_name):
         if isinstance(found, WalkProblem):
             findings.append(_unauditable_finding(found.reason, found.relative))
+        elif isinstance(found, WalkLink):
+            first_link = first_link or found
         elif _is_manifest_name(found.path.name):
             manifests += 1
             if manifests > _MAX_MANIFESTS:
@@ -240,6 +248,8 @@ def audit_skill_directory(skill_dir: str | Path) -> list[PackageAuditFinding]:
             findings.extend(_audit_manifest_file(found))
         else:
             findings.append(_hook_file_finding(found.path.name, found.relative))
+    if manifests and first_link is not None:
+        findings.append(_unauditable_finding(_LEADS_OUT, first_link.relative))
     return findings
 
 

@@ -8,8 +8,9 @@
 
 [OUTPUT]
 - Fails when a manifest is skipped for its depth or folder, when a file a package manager runs at install without a script
-  reads as clean, when a manifest beyond the audit's cap, a manifest over 1 MB, a folder it cannot list or a tree over its
-  entry budget reads as clean, or when an ordinary skill tree stops reading as clean.
+  reads as clean, when a manifest beyond the audit's cap, a manifest over 1 MB, a folder it cannot list, a tree over its
+  entry budget or a symbolic link out of a skill that has a manifest reads as clean, or when an ordinary skill tree, or
+  one that links to shared files and has no manifest, stops reading as clean.
 
 [POS]
 ``test_package_audit.py`` and ``test_package_audit_unauditable.py`` cover a single manifest; this file pins what the audit
@@ -35,7 +36,9 @@ from myrm_agent_harness.backends.skills.scanning.package_audit import (
     check_lifecycle_scripts,
 )
 from myrm_agent_harness.backends.skills.scanning.scanner import compute_scan_summary
+from tests.support.symlinks import make_symlink
 
+_SKILL_MD = "---\nname: demo\ndescription: A demo skill.\n---\nDo things.\n"
 _POSTINSTALL = json.dumps({"name": "t", "scripts": {"postinstall": "node run.js"}})
 _HOOK_FILES = [".npm-extension.cjs", ".npm-extension.mjs", ".pnpmfile.cjs", ".pnpmfile.mjs", "binding.gyp"]
 _LIMIT = 1024 * 1024
@@ -84,23 +87,67 @@ def test_a_name_that_only_resembles_a_hook_file_is_not_a_finding(tmp_path: Path,
 
 
 def test_a_symlinked_hook_file_is_reported_without_being_followed(tmp_path: Path) -> None:
-    try:
-        (tmp_path / ".pnpmfile.cjs").symlink_to(tmp_path / "missing.cjs")
-    except OSError:
-        pytest.skip("symbolic links are not available")
+    make_symlink(tmp_path / ".pnpmfile.cjs", tmp_path / "missing.cjs")
 
     assert _summary(audit_skill_directory(tmp_path)) == [("supply_chain", "high", ".pnpmfile.cjs")]
 
 
 def test_a_hook_file_makes_the_directory_scan_untrusted(tmp_path: Path) -> None:
-    _write(tmp_path, "SKILL.md", "---\nname: demo\ndescription: A demo skill.\n---\nDo things.\n")
+    _write(tmp_path, "SKILL.md", _SKILL_MD)
     _write(tmp_path, ".pnpmfile.cjs", "module.exports = {};\n")
 
     assert compute_scan_summary(scan_skill_directory("demo", tmp_path)).score < 50
 
 
+def _skill_reaching_out_through_a_workspace_link(tmp_path: Path) -> Path:
+    """A skill with a manifest whose workspace glob reaches, through a symbolic link, a package outside the skill."""
+    skill = tmp_path / "skill"
+    _write(skill, "SKILL.md", _SKILL_MD)
+    _write(skill, "package.json", '{"name": "skill", "workspaces": ["ws/*"]}')
+    _write(tmp_path / "outside", "pkg/package.json", _POSTINSTALL)
+    make_symlink(skill / "ws", tmp_path / "outside")
+    return skill
+
+
+def test_a_symlink_out_of_a_skill_that_has_a_manifest_is_a_high_finding(tmp_path: Path) -> None:
+    findings = audit_skill_directory(_skill_reaching_out_through_a_workspace_link(tmp_path))
+
+    assert _summary(findings) == [("invalid_manifest", "high", "ws")]
+    assert findings[0].description == "package.json cannot be audited: a symbolic link leads out of the skill folder"
+
+
+def test_several_symlinks_out_of_a_skill_are_one_finding_that_names_the_first(tmp_path: Path) -> None:
+    skill = _skill_reaching_out_through_a_workspace_link(tmp_path)
+    make_symlink(skill / "zz", tmp_path / "outside")
+
+    assert _summary(audit_skill_directory(skill)) == [("invalid_manifest", "high", "ws")]
+
+
+def test_a_symlink_out_of_a_skill_makes_the_directory_scan_untrusted(tmp_path: Path) -> None:
+    skill = _skill_reaching_out_through_a_workspace_link(tmp_path)
+
+    assert compute_scan_summary(scan_skill_directory("demo", skill)).score < 50
+
+
+def test_a_symlink_out_of_a_skill_without_any_manifest_is_not_a_finding(tmp_path: Path) -> None:
+    skill = tmp_path / "skill"
+    _write(skill, "SKILL.md", _SKILL_MD)
+    _write(tmp_path / "shared", "notes.md", "Notes the skill reads.\n")
+    make_symlink(skill / "shared", tmp_path / "shared")
+
+    assert audit_skill_directory(skill) == []
+    assert scan_skill_directory("demo", skill).is_clean
+
+
+def test_a_symlink_inside_a_skill_is_not_a_finding_and_its_manifest_is_audited_once(tmp_path: Path) -> None:
+    _write(tmp_path, "real/package.json", _POSTINSTALL)
+    make_symlink(tmp_path / "alias", tmp_path / "real")
+
+    assert _summary(audit_skill_directory(tmp_path)) == [("supply_chain", "high", str(Path("real") / "package.json"))]
+
+
 def test_an_ordinary_skill_tree_with_a_deep_clean_manifest_stays_clean(tmp_path: Path) -> None:
-    _write(tmp_path, "SKILL.md", "---\nname: demo\ndescription: A demo skill.\n---\nDo things.\n")
+    _write(tmp_path, "SKILL.md", _SKILL_MD)
     _write(tmp_path, "scripts/tools/a/b/c/package.json", '{"name": "clean", "scripts": {"test": "jest"}}')
 
     assert scan_skill_directory("demo", tmp_path).is_clean
