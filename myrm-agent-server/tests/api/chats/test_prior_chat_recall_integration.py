@@ -146,3 +146,16 @@ class TestPriorChatRecallIntegration:
             seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params={"marker": "not a token"})
 
         assert seed_resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "params",
+        [{}, {"marker": "not a token"}, {"sent_at": "not an instant"}, {"sent_at": "2026-03-15T23:30:00"}],
+        ids=["plain", "bad-marker", "bad-instant", "no-offset"],
+    )
+    def test_seed_is_not_found_outside_local_mode_whatever_the_query_holds(
+        self, client: TestClient, params: dict[str, str]
+    ) -> None:
+        with patch("app.api.chats.test_fixtures.prior_chat.is_local_mode", return_value=False):
+            seed_resp = client.post("/api/v1/chats/test/seed-prior-chat-fixture", params=params)
+
+        assert seed_resp.status_code == 404

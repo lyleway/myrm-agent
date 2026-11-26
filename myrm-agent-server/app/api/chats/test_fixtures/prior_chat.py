@@ -6,7 +6,7 @@
 - app.database.repositories.conversation_recall::ConversationRecallRepository (POS: rebuild recall index)
 
 [OUTPUT]
-- router: POST /test/seed-prior-chat-fixture (POS: E2E seed for @chat mention picker and search-result time checks; optional sent_at pins the message time, optional marker makes the seed searchable by itself)
+- router: POST /test/seed-prior-chat-fixture (POS: E2E seed for @chat mention picker and search-result time checks; optional sent_at pins the message time, optional marker makes the seed searchable by itself; 404 outside local mode whatever the query holds)
 
 [POS]
 app.api.chats — Chrome E2E fixture for composer @chat: prior conversation mention.
@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config.deploy_mode import is_local_mode
 from app.database.connection import get_session
@@ -34,7 +34,13 @@ _PRIOR_USER = "We decided the Alpha project should use Redis for caching."
 _PRIOR_ASSISTANT = "Agreed — Redis fits the Alpha latency requirements."
 
 
-@router.post("/test/seed-prior-chat-fixture", include_in_schema=False)
+def _require_local_mode() -> None:
+    """Outside local mode the route does not exist, whatever the query holds: a dependency runs before FastAPI validates it."""
+    if not is_local_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@router.post("/test/seed-prior-chat-fixture", include_in_schema=False, dependencies=[Depends(_require_local_mode)])
 async def seed_prior_chat_fixture(
     sent_at: datetime | None = None,
     marker: Annotated[str | None, Query(pattern=r"^[A-Za-z0-9]{1,40}$")] = None,
@@ -45,8 +51,6 @@ async def seed_prior_chat_fixture(
     date-display assertions depend on; it must carry a UTC offset. ``marker`` (one alphanumeric token) is appended to
     both messages, so a check can search for exactly this seed however many earlier seeds the database holds.
     """
-    if not is_local_mode():
-        raise HTTPException(status_code=404, detail="Not found")
     if sent_at is not None and sent_at.tzinfo is None:
         raise HTTPException(status_code=422, detail="sent_at must include a UTC offset")
 
