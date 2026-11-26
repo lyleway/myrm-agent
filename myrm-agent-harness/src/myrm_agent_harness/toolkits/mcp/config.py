@@ -12,6 +12,7 @@ MCP server configuration models passed to the Agent.
 - should_register_mcp_tool: Per-server include/exclude filter for MCP tool whitelisting.
 - sanitize_mcp_name_component: Sanitize name component for ``mcp__{server}__{tool}`` generation (replaces non-alnum, collapses consecutive underscores, strips leading/trailing underscores, falls back to 'unnamed').
 - is_mcp_tool_name: Check if a tool name follows the ``mcp__{server}__{tool}`` convention.
+- mcp_tool_prefix: The ``mcp__{server}__`` prefix every tool of one server carries, the single place it is derived from a server name.
 - parse_mcp_tool_name: Parse ``mcp__{server}__{tool}`` into (server, tool) tuple.
 - mcp_config_to_runtime_dict: Serialize an MCPServerConfigProtocol into a complete runtime dictionary preserving auth, TLS, filtering, and callback attributes.
 
@@ -303,6 +304,15 @@ def is_mcp_tool_name(name: str) -> bool:
     return name.startswith(_MCP_PREFIX) and _MCP_DELIM in name[len(_MCP_PREFIX) :]
 
 
+def mcp_tool_prefix(server_name: str) -> str:
+    """Return the ``mcp__{server}__`` prefix that every tool of *server_name* carries.
+
+    The sanitized server component never contains ``__``, so one server's prefix is never
+    the start of another server's tool names (``mcp__a__`` does not match ``mcp__a_b__x``).
+    """
+    return f"{_MCP_PREFIX}{sanitize_mcp_name_component(server_name)}{_MCP_DELIM}"
+
+
 def parse_mcp_tool_name(name: str) -> tuple[str, str] | None:
     """Parse ``mcp__{server}__{tool}`` into ``(server, tool)``.
 
@@ -366,6 +376,7 @@ __all__ = [
     "MCPConfig",
     "is_mcp_tool_name",
     "mcp_config_to_runtime_dict",
+    "mcp_tool_prefix",
     "parse_mcp_tool_name",
     "sanitize_mcp_name_component",
     "should_register_mcp_tool",

@@ -1,6 +1,6 @@
 /**
  * Route → readability scene SSOT (immersive chat vs functional work pages).
- * Keep in sync with `theme-pre-init-script.ts` / `public/theme-init.js`.
+ * Keep in sync with `public/theme-init.js`, the pre-hydration script that embeds these tables.
  */
 
 import type { ThemeReadabilityScene } from './schema';

@@ -19,7 +19,8 @@ answers (404, 410, ...) are the origin's final word on the request: trying anoth
 content rules judge them.
 
 [INPUT]
-- web_fetch.processing.html_scan::body_content, extract_title, strip_script_and_style, strip_tags (POS: Linear-time scans of raw HTML text)
+- web_fetch.processing.html_scan::body_content, extract_title, strip_script_and_style (POS: Linear-time scans of raw HTML text)
+- utils.html_tags::strip_tags (POS: Tag stripping linear in the text)
 
 [OUTPUT]
 - BlockKind: Failure classification literal ("blocked" | "needs_javascript" | "error_page")
@@ -37,7 +38,9 @@ import re
 from collections.abc import Mapping
 from typing import Literal
 
-from .html_scan import body_content, extract_title, strip_script_and_style, strip_tags
+from myrm_agent_harness.utils.html_tags import strip_tags
+
+from .html_scan import body_content, extract_title, strip_script_and_style
 
 BlockKind = Literal["blocked", "needs_javascript", "error_page"]
 

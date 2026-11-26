@@ -23,7 +23,7 @@ _LOOKS_READ_ONLY = SafetyMetadata(is_read_only=True, is_concurrent_safe=True, is
 
 def _hold(tool_name: str, record: SafetyMetadata) -> None:
     """Put ``record`` in the registry where a direct call to ``tool_name`` resolves it."""
-    register_ptc_safety_metadata("mcp_server_skill", tool_name, record, {})
+    register_ptc_safety_metadata(tool_name, record, {})
 
 
 async def _decide(*tool_calls: ToolCall, config: SecurityConfig | None = None) -> tuple[list, list, list]:

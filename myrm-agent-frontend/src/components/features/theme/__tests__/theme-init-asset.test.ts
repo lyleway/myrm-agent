@@ -7,12 +7,11 @@ import {
   FUNCTIONAL_SURFACE_FLOORS,
   STATIC_APP_SEGMENTS,
 } from '@/theme-engine';
-import { THEME_PRE_INIT_SCRIPT } from '../theme-pre-init-script';
 
 const publicScript = readFileSync(resolve(process.cwd(), 'public/theme-init.js'), 'utf8');
 
-describe('theme-init public asset parity', () => {
-  it('keeps public/theme-init.js aligned with THEME_PRE_INIT_SCRIPT keys', () => {
+describe('public/theme-init.js embeds the theme-engine tables', () => {
+  it('reads and writes the storage keys and root attributes the theme engine owns', () => {
     for (const key of [
       'myrm-theme-preinit',
       'myrm-skin',
@@ -26,31 +25,26 @@ describe('theme-init public asset parity', () => {
       'myrm-theme-art-preload',
     ]) {
       expect(publicScript).toContain(key);
-      expect(THEME_PRE_INIT_SCRIPT).toContain(key);
     }
   });
 
   it('embeds every functional route prefix from readability-scene SSOT', () => {
     for (const prefix of FUNCTIONAL_ROUTE_PREFIXES) {
-      expect(THEME_PRE_INIT_SCRIPT).toContain(`'${prefix}'`);
       expect(publicScript).toContain(`'${prefix}'`);
     }
   });
 
   it('embeds every static app segment from readability-scene SSOT', () => {
     for (const segment of STATIC_APP_SEGMENTS) {
-      expect(THEME_PRE_INIT_SCRIPT).toContain(`'${segment}':1`);
       expect(publicScript).toContain(`'${segment}':1`);
     }
   });
 
   it('embeds functional surface opacity floors from scene-surfaces SSOT', () => {
-    for (const script of [THEME_PRE_INIT_SCRIPT, publicScript]) {
-      expect(script).toContain(String(FUNCTIONAL_SURFACE_FLOORS.navOpacity));
-      expect(script).toContain(String(FUNCTIONAL_SURFACE_FLOORS.sidebarOpacity));
-      expect(script).toContain(String(FUNCTIONAL_SURFACE_FLOORS.mainOpacity));
-      expect(script).toContain(String(FUNCTIONAL_SURFACE_FLOORS.surfaceOpacity));
-      expect(script).toContain(String(FUNCTIONAL_ART_WASH_FLOOR));
-    }
+    expect(publicScript).toContain(String(FUNCTIONAL_SURFACE_FLOORS.navOpacity));
+    expect(publicScript).toContain(String(FUNCTIONAL_SURFACE_FLOORS.sidebarOpacity));
+    expect(publicScript).toContain(String(FUNCTIONAL_SURFACE_FLOORS.mainOpacity));
+    expect(publicScript).toContain(String(FUNCTIONAL_SURFACE_FLOORS.surfaceOpacity));
+    expect(publicScript).toContain(String(FUNCTIONAL_ART_WASH_FLOOR));
   });
 });

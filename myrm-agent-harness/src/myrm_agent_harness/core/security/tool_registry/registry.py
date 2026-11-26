@@ -64,7 +64,7 @@ declaration improves transparency and self-documentation.
 - resolve_permission_type(): tool name → permission type (with dynamic sub-action and MCP fallback)
 - compute_canonical_args_hash(): stable hash for tool arguments (core params only)
 - resolve_safety_metadata(): tool name → SafetyMetadata (fail-closed for undeclared tools)
-- MCPAnnotations / register_ptc_safety_metadata / get_ptc_safety_metadata / unregister_ptc_safety_metadata / evict_skill_safety_metadata: dynamic MCP tool safety store (defined in ptc_safety.py)
+- MCPAnnotations / register_ptc_safety_metadata / get_ptc_safety_metadata / unregister_ptc_safety_metadata / evict_ptc_safety_metadata_by_prefix: dynamic MCP tool safety store keyed by prefixed tool name (defined in ptc_safety.py)
 
 [POS]
 Pure functions, no side effects, trivially testable.
@@ -103,16 +103,13 @@ from .ptc_safety import (
     _PTC_LOCK as _PTC_LOCK,
 )
 from .ptc_safety import (
-    _PTC_SAFETY_METADATA as _PTC_SAFETY_METADATA,
-)
-from .ptc_safety import (
-    _PTC_TOOL_FLAT_INDEX as _PTC_TOOL_FLAT_INDEX,
+    _PTC_TOOL_SAFETY as _PTC_TOOL_SAFETY,
 )
 from .ptc_safety import (
     MCPAnnotations as MCPAnnotations,
 )
 from .ptc_safety import (
-    evict_skill_safety_metadata as evict_skill_safety_metadata,
+    evict_ptc_safety_metadata_by_prefix as evict_ptc_safety_metadata_by_prefix,
 )
 from .ptc_safety import (
     get_ptc_safety_metadata as get_ptc_safety_metadata,
@@ -432,15 +429,14 @@ def resolve_safety_metadata(tool_name: str) -> SafetyMetadata:
 
     Three-level fallback:
     1. Built-in tools: ``TOOL_SAFETY_METADATA`` (highest priority)
-    2. MCP dynamic tools: ``_PTC_TOOL_FLAT_INDEX`` (populated by ``register_ptc_safety_metadata``)
+    2. MCP dynamic tools: ``_PTC_TOOL_SAFETY`` (populated by ``register_ptc_safety_metadata``)
     3. Fail-closed defaults for unknown tools
     """
     if tool_name in TOOL_SAFETY_METADATA:
         return TOOL_SAFETY_METADATA[tool_name]
     with _PTC_LOCK:
-        if tool_name in _PTC_TOOL_FLAT_INDEX:
-            return _PTC_TOOL_FLAT_INDEX[tool_name]
-    return _FAIL_CLOSED_DEFAULTS
+        recorded = _PTC_TOOL_SAFETY.get(tool_name)
+    return recorded[0] if recorded is not None else _FAIL_CLOSED_DEFAULTS
 
 
 from .safety import check_safety_coverage  # noqa: E402
