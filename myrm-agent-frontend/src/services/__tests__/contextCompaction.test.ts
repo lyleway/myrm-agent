@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest } from '@/lib/api';
 import { COMPACT_FOCUS_TOPIC_MAX_LENGTH } from '@/lib/constants/compact-focus-topic';
-import { compactChat, describeCompactSkip, runManualCompaction } from '@/services/contextCompaction';
+import {
+  COMPACT_REQUEST_TIMEOUT_MS,
+  compactChat,
+  describeCompactSkip,
+  runManualCompaction,
+} from '@/services/contextCompaction';
 import en from '../../../locales/en.json';
 import zh from '../../../locales/zh.json';
 
@@ -37,13 +42,25 @@ describe('compactChat', () => {
       method: 'POST',
       body: JSON.stringify({ focus_topic: 'billing decisions' }),
       headers: { 'Content-Type': 'application/json' },
+      timeout: COMPACT_REQUEST_TIMEOUT_MS,
     });
   });
 
   it.each([undefined, ''])('sends no body when the topic is %j', async (topic) => {
     await compactChat('chat-1', topic);
 
-    expect(apiRequestMock).toHaveBeenCalledWith('/chats/chat-1/compact', { method: 'POST' });
+    expect(apiRequestMock).toHaveBeenCalledWith('/chats/chat-1/compact', {
+      method: 'POST',
+      timeout: COMPACT_REQUEST_TIMEOUT_MS,
+    });
+  });
+
+  it("waits longer than the server may work on a compaction, so the answer read is the server's and not a page timeout", () => {
+    const SERVER_TOTAL_CEILING_MS = 600_000; // COMPACT_TOTAL_CEILING_S in the server's compact/_constants.py
+    const DEFAULT_REQUEST_TIMEOUT_MS = 30_000; // what apiRequest applies when a call sets none
+
+    expect(COMPACT_REQUEST_TIMEOUT_MS).toBeGreaterThan(SERVER_TOTAL_CEILING_MS);
+    expect(COMPACT_REQUEST_TIMEOUT_MS).toBeGreaterThan(DEFAULT_REQUEST_TIMEOUT_MS);
   });
 
   it('cuts a longer topic to the limit the server accepts, so the request is not refused', async () => {

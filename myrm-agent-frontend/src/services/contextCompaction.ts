@@ -7,14 +7,16 @@
  *
  * [OUTPUT]
  * - CompactResult: 一次手动压缩上下文的结果
- * - compactChat: 压缩会话上下文，可带聚焦主题
+ * - compactChat: 压缩会话上下文，可带聚焦主题；等服务端答复的时长是 COMPACT_REQUEST_TIMEOUT_MS
+ * - COMPACT_REQUEST_TIMEOUT_MS: 页面等一次压缩答复的上限，略长于服务端自己的压缩上限
  * - runManualCompaction: 手动压缩，并把省下 token 的结果交给 store；输入框、`/compact`、策略面板三个入口共用
  * - CompactNotice / describeCompactSkip / COMPACT_FAILED_NOTICE: 服务端没有压缩时展示给用户的提示（文案键 + 严重度）
  * - DONT_REMIND_COMPACT_STORAGE_KEY: 「手动压缩前不再提醒」偏好的 localStorage 键
  *
  * [POS]
  * 上下文压缩的前端服务。聚焦主题发出前按服务端上限截断，所以输入框与 `/compact <主题>` 两条路径都不会被服务端拒收；
- * 压缩后的 store 同步与「没压缩」的措辞各只有一处，三个入口因此对同一次压缩给出同一个结果。
+ * 压缩后的 store 同步与「没压缩」的措辞各只有一处，三个入口因此对同一次压缩给出同一个结果；
+ * 压缩由模型摘要整段历史，耗时远超普通请求，页面等到服务端自己给出结果，不在服务端仍在压缩时先报「失败」。
  */
 
 import { apiRequest } from '@/lib/api';
@@ -33,6 +35,13 @@ export interface CompactResult {
 /** Set once the user ticks "don't remind me" in the input box dialog; `/compact` reads it to skip its prompt-cache note. */
 export const DONT_REMIND_COMPACT_STORAGE_KEY = 'dontRemindCompact';
 
+/**
+ * A compaction has a model summarise the whole history, which can take minutes. The server ends one after 90 s without
+ * progress or 600 s in all and answers with the reason, so the page waits slightly longer than that: what the user reads
+ * is the server's answer, not the page's default 30 s request budget running out while the server is still compacting.
+ */
+export const COMPACT_REQUEST_TIMEOUT_MS = 11 * 60 * 1000;
+
 export const compactChat = async (chatId: string, focusTopic?: string): Promise<CompactResult> => {
   // The server refuses a longer topic (HTTP 422); a topic typed after `/compact` has no box to stop it, so it is cut here.
   const body = focusTopic
@@ -40,6 +49,7 @@ export const compactChat = async (chatId: string, focusTopic?: string): Promise<
     : undefined;
   return (await apiRequest(`/chats/${chatId}/compact`, {
     method: 'POST',
+    timeout: COMPACT_REQUEST_TIMEOUT_MS,
     ...(body ? { body, headers: { 'Content-Type': 'application/json' } } : {}),
   })) as CompactResult;
 };
