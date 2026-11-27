@@ -60,8 +60,9 @@ class _ActiveTask:
 
     ``requester_id`` is the channel-level sender identifier (e.g. Slack user
     id, Telegram user id) of the message that initiated this turn, captured at
-    task creation time. In a group it names the one member who may answer this
-    turn's approval by button and who may ``/steer`` the run.
+    task creation time. In a group it names the one member who may ``/steer``
+    the run. Who may answer an approval is not read from it: the chat's open
+    request names its own asker.
 
     ``started_at`` is a monotonic timestamp used by the janitor's stuck-task
     watchdog to detect tasks that exceed ``_STUCK_TASK_TIMEOUT``.

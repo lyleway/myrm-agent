@@ -1,4 +1,4 @@
-"""Builders of the action-button approval tests: the router host under test, a click, an approval record, the database."""
+"""Builders of the action-button approval tests: the router host under test, an open request, a click, an approval record, the database."""
 
 from __future__ import annotations
 
@@ -10,14 +10,18 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.channels.routing.commands import RouterCommandsMixin
-from app.channels.routing.pending_approvals import PendingApprovals
+from app.channels.routing.pending_approvals import PendingApproval, PendingApprovals
+from app.channels.routing.router_keys import routing_state_key
 from app.channels.routing.router_models import _ActiveTask
 from app.channels.types import InboundMessage
 from app.database.models.approval import ApprovalRecord
-from tests.support.pending_approvals import empty_registry, finished_turn
+from tests.support.pending_approvals import asked_in, empty_registry, finished_turn
 
 engine = create_async_engine("sqlite+aiosqlite:///:memory:")
 _factory = async_sessionmaker(engine, expire_on_commit=False)
+
+# The router state key of the clicks' chat (``telegram`` / ``chat-1``).
+CHAT = routing_state_key("telegram", "chat-1")
 
 
 @asynccontextmanager
@@ -53,6 +57,15 @@ def make_host() -> Host:
     gate = MagicMock()
     gate.submit = MagicMock()
     return Host(_bus=bus, _gate=gate)
+
+
+def ask(host: Host, asker: str = "alice", *, is_group: bool = True, chat_id: str = "chat-1") -> PendingApproval:
+    """Open the request ``asker`` asked in ``chat_id``, with the registry entry their finished turn leaves behind."""
+    asked = asked_in("telegram", chat_id, sender_id=asker, user_id=asker, is_group=is_group)
+    key = routing_state_key("telegram", chat_id)
+    host._pending_approvals.register(key, asked, None)
+    host._active_tasks[key] = finished_turn(asker, chat_id=chat_id)
+    return asked
 
 
 def click(

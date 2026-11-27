@@ -5,7 +5,7 @@
 - channels.routing.router_host::RouterCommandsHost (POS: typing protocol for mixin host attributes.)
 - channels.routing.router_keys::routing_state_key (POS: channel+peer+topic state-map key format.)
 - channels.routing.inbound_risk_gate::hold_risky_inbound (POS: risk screening of a sender's text before any agent reads it.)
-- channels.routing.pending_approvals::answer_resume_message (POS: the message that resumes the asking turn's run with a person's answer.)
+- channels.routing.pending_approvals::PendingApproval, answer_resume_message (POS: one open approval request of a chat; the message that resumes the asking turn's run with a person's answer.)
 - channels.types::InboundMessage, OutboundMessage (POS: channel message types.)
 - channels.i18n::get_text (POS: multi-language gateway command replies and system-generated channel messages.)
 - services.approvals.registry::ApprovalRegistry (POS: unified approval flow scheduler that persists, pushes and resolves approvals.)
@@ -16,9 +16,11 @@
 [POS]
 Router approval mixin segment. Validates reaction/button approvals and builds harness-compatible resume_value for
 LangGraph interrupt resume. A person's answer ends the chat's open request in ``_pending_approvals`` before the run
-resumes. Who may answer is decided where the answer is taken (``_may_decide``), the same way for a typed word, a
-reaction and a button click: in a group only the member who asked. The ends of a request without an answer (the
-timeout, a new turn in its session) are in ``router_commands_approval_end``.
+resumes. Who may answer is decided where the answer is taken, against that open request (``_may_decide``), the same way
+for a typed word, a reaction and a button click: in a group only the member who asked. A button click on an approval the
+chat holds no request for (one raised outside the chat, an external agent's permission request) is decided by the owner;
+one on an approval already settled is not authorised and only marks the card settled. The ends of a request without an
+answer (the timeout, a new turn in its session) are in ``router_commands_approval_end``.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from typing import TYPE_CHECKING
 
 from app.channels.i18n import get_text
 from app.channels.routing.inbound_risk_gate import hold_risky_inbound
-from app.channels.routing.pending_approvals import answer_resume_message
+from app.channels.routing.pending_approvals import PendingApproval, answer_resume_message
 from app.channels.routing.router_host import RouterCommandsHost
 from app.channels.routing.router_keys import routing_state_key
 from app.channels.types import InboundMessage, OutboundMessage
@@ -65,16 +67,18 @@ async def _reply_text(bus: MessageBus, msg: InboundMessage, chat_id: str, text_k
     )
 
 
-def _may_decide(msg: InboundMessage, requester_id: str | None) -> bool:
-    """Whether the sender of ``msg`` may decide an approval asked by the member ``requester_id``.
+def _may_decide(msg: InboundMessage, asked: PendingApproval) -> bool:
+    """Whether the sender of ``msg`` may answer the chat's open request ``asked``.
 
-    A DM is one person's chat with the bot, so whoever writes there decides. In a group only the member who asked
-    does. A missing identity never matches: nobody qualifies when ``msg`` names no sender, or when no member is known
-    to have asked (``requester_id`` is ``""`` or ``None``).
+    The request is the message of the turn that asked, so it says who asked. The chat counts as a group when the request
+    or the answer says so: a flag is only evidence when it says group, because a channel that cannot tell reports a
+    direct chat (Telegram does for every button click). In a DM whoever writes decides; in a group only the member who
+    asked. A missing identity never matches: nobody qualifies when ``msg`` names no sender, or when no member is known
+    to have asked.
     """
-    if not msg.is_group:
+    if not (asked.message.is_group or msg.is_group):
         return True
-    return bool(msg.sender_id) and msg.sender_id == requester_id
+    return bool(msg.sender_id) and msg.sender_id == asked.message.sender_id
 
 
 def _log_refusal(msg: InboundMessage, requester_id: str | None) -> None:
@@ -139,10 +143,10 @@ class RouterCommandsApprovalMixin:
         Supports both single and batch decisions; LangGraph resumes the
         interrupted graph state via ``Command(resume=resume_value)``.
 
-        The request is taken only by someone who may decide it (``_may_decide``, against the member whose turn asked
-        it): the answer of anyone else is dropped and the request stays open, with no reply that would show the chat
-        an approval is pending. The check runs after the last ``await`` of this handler and directly before the
-        request is taken, so the member judged is the one whose request is taken.
+        The request is taken only by someone who may decide it (``_may_decide``, against the request itself): the
+        answer of anyone else is dropped and the request stays open, with no reply that would show the chat an
+        approval is pending. The check runs after the last ``await`` of this handler and directly before the request
+        is taken, so the request judged is the request taken.
         """
         chat_id = msg.chat_id or msg.sender_id
         session_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
@@ -170,7 +174,7 @@ class RouterCommandsApprovalMixin:
         resume_value: dict[str, object] = {"decisions": decisions}
 
         asked = self._pending_approvals.get(session_key)
-        if asked is not None and not _may_decide(msg, asked.message.sender_id):
+        if asked is not None and not _may_decide(msg, asked):
             _log_refusal(msg, asked.message.sender_id)
             return
         answered = self._pending_approvals.pop(session_key)
@@ -196,13 +200,16 @@ class RouterCommandsApprovalMixin:
 
         Steps:
           1. Parse action ("approve" / "deny") and approval_id from content.
-          2. Authorise the clicker. A held channel reply (``outbound_draft``)
-             is decided by the owner alone; any other approval by the member
-             whose turn asked it (``_may_decide``), and, in a group where no
-             turn of the chat asked it, by the owner.
-          3. Resolve via ``ApprovalRegistry`` (only PENDING records; for an
-             already-resolved approval the card is edited to say so and the
-             handler exits). Resolving a held reply also sends or releases it.
+          2. Authorise the clicker. An approval that is already settled has
+             no decision left to authorise: whoever clicks, its card is edited
+             to say so and the handler exits. A held channel reply
+             (``outbound_draft``) is decided by the owner alone; any other
+             approval by the member whose message started the chat's open
+             request (``_may_decide``), and, when the chat holds no open
+             request, by the owner.
+          3. Resolve via ``ApprovalRegistry`` (only PENDING records; one
+             settled in the meantime gets the same card edit and the handler
+             exits). Resolving a held reply also sends or releases it.
           4. Edit the original IM message to show the outcome and prevent
              further button clicks from appearing actionable.
           5. Convert the decision into a ``resume_value`` and submit to
@@ -227,10 +234,14 @@ class RouterCommandsApprovalMixin:
 
         # --- Authorisation ---
         pending = await ApprovalRegistry.get_approval(approval_id)
+        if pending is not None and pending.status != "PENDING":
+            # Nothing is left to decide, so there is nobody to authorise; a stale card is marked settled for any clicker.
+            await _show_outcome_on_card(self._bus, msg, chat_id, "approval_already_resolved")
+            return
         active = self._active_tasks.get(session_key)
-        requester = active.requester_id if active is not None else None
+        asked = self._pending_approvals.get(session_key)
         if pending is not None and pending.action_type == _OUTBOUND_DRAFT:
-            # No agent task of this chat waits on a held reply, so the requester rule below cannot apply, and
+            # No agent task of this chat waits on a held reply, so the request rule below cannot apply, and
             # everyone who can see the card (any group member, any DM sender) would otherwise get to decide.
             if not await self._check_admin_permission(msg):
                 logger.info("Held reply decision refused: sender=%s channel=%s", msg.sender_id, msg.channel)
@@ -244,14 +255,15 @@ class RouterCommandsApprovalMixin:
                     )
                 )
                 return
-        elif msg.is_group and requester is None:
-            # No turn of this chat asked it, so there is no member to compare with, and everyone in the group who can
-            # see the card would otherwise get to decide: the owner does, as for a held reply.
+        elif asked is None:
+            # The chat holds no request, so no member is known to have asked this approval (it was raised outside the
+            # chat, or by an external agent), and everyone who can see the card would otherwise get to decide: the
+            # owner does, as for a held reply.
             if not await self._check_admin_permission(msg):
-                _log_refusal(msg, requester)
+                _log_refusal(msg, None)
                 return
-        elif not _may_decide(msg, requester):
-            _log_refusal(msg, requester)
+        elif not _may_decide(msg, asked):
+            _log_refusal(msg, asked.message.sender_id)
             return
 
         # --- Resolve in DB ---
@@ -285,6 +297,11 @@ class RouterCommandsApprovalMixin:
 
         # --- Resume the interrupted Agent ---
         if active is not None:
+            if self._pending_approvals.get(session_key) is not asked:
+                # The request the clicker was judged against has ended or been replaced while the decision was
+                # stored: it was answered some other way already, and the one open now belongs to its own asker.
+                logger.info("Action button approval resumes nothing: its request is no longer open: id=%s", approval_id[:12])
+                return
             decision: ApprovalDecision = "allow_once" if action_raw == "approve" else "deny"
             entry = self._build_decision_entry(decision, msg.channel)
             resume_value: dict[str, object] = {"decisions": [entry]}

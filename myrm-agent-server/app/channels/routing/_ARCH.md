@@ -37,21 +37,30 @@ text aliases.
 
 ### Who may answer
 
-One rule, `_may_decide(msg, requester_id)`, serves every way of answering — a typed word, a reaction, a
-button click — so the three cannot disagree:
+One rule, `_may_decide(msg, asked)`, serves every way of answering — a typed word, a reaction, a
+button click — so the three cannot disagree. It judges the answer against the chat's open request
+(`asked`, a `PendingApproval`), whose message says who asked:
 
 - in a **DM**, whoever writes decides (the chat is one person's);
-- in a **group**, only the member who asked: the sender must be named and equal `requester_id`. A message
-  that names no sender, or a request whose asker is unknown, leaves nobody who qualifies.
+- in a **group**, only the member who asked: the sender must be named and equal the request's
+  `message.sender_id`. A message that names no sender, or a request whose asker is unknown, leaves nobody
+  who qualifies.
 
-Typed words and reactions are judged by `_handle_approval_command` against the asker of the open request
-(`PendingApproval.message.sender_id`), not against the chat's registry entry: a delegated run asks while
-another member's turn can hold that entry. The question is asked at the moment the request is taken, after the
-last `await` of the handler (the risk screening of a `/deny <reason>`) and directly before
-`PendingApprovals.pop`, so the member judged is the one whose request is taken. An answer the rule refuses is
-still claimed by `_claim_approval_input` (it never reaches the agent as chat text): it is logged at INFO and
-dropped without a reply, and the request stays open for the asker. A bare word such as `ok` or `1` from anyone
-else is therefore swallowed while an approval is pending in a group.
+The chat counts as a group when the request or the answer says so, because a flag is only evidence when it
+says group. A channel that cannot tell reports a direct chat: Telegram's parser does so for every button
+click — the approval card's `act:` buttons and the `qr:/approve` answer buttons of the in-turn card alike — so
+the click that answers a request asked in a group must not turn that group into a DM. The answer is not
+judged against the chat's registry entry (`_ActiveTask.requester_id`) either: a delegated run asks while
+another member's turn can hold that entry.
+
+The question is asked at the moment the request is taken. `_handle_approval_command` asks it after the last
+`await` of the handler (the risk screening of a `/deny <reason>`) and directly before `PendingApprovals.pop`.
+The button handler reads the request before it authorises and, after its last `await`, resumes the run only if
+`PendingApprovals.get` still returns that very request. So the request judged is the request taken: one that
+ended or was replaced in between is left alone. An answer the rule refuses is still claimed by
+`_claim_approval_input` (it never reaches the agent as chat text): it is logged at INFO and dropped without a
+reply, and the request stays open for the asker. A bare word such as `ok` or `1` from anyone else is therefore
+swallowed while an approval is pending in a group.
 
 `_handle_approval_command` then converts the three-tier decision into the
 exact payload `myrm-agent-harness.apply_approval_decisions` expects:
@@ -97,19 +106,21 @@ if msg.metadata.get("callback_prefix") == "act" and msg.content.startswith("appr
 `_handle_action_button_approval` in `commands/router_commands/approval.py` then:
 
 1. **Parses** action (`approve`/`deny`) and `approval_id` from content.
-2. **Authorises**:
+2. **Authorises**. An approval that is already settled has no decision left, so it is not
+   authorised at all: its card is edited to the localized `approval_already_resolved` line for
+   whoever clicks, and the handler exits. For a pending one:
    - a held reply (`action_type == "outbound_draft"`) may only be decided by the
      owner (`_check_admin_permission`, see *Owner Check*); anyone else gets the
      localized `approval_requires_admin` reply and the record stays pending;
-   - every other approval follows *Who may answer* against the turn's
-     `_ActiveTask.requester_id`. In a group where no turn of the chat asked it (the approval
-     was asked elsewhere, e.g. on the web), only the owner decides
-     (`_check_admin_permission`). A refused click is dropped without a reply (INFO log) and
-     the record stays pending.
+   - every other approval follows *Who may answer* against the chat's open request in
+     `_pending_approvals`. When the chat holds none (the approval was asked elsewhere, e.g. on
+     the web, or is an external agent's permission request), nobody is known to have asked it and
+     only the owner decides (`_check_admin_permission`), in a group and in a DM alike. A refused
+     click is dropped without a reply (INFO log) and the record stays pending.
 3. **Resolves** via `ApprovalRegistry.resolve_approval()` — only PENDING
-   records are updated; for an already-resolved approval (duplicate click, TTL
-   sweep) the card is edited to the localized `approval_already_resolved` line
-   and the handler exits (prevents status flip on duplicate button clicks).
+   records are updated; one that was settled between step 2 and here (duplicate click, TTL
+   sweep) gets the same card edit and the handler exits (prevents status flip on duplicate
+   button clicks).
 4. **Edits** the original IM message to the localized status line
    (`approval_resolved_approved` / `approval_resolved_denied`, e.g. "Approved by
    @user") so stale buttons stop inviting clicks.
@@ -117,7 +128,9 @@ if msg.metadata.get("callback_prefix") == "act" and msg.content.startswith("appr
    step 4: `resolve_approval` has already sent or released it (see *Held Replies*),
    and no LangGraph resume is needed. Otherwise, **resumes** the interrupted
    LangGraph agent via `SessionGate.submit()` with a `resume_value`
-   payload, or publishes `APPROVAL_RESOLVED` event if no active task
+   payload and ends the chat's open request, unless that request is no longer the one
+   step 2 judged (it was answered another way or replaced meanwhile, so nothing is resumed);
+   or publishes `APPROVAL_RESOLVED` event if no active task
    exists in the router (e.g. WebUI concurrent resolve).
 
 ## Owner Check
@@ -424,7 +437,7 @@ Pinned by `tests/channels/routing/test_bot_loop_guard.py`,
 | router_constants.py | Core | Constants and pure helpers shared by routing modules. Includes silence reassurance thresholds, the time limit of a notice to a chat (`_NOTICE_SEND_TIMEOUT`), how long a stop waits for the turns it cancelled (`_SHUTDOWN_TURN_GRACE_SECONDS`) and `_is_silent_content` outbound filter. Unit tests can import directly. | — |
 | router_host.py | Core | Typing protocols: host instance attributes required by the stream and command mixins (`pipeline/hosts.py` holds the protocols of the pipeline mixins). | [OK] |
 | router_keys.py | Core | ``routing_state_key`` builds the key for the router's in-memory state maps (active task, /stop target, YOLO flag, pending approval, debounce queue): ``f"{channel}:{peer_id}"`` for DMs and untopiced chats, ``f"{channel}:{peer_id}:{thread}"`` for a forum topic. The topic is required because a supergroup topic binds its own agent (``SqlTopicManager`` keys bindings by ``(chat_id, thread_id)``), so a key without it let two topics overwrite each other's turn. Conversation history uses ``app.channels.types.session.SessionKey`` instead, which carries channel, peer, thread and agent for ``Chat.channel_session_key`` — the two keys answer different questions and are not interchangeable. ``routing_session_key`` keeps the chat-wide key for cross-topic chat lookups. | [OK] |
-| router_models.py | Core | Data models referenced by AgentRouter in router.py, pipeline/ and commands/ (_ActiveTask with steering_token, `requester_id` for who may answer the turn's approval by button and who may `/steer` a group run, `locale` for stuck watchdog i18n, `gate_key` + `gate_turn` for the watchdog's gate release, ReactionPolicy, etc.) | — |
+| router_models.py | Core | Data models referenced by AgentRouter in router.py, pipeline/ and commands/ (_ActiveTask with steering_token, `requester_id` for who may `/steer` a group run, `locale` for stuck watchdog i18n, `gate_key` + `gate_turn` for the watchdog's gate release, ReactionPolicy, etc.) | — |
 | router_reassurance.py | Core | `run_reassurance_loop`: edit-in-place heartbeat for long-task silence detection (sends once, then edits the same message with elapsed time and stage; a failed edit falls back to a new message, a channel that cannot edit gets the first heartbeat only). `interval`, `max_count`, `text_key` and `text_params` default to the foreground pacing and let a delegated run pace and word its own (`delegation/delegation_heartbeat.py`). Started and cancelled by the stream consumer in `router_stream.py`, which owns the shared state and refreshes `last_activity` on every event. | [OK] |
 | router_stream.py | Core | RouterStreamMixin composed into AgentRouter (router.py) via multiple inheritance; the whole consumption of one streamed reply runs inside one `stream_reply_span` (agent run and every edit nest below it; streamed text events add no spans of their own); starts the silence heartbeat of `router_reassurance.py`. `hold_reply` keeps streamed reply text out of the chat while a human still has to approve it. | [OK] |
 | router_stream_scrubber.py | Core | Stream content and progress scrubbing utilities: filters `<think>` tags and normalizes raw tool executions into user-friendly Stage descriptions. | [OK] |

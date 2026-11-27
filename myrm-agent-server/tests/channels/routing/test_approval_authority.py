@@ -43,9 +43,9 @@ def _from(sender: str, text: str, *, group: bool = True) -> InboundMessage:
     return dataclasses.replace(message, sender_id=sender, message_id=f"m{next(_message_ids)}")
 
 
-def _reaction_from(sender: str, emoji: str) -> InboundMessage:
+def _reaction_from(sender: str, emoji: str, *, group: bool = True) -> InboundMessage:
     """``emoji`` as ``sender`` reacts with it to the approval card."""
-    message = _from(sender, emoji)
+    message = _from(sender, emoji, group=group)
     return dataclasses.replace(message, metadata={**message.metadata, "reaction": True, "target_message_id": _CARD})
 
 
@@ -118,6 +118,37 @@ async def test_a_dm_answer_needs_no_sender_check(answer: str) -> None:
     await _dispatch(router, _from("someone-else", answer, group=False))
 
     _assert_taken(router)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["/approve", "1"])
+async def test_an_answer_flagged_as_a_dm_does_not_make_a_groups_request_a_dms(answer: str) -> None:
+    """The request says it was asked in a group; a channel that cannot tell reports every answer of its own as a DM."""
+    router, bus = _router()
+
+    await _dispatch(router, _from("bob", answer, group=False))
+
+    _assert_left_open(router, bus)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("emoji", _REACTIONS)
+async def test_a_reaction_flagged_as_a_dm_does_not_make_a_groups_request_a_dms(emoji: str) -> None:
+    router, bus = _router()
+
+    await _dispatch(router, _reaction_from("bob", emoji, group=False))
+
+    _assert_left_open(router, bus)
+
+
+@pytest.mark.asyncio
+async def test_a_group_flag_on_the_answer_counts_when_the_request_carries_none() -> None:
+    """A request that a button click started is flagged as a DM (the click is); the typed answer still shows the group."""
+    router, bus = _router(group=False)
+
+    await _dispatch(router, _from("bob", "/approve", group=True))
+
+    _assert_left_open(router, bus)
 
 
 @pytest.mark.asyncio

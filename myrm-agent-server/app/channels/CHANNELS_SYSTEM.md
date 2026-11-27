@@ -272,10 +272,16 @@ Discord / Signal / Feishu / iMessage / **Mattermost** / **Matrix**）会把
 | `deny` + reason | `/deny <reason>`（≤280 字符）                   | `{"type": "reject", "feedback": "...", "guidance": "<reason>"}` |
 
 谁能作答由一条规则 `_may_decide` 统一裁定，文字回答（`/approve`、`1`、同意等）、emoji
-反应与按钮点击都走它：私聊里谁发的都算（对话只有一个人），群聊里只有发起这次审批的成员——
-发送者必须有名字且与发起者一致，消息没有发送者、或审批的发起者未知，都无人可答。文字回答
-与反应由 `_handle_approval_command` 对照这条审批登记里的发起者（`PendingApproval.message.sender_id`）
-判断，判断紧挨着取走审批的那一步，中间不再有 `await`；被拒的回答仍被认领、不会当成聊天内容交给
+反应与按钮点击都走它，并且都对照聊天里正在等待的那条审批请求（`PendingApproval`）：私聊里谁发的
+都算（对话只有一个人），群聊里只有发起这次审批的成员——发送者必须有名字且与请求登记的发起者
+（`PendingApproval.message.sender_id`）一致，消息没有发送者、或审批的发起者未知，都无人可答。
+请求或回答任一方说是群聊，就按群聊判断：群聊标志只在说「是」时才算证据，无法判断的渠道一律报成私聊
+（Telegram 入站解析器对所有按钮点击都是如此，包括审批卡上的 `act:` 按钮和对话内审批卡的 `qr:/approve`
+答复按钮），所以回答群聊请求的那次点击不会把群聊变成私聊。聊天里恰好在跑的回合的发起人
+（`_ActiveTask.requester_id`）也不参与判断（委派运行提问时，登记项可能属于别的成员）。
+判断紧挨着取走审批的那一步：文字回答与反应由 `_handle_approval_command` 在最后一个 `await` 之后、
+取走审批之前判断；按钮点击在 `resolve_approval` 之后，只有聊天里等待的仍是判断时的那条请求才恢复运行，
+期间已结束或被取代的请求不会被碰。被拒的回答仍被认领、不会当成聊天内容交给
 Agent，只记一条 INFO 日志、不回复，审批保持待答，所以群里别人发的 `ok`、`1` 这类裸词在审批待答时
 也被吞掉。`_is_reaction_approval_valid` 只核对聊天正在等审批、反应指向的就是审批卡片。
 `_handle_approval_command` 在 `set_approval_user_id`
@@ -288,8 +294,9 @@ Agent，只记一条 INFO 日志、不回复，审批保持待答，所以群里
 （云端沙箱走控制面出口，出站只带纯文本，托管渠道上的 Telegram 卡片同样没有按钮），其余路由提示打开应用审核；
 `ApprovalRegistry` 推给会话对端的是同一张卡（不带请求载荷；被拦截的回复不推，只由通知分发器发给 owner）；被拦截的回复还会附上 `/draft approve <code>` /
 `/draft reject <code>`（`<code>` 为审批 ID 前 8 位，命令接受 6 位及以上），owner 可直接在聊天里决定。
-按钮点击对照该回合的发起者（`_ActiveTask.requester_id`）；群聊里没有任何回合发起过的审批（例如在网页端发起）
-只有 owner 能决定；被拒的点击不回复，审批保持待答。
+按钮点击同样对照聊天正在等待的审批请求；聊天没有等待中的请求时（审批在网页端发起，或是外部 Agent 的权限请求），
+没有任何成员被登记为发起者，只有 owner 能决定，私聊群聊一样；已经定案的审批没有决定可做，不校验点击者，
+谁点旧卡片，卡片都被改成「已处理」；被拒的点击不回复，审批保持待答。
 被拦截的回复（`outbound_draft`）只有 owner
 （控制面转发或 ADMIN 配对）可批准/拒绝，详见 `routing/_ARCH.md` 的 *ActionButton Callback Approval*
 与 *Owner Check*。无论由 WebUI、IM 按钮、批量审批还是 TTL 到期定案，发送或释放、关闭对话方会话里的
