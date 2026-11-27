@@ -12,7 +12,7 @@ Platform-specific implementations of the ComputerBackend protocol. Provides macO
 | factory.py | Core | `create_native_backend`: the ComputerBackend of the host OS (macOS / Windows / Linux), never wrapped; the backend a desktop session holds. | ✅ |
 | macos/ | Package | macOS backend — Quartz CGEvent input, `screencapture` capture, clipboard-paste typing, TCC permission probes — see [macos/_ARCH.md](macos/_ARCH.md) | — |
 | linux/ | Package | Linux X11 backend — xdotool + scrot, shell-free runner, ASCII-typing / clipboard-paste text input, environment probes — see [linux/_ARCH.md](linux/_ARCH.md) | — |
-| windows/ | Package | Windows backend — mss + pyautogui + SendInput Unicode typing + uiautomation text — see [windows/_ARCH.md](windows/_ARCH.md) | — |
+| windows/ | Package | Windows backend — mss + pyautogui + SendInput Unicode typing — see [windows/_ARCH.md](windows/_ARCH.md) | — |
 | cua_driver/ | Package | cua-driver MCP background-input backend wrapping the native backend of a plain computer session — see [cua_driver/_ARCH.md](cua_driver/_ARCH.md) | — |
 
 Desktop backends cover macOS / Windows / Linux only.
@@ -31,7 +31,7 @@ Plain computer session (macOS / Windows / Linux):
 
 ## cua-driver Integration
 
-`CuaDriverBackend` uses the **proxy pattern**: input operations (click, type, key, scroll, drag, mouse_move) are routed to `cua-driver` via MCP stdio for background (focus-free) execution. Non-input operations (screenshot, screen_info, window_text, etc.) are delegated to the platform-native fallback backend.
+`CuaDriverBackend` uses the **proxy pattern**: input operations (click, type, key, scroll, drag, mouse_move) are routed to `cua-driver` via MCP stdio for background (focus-free) execution. Non-input operations (screenshot, screen_info, screen_context, etc.) are delegated to the platform-native fallback backend.
 
 If cua-driver fails for any individual action, it transparently falls back to the native backend for that operation. If cua-driver is not installed, it is never loaded.
 
@@ -44,7 +44,6 @@ A desktop session never holds the proxy: the accessibility capture, the foregrou
 - `mss` (Windows screenshot capture)
 - `pyobjc-framework-Quartz` (macOS input simulation — native CGEvent, avoids rubicon-objc arm64 bug)
 - `pyautogui` (Windows input simulation — native fallback)
-- `uiautomation` (Windows accessibility text extraction, optional)
 - `xdotool` (Linux key and mouse input, active window)
 - `scrot` or `gnome-screenshot` (Linux screen capture)
 - `xclip` (Linux clipboard paste for text containing non-ASCII characters)

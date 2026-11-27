@@ -1,7 +1,7 @@
 """Live integration tests for the real web_fetch engine chain.
 
-The full crawl path is unmocked: SSRF/DNS-pin validation -> scrapling HTTP
-fetch -> content pipeline. Requires the ``[web]`` extra (scrapling) in the
+The full crawl path is unmocked: SSRF/DNS-pin validation -> curl_cffi HTTP
+fetch -> content pipeline. Requires the ``[web]`` extra (curl_cffi) in the
 running interpreter — the server venv (``./myrm-dev test``) has it.
 """
 

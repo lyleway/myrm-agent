@@ -3,7 +3,7 @@
 Wraps a platform fallback backend (macOS/Windows/Linux) and delegates **input**
 operations (click, type, key, scroll, drag, mouse_move) to `cua-driver`
 via its MCP stdio transport.  Non-input operations (screenshot, screen_info,
-window_text, etc.) are forwarded to the platform-native backend unchanged.
+screen_context, etc.) are forwarded to the platform-native backend unchanged.
 
 cua-driver uses private OS APIs (macOS SkyLight SPIs, Windows Touch Injection)
 to simulate user input *without* stealing focus or moving the cursor —
@@ -15,7 +15,7 @@ License: MIT (https://github.com/trycua/cua)
 
 [INPUT]
 - protocols::ComputerBackend (POS: fallback platform backend)
-- types::ActionResult, ModifierKey, ScreenInfo, ScreenContext, WindowTextResult, PermissionStatus (POS: shared types)
+- types::ActionResult, ModifierKey, ScreenInfo, ScreenContext, PermissionStatus (POS: shared types)
 
 [OUTPUT]
 - CuaDriverBackend: ComputerBackend implementation with background input
@@ -43,7 +43,6 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     PermissionStatus,
     ScreenContext,
     ScreenInfo,
-    WindowTextResult,
 )
 
 if TYPE_CHECKING:
@@ -195,7 +194,7 @@ class CuaDriverBackend:
 
     Delegates **input** actions (click, type, key, scroll, drag, mouse_move) to
     cua-driver for focus-free operation.  Non-input operations (screenshot,
-    screen_info, window_text, etc.) are forwarded to the platform-native
+    screen_info, screen_context, etc.) are forwarded to the platform-native
     ``fallback`` backend.
     """
 
@@ -250,12 +249,6 @@ class CuaDriverBackend:
 
     def screen_context(self) -> ScreenContext:
         return self._fallback.screen_context()
-
-    async def window_text(self) -> WindowTextResult:
-        return await self._fallback.window_text()
-
-    async def has_blocking_dialog(self, target_app_names: list[str] | None = None) -> bool:
-        return await self._fallback.has_blocking_dialog(target_app_names)
 
     async def is_browser_active(self) -> bool:
         return await self._fallback.is_browser_active()

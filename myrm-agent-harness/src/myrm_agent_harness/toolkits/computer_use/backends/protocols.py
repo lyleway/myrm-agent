@@ -1,7 +1,7 @@
 """ComputerBackend protocol — platform-agnostic contract for screen I/O.
 
 [INPUT]
-- types::ScreenInfo, ActionResult, WindowTextResult, PermissionStatus (POS: shared type definitions)
+- types::ScreenInfo, ActionResult, PermissionStatus (POS: shared type definitions)
 
 [OUTPUT]
 - ComputerBackend: Protocol that platform backends must implement
@@ -20,7 +20,6 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     PermissionStatus,
     ScreenContext,
     ScreenInfo,
-    WindowTextResult,
 )
 
 
@@ -97,26 +96,6 @@ class ComputerBackend(Protocol):
 
     def screen_context(self) -> ScreenContext:
         """Return current screen context (active window, mouse position)."""
-        ...
-
-    async def window_text(self) -> WindowTextResult:
-        """Extract all text content from the frontmost window via Accessibility API.
-
-        Returns structured text including content beyond the visible viewport.
-        Falls back gracefully when accessibility permissions are unavailable.
-        """
-        ...
-
-    async def has_blocking_dialog(self, target_app_names: list[str] | None = None) -> bool:
-        """Check if there is an OS-level dialog window blocking the target application.
-
-        Args:
-            target_app_names: Optional list of app names to check against (e.g., ["Google Chrome", "Chromium"]).
-                              If None, checks the frontmost app.
-
-        Returns:
-            True if a blocking dialog (like a file picker or permission prompt) is detected.
-        """
         ...
 
     async def is_browser_active(self) -> bool:

@@ -6,15 +6,15 @@ post-processing event emission.
 
 [INPUT]
 - agent.types::AgentRunStatistics (POS: statistics of one agent run: duration, tool and node counts, token usage, cost, completion status)
-- toolkits.code_execution.executors.base::CodeExecutor (POS: Code executor base classes.)
+- toolkits.code_execution.executors.base::CodeExecutor, close_executor_in_background (POS: Code executor base classes.)
 - toolkits.code_execution.workspace.storage_root_bind (POS: ContextVar binding for aggregate workspace filesystem roots during a single agent Task.)
 - utils.runtime.steering::SteeringToken (POS: steering token: injects a message while the agent runs to interrupt the current tool chain)
 - _internals.message_end_event::build_message_end_event (POS: MESSAGE_END 事件负载)
+- _internals.pseudonym_context::init_pseudonym_store (POS: the run's PseudonymStore and memory-write PII closure)
 
 [OUTPUT]
-- setup_workspace: Create workspace under host ``workspaces_storage_root``, bind executor, set context vars. The storage-root ContextVar undo token is stashed in a ContextVar (not in ``merged_context``) so checkpoints/msgpack never serialize it.
-- cleanup_run: Run-end cleanup: cancel children, reset context vars, collect stats.
-- _init_pseudonym_store: Initialize the context-local PseudonymStore and regex PII closure when the active PrivacyPolicy requires one (``needs_pseudonym_store``); consumed by skill-agent session-end privacy re-establishment.
+- setup_workspace: Create workspace under host ``workspaces_storage_root``, bind executor, set context vars. The storage-root ContextVar undo token is stashed in a ContextVar (not in ``merged_context``) so checkpoints/msgpack never serialize it. An executor it creates itself (none was handed in) is recorded in a ContextVar as this run's own and closed if the start fails; a handed-in executor is never recorded.
+- cleanup_run: Run-end cleanup: cancel children, reset context vars, collect stats, and close the executor this run created itself (an executor handed in stays open: its owner closes it).
 - collect_tracker_stats: Extract token usage and cost from the current TokenTracker into the run statistics.
 - post_run_events: Yield post-processing events: artifacts, FILE_MUTATION_FAILED, and MESSAGE_END (payload assembly lives in ``message_end_event``).
 
@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from myrm_agent_harness.agent._internals.message_end_event import build_message_end_event
+from myrm_agent_harness.agent._internals.pseudonym_context import init_pseudonym_store
 from myrm_agent_harness.agent.context_management.infra.cache_metrics_collector import (
     clear_pending_explicit_cache_snapshot,
     install_llm_response_hook,
@@ -45,6 +46,7 @@ from myrm_agent_harness.agent.types import (
     map_to_completion_status,
 )
 from myrm_agent_harness.toolkits.code_execution import create_workspace_service
+from myrm_agent_harness.toolkits.code_execution.executors.base import close_executor_in_background
 from myrm_agent_harness.toolkits.code_execution.workspace.storage_root_bind import (
     WORKSPACE_BIND_CTX_KEY,
     bind_workspace_storage_root,
@@ -81,94 +83,10 @@ def _take_workspace_bind_handle() -> object | None:
     return handle
 
 
-def _init_pseudonym_store(workspace_path: str) -> None:
-    """Initialize PseudonymStore and the PII closure for the current context.
-
-    Reads the active PrivacyPolicy from the current task context and, when the
-    policy requires a shared store (``needs_pseudonym_store``: S2/S3
-    PSEUDONYMIZE or deep PII scan), creates the store and registers the regex PII
-    pseudonymizer as a context-local closure (inherited by fire-and-forget
-    memory-write tasks created afterwards). Deep scan needs the store even when
-    S2/S3 use REDACT, because non-structured PII is always pseudonymized through
-    PseudonymStore.
-    """
-    from myrm_agent_harness.agent.middlewares._session_context import (
-        get_privacy_policy,
-        set_pseudonym_store,
-    )
-
-    policy = get_privacy_policy()
-    if not policy.enabled:
-        return
-    if not policy.needs_pseudonym_store:
-        return
-
-    from myrm_agent_harness.agent.security.detection.pseudonym_store import (
-        get_pseudonym_store,
-    )
-
-    db_path = str(Path(workspace_path).parent / "pseudonym_store.db")
-    store = get_pseudonym_store(db_path)
-    set_pseudonym_store(store)
-    logger.info("PseudonymStore initialized at %s", db_path)
-
-    _register_pii_pseudonymizer(policy, store)
-
-
-def _register_pii_pseudonymizer(policy: object, store: object) -> None:
-    """Build and register a PII pseudonymization closure for memory_scanner."""
-    from myrm_agent_harness.core.security.detection.custom_rules import custom_rules
-    from myrm_agent_harness.core.security.detection.pii_classifier import classify_content
-    from myrm_agent_harness.core.security.detection.pseudonymizer import (
-        pseudonymize_text,
-    )
-    from myrm_agent_harness.core.security.types import (
-        PIIAction,
-        PrivacyPolicy,
-        SensitivityLevel,
-    )
-    from myrm_agent_harness.toolkits.memory._internal.memory_scanner import (
-        set_pii_pseudonymizer,
-    )
-
-    if not isinstance(policy, PrivacyPolicy):
-        return
-
-    def _pseudonymize(text: str) -> str:
-        if not policy.enabled:
-            return text
-        has_pseudonymize = policy.s2_action == PIIAction.PSEUDONYMIZE or policy.s3_action == PIIAction.PSEUDONYMIZE
-        if not has_pseudonymize or store is None:
-            return text
-
-        pii_result = classify_content(text, policy)
-        if pii_result.level == SensitivityLevel.S1:
-            return text
-
-        levels_to_process: list[SensitivityLevel] = [pii_result.level]
-        if pii_result.level == SensitivityLevel.S3 and policy.s2_action == PIIAction.PSEUDONYMIZE:
-            levels_to_process.append(SensitivityLevel.S2)
-
-        result = text
-        total_count = 0
-        for level in levels_to_process:
-            action = policy.s3_action if level == SensitivityLevel.S3 else policy.s2_action
-            if action != PIIAction.PSEUDONYMIZE:
-                continue
-            # The level's custom terms are pseudonymized with its built-in detectors, so memory never keeps them.
-            ps_result = pseudonymize_text(result, store, level, custom_rules(policy, level))
-            if ps_result.count > 0:
-                result = ps_result.text
-                total_count += ps_result.count
-
-        if total_count > 0:
-            logger.warning(
-                "[MEMORY_SCAN] Pseudonymized %d PII items in memory content",
-                total_count,
-            )
-        return result
-
-    set_pii_pseudonymizer(_pseudonymize)
+# The executor this run created itself, or None when the host handed one in. Whoever builds an executor closes it, so
+# the run's end closes this one and no other. A run's start and end share one context, and a child run's task starts
+# from a copy of its parent's: each start therefore records its own answer, None included.
+_run_created_executor: ContextVar[CodeExecutor | None] = ContextVar("run_created_executor", default=None)
 
 
 async def setup_workspace(
@@ -225,12 +143,13 @@ async def setup_workspace(
         workspace = await workspace_svc.get_or_create(session_id=session_id)
         workspace_path = workspace_svc.get_workspace_absolute_path(workspace)
 
+    created: CodeExecutor | None = None
     try:
         if executor is None:
             from myrm_agent_harness.toolkits.code_execution import create_executor
 
             try:
-                executor = create_executor()
+                executor = created = create_executor()
                 logger.debug(f" Auto-created Executor: {executor.get_executor_name()}")
             except Exception as e:
                 logger.error(f" Failed to create Executor: {e}")
@@ -247,7 +166,7 @@ async def setup_workspace(
 
         set_executor(executor)
         set_workspace_root(workspace_path)
-        _init_pseudonym_store(workspace_path)
+        init_pseudonym_store(workspace_path)
 
         from myrm_agent_harness.agent.security.workspace_trust.runtime import (
             apply_workspace_trust_for_root,
@@ -277,9 +196,13 @@ async def setup_workspace(
 
         record_ttfa_run_start()
 
+        # Last in the try: from here on the run's end owns the close, and nothing above can fail after the claim.
+        _run_created_executor.set(created)
     except Exception:
         leaked = _take_workspace_bind_handle()
         release_workspace_storage_bind_token(leaked)
+        if created is not None:
+            close_executor_in_background(created)
         raise
 
     return context, executor
@@ -295,7 +218,10 @@ def cleanup_run(
     merged_context: dict[str, object] | None = None,
     include_detached: bool = True,
 ) -> None:
-    """Run-end cleanup: cancel children, reset context vars, collect stats.
+    """Run-end cleanup: cancel children, reset context vars, collect stats, close the executor this run created.
+
+    An executor the host handed in stays open: whoever built it closes it. Dropping the session's stash entry
+    never closes anything.
 
     Args:
         stats: Mutable statistics object to fill.
@@ -311,6 +237,8 @@ def cleanup_run(
             failed run passes ``True``; a normally-completed run passes
             ``False`` so background subagents outlive the parent stream.
     """
+    created_executor = _run_created_executor.get()
+    _run_created_executor.set(None)
     try:
         stashed = _take_workspace_bind_handle()
         legacy: object | None = None
@@ -409,6 +337,10 @@ def cleanup_run(
         stats.total_duration_seconds = time.time() - start_time
     except Exception as cleanup_error:
         logger.error(f"Error during cleanup: {cleanup_error}", exc_info=True)
+    finally:
+        # Last, so a step above that fails never keeps the executor open.
+        if created_executor is not None:
+            close_executor_in_background(created_executor)
 
 
 def collect_tracker_stats(stats: AgentRunStatistics, *, tracker: TokenTracker | None = None) -> None:

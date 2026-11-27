@@ -468,6 +468,7 @@ config = SubagentConfig(
    - **被取消 / 启动前取消**（`was_cancelled=True`）→ `include_detached=True`：级联取消所有子代理（含后台），与 §5 语义一致
    - **用户显式 cancel**（cancel-all API / cancel-child / `cancel_active_children_for_session`）始终取消全部（含后台），不做区分
    - 后台子代理由事件循环 + `manager._children` 强引用持有，父流结束后仍存活；`_cleanup_child` 在完成时写入 `COMPLETED_SUBAGENT_RESULTS` 供 REST/SSE 观测
+   - **共享执行器的归属**：子代理沿用父 agent 的 `executor`（`builder.py` 传入 `parent_agent.executor`）和 `session_id`（`executor_attempt_mixin.py:_inherit_parent_context` 继承），所以父子共用同一个 shell。`cleanup_run` 只关闭本次 run 自己创建的执行器，子代理 run 结束不会关闭与父共享的执行器，也就不会打断父或兄弟 run 正在执行的命令；这个执行器由创建它的一方（父 agent 的宿主）负责关闭
 
 **优势**：
 - ✅ 灵活：支持三种取消策略，满足不同场景

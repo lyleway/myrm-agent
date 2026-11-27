@@ -2,6 +2,7 @@
 
 [INPUT]
 - app.core.media.reference::local_media_file, parse_media_reference (POS: ``media://<id>`` -> the stored file on the local disk)
+- myrm_agent_harness.core.security.path::open_directory_beneath, ConfinedDirectory (POS: exclusive file creation below a trusted directory, decided on descriptors so no link redirects it)
 - myrm_agent_harness.toolkits.tasks::Task, TaskStatus (POS: the queue task a status answer describes)
 - myrm_agent_harness.toolkits.storage.base::StorageError (POS: a storage key that escapes the storage root)
 
@@ -13,12 +14,15 @@
 [POS]
 The output counterpart of ``_uploaded/``: inputs reach the workspace as files, generated media would otherwise exist only
 as ``media://`` references that code tools cannot open. A copy (never a link) is made on demand, so editing it in place
-cannot reach the media library's original, and a ``.gitignore`` keeps the copies out of the user's repository.
+cannot reach the media library's original, and a ``.gitignore`` keeps the copies out of the user's repository. The
+server writes into a folder the agent's sandbox can also write, so the folder is opened once without following a link
+and every write goes through that open folder: swapping its name for a link afterwards redirects nothing.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import json
 import logging
@@ -29,6 +33,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import uuid4
 
+from myrm_agent_harness.core.security.path import ConfinedDirectory, open_directory_beneath
 from myrm_agent_harness.toolkits.storage.base import StorageError
 from myrm_agent_harness.toolkits.tasks import Task, TaskStatus
 
@@ -43,26 +48,33 @@ _MEDIA_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
 _EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,8}")
 # Kanban runs commit the whole workspace with ``git add -A``; the copies are working material, not deliverables.
 _GITIGNORE = ".gitignore"
+_IGNORE_EVERYTHING = b"*\n"
 
 
 class _ExportError(Exception):
     """A media item that could not be copied; the message says why, in words meant for the model."""
 
 
-def _ensure_directory(directory: Path) -> None:
-    """Create the folder of the copies. Its creator ignores its contents in git; a folder that exists is left alone."""
+def _open_folder(workspace_root: Path) -> ConfinedDirectory:
+    """Open the folder of the copies, creating it with its git-ignore rule when it is absent; the caller closes it.
+
+    A link in place of the folder is refused. A folder that exists is left alone, and one that could not be given
+    its ignore rule is not left behind.
+    """
     try:
-        directory.mkdir()
-    except FileExistsError:
-        if directory.is_symlink():
-            # The server writes here from outside the agent's sandbox, so the agent must not be able to redirect it.
-            raise OSError(errno.ELOOP, "the folder is a symbolic link") from None
-        return
+        return open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,), create=False)
+    except FileNotFoundError:
+        pass  # absent: this call is its creator
+    folder = open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,))
     try:
-        (directory / _GITIGNORE).write_text("*\n", encoding="utf-8")
+        # ``FileExistsError``: a concurrent call created the folder and its rule first.
+        with contextlib.suppress(FileExistsError), os.fdopen(folder.create_new(_GITIGNORE), "wb") as rule:
+            rule.write(_IGNORE_EVERYTHING)
     except OSError:
-        shutil.rmtree(directory, ignore_errors=True)
+        folder.close()
+        shutil.rmtree(folder.path, ignore_errors=True)
         raise
+    return folder
 
 
 def _copy_into_workspace(source: Path, workspace_root: Path, file_name: str) -> int | None:
@@ -72,22 +84,26 @@ def _copy_into_workspace(source: Path, workspace_root: Path, file_name: str) -> 
     and two concurrent calls end with one complete file.
 
     Raises:
-        OSError: The workspace folder is missing or not writable, or the copy failed.
+        OSError: The workspace folder is missing or not writable, a link stands in place of the copies' folder, or the
+            copy failed.
     """
     if not workspace_root.is_dir():
         raise NotADirectoryError(errno.ENOTDIR, "the workspace folder does not exist")
-    directory = workspace_root / WORKSPACE_MEDIA_DIR
-    _ensure_directory(directory)
-    destination = directory / file_name
-    if destination.exists():
-        return None
-    temporary = directory / f".{file_name}.{uuid4().hex}.part"
-    try:
-        shutil.copyfile(source, temporary)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return destination.stat().st_size
+    with _open_folder(workspace_root.resolve()) as folder:
+        destination = folder.path / file_name
+        if destination.exists():
+            return None
+        temporary = f".{file_name}.{uuid4().hex}.part"
+        try:
+            with os.fdopen(folder.create_new(temporary), "wb") as writer, source.open("rb") as reader:
+                shutil.copyfileobj(reader, writer)
+                size = writer.tell()
+            # Names resolve here, so a folder swapped for a link meanwhile finds no temporary file and publishes nothing.
+            os.replace(folder.path / temporary, destination)
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                folder.unlink(temporary)
+    return size
 
 
 def _media_references(result: Mapping[str, object]) -> list[str]:
@@ -189,7 +205,8 @@ class WorkspaceExporter:
         try:
             size = await asyncio.to_thread(_copy_into_workspace, source, self._root, file_name)
         except OSError as exc:
-            raise _ExportError(f"the copy could not be written ({exc.strerror or type(exc).__name__})") from None
+            reason = exc.strerror or str(exc) or type(exc).__name__
+            raise _ExportError(f"the copy could not be written ({reason})") from None
         if size is not None:
             logger.info("Copied generated media %s into the workspace (%d bytes)", media_id, size)
         # The credential redaction of the agent stack masks random-looking tokens in tool results. It takes the bare

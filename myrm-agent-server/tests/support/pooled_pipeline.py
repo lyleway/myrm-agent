@@ -18,6 +18,7 @@ def skill_agent_mock() -> MagicMock:
     skill_agent = MagicMock()
     skill_agent.config = AgentRuntimeConfig(security_config=SecurityConfig(ruleset=()))
     skill_agent.memory_manager = None
+    skill_agent.executor = None
     return skill_agent
 
 
