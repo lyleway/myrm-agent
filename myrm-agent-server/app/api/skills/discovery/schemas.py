@@ -2,42 +2,44 @@
 
 [INPUT]
 pydantic::BaseModel (POS: Schema validation)
+app.api.skills.schemas::EncodableStr, ScanFindingResponse (POS: response text type that repairs lone surrogates; scan finding model)
 
 [OUTPUT]
-Request/response models for skill discovery endpoints.
+Request/response models for skill discovery endpoints. A response field that carries registry, package or
+scanner text is an EncodableStr, so a lone surrogate in it becomes U+FFFD instead of making the JSON body unencodable.
 
 [POS]
-Pydantic schemas extracted from discovery.py to stay within
-the 400-line file budget.
+Request and response schemas of the skill discovery routes: search, install, update, uninstall, preview,
+URL analysis, custom sources, static-index status and skill-pool sync.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel
 
-from app.api.skills.schemas import ScanFindingResponse
+from app.api.skills.schemas import EncodableStr, ScanFindingResponse
 
 
 class SkillSearchResultResponse(BaseModel):
-    id: str
-    name: str
-    description: str
-    source: str
-    author: str
-    install_url: str
-    install_method: str
-    version: str = ""
+    id: EncodableStr
+    name: EncodableStr
+    description: EncodableStr
+    source: EncodableStr
+    author: EncodableStr
+    install_url: EncodableStr
+    install_method: EncodableStr
+    version: EncodableStr = ""
     stars: int = 0
     downloads: int = 0
-    tags: list[str] = []
-    readme_url: str | None = None
-    subdirectory: str | None = None
-    installed_version: str = ""
+    tags: list[EncodableStr] = []
+    readme_url: EncodableStr | None = None
+    subdirectory: EncodableStr | None = None
+    installed_version: EncodableStr = ""
     upgrade_available: bool = False
-    installed_skill_id: str = ""
-    package_type: str = "skill"
-    keywords: list[str] = []
-    declared_mcp_servers: list[str] = []
+    installed_skill_id: EncodableStr = ""
+    package_type: EncodableStr = "skill"
+    keywords: list[EncodableStr] = []
+    declared_mcp_servers: list[EncodableStr] = []
 
 
 class SkillSearchResponse(BaseModel):
@@ -55,49 +57,49 @@ class SkillInstallRequest(BaseModel):
 
 
 class SkillReceiptResponse(BaseModel):
-    receipt_id: str
-    skill_id: str
-    skill_name: str
-    source: str
-    installed_at: str
-    version: str = ""
-    installed_path: str = ""
-    installed_skills: list[str] = []
-    declared_mcp_servers: list[str] = []
+    receipt_id: EncodableStr
+    skill_id: EncodableStr
+    skill_name: EncodableStr
+    source: EncodableStr
+    installed_at: EncodableStr
+    version: EncodableStr = ""
+    installed_path: EncodableStr = ""
+    installed_skills: list[EncodableStr] = []
+    declared_mcp_servers: list[EncodableStr] = []
     scan_score: int = 100
     security_verified: bool = True
-    manifest_hash: str = ""
+    manifest_hash: EncodableStr = ""
 
 
 class SkillInstallResponse(BaseModel):
     success: bool
-    skill_name: str = ""
-    skill_id: str = ""
-    installed_path: str = ""
-    error: str = ""
-    error_code: str = ""
+    skill_name: EncodableStr = ""
+    skill_id: EncodableStr = ""
+    installed_path: EncodableStr = ""
+    error: EncodableStr = ""
+    error_code: EncodableStr = ""
     mounted: bool = False
-    mount_agent_id: str = ""
-    mount_skill_id: str = ""
+    mount_agent_id: EncodableStr = ""
+    mount_skill_id: EncodableStr = ""
     mount_already_present: bool = False
-    mount_error: str = ""
+    mount_error: EncodableStr = ""
     allowlist_appended: bool = False
-    allowlist_append_error: str = ""
-    installed_skills: list[str] = []
-    declared_mcp_servers: list[str] = []
+    allowlist_append_error: EncodableStr = ""
+    installed_skills: list[EncodableStr] = []
+    declared_mcp_servers: list[EncodableStr] = []
     receipt: SkillReceiptResponse | None = None
-    pre_replace_batch_id: str | None = None
+    pre_replace_batch_id: EncodableStr | None = None
     """Rollback batch id when a market replace captured a pre-replace snapshot."""
     snapshot_truncated: bool = False
     """True when the pre-replace snapshot hit size limits (undo may be partial)."""
 
 
 class SkillUpdateInfoResponse(BaseModel):
-    skill_name: str
-    current_version: str
-    remote_version: str
-    source: str
-    skill_id: str
+    skill_name: EncodableStr
+    current_version: EncodableStr
+    remote_version: EncodableStr
+    source: EncodableStr
+    skill_id: EncodableStr
     has_update: bool
 
 
@@ -126,24 +128,24 @@ class SkillPreviewRequest(BaseModel):
 class PrerequisiteDiagnosticResponse(BaseModel):
     is_supported_os: bool = True
     all_satisfied: bool = True
-    current_os: str = ""
-    missing_binaries: list[str] = []
-    missing_packages: list[str] = []
-    remediation_commands: list[str] = []
-    summary_message: str = ""
+    current_os: EncodableStr = ""
+    missing_binaries: list[EncodableStr] = []
+    missing_packages: list[EncodableStr] = []
+    remediation_commands: list[EncodableStr] = []
+    summary_message: EncodableStr = ""
 
 
 class SkillPreviewResponse(BaseModel):
-    skill_id: str
-    name: str
-    description: str
-    version: str
-    files: list[str]
+    skill_id: EncodableStr
+    name: EncodableStr
+    description: EncodableStr
+    version: EncodableStr
+    files: list[EncodableStr]
     scan_findings: list[ScanFindingResponse] = []
     is_clean: bool = True
-    package_type: str = "skill"
-    installed_skills: list[str] = []
-    declared_mcp_servers: list[str] = []
+    package_type: EncodableStr = "skill"
+    installed_skills: list[EncodableStr] = []
+    declared_mcp_servers: list[EncodableStr] = []
     prerequisites: PrerequisiteDiagnosticResponse | None = None
 
 
@@ -155,9 +157,9 @@ class SkillInstallFromUrlRequest(BaseModel):
 
 
 class SkillUrlInfo(BaseModel):
-    url: str
-    name: str
-    description: str = ""
+    url: EncodableStr
+    name: EncodableStr
+    description: EncodableStr = ""
     is_installed: bool
 
 
@@ -206,4 +208,3 @@ class StaticIndexStatusResponse(BaseModel):
     source_name: str
     source_url: str
     last_synced_at: float
-

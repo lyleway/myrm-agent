@@ -15,7 +15,7 @@
 - install_skill_files: Install an in-memory skill file tree under an install root through the quarantine pipeline.
 - is_safe_skill_dir_name: Whether a publisher-controlled name is a single relative path segment.
 - resolve_install_error: Map an install exception to a user message and a stable error code.
-- DOCUMENT_TOO_LARGE_MESSAGE, INVALID_PACKAGE_PATH_MESSAGE: The fixed refusal sentences a user sees; the details go to the log.
+- DOCUMENT_TOO_LARGE_MESSAGE, INVALID_PACKAGE_PATH_MESSAGE, INVALID_SKILL_NAME_MESSAGE: The fixed refusal sentences a user sees; the details go to the log.
 
 [POS]
 The one install path for every source that already holds the files. The market service passes its install root, so the
@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 # 用户可见拒绝原因的固定文案：不含包内路径、数字与解析器原文，这些细节只写日志
 DOCUMENT_TOO_LARGE_MESSAGE = "安装被拦截：Agent Plugin 包内有文件超出大小限制。"
 INVALID_PACKAGE_PATH_MESSAGE = "安装被拦截：包内有文件名或目录名过长，或含不支持的字符。"
+INVALID_SKILL_NAME_MESSAGE = "安装被拦截：技能名称无效，不能用作安装目录名。"
 
 # ext4 等 POSIX 文件系统的路径分量上限是 255 字节；按 UTF-8 字节数计，同一个包在每台主机上的结论一致
 _MAX_NAME_BYTES = 255
@@ -146,13 +147,12 @@ async def install_skill_files(
     # 技能发布方控制，未经校验会拼出目录穿越或让 mkdtemp 直接崩溃。
     # 本步两道门的拒绝结果都回显这个名字，它可能含孤立代理字符，须先换成 U+FFFD，否则 JSON 响应序列化会抛异常
     if not is_safe_skill_dir_name(name):
-        reason = f"Invalid skill name for install directory: {name!r}"
-        logger.warning("Skill install rejected: %s", reason)
-        _emit("rejected", reason)
+        logger.warning("Skill %.80r install rejected: not a single relative path segment", name)
+        _emit("rejected", INVALID_SKILL_NAME_MESSAGE)
         return SkillInstallResult(
             success=False,
             skill_name=encodable_text(name),
-            error=reason,
+            error=INVALID_SKILL_NAME_MESSAGE,
             error_code="INVALID_SKILL_NAME",
         )
 

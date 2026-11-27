@@ -43,6 +43,7 @@ const SHA = 'a'.repeat(64);
 const UNDECLARED: Record<BridgeCapability, CapabilityStatus> = {
   notify: 'undeclared',
   fetch: 'undeclared',
+  ai: 'undeclared',
   tray: 'undeclared',
   shortcut: 'undeclared',
   float: 'undeclared',
@@ -173,6 +174,25 @@ describe('AppPermissionsDialog', () => {
     expect(mocks.requestAppNotificationPermission).not.toHaveBeenCalled();
   });
 
+  it('lists ai in every window and stores it with no scope', async () => {
+    renderDialog({
+      declaration: { ...EMPTY_DECLARATION, ai: true },
+      statuses: { ...UNDECLARED, ai: 'ask' },
+      desktopAvailable: false,
+    });
+
+    expect(screen.getByText('ai.title')).toBeInTheDocument();
+    expect(screen.getByText('ai.destination')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(mocks.saveGrant).toHaveBeenCalledTimes(1));
+    expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'ai', {
+      decision: 'allow',
+      scope: [],
+      version_sha256: SHA,
+    });
+  });
+
   it('only shows and stores what the page declares', async () => {
     renderDialog({
       declaration: { ...EMPTY_DECLARATION, notify: true },
@@ -250,8 +270,16 @@ describe('AppPermissionsDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
       await waitFor(() => expect(onClose).toHaveBeenCalled());
-      expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'tray', { decision: 'allow', scope: [], version_sha256: SHA });
-      expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'float', { decision: 'deny', scope: [], version_sha256: SHA });
+      expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'tray', {
+        decision: 'allow',
+        scope: [],
+        version_sha256: SHA,
+      });
+      expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'float', {
+        decision: 'deny',
+        scope: [],
+        version_sha256: SHA,
+      });
       expect(mocks.saveGrant).toHaveBeenCalledWith('art-1', 'shortcut', {
         decision: 'allow',
         scope: ['Alt+F1', 'CommandOrControl+Shift+K'],

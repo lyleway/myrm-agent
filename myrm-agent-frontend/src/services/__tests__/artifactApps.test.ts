@@ -2,12 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const apiRequest = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api', () => ({ apiRequest }));
+const showRiskHeldRefusal = vi.hoisted(() => vi.fn<(detail: unknown) => boolean>(() => false));
+vi.mock('@/services/riskHeldToast', () => ({ showRiskHeldRefusal }));
 
 import {
   fetchAppActivity,
   fetchAppDetail,
   installApp,
   listInstalledApps,
+  proxyAppAi,
   proxyAppFetch,
   reportAppActivity,
   saveGrant,
@@ -73,6 +76,39 @@ describe('artifactApps client', () => {
       body: JSON.stringify(request),
       silent: true,
     });
+  });
+
+  it("posts a model call with the server's field names and a timeout just above the server's own limit", async () => {
+    await proxyAppAi('art-1', { prompt: 'Weather?', system: null, maxTokens: 64, version_sha256: SHA });
+
+    expect(apiRequest).toHaveBeenCalledWith('/artifact-apps/art-1/ai', {
+      method: 'POST',
+      body: JSON.stringify({ prompt: 'Weather?', system: null, version_sha256: SHA, max_tokens: 64 }),
+      silent: true,
+      timeout: 65_000,
+    });
+  });
+
+  it('shows the shared notice and answers blocked when a risk rule holds the text, and rethrows any other failure', async () => {
+    const held = Object.assign(new Error('held'), { data: { code: 'risk_held' } });
+    apiRequest.mockRejectedValueOnce(held);
+    showRiskHeldRefusal.mockReturnValueOnce(true);
+
+    await expect(
+      proxyAppAi('art-1', { prompt: 'key', system: null, maxTokens: 64, version_sha256: SHA }),
+    ).resolves.toEqual({
+      ok: false,
+      text: '',
+      code: 'blocked',
+      message: "The text was held by the user's risk rules",
+    });
+    expect(showRiskHeldRefusal).toHaveBeenCalledWith({ code: 'risk_held' });
+
+    const down = new Error('offline');
+    apiRequest.mockRejectedValueOnce(down);
+    await expect(proxyAppAi('art-1', { prompt: 'x', system: null, maxTokens: 64, version_sha256: SHA })).rejects.toBe(
+      down,
+    );
   });
 
   it('reports a page-side call next to the version it ran under, outliving the page, and resolves to nothing', async () => {

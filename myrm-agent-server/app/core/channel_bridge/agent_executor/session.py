@@ -7,7 +7,7 @@
 
 [OUTPUT]
 - resolve_session_key: the key the next turn of a peer is stored under
-- build_channel_session_key: the base key of a peer's conversation, for the lookups that do not resolve an epoch
+- build_channel_session_key: the base key of a peer's conversation, without a reset epoch, which a conversation opened on request extends
 - build_channel_budget_key: the budget key of a group message
 
 [POS]
@@ -61,11 +61,10 @@ def build_channel_session_key(
     *,
     agent_id: str | None = None,
 ) -> str:
-    """Return the base ``channel_session_key`` for a message's conversation.
+    """Return the base ``channel_session_key`` for a message's conversation, without a reset epoch.
 
-    Public counterpart of ``_build_session_key`` for callers that need to look up the Chat row
-    rather than resolve a reset epoch: ``Chat.channel_session_key`` stores this exact string, so
-    a lookup built from only channel + peer never matches a topic- or agent-scoped conversation.
+    Public counterpart of ``_build_session_key`` for callers that derive a key of their own from the base: a
+    conversation opened on request extends it with its opening time (``started_session_key``).
     """
     return _build_session_key(msg, agent_id=agent_id)
 
@@ -177,8 +176,8 @@ async def _resolve_idle_key(
 ) -> str:
     """Resolve session key for idle mode by checking the latest Chat's activity.
 
-    Only the conversation's own chats count (its key and its reset epochs): the chat of another
-    peer, topic or agent that shares the key's leading characters must not be continued.
+    Only the conversation's own chats count (its key, its reset epochs and the conversations opened on request):
+    the chat of another peer, topic or agent that shares the key's leading characters must not be continued.
     """
     from sqlalchemy import select
 

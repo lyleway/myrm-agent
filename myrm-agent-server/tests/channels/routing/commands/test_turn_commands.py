@@ -11,7 +11,7 @@ from app.channels.routing.commands import (
     handle_undo,
 )
 from app.channels.types import OutboundMessage
-from tests.channels.command_testkit import make_command_bus, make_command_msg, make_command_resolver
+from tests.channels.routing.commands.command_testkit import make_command_bus, make_command_msg, make_command_resolver
 
 
 class TestHandleRetry:

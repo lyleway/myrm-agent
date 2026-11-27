@@ -6808,6 +6808,11 @@
           "description": "Let the app request data from these sites:",
           "destination": "Your Myrm server sends the requests, not the page, and the replies go back to the app. The page can still show images from any site."
         },
+        "ai": {
+          "title": "Ask your AI model",
+          "description": "Let the app send text to the AI model you set up and read the answer.",
+          "destination": "Your Myrm server sends only that text to your model provider. The app can't see your conversations or files. It uses your model quota: every call counts toward your budget, and each app has its own daily limit."
+        },
         "activity": {
           "title": "Recent activity",
           "empty": "Nothing yet.",
@@ -6816,6 +6821,15 @@
             "denied": "Blocked",
             "rate_limited": "Too frequent",
             "error": "Failed"
+          },
+          "reason": {
+            "permission_denied": "Not allowed",
+            "rate_limited": "Too many calls",
+            "budget_exceeded": "Budget used up",
+            "unavailable": "No usable model",
+            "upstream_error": "Model error",
+            "timeout": "Model too slow",
+            "risk_held": "Held by risk rules"
           }
         },
         "desktopOnly": "This app also asks for features that only the desktop app offers: menu bar item, keyboard shortcuts and floating.",
