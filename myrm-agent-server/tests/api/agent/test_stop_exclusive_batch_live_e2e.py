@@ -98,7 +98,6 @@ class StoppedTurn:
     written_at_stop: list[str]
     written_during_hold: list[str]
     written_after: list[str]
-    ended_after_seconds: float | None
     alive: list[int]
     stop_reason: str | None
     events: list[dict[str, object]]
@@ -222,9 +221,10 @@ def _stop_one_turn(client: TestClient, agent_id: str, event_path_hold: threading
         time.sleep(hold_seconds)
         written_during_hold = batch.written()
         event_path_hold.clear()
-        released_at = time.monotonic()
         batch.worker.join(_STOP_DEADLINE_SECONDS)
-        ended_after_seconds = None if batch.worker.is_alive() else time.monotonic() - released_at
+        assert not batch.worker.is_alive(), (
+            f"the turn was still streaming {_STOP_DEADLINE_SECONDS}s after the event path was let go"
+        )
         time.sleep(_SETTLE_SECONDS)
         if batch.failures:
             raise batch.failures[0]
@@ -235,7 +235,6 @@ def _stop_one_turn(client: TestClient, agent_id: str, event_path_hold: threading
             written_at_stop=written_at_stop,
             written_during_hold=written_during_hold,
             written_after=batch.written(),
-            ended_after_seconds=ended_after_seconds,
             alive=processes_with_marker(str(batch.script)),
             stop_reason=_stored_stop_reason(messages),
             events=batch.events,
@@ -264,9 +263,6 @@ def test_a_stop_during_a_batch_lets_none_of_the_waiting_file_writes_change_a_fil
         )
 
     assert turn.written_during_hold == [], f"files written while the event path was held: {turn.written_during_hold}"
-    assert turn.ended_after_seconds is not None, (
-        f"the turn was still streaming {_STOP_DEADLINE_SECONDS}s after the event path was let go"
-    )
     assert turn.written_after == [], f"files written after Stop: {turn.written_after}"
     assert turn.alive == [], f"processes of the turn still alive after it ended: {turn.alive}"
     assert turn.stop_reason == "user_cancelled", f"stored stop reason: {turn.stop_reason}"
