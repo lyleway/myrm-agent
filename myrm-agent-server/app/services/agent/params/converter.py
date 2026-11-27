@@ -12,7 +12,7 @@
 Agent request parameter conversion layer. Orchestrates the conversion stages in a fixed order —
 model plan, routing, config sources, agent profile, model finalization, query enrichment, tool
 surface — then assembles `GeneralAgentParams`. Fast mode (`action_mode='fast'`) overrides builtin
-tools to answer_tool-only plus forced web search; deep search uses web_fetch + sufficiency, not
+tools to an empty profile plus forced web search; deep search uses web_fetch + sufficiency, not
 browser eager bind.
 """
 

@@ -864,7 +864,6 @@ def test_canonical_params_completed_for_management_tools() -> None:
     for control_signal in (
         "ask_question_tool",
         "complete_goal_tool",
-        "request_answer_user_tool",
     ):
         assert TOOL_CANONICAL_PARAMS[control_signal] == []
 

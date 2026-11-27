@@ -49,7 +49,6 @@ class TestGetToolLayer:
     def test_extended_tools_return_extended(self):
         extended_tools = [
             "todo_write",
-            "request_answer_user_tool",
             "skill_manage_tool",
             "browser_navigate_tool",
         ]

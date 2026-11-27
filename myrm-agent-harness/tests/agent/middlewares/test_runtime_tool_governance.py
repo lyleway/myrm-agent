@@ -52,14 +52,14 @@ def test_runtime_governance_readonly_intent_filters_mutation_tools() -> None:
         "file_read_tool",
         "bash_code_execute_tool",
         "file_write_tool",
-        "request_answer_user_tool",
+        "ask_question_tool",
     ]
     allowed, reasons = derive_runtime_allowed_tools(
         tool_names=tool_names,
         recent_human_text="请分析这段日志为什么会失败？",
     )
 
-    assert allowed == frozenset({"web_fetch_tool", "file_read_tool", "request_answer_user_tool"})
+    assert allowed == frozenset({"web_fetch_tool", "file_read_tool", "ask_question_tool"})
     assert "readonly_intent_gate" in reasons
 
 

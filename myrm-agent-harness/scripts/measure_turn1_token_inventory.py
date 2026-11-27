@@ -5,7 +5,7 @@ Builds the harness-side default product profile:
   web_search + web_fetch + file_ops (5) + bash + bash_process + memory (3, HIGH_PRIORITY)
   + skill_select (when demo skill present)
   (conversation_search opt-in via server; excluded from default Turn1)
-  (TSM v1: no request_answer_user_tool, no todo_write; skill_manage opt-in via server)
+  (TSM v1: no todo_write; skill_manage opt-in via server)
 
 Usage:
     python scripts/measure_turn1_token_inventory.py
@@ -82,7 +82,6 @@ async def _build_default_turn1_tools() -> list[BaseTool]:
         registry=registry,
         file_access_mode=FileAccessMode.FULL,
         enable_shell_tools=True,
-        enable_answer_tool=False,
     )
 
     search_cfg = SearchServiceConfig(search_service="tavily", api_key="measurement-placeholder")

@@ -49,7 +49,6 @@ class TestBuiltinToolNames:
         assert "skill_select_tool" in BUILTIN_TOOL_NAMES
         assert "skill_market_tool" in BUILTIN_TOOL_NAMES
         assert "skill_search_tool" in BUILTIN_TOOL_NAMES
-        assert "request_answer_user_tool" in BUILTIN_TOOL_NAMES
 
 
 class TestRemovedOsBrowserHistoryTool:
@@ -79,7 +78,6 @@ class TestResolvePermissionType:
         assert resolve_permission_type("web_search_tool") == "web_search_tool"
         assert resolve_permission_type("memory_search_tool") == "memory_search_tool"
         assert resolve_permission_type("skill_select_tool") == "skill_select_tool"
-        assert resolve_permission_type("request_answer_user_tool") == "request_answer_user_tool"
         assert resolve_permission_type("skill_search_tool") == "skill_search_tool"
 
     def test_mapped_agent_tools_return_permission_type(self):
@@ -241,10 +239,9 @@ class TestSafetyMetadata:
             assert meta.is_concurrent_safe is False, f"{tool} should not be concurrent-safe"
 
     def test_ui_tools_are_safe(self):
-        for tool in ("request_answer_user_tool", "skill_select_tool"):
-            meta = resolve_safety_metadata(tool)
-            assert meta.is_read_only is True
-            assert meta.is_concurrent_safe is True
+        meta = resolve_safety_metadata("skill_select_tool")
+        assert meta.is_read_only is True
+        assert meta.is_concurrent_safe is True
 
     def test_metadata_is_frozen(self):
         meta = resolve_safety_metadata("file_read_tool")

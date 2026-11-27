@@ -259,7 +259,6 @@ def compute_execution_fingerprint(agent_wrapper: GeneralAgent, *, has_active_goa
         "kanban_tool_mode": agent_wrapper.kanban_tool_mode,
         "kanban_default_board_id": agent_wrapper.kanban_default_board_id,
         "enable_cron_eager": agent_wrapper.enable_cron_eager,
-        "enable_answer_tool": agent_wrapper.enable_answer_tool,
         "enable_planning": agent_wrapper.enable_planning,
         "enable_external_cli": agent_wrapper.enable_external_cli,
         "enable_structured_clarify": agent_wrapper.enable_structured_clarify,

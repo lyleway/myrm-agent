@@ -207,11 +207,6 @@
   {
     "layer": "EXTENDED",
     "layer_value": 3,
-    "name": "request_answer_user_tool"
-  },
-  {
-    "layer": "EXTENDED",
-    "layer_value": 3,
     "name": "skill_manage_tool"
   },
   {

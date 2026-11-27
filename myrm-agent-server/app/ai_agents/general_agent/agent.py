@@ -102,7 +102,6 @@ class GeneralAgent(ToolSetupMixin, AgentLifecycleMixin):
         enable_wiki: bool = False,
         enable_kanban: bool = False,
         enable_cron_eager: bool = False,
-        enable_answer_tool: bool = False,
         enable_planning: bool = False,
         enable_plan_confirm: bool = False,
         enable_external_cli: bool = False,
@@ -219,7 +218,6 @@ class GeneralAgent(ToolSetupMixin, AgentLifecycleMixin):
         self.enable_wiki = enable_wiki
         self.enable_kanban = enable_kanban
         self.enable_cron_eager = enable_cron_eager
-        self.enable_answer_tool = enable_answer_tool
         self.enable_planning = enable_planning
         self.enable_plan_confirm = enable_plan_confirm
         self.enable_external_cli = enable_external_cli

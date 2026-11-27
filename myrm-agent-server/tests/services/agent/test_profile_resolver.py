@@ -456,9 +456,11 @@ class TestSessionPolicyField:
             result = await resolver.resolve("agent-sp")
 
         assert result is not None
-        assert result.session_policy == policy_dict
-        assert result.session_policy["mode"] == "idle"
-        assert result.session_policy["idle_minutes"] == 30
+        policy = result.session_policy
+        assert policy is not None
+        assert policy == policy_dict
+        assert policy["mode"] == "idle"
+        assert policy["idle_minutes"] == 30
 
     @pytest.mark.asyncio
     async def test_session_policy_none_when_not_set(self, resolver: AgentProfileResolver):
@@ -515,6 +517,7 @@ class TestSessionPolicyField:
             second = await resolver.resolve("agent-sp-cache")
 
             assert first is second
+            assert first is not None
             assert first.session_policy == policy_dict
             assert mock_load.await_count == 1
 
@@ -704,14 +707,13 @@ class TestResolveBuiltinToolFlags:
             "wiki",
             "kanban",
             "cron",
-            "answer_tool",
             "planning",
             "structured_clarify",
             "external_cli",
             "skill_market",
             "skill_manage",
         )
-        flags = resolve_builtin_tool_flags(tools, allow_answer_tool=True)
+        flags = resolve_builtin_tool_flags(tools)
         assert flags["file_access_mode"].value == "full"
         assert flags["enable_browser"] is True
         assert flags["enable_shell_tools"] is True
@@ -764,10 +766,9 @@ class TestResolveBuiltinToolFlags:
         assert flags["enable_planning"] is True
         assert flags["enable_browser"] is False
 
-    def test_default_tools_exclude_planning_and_answer(self):
+    def test_default_tools_exclude_planning(self):
         flags = resolve_builtin_tool_flags(DEFAULT_ENABLED_BUILTIN_TOOLS)
         assert flags["enable_planning"] is False
-        assert flags["enable_answer_tool"] is False
 
     def test_structured_clarify_maps_to_enable_structured_clarify(self):
         flags = resolve_builtin_tool_flags(["structured_clarify"])
@@ -784,13 +785,12 @@ class TestResolveBuiltinToolFlags:
         assert flags["enable_structured_clarify"] is True
 
     def test_file_access_mode_defaults_none_without_file_ops(self):
-        flags = resolve_builtin_tool_flags(["web_search", "answer_tool"])
+        flags = resolve_builtin_tool_flags(["web_search"])
         assert flags["file_access_mode"].value == "none"
-        assert flags["enable_answer_tool"] is False
 
-    def test_answer_tool_requires_explicit_allow_flag(self):
-        flags = resolve_builtin_tool_flags(["answer_tool"], allow_answer_tool=True)
-        assert flags["enable_answer_tool"] is True
+    def test_retired_answer_tool_id_is_ignored(self):
+        flags = resolve_builtin_tool_flags(["web_search", "answer_tool"])
+        assert flags == resolve_builtin_tool_flags(["web_search"])
 
     def test_returns_all_flag_keys(self):
         flags = resolve_builtin_tool_flags([])
@@ -802,7 +802,6 @@ class TestResolveBuiltinToolFlags:
             "enable_wiki",
             "enable_kanban",
             "enable_cron_eager",
-            "enable_answer_tool",
             "enable_planning",
             "enable_structured_clarify",
             "enable_external_cli",

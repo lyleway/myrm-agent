@@ -33,7 +33,6 @@ def build_system_prompt(
 
     system_prompt = get_core_system_prompt(
         mode=coerce_prompt_mode(agent_wrapper.prompt_mode),
-        enable_answer_tool=agent_wrapper.enable_answer_tool,
         locale=prompt_locale,
     )
 

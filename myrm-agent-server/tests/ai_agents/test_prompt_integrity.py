@@ -104,12 +104,10 @@ class TestPromptModes:
             assert first is second
 
     def test_prompt_stability_all_param_combos(self) -> None:
-        """All enable_answer_tool combos return stable objects."""
-        for answer in (True, False):
+        """Every mode and locale returns the same object on each call (KV Cache stability)."""
+        for locale in (None, "en", "zh-CN"):
             for mode in _MODES:
-                a = get_core_system_prompt(mode, enable_answer_tool=answer)
-                b = get_core_system_prompt(mode, enable_answer_tool=answer)
-                assert a is b
+                assert get_core_system_prompt(mode, locale=locale) is get_core_system_prompt(mode, locale=locale)
 
 
 class TestSystemPromptDecoupledFromMemoryTools:
@@ -135,16 +133,12 @@ class TestSystemPromptDecoupledFromMemoryTools:
         assert "<response_rules>" in prompt
         assert "<task_integrity>" in prompt
 
-    def test_answer_tool_disabled_full_mode_still_has_core_rules(self) -> None:
-        """enable_answer_tool=False still has core rules."""
-        prompt = get_core_system_prompt("full", enable_answer_tool=False)
-        assert "<identity>" in prompt
-        assert "<task_integrity>" in prompt
+    @pytest.mark.parametrize("mode", _MODES)
+    @pytest.mark.parametrize("locale", ["en", "zh-CN"])
+    def test_prompt_never_references_the_retired_answer_tool(self, mode: PromptMode, locale: str) -> None:
+        """The answer-gate tool is gone, so no prompt may tell the model to call it."""
+        prompt = get_core_system_prompt(mode, locale=locale)
         assert "request_answer_user_tool" not in prompt
-
-    def test_answer_tool_disabled_no_answer_tool_references(self) -> None:
-        """No answer tool references when answer tool disabled."""
-        prompt = get_core_system_prompt("full", enable_answer_tool=False)
         assert "answer_tool_required" not in prompt
 
     def test_invalid_mode_falls_back_to_full(self) -> None:

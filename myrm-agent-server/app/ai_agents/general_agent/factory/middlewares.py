@@ -52,7 +52,6 @@ async def build_agent_middlewares(
     from app.core.utils.media_file_reader import read_media_content
 
     from ..agent_middlewares.citation_rules_middleware import citation_rules_middleware
-    from ..agent_middlewares.tool_selection_middleware import tool_selection_middleware
     from ..callbacks import (
         make_notes_load,
         make_notes_persist,
@@ -139,7 +138,6 @@ async def build_agent_middlewares(
         memory_context_middleware,
         *([widget_capability_middleware] if mount_plan.mount_widget_capability else []),
         citation_rules_middleware,
-        tool_selection_middleware,
         context_pipeline_middleware,
     ]
 

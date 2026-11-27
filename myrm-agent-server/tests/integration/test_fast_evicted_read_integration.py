@@ -116,7 +116,6 @@ def test_web_fast_mount_resolves_evicted_read_only_meta_tools() -> None:
         registry=registry,
         file_access_mode=flags["file_access_mode"],
         enable_shell_tools=flags["enable_shell_tools"],
-        enable_answer_tool=flags["enable_answer_tool"],
     )
     names = {tool.name for tool in meta_tools}
     assert "file_read_tool" in names

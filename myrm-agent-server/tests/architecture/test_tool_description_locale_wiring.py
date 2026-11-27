@@ -31,14 +31,11 @@ _ROOTS = {
     "server": Path(__file__).resolve().parents[2] / "app",
 }
 _LOCALE_PARAMETERS = frozenset({"locale", "description_locale"})
-# 21 factories exist today; a scan that finds far fewer has gone blind (the prefix renamed, a root moved).
+# 20 factories exist today; a scan that finds far fewer has gone blind (the prefix renamed, a root moved).
 _MIN_FACTORIES = 15
 
 # Calls that leave the locale out on purpose. Key: "<root>:<path inside the root>::<factory>".
 _EXEMPT = {
-    "harness:agent/meta_tools/answer_user_tool.py::create_answer_user_tool": (
-        "module-level instance for direct importers; get_meta_tools builds the session's instance with the locale"
-    ),
     "harness:agent/middlewares/context_pipeline/context_pipeline_middleware.py::create_file_read_tool": (
         "fallback tool that the registry priority hides unless the built-in tools are switched off"
     ),

@@ -51,13 +51,11 @@ AI Agent 定义层。基于 myrm-agent-harness 的基础能力，配置和组装
 |------|------|------|-------|
 | `agent.py` | 核心 | 通用 Agent 定义 | — |
 | `agent_middlewares/citation_rules_middleware.py` | 核心 | 引用规则中间件；search 跳过；full 在有 UNTRUSTED 来源时注入 | — |
-| `agent_middlewares/tool_selection_middleware.py` | 核心 | 工具约束中间件 — tool_choice 状态机 + 收敛保护 | — |
-| `tools/answer_user_tool.py` | 核心 | 回答用户工具 | — |
 | harness `agent/meta_tools/clarification/clarification_agent_tools.py` | 核心 | 结构化澄清工具（ask_question）；server `_setup_clarification_tools` 按 `structured_clarify` ON + `web_chat`+`!unattended`+`prompt_mode!=search` 挂载并注入 LangGraph interrupt | — |
 
 ### prompts/fast_search_agent_prompt.py
 
-搜索模式提示词。被 `general_agent_prompt.py` 静态引用为 `_SEARCH_PROMPT_BASE` 和 `SEARCH_DEEP_SUFFIX`（Kv Cache 稳定），作为 `prompt_mode="search"` 的唯一提示词来源。支持 normal 和 deep 两种深度，共享引用规则（`EXTERNAL_SOURCES_CITATION_RULES`）。Deep 后缀指引 `web_fetch_tool` 深读与 `request_answer_user_tool` 自审；Fast 模式 Turn1 工具为 web_search + web_fetch + UECD 只读 file_read + answer_tool + memory（可选），browser 仅通过 Agent profile 的 `browser` 开关 opt-in，不由 `search_depth=deep` 自动加载。
+搜索模式提示词。被 `general_agent_prompt.py` 静态引用为 `_SEARCH_PROMPT_BASE` 和 `SEARCH_DEEP_SUFFIX`（Kv Cache 稳定），作为 `prompt_mode="search"` 的唯一提示词来源。支持 normal 和 deep 两种深度，共享引用规则（`EXTERNAL_SOURCES_CITATION_RULES`）。Deep 后缀指引 `web_fetch_tool` 深读；Fast 模式 Turn1 工具为 web_search + web_fetch + UECD 只读 file_read（不挂载记忆工具），browser 仅通过 Agent profile 的 `browser` 开关 opt-in，不由 `search_depth=deep` 自动加载。
 
 ---
 

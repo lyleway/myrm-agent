@@ -406,7 +406,6 @@ async def build_general_agent(
         wiki_scope_id=agent_wrapper.agent_id,
         file_access_mode=effective_file_access,
         enable_shell_tools=effective_enable_shell,
-        enable_answer_tool=agent_wrapper.enable_answer_tool,
         enable_planning=enable_planning,
         task_workspace_root=workspace_root,
     )

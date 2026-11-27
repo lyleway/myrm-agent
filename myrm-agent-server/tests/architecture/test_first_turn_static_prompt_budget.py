@@ -32,8 +32,8 @@ _STATIC_FIRST_MESSAGE_CAPS: dict[tuple[str, str], int] = {
     ("full", "en"): 1022,
     ("search-normal", "zh-CN"): 2316,
     ("search-normal", "en"): 1570,
-    ("search-deep", "zh-CN"): 2453,
-    ("search-deep", "en"): 1688,
+    ("search-deep", "zh-CN"): 2426,
+    ("search-deep", "en"): 1661,
 }
 # Measured 348 tokens; the block rides in every web chat turn outside the search surface. Cap = measured * 1.05 rounded up.
 _WIDGET_CAPABILITY_CAP = 366
@@ -55,7 +55,7 @@ def _token_count(text: str) -> int:
 def _static_first_message(surface: str, locale: str) -> str:
     """Assemble the static blocks in the order the agent appends them to the system prompt."""
     if surface == "full":
-        core = get_core_system_prompt("full", enable_answer_tool=False, locale=locale)
+        core = get_core_system_prompt("full", locale=locale)
     else:
         core = get_core_system_prompt("search", locale=locale)
         if surface == "search-deep":

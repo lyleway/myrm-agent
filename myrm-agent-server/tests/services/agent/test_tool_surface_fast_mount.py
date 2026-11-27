@@ -42,7 +42,6 @@ async def test_a_fast_turn_mounts_no_builtin_toggle_even_when_the_profile_lists_
     flags = surface.tool_flags
     assert surface.is_fast
     assert surface.search_depth == search_depth
-    assert flags["enable_answer_tool"] is False
     assert flags["enable_shell_tools"] is False
     assert flags["enable_browser"] is False
     assert flags["enable_cron_eager"] is False

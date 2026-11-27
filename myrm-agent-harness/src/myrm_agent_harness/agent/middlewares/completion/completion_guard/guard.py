@@ -51,7 +51,6 @@ LangGraph executes nodes in copied contexts, which prevents ContextVar state fro
 - agent.middlewares.completion.completion_guard.capabilities::CompletionCapabilities (POS: what the run can do, so a demand is made only of a run that could meet it)
 - agent.middlewares.completion.completion_guard.external_evidence::build_external_evidence_reason, extract_latest_human_text (POS: Freshness-sensitive external evidence gate including MCP PTC bash via skills.mcp_* and Direct FC via mcp__{server}__{tool})
 - agent.middlewares.completion.completion_guard.rerun::rerun_verification_in_sandbox (POS: independent sandbox re-run of the last verification command)
-- agent.middlewares.completion.completion_guard.safety::FINISH_TOOL_NAMES (POS: which tool call is a completion attempt)
 - agent.middlewares.completion.deliverable.write_verifier::check_deliverable_write_claim (POS: Zero-call deliverable write claim detection for CompletionGuard)
 - agent.middlewares.completion.execution_claim.verifier::check_execution_claim (POS: Completion-claim grounding against this run's tool records)
 - agent.middlewares._run_workspace::run_workspace (POS: the workspace of the current run)
@@ -99,7 +98,6 @@ from myrm_agent_harness.agent.middlewares.completion.completion_guard.mixed_mess
     strip_readonly_calls_beside_answer,
 )
 from myrm_agent_harness.agent.middlewares.completion.completion_guard.rerun import rerun_verification_in_sandbox
-from myrm_agent_harness.agent.middlewares.completion.completion_guard.safety import FINISH_TOOL_NAMES
 from myrm_agent_harness.agent.middlewares.completion.completion_guard.state import (
     RunGuardState,
     current_run_state,
@@ -207,10 +205,8 @@ class CompletionGuard(AgentMiddleware):
         content_str = last_ai_msg.content if isinstance(last_ai_msg.content, str) else str(last_ai_msg.content or "")
         publish_tier_disclosure(content_str, records, has_claim=has_completion_claim(content_str))
 
-        is_attempting_completion = not last_ai_msg.tool_calls or any(
-            tc.get("name") in FINISH_TOOL_NAMES for tc in last_ai_msg.tool_calls if isinstance(tc, dict)
-        )
-        if not is_attempting_completion:
+        # A message that carries tool calls is not a completion attempt: the run goes on.
+        if last_ai_msg.tool_calls:
             return strip_readonly_calls_beside_answer(
                 last_ai_msg, messages=messages, records=records, user_text=latest_user_text
             )
@@ -295,7 +291,6 @@ class CompletionGuard(AgentMiddleware):
             reasons = replace(reasons, forced_finish=True, staged_artifacts=tuple(staged_metas_dict))
             return await hold_back(
                 run_state,
-                messages,
                 last_ai_msg,
                 reasons,
                 records,
@@ -314,7 +309,6 @@ class CompletionGuard(AgentMiddleware):
             run_state.evidence_disclosure_requested = True
         return await hold_back(
             run_state,
-            messages,
             last_ai_msg,
             reasons,
             records,

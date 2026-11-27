@@ -32,7 +32,6 @@ class ActiveToolGroupSource(Protocol):
     incognito_mode: bool
     enable_kanban: bool
     enable_wiki: bool
-    enable_answer_tool: bool
     enable_structured_clarify: bool
     enable_external_cli: bool
     enable_cron_eager: bool
@@ -58,7 +57,6 @@ ACTIVE_TOOL_GROUP_KEYS: tuple[str, ...] = (
     "kanban",
     "wiki",
     "planning",
-    "answer_tool",
     "structured_clarify",
     "cron",
     "image_generation",
@@ -84,7 +82,6 @@ def derive_active_tool_groups(
         ("kanban", agent.enable_kanban),
         ("wiki", agent.enable_wiki),
         ("planning", enable_planning),
-        ("answer_tool", agent.enable_answer_tool),
         ("structured_clarify", agent.enable_structured_clarify),
         ("cron", agent.enable_cron_eager),
         ("image_generation", agent.image_generation_params is not None),

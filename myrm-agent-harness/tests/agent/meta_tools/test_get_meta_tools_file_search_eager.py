@@ -39,7 +39,6 @@ class TestFileSearchEager:
             registry=registry,
             file_access_mode=FileAccessMode.FULL,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
 
         returned_names = {t.name for t in tools}
@@ -57,7 +56,6 @@ class TestFileSearchEager:
             registry=registry,
             file_access_mode=FileAccessMode.FULL,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
 
         runtime_names = {t.name for t in registry.get_runtime_tools()}
@@ -75,7 +73,6 @@ class TestFileSearchEager:
             registry=registry,
             file_access_mode=FileAccessMode.NONE,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
 
         returned_names = {t.name for t in tools}
@@ -110,7 +107,6 @@ class TestFileSearchEager:
             registry=registry,
             file_access_mode=FileAccessMode.FULL,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
         sync_discover_capability_tool(registry, skills=many_skills)
         discover = next(t for t in registry.resolve() if t.name == "skill_search_tool")
@@ -130,7 +126,6 @@ class TestFileSearchEager:
             registry=registry,
             file_access_mode=FileAccessMode.NONE,
             enable_shell_tools=True,
-            enable_answer_tool=False,
         )
 
         returned_names = {t.name for t in tools}
@@ -139,19 +134,3 @@ class TestFileSearchEager:
 
         runtime_only_names = {t.name for t in registry.get_runtime_tools()}
         assert "bash_process_tool" not in runtime_only_names
-
-    def test_answer_tool_eager_when_enabled(
-        self,
-        skill_backend: MagicMock,
-    ) -> None:
-        tools = get_meta_tools(
-            [],
-            skill_backend,
-            registry=ToolRegistry(),
-            file_access_mode=FileAccessMode.NONE,
-            enable_shell_tools=False,
-            enable_answer_tool=True,
-        )
-
-        returned_names = {t.name for t in tools}
-        assert "request_answer_user_tool" in returned_names

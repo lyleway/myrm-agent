@@ -92,7 +92,6 @@ async def create_skill_agent(
     extraction_lifecycle_observer: ExtractionLifecycleObserver | None = None,
     file_access_mode: FileAccessMode = FileAccessMode.FULL,
     enable_shell_tools: bool = True,
-    enable_answer_tool: bool = False,
     enable_planning: bool = False,
     task_workspace_root: str | None = None,
 ) -> SkillAgent:
@@ -424,7 +423,6 @@ async def create_skill_agent(
         extraction_lifecycle_observer=extraction_lifecycle_observer,
         file_access_mode=resolved_file_access,
         enable_shell_tools=enable_shell_tools,
-        enable_answer_tool=enable_answer_tool,
         enable_planning=enable_planning,
         task_workspace_root=task_workspace_root
         or (spec.workspace_binding.root_path if spec.workspace_binding else None),
