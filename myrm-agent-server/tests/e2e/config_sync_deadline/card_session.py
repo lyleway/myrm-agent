@@ -17,7 +17,7 @@ tell when each step happened.
 - CardSession: the card on a live page plus the backend it saves to; types the Jina key (edit, edit_while_held), reads back
   what the card shows (shown, enabled_switch), what the backend stores (stored, wait_stored), when and how often it applied
   a value (applied_versions, applied_count, applied_at_ms) and what the page requested (log, writes, settled_writes,
-  server_reads_after)
+  wait_for_cancelled_writes, server_reads_after)
 - run_marker(step): a Jina key value unique to this run and step
 - jina_key(value): the Jina key of a stored or sent webFetchEscalation value
 - CONFIG_KEY / SETTINGS_ROUTE / QUIET_MS: the config key, the settings route of the card, the page-clock silence that makes a write final
@@ -238,6 +238,19 @@ class CardSession:
                 return writes
             time.sleep(0.5)
         raise AssertionError(f"the writes of {marker!r} did not settle within {timeout_sec}s: {self.writes(marker)}")
+
+    def wait_for_cancelled_writes(self, marker: str, count: int, *, timeout_sec: float = 120.0) -> list[ConfigRequest]:
+        """The marker's writes the app has given up on, as soon as `count` of them have been cancelled."""
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            touch_wall_progress(current_node="config_sync_wait_cancelled")
+            cancelled = [write for write in self.writes(marker) if write.aborted_at_ms is not None]
+            if len(cancelled) >= count:
+                return cancelled
+            time.sleep(0.5)
+        raise AssertionError(
+            f"the app cancelled fewer than {count} writes of {marker!r} within {timeout_sec}s: {self.writes(marker)}"
+        )
 
     def server_reads_after(self, started_ms: float) -> list[ConfigRequest]:
         """The conflict settlement's read of the key's server copy made after `started_ms`."""

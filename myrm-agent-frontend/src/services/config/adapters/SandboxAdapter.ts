@@ -2,7 +2,7 @@
  * [INPUT]
  * - `@/lib/guest` getAuthToken (POS: the session's bearer token)
  * - `@/lib/deploy-mode` getApiBaseUrl (POS: cloud API origin)
- * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer (POS: the failure answer and the deadline-bound request both adapters share)
+ * - `./BaseAdapter` BaseConfigAdapter / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer / DeadlineInit / DeadlineAnswer (POS: the failure answer and the deadline-bound request both adapters share)
  * - `../types` ConfigSyncError / record and change shapes (POS: adapter contract)
  *
  * [OUTPUT]

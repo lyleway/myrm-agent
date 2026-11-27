@@ -204,6 +204,16 @@ def test_db_messages_to_langchain_maps_user_and_assistant() -> None:
     assert converted[1].content == "message 1"
 
 
+def test_db_messages_to_langchain_skips_ephemeral_rows() -> None:
+    kept = _make_message("chat-lc", 0, role="user")
+    ephemeral = _make_message("chat-lc", 1, role="assistant")
+    ephemeral.extra_data = {"retention": "ephemeral"}
+
+    converted = db_messages_to_langchain([kept, ephemeral])
+
+    assert [message.content for message in converted] == ["message 0"]
+
+
 @pytest.mark.asyncio
 async def test_backup_context_writes_jsonl() -> None:
     chat = Chat(

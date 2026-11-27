@@ -2,7 +2,7 @@
 
 [INPUT]
 - app.channels.types::InboundMessage, OutboundMessage (POS: Channel message types.)
-- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was written into)
+- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was produced in)
 - app.channels.routing.friendly_errors::ERROR_TYPE_METADATA_KEY, friendly_error_text (POS: member-safe error wording with reference id)
 - myrm_agent_harness.toolkits.llms.errors::MyrmLLMError (POS: LLM error with diagnostics.)
 

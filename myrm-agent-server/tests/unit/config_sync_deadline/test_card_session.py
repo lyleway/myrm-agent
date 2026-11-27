@@ -126,7 +126,7 @@ def test_a_run_marker_carries_its_step_and_is_the_same_for_the_whole_run() -> No
 
 def test_a_run_marker_is_what_the_shim_script_lists_as_a_marker() -> None:
     pattern = re.search(r"const MARKERS = /(.+?)/g;", FAULT_SHIM_JS)
-    assert pattern, "the shim script no longer declares its marker pattern"
+    assert pattern, "the shim script declares no marker pattern"
 
     assert re.fullmatch(pattern.group(1), run_marker("a1b2"))
 

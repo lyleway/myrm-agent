@@ -7,6 +7,7 @@
  * BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult: the failed `SyncResult` of a write that never reached a backend.
  * isTransportFailure: whether a rejected `fetch()` call is a delivery failure rather than a bug.
  * fetchWithDeadlines / RESPONSE_HEADERS_DEADLINE_MS / RESPONSE_BODY_DEADLINE_MS: the request call of both adapters; a request whose headers or body outlast their deadline is cancelled.
+ * DeadlineInit / DeadlineAnswer / ReadJson: the options `fetchWithDeadlines` takes, the answer it returns, and the call on that answer that reads its JSON body within the body deadline.
  * isLostAnswer: whether a failed body read means the answer was lost rather than wrong.
  *
  * [POS]

@@ -96,7 +96,7 @@ def test_every_component_type_round_trips(component: ActionButton | SelectMenu) 
 
 
 def test_web_handoff_button_message_is_recoverable() -> None:
-    """Every IM reply carries this button when a public ingress URL exists - it must never poison the outbox."""
+    """The handoff button an IM reply carries when a public ingress URL exists must never poison the outbox."""
     original = _message(components=((_HANDOFF_BUTTON,),))
 
     restored = _through_json(original)
