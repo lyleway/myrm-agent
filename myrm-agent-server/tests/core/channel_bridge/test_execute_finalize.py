@@ -19,10 +19,7 @@ from app.channels.types import (
     OutboundMessage,
     SessionPolicy,
 )
-from app.core.channel_bridge.executor_helpers import (
-    ShareableArtifact,
-    StreamAccumulator,
-)
+from app.core.channel_bridge.executor_helpers import ChannelChatHistory, ShareableArtifact, StreamAccumulator
 
 
 def _make_message() -> InboundMessage:
@@ -41,9 +38,8 @@ async def _finalize(
     *,
     channel_budget_key: str | None = None,
     memory_settings: dict[str, object] | None = None,
-    chat_history: list[object] | None = None,
+    chat_history: ChannelChatHistory | None = None,
     session_was_auto_reset: bool = False,
-    lite_model_cfg: object | None = None,
     workspace_root: str | None = None,
     message: InboundMessage | None = None,
     account_guidance: bool = False,
@@ -72,8 +68,8 @@ async def _finalize(
             chat_id="chat-1",
             channel_budget_key=channel_budget_key,
             memory_settings=memory_settings or {},
-            lite_model_cfg=lite_model_cfg,  # type: ignore[arg-type]
-            chat_history=chat_history if chat_history is not None else [object()],
+            lite_model_cfg=None,
+            chat_history=chat_history if chat_history is not None else [["human", "Earlier question."]],
             session_was_auto_reset=session_was_auto_reset,
             session_policy=SessionPolicy(),
             account_guidance=account_guidance,
@@ -102,6 +98,7 @@ async def test_share_buttons_are_built_for_the_chats_workspace(tmp_path: Path) -
     acc.shareable_artifacts.append(ShareableArtifact("art-1", "report.pdf", "application/pdf"))
     deep_links = AsyncMock(return_value=())
     await _finalize(acc, deep_links=deep_links, workspace_root=str(tmp_path))
+    assert deep_links.await_args is not None
     assert deep_links.await_args.args[2] == str(tmp_path)
 
 
@@ -213,8 +210,10 @@ async def test_screenshot_base64_saved_to_temp_file() -> None:
     assert reply.media[0].filename == "screenshot.png"
     # The temp file outlives finalize (delivery is still pending) and is handed to the bus for cleanup.
     assert reply.media[0].ephemeral is True
-    assert Path(reply.media[0].path).is_file()
-    Path(reply.media[0].path).unlink()
+    media_path = reply.media[0].path
+    assert media_path is not None
+    assert Path(media_path).is_file()
+    Path(media_path).unlink()
 
 
 @pytest.mark.asyncio
@@ -249,6 +248,7 @@ async def test_empty_response_fallback() -> None:
     acc = StreamAccumulator()
     _persist_mock, reply = await _finalize(acc)
     assert reply.content == "No response generated."
+    assert reply.metadata is not None
     assert reply.metadata["error_type"] == "empty_response"
 
     message = _make_message()
@@ -262,9 +262,7 @@ async def test_channel_cost_recorded_when_budget_key() -> None:
     acc = StreamAccumulator()
     acc.cost_usd = 0.12
     acc.draft.feed({"type": "message", "data": "Done."})
-    with patch(
-        "app.services.budget.channel_budget.record_channel_cost",
-    ) as record_mock:
+    with patch("app.services.budget.channel_budget.record_channel_cost") as record_mock:
         await _finalize(acc, channel_budget_key="tg:user-1")
     record_mock.assert_called_once_with("tg:user-1", 0.12)
 
@@ -273,9 +271,7 @@ async def test_channel_cost_recorded_when_budget_key() -> None:
 async def test_auto_title_generated_for_new_chat() -> None:
     acc = StreamAccumulator()
     acc.draft.feed({"type": "message", "data": "First reply."})
-    with patch(
-        "app.core.channel_bridge.agent_executor.execute_finalize.asyncio.create_task",
-    ) as create_task_mock:
+    with patch("app.core.channel_bridge.agent_executor.execute_finalize.asyncio.create_task") as create_task_mock:
         await _finalize(acc, chat_history=[])
     create_task_mock.assert_called_once()
     assert create_task_mock.call_args.args[0].__name__ == "generate_channel_title"
@@ -285,10 +281,8 @@ async def test_auto_title_generated_for_new_chat() -> None:
 async def test_no_auto_title_for_existing_chat() -> None:
     acc = StreamAccumulator()
     acc.draft.feed({"type": "message", "data": "Follow-up reply."})
-    with patch(
-        "app.core.channel_bridge.agent_executor.execute_finalize.asyncio.create_task",
-    ) as create_task_mock:
-        await _finalize(acc, chat_history=[object()])
+    with patch("app.core.channel_bridge.agent_executor.execute_finalize.asyncio.create_task") as create_task_mock:
+        await _finalize(acc, chat_history=[["human", "Earlier question."]])
     create_task_mock.assert_not_called()
 
 
@@ -303,7 +297,7 @@ async def test_session_auto_reset_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_every_reply_names_the_stored_chat_it_was_written_into() -> None:
-    """The router links that chat from the reply, an empty turn's included, instead of resolving the turn's chat again."""
+    """Every reply, an empty turn's included, names the stored chat it was written into: the router links that chat."""
     answered = StreamAccumulator()
     answered.draft.feed({"type": "message", "data": "Done."})
     for acc in (answered, StreamAccumulator()):
@@ -324,7 +318,9 @@ async def test_cost_metadata_when_enabled() -> None:
         memory_settings={"enableCostEstimation": True},
     )
     assert reply.metadata is not None
-    assert reply.metadata["cost_metadata"]["cost_usd"] == 0.05
+    cost_metadata = reply.metadata["cost_metadata"]
+    assert isinstance(cost_metadata, dict)
+    assert cost_metadata["cost_usd"] == 0.05
 
 
 @pytest.mark.asyncio
@@ -338,9 +334,10 @@ async def test_sources_sorted_by_index_metadata() -> None:
     acc.draft.feed({"type": "message", "data": "Sourced reply."})
     _persist_mock, reply = await _finalize(acc)
     assert reply.metadata is not None
-    titles = [s["title"] for s in reply.metadata["sources"]]  # type: ignore[typeddict-item]
+    sources = reply.metadata["sources"]
+    assert isinstance(sources, list)
     # Non-numeric index → key 0 → sorts first; numeric 1 then 2 follow.
-    assert titles == ["c", "a", "b"]
+    assert [s["title"] for s in sources] == ["c", "a", "b"]
 
 
 @pytest.mark.asyncio

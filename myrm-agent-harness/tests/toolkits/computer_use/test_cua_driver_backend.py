@@ -17,7 +17,6 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     PermissionStatus,
     ScreenContext,
     ScreenInfo,
-    WindowTextResult,
 )
 
 # ── Fixtures ──────────────────────────────────────────────────────
@@ -37,8 +36,6 @@ def mock_fallback():
     fb.wait = AsyncMock(return_value=ActionResult(success=True))
     fb.screen_info = MagicMock(return_value=ScreenInfo(width=1920, height=1080, dpi_scale=1.0))
     fb.screen_context = MagicMock(return_value=ScreenContext(active_window="Test", mouse_x=0, mouse_y=0))
-    fb.window_text = AsyncMock(return_value=WindowTextResult(success=True))
-    fb.has_blocking_dialog = AsyncMock(return_value=False)
     fb.is_browser_active = AsyncMock(return_value=False)
     fb.check_permissions = AsyncMock(return_value=PermissionStatus(accessibility=True, screen_recording=True))
     return fb
@@ -85,13 +82,6 @@ def test_screen_context_delegates_to_fallback(backend: CuaDriverBackend, mock_fa
     ctx = backend.screen_context()
     assert ctx.active_window == "Test"
     mock_fallback.screen_context.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_window_text_delegates_to_fallback(backend: CuaDriverBackend, mock_fallback: MagicMock):
-    result = await backend.window_text()
-    assert result.success is True
-    mock_fallback.window_text.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -32,8 +32,8 @@ _STARTED_KEY = re.compile(r":e=s(\d{8}T\d{6})$")
 # Inbound metadata flag a forwarder sets on the first message after a ``/new`` it answered itself.
 METADATA_NEW_CONVERSATION_KEY = "force_new_epoch"
 
-# Outbound metadata the producer of a reply sets to the stored chat it wrote the reply into (the database chat id), so the
-# router links that conversation from the reply instead of working out again which one the turn ran in.
+# Outbound metadata the producer of a reply sets to the stored chat it wrote the reply into (the database chat id): the
+# router links that chat, which alias routing, a resumed approval and the reset policy decide for each turn.
 METADATA_STORED_CHAT_KEY = "stored_chat_id"
 
 
