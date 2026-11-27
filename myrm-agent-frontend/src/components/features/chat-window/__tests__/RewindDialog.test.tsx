@@ -13,6 +13,7 @@ const { toastMock, rewindToMessageMock } = vi.hoisted(() => ({
 }));
 
 const fetchPlanMock = vi.fn(async (_chatId: string): Promise<void> => undefined);
+const refreshCompactionStateMock = vi.fn(async (): Promise<void> => undefined);
 
 const stableT = (key: string, values?: Record<string, string | number>): string =>
   values?.count !== undefined ? `${key}:${String(values.count)}` : key;
@@ -83,8 +84,15 @@ describe('RewindDialog', () => {
     rewindToMessageMock.mockReset();
     toastMock.mockReset();
     fetchPlanMock.mockClear();
+    refreshCompactionStateMock.mockClear();
     usePlanStore.setState({ fetchPlan: fetchPlanMock });
-    useChatStore.setState({ chatId: 'c1', inputMessage: '', pendingExplicitSkillActivation: null });
+    useChatStore.setState({
+      chatId: 'c1',
+      inputMessage: '',
+      pendingExplicitSkillActivation: null,
+      compactedSummary: 'summary of earlier turns',
+      refreshCompactionState: refreshCompactionStateMock,
+    });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [] }));
   });
 
@@ -167,6 +175,7 @@ describe('RewindDialog', () => {
     expect(useChatStore.getState().messages).toHaveLength(2);
     expect(useChatStore.getState().inputMessage).toBe('hello world');
     expect(fetchPlanMock).toHaveBeenCalledWith('c1');
+    expect(refreshCompactionStateMock).toHaveBeenCalledWith('c1');
   });
 
   it('puts the skill chip and the text of a skill-driven message back into the composer', async () => {
@@ -260,6 +269,7 @@ describe('RewindDialog', () => {
     expect(useChatStore.getState().messages).toBe(otherChatMessages);
     expect(composer()).toEqual({ inputMessage: 'typing in c2', pendingExplicitSkillActivation: null });
     expect(fetchPlanMock).not.toHaveBeenCalled();
+    expect(refreshCompactionStateMock).not.toHaveBeenCalled();
     expect(toastMock).toHaveBeenCalledWith({ title: 'success', description: undefined });
   });
 

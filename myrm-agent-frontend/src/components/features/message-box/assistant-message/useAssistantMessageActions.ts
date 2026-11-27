@@ -2,6 +2,7 @@
  * [INPUT]
  * @/store/useChatStore (POS: Chat state store and message state façade)
  * @/store/chat/goals/usePlanStore::usePlanStore (POS: Goal plan state refreshed after a regenerate)
+ * @/store/chat/compactionAfterHistoryChange::refreshCompactionAfterHistoryChange (POS: Re-reads the summary card the regenerate may have invalidated)
  * @/services/chat::{regenerateLastTurn,cancelAgentRequest} (POS: Chat turn control API)
  * @/services/wiki/evidenceMetrics::recordQualityOutcomeNegative (POS: Quality signal of knowledge-base evidence)
  *
@@ -16,6 +17,7 @@
 import type { Message } from '@/store/chat/types';
 import useChatStore from '@/store/useChatStore';
 import { usePlanStore } from '@/store/chat/goals/usePlanStore';
+import { refreshCompactionAfterHistoryChange } from '@/store/chat/compactionAfterHistoryChange';
 import { removeWaitingForTurnStep } from '@/store/chat/messageUtils';
 import { stripDatetimeTag } from '@/lib/utils/messageUtils';
 import { cancelAgentRequest, regenerateLastTurn } from '@/services/chat';
@@ -53,6 +55,7 @@ export function useAssistantMessageActions({
         }
 
         void usePlanStore.getState().fetchPlan(chatId);
+        refreshCompactionAfterHistoryChange(chatId);
 
         const cleanQuery = stripDatetimeTag(result.query);
         return await sendMessage(cleanQuery);

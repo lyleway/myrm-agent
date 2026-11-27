@@ -2,6 +2,7 @@
 
 [INPUT]
 - app.channels.types::InboundMessage, MediaAttachment, OutboundMessage, SessionPolicy (POS: Channel message types.)
+- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was written into)
 - app.core.channel_bridge.executor_helpers::StreamAccumulator, persist_assistant_message (POS: Stream accumulation for channel turns.)
 - agent_executor.deliverable::build_artifact_deep_links (POS: Artifact delivery helpers for ChannelAgentExecutor.)
 - agent_executor.deliverable::append_deliverable_notes, collect_deliverable_paths_from_text, resolve_chat_workspace_root (POS: Channel deliverable attachment mode. Complements artifact event collection in deliverable.deep_links.collect_channel_artifacts.)
@@ -9,7 +10,8 @@
 - app.channels.routing.friendly_errors::ERROR_TYPE_METADATA_KEY, friendly_error_text (POS: member-safe error wording with reference id)
 [OUTPUT]
 - finalize_channel_stream_reply: persist assistant turn and build OutboundMessage reply (temp files ride along
-  as ``ephemeral`` attachments; the message bus deletes them once delivery is final)
+  as ``ephemeral`` attachments; the message bus deletes them once delivery is final; the reply names the chat it
+  was written into, which the router's browser button links)
 
 [POS]
 Finalizes a completed harness stream into a channel OutboundMessage: content cleanup,
@@ -32,6 +34,7 @@ from myrm_agent_harness.utils.text_utils import strip_internal_markers
 
 from app.channels.routing.friendly_errors import ERROR_TYPE_METADATA_KEY, friendly_error_text
 from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
     InboundMessage,
     MediaAttachment,
     MediaType,
@@ -116,7 +119,8 @@ async def finalize_channel_stream_reply(
 
     A failed turn is flagged with ``ERROR_TYPE_METADATA_KEY`` so hosts that run the turn for someone else
     (the delegation coordinator) can tell it from an answer. ``account_guidance`` lets the owner's direct
-    chat name the account state to fix.
+    chat name the account state to fix. The reply names ``chat_id``, the stored chat it is written into, in
+    ``METADATA_STORED_CHAT_KEY``: the router links that conversation from the reply.
     """
     from app.channels.i18n import channel_t, resolve_message_locale
 
@@ -236,7 +240,7 @@ async def finalize_channel_stream_reply(
             )
         )
 
-    metadata: dict[str, object] = {}
+    metadata: dict[str, object] = {METADATA_STORED_CHAT_KEY: chat_id}
     if error_type:
         metadata[ERROR_TYPE_METADATA_KEY] = error_type
     if acc.sources:
@@ -267,7 +271,7 @@ async def finalize_channel_stream_reply(
 
     reply = msg.get_or_create_correlation_context().create_reply(
         content=content,
-        metadata=metadata or None,
+        metadata=metadata,
         media=tuple(media_list),
         reasoning=reasoning,
         tool_steps=tool_steps,

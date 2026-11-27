@@ -2,8 +2,28 @@
 
 A user saves the Jina key by typing into the card; the page's sync layer then writes the whole value to the backend.
 ``CardSession`` types into the card the same way and reads back what the card shows, what the backend stores, and the
-requests the page made (through ``config_sync_fault_shim``), so a test can follow one edit from the keyboard to the
-database and tell when each step happened.
+requests the page made (through ``fault_shim``), so a test can follow one edit from the keyboard to the database and
+tell when each step happened.
+
+[INPUT]
+- cdp_chat.support::fetch_config_value (POS: Stable import surface of the E2E chat helpers; it defines nothing itself)
+- e2e_core.orchestrator::touch_wall_progress (POS: Single import path for E2E session orchestration)
+- tests.support.chrome_mcp_e2e::ChromeMcpClient, McpPage, dismiss_blocking_modals, http_json, wait_for_state,
+  _warm_ui_parallel_wait_sec (POS: Shared real-Chrome MCP helpers for formal UI E2E tests)
+- tests.e2e.config_sync_deadline.fault_shim::ConfigLog, ConfigRequest, read_log (POS: Fault injection layer of the
+  config-sync deadline E2E; the only code that touches the page's fetch)
+
+[OUTPUT]
+- CardSession: the card on a live page plus the backend it saves to; types the Jina key (edit, edit_while_held), reads back
+  what the card shows (shown, enabled_switch), what the backend stores (stored, wait_stored), when and how often it applied
+  a value (applied_versions, applied_count, applied_at_ms) and what the page requested (log, writes, settled_writes,
+  server_reads_after)
+- run_marker(step): a Jina key value unique to this run and step
+- jina_key(value): the Jina key of a stored or sent webFetchEscalation value
+- CONFIG_KEY / SETTINGS_ROUTE / QUIET_MS: the config key, the settings route of the card, the page-clock silence that makes a write final
+
+[POS]
+Card layer of the config-sync deadline E2E: follows one edit from the keyboard to the database.
 """
 
 from __future__ import annotations
@@ -16,6 +36,7 @@ from dataclasses import dataclass
 from cdp_chat.support import fetch_config_value
 from e2e_core.orchestrator import touch_wall_progress
 
+from tests.e2e.config_sync_deadline.fault_shim import ConfigLog, ConfigRequest, read_log
 from tests.support.chrome_mcp_e2e import (
     ChromeMcpClient,
     McpPage,
@@ -24,7 +45,6 @@ from tests.support.chrome_mcp_e2e import (
     http_json,
     wait_for_state,
 )
-from tests.support.config_sync_fault_shim import ConfigLog, ConfigRequest, read_log
 
 CONFIG_KEY = "webFetchEscalation"
 SETTINGS_ROUTE = "/settings/search"

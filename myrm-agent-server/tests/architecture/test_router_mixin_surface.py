@@ -58,7 +58,7 @@ def test_agent_router_keeps_its_composed_methods() -> None:
 
 
 def test_web_handoff_takes_only_the_message() -> None:
-    """``_attach_web_handoff`` resolves the conversation from ``msg``; a peer argument would be dead."""
+    """``_attach_web_handoff`` links the chat its reply names and takes the language from ``msg``; a peer argument would be dead."""
     import inspect
 
     from app.channels.routing.router import AgentRouter

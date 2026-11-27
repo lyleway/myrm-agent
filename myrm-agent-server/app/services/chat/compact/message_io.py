@@ -5,7 +5,7 @@
 - myrm_agent_harness...summary_parser::parse_structured_summary_json (POS: full-field summary deserialization across DB boundary)
 
 [OUTPUT]
-- load_chat / load_compactable_messages: incremental compactable slice
+- load_chat / load_compactable_messages: incremental compactable slice of the active branch
 - db_messages_to_langchain / parse_existing_summary: summarize inputs
 - backup_context: workspace JSONL backup before persist
 
@@ -40,8 +40,11 @@ async def load_chat(db: AsyncSession, chat_id: str) -> Chat | None:
 
 
 async def load_compactable_messages(db: AsyncSession, chat: Chat) -> list[Message]:
-    """Load messages that should be included in compaction (incremental-aware)."""
-    query = select(Message).where(Message.chat_id == chat.id)
+    """Load the active messages that should be included in compaction (incremental-aware).
+
+    A reply a regenerate or sibling switch deactivated is no longer part of the conversation, so it must not reach a summary.
+    """
+    query = select(Message).where(Message.chat_id == chat.id, Message.is_active)
     if chat.compacted_before_id:
         anchor = await db.execute(select(Message.created_at).where(Message.id == chat.compacted_before_id))
         anchor_ts = anchor.scalar_one_or_none()

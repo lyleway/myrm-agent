@@ -10,6 +10,7 @@
 - compact._types::CompactReason, CompactResult (POS: closed decline reasons + outcome)
 
 [OUTPUT]
+- tokens_replaced_by_summary: the context a new summary replaces; ``compact_chat`` and the idle drain measure their saving against it
 - compact_chat: transactional compaction entry (``for_idle_stale`` idle predicate; ``request_tokens_for_guard`` aligns idle anti-thrash with gate; ``explicit_request`` marks a person's request, which the anti-thrash guard does not stop and which counts toward its streak only up to the guard limit)
 
 [POS]
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from myrm_agent_harness.utils.text_utils import get_token_count
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +45,25 @@ from app.services.chat.compact.persist import (
 )
 from app.services.chat.compact.summarize_guard import guarded_compact_summarize
 
+if TYPE_CHECKING:
+    from langchain_core.messages import BaseMessage
+
 logger = logging.getLogger(__name__)
+
+
+def tokens_replaced_by_summary(tail: list[BaseMessage], stored_summary: str | None) -> int:
+    """Tokens of context a new summary replaces: the messages after the stored boundary and the stored summary itself.
+
+    The new summary carries both, so counting only the messages would make every incremental compaction look like it
+    saved nothing. ``compact_chat`` and the idle drain both measure what they save against this, so the running total
+    ``compacted_tokens_saved`` does not count the rows an earlier summary covered a second time.
+    """
+    from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
+
+    tokens = estimate_messages_tokens(tail)
+    if stored_summary:
+        tokens += get_token_count(stored_summary)
+    return tokens
 
 
 async def compact_chat(
@@ -76,7 +96,6 @@ async def compact_chat(
         from myrm_agent_harness.agent.context_management.strategies.summary.summarize_circuit_guard import (
             is_summarize_circuit_open,
         )
-        from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
 
         from app.services.chat.compact.compression_streak import hydrate_compression_streak_from_db
 
@@ -110,11 +129,7 @@ async def compact_chat(
                 )
 
         lc_messages = db_messages_to_langchain(db_messages)
-        # The new summary replaces the stored one together with the messages after it. Counting only those messages
-        # would make every incremental compaction look like it saved nothing, because the summary now carries both.
-        original_tokens = estimate_messages_tokens(lc_messages)
-        if chat.compacted_summary:
-            original_tokens += get_token_count(chat.compacted_summary)
+        original_tokens = tokens_replaced_by_summary(lc_messages, chat.compacted_summary)
 
         existing_summary = parse_existing_summary(chat.compacted_summary) if chat.compacted_summary else None
         llm, max_context_tokens = await get_llm_for_user()

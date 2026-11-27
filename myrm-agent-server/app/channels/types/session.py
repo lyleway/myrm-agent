@@ -7,6 +7,7 @@
 - SessionKey: Session identifier
 - SessionResetMode, SessionPolicy: Session reset strategy
 - METADATA_NEW_CONVERSATION_KEY: Inbound metadata flag that asks for a new conversation
+- METADATA_STORED_CHAT_KEY: Outbound metadata naming the stored chat a reply was produced in
 - compute_daily_epoch(): Daily-granularity time epoch computation, for now or for a given moment
 - started_session_key(), started_key_time(), is_started_session_key(): the key of a conversation a person opened on
   request, and how to recognise one
@@ -30,6 +31,10 @@ _STARTED_KEY = re.compile(r":e=s(\d{8}T\d{6})$")
 
 # Inbound metadata flag a forwarder sets on the first message after a ``/new`` it answered itself.
 METADATA_NEW_CONVERSATION_KEY = "force_new_epoch"
+
+# Outbound metadata the producer of a reply sets to the stored chat it wrote the reply into (the database chat id), so the
+# router links that conversation from the reply instead of working out again which one the turn ran in.
+METADATA_STORED_CHAT_KEY = "stored_chat_id"
 
 
 @dataclass(frozen=True, slots=True)

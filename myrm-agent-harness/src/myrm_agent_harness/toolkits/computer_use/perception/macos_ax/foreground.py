@@ -2,7 +2,7 @@
 
 [INPUT]
 - capture::capture_ax_snapshot (POS: AX capture whose meta describes the foreground app)
-- scripts::_ESCAPE_HANDLERS (POS: the osascript text and its caps)
+- scripts::_ESCAPE_HANDLERS (POS: the handlers that make a text read from the screen one delimiter-free output field)
 - dref.errors::AXPermissionRequiredError, AXTreeEmptyError (POS: AX error types)
 
 [OUTPUT]
