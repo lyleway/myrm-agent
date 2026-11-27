@@ -9,7 +9,6 @@ writes (fire-and-forget writes must not run with a cleared context).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -42,10 +41,14 @@ class _FakeConfig:
 
 
 class FakeAgent(SkillAgentReviewMixin):
+    # Only the tests of session-end memory work set these; the mixin reads both through ``getattr`` defaults.
+    memory_manager: object
+    _enable_memory_auto_extraction: bool
+
     def __init__(
         self,
         *,
-        config: Any = None,
+        config: _FakeConfig | None = None,
         last_context: dict[str, object] | None = None,
     ) -> None:
         self.config = config or _FakeConfig()
@@ -199,7 +202,7 @@ class TestReestablishPrivacyContext:
                 return_value=mock_store,
             ),
             patch(
-                "myrm_agent_harness.agent._internals.run_lifecycle._init_pseudonym_store",
+                "myrm_agent_harness.agent._internals.pseudonym_context.init_pseudonym_store",
                 side_effect=_boom,
             ),
         ):

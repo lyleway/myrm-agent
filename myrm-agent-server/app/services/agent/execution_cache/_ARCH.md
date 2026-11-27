@@ -4,7 +4,7 @@
 
 ## 架构概述
 
-Chat 级 `BuiltExecutionUnit` 池（SkillAgent + BrowserSession）。WebUI/Channel/Wakeup 走 POOLED；Cron/Eval/Kanban 走 EPHEMERAL。镜像 `ChatRuntimePoolRegistry` 生命周期语义。
+Chat 级 `BuiltExecutionUnit` 池（SkillAgent + 它的执行器 + BrowserSession）。WebUI/Channel/Wakeup 走 POOLED；Cron/Eval/Kanban 走 EPHEMERAL。镜像 `ChatRuntimePoolRegistry` 生命周期语义。池化 chat 的执行器（及其中的 shell）由单元持有：一次 run 的结束只关闭它自己创建的执行器，不关闭单元的，所以执行器只在单元 `teardown()` 时关闭。
 
 ---
 
@@ -14,7 +14,7 @@ Chat 级 `BuiltExecutionUnit` 池（SkillAgent + BrowserSession）。WebUI/Chann
 |------|------|------|-------|
 | `__init__.py` | 入口 | 公共导出 | ✅ |
 | `registry.py` | 核心 | acquire（`holds_turn_guard` 标明调用方即持锁回合，见“指纹变化的生效路径”）/release/refresh_unit/guard_turn/idle_evict（支持动态空闲回收超时配置、原子移出与 gc.collect）；`snapshot_warm_units` / `is_scope_turn_active` 供 catalog 热更新；进程级 singleton | ✅ |
-| `types.py` | 核心 | `ExecutionMode`、`BuiltExecutionUnit.teardown()` | ✅ |
+| `types.py` | 核心 | `ExecutionMode`、`BuiltExecutionUnit.teardown()`（依次关闭浏览器、桌面会话、单元 agent 的执行器与 agent；执行器关闭失败只记 WARNING，不阻止 agent 关闭） | ✅ |
 | `fingerprint.py` | 核心 | `compute_execution_fingerprint`（模型类字段统一经 `_model_sig` 提取 build 固化签名，含主/兜底/推理/轻量/视觉/视频模型，且将 temperature/model_kwargs（LLM 实例 build 期固化）与 credential_pool_strategy（CredentialPool build 期固化）纳入签名；结构化配置经 `_credential_free_json` 剔除 api_key/api_keys/apiKeys/_oauthToken/localApiKey/bearer_token 等凭据后进哈希（媒体生成/搜索服务/嵌入/重排/provider 池/OpenAPI 服务/隐私路由）；技能/凭证轨道/MCP/harness epoch/`engine_params` 含 MoA preset 激活态/安全配置/记忆配置（含确认开关/隔离策略/会话搜索/高级检索）/执行网络/通知/看板（含默认看板）/子代理/委托/网页抓取/域名恢复——覆盖所有 build 期固化的用户可配置输入；活跃 Goal 经关键字参数 `has_active_goal`（存储真值）进指纹；排除凭据、传输头、每 run 状态与全局静态配置；YOLO 启用时间戳 `yolo_mode_enabled_at` 不进指纹） | ✅ |
 | `unit_ops.py` | 核心 | capture/apply/detach wrapper ↔ unit | ✅ |
 | `session_lifecycle.py` | 核心 | `resolve_execution_mode`、`finalize_agent_session`（release 前 refresh_unit） | ✅ |
@@ -28,16 +28,16 @@ Chat 级 `BuiltExecutionUnit` 池（SkillAgent + BrowserSession）。WebUI/Chann
 
 | 入口 | execution_mode | 行为 |
 |------|----------------|------|
-| WebUI / Channel / Wakeup | POOLED | 同 chat 复用 BuiltExecutionUnit |
-| Cron / Eval / Kanban | EPHEMERAL | 每条消息 build + close |
+| WebUI / Channel / Wakeup | POOLED | 同 chat 复用 BuiltExecutionUnit；执行器与 shell 随单元存活，单元被拆除时才关闭 |
+| Cron / Eval / Kanban | EPHEMERAL | 每条消息 build + close（`GeneralAgent.close()` 关闭其执行器） |
 
-删 chat：`chat_disposal` 调用 `close_execution_cache_for_chat_all_agents`。
+删 chat：`chat_disposal` 调用 `close_execution_cache_for_chat_all_agents`。`close_scope` 不等回合锁，该 chat 正在执行的命令随执行器关闭而结束；空闲回收跳过持有回合锁的 scope，不打断进行中的回合，单元空闲超过回收时间后拆除，shell 随之关闭。
 
 ---
 
 ## 指纹变化的生效路径
 
-`acquire` 遇到指纹变化时替换旧单元：先把旧条目从缓存摘除并 `teardown()`（关闭其浏览器/桌面会话与 SkillAgent），再重建。摘除在拆除之前，所以拆除或重建失败后缓存里不会残留已关闭的单元，之后的 `acquire` 会重新构建。
+`acquire` 遇到指纹变化时替换旧单元：先把旧条目从缓存摘除并 `teardown()`（关闭其浏览器/桌面会话、执行器与 SkillAgent），再重建。摘除在拆除之前，所以拆除或重建失败后缓存里不会残留已关闭的单元，之后的 `acquire` 会重新构建。
 
 - **其他回合正在运行**：该 scope 的 turn lock 被另一个回合持有时，只推迟替换并复用旧单元（保护运行中的回合），回合结束后的下一次 `acquire` 再替换。
 - **持锁回合自己 acquire**：`guard_turn` 保证同 scope 的回合串行，持锁者就是唯一使用该单元的回合，经 `holds_turn_guard=True` 声明身份后立即替换。`stream_pipeline` 整个回合都在 `guard_turn` 内，经 `coalesced_acquire(..., holds_turn_guard=True)` acquire，所以所有 POOLED 入口（编排器、无人值守目标触发、自动续跑、语音、OpenAI 兼容、fast 模式）在指纹变化后的第一个回合就跑在新单元上，不依赖回合前的预热。
