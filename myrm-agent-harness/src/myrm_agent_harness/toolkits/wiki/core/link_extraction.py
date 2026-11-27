@@ -5,7 +5,7 @@
 
 [OUTPUT]
 - CODE_REGION_RE, protect_code, mask_code: fenced and inline code is literal text, never a link
-- WIKILINK_RE, MARKDOWN_LINK_RE: the two link syntaxes (each part at most 1024 characters, so an unclosed opener cannot make a scan quadratic)
+- WIKILINK_RE, MARKDOWN_LINK_RE, MAX_LINK_PART: the two link syntaxes and the most characters a part of one may hold (1024, so an unclosed opener cannot make a scan quadratic)
 - WikilinkParts, parse_wikilink, normalize_wikilink_target: split / normalize a `[[...]]` body
 - NON_PAGE_TARGET_PREFIXES, is_external_link: targets that are not wiki pages
 - extract_wikilink_targets, extract_markdown_link_targets: distinct page-candidate targets of a page's prose
@@ -36,9 +36,9 @@ CODE_REGION_RE = re.compile(
 )
 # Link parts are length-bounded: an opener without its closer (`[[`, `[x](`) would otherwise
 # rescan the rest of the line, or page, from every opener, which is quadratic in page size.
-_MAX_LINK_PART = 1024
-WIKILINK_RE = re.compile(rf"\[\[([^\]\n]{{1,{_MAX_LINK_PART}}})\]\]")
-MARKDOWN_LINK_RE = re.compile(rf"\[([^\]]{{1,{_MAX_LINK_PART}}})\]\(([^)]{{1,{_MAX_LINK_PART}}})\)")
+MAX_LINK_PART = 1024
+WIKILINK_RE = re.compile(rf"\[\[([^\]\n]{{1,{MAX_LINK_PART}}})\]\]")
+MARKDOWN_LINK_RE = re.compile(rf"\[([^\]]{{1,{MAX_LINK_PART}}})\]\(([^)]{{1,{MAX_LINK_PART}}})\)")
 
 NON_PAGE_TARGET_PREFIXES = ("http://", "https://", "system:")
 

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import re
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from app.channels.types import (
@@ -44,8 +44,60 @@ from app.channels.types import (
 
 logger = logging.getLogger(__name__)
 
-_TTS_DIRECTIVE_RE = re.compile(r"\[\[tts:([^\]]+)\]\]")
-_TTS_TEXT_RE = re.compile(r"\[\[tts:text\]\](.*?)\[\[/tts:text\]\]", re.DOTALL)
+_TTS_DIRECTIVE_OPEN = "[[tts:"
+_TTS_TEXT_OPEN = "[[tts:text]]"
+_TTS_TEXT_CLOSE = "[[/tts:text]]"
+
+# (start, end, body) of a marker in the text; the body is what stands between its delimiters.
+_Marker = tuple[int, int, str]
+
+
+def _tts_directives(text: str) -> Iterator[_Marker]:
+    """Yield each ``[[tts:body]]`` whose body is not empty and holds no ``]``.
+
+    A reply is untrusted text. Trying a pattern at every ``[[tts:`` makes a reply made of nothing else cost the square
+    of its length, so the first ``]`` after an opener is looked up once and decides it: none ahead means no later
+    opener can close either, and an opener that fails there is followed by the openers inside its body, which fail
+    at the same ``]``.
+    """
+    position = 0
+    while (start := text.find(_TTS_DIRECTIVE_OPEN, position)) != -1:
+        body_start = start + len(_TTS_DIRECTIVE_OPEN)
+        close = text.find("]", body_start)
+        if close == -1:
+            return
+        if close > body_start and text.startswith("]]", close):
+            yield start, close + 2, text[body_start:close]
+            position = close + 2
+        else:
+            position = close
+
+
+def _tts_text_blocks(text: str) -> Iterator[_Marker]:
+    """Yield each ``[[tts:text]]…[[/tts:text]]``, a block ending at the first closing marker after its opener.
+
+    With no closing marker after an opener there is none after a later one either, so the scan ends there instead of
+    searching to the end of the text once per opener.
+    """
+    position = 0
+    while (start := text.find(_TTS_TEXT_OPEN, position)) != -1:
+        body_start = start + len(_TTS_TEXT_OPEN)
+        close = text.find(_TTS_TEXT_CLOSE, body_start)
+        if close == -1:
+            return
+        position = close + len(_TTS_TEXT_CLOSE)
+        yield start, position, text[body_start:close]
+
+
+def _without(text: str, markers: Iterable[_Marker]) -> str:
+    """Return the text with the given (ordered, non-overlapping) markers cut out."""
+    kept: list[str] = []
+    position = 0
+    for start, end, _ in markers:
+        kept.append(text[position:start])
+        position = end
+    kept.append(text[position:])
+    return "".join(kept)
 
 
 def has_audio_attachment(msg: InboundMessage) -> bool:
@@ -65,8 +117,8 @@ def parse_tts_directives(text: str) -> tuple[dict[str, str], str | None]:
     """
     directives: dict[str, str] = {}
 
-    for match in _TTS_DIRECTIVE_RE.finditer(text):
-        raw = match.group(1).strip()
+    for _, _, body in _tts_directives(text):
+        raw = body.strip()
         if raw == "off":
             directives["off"] = "true"
             continue
@@ -77,16 +129,16 @@ def parse_tts_directives(text: str) -> tuple[dict[str, str], str | None]:
                 key, _, val = part.partition("=")
                 directives[key.strip()] = val.strip()
 
-    tts_text_match = _TTS_TEXT_RE.search(text)
-    tts_text = tts_text_match.group(1).strip() if tts_text_match else None
+    first_block = next(_tts_text_blocks(text), None)
+    tts_text = first_block[2].strip() if first_block else None
 
     return directives, tts_text
 
 
 def strip_tts_tags(text: str) -> str:
     """Remove all TTS directive tags from text for display in chat."""
-    text = _TTS_TEXT_RE.sub("", text)
-    text = _TTS_DIRECTIVE_RE.sub("", text)
+    text = _without(text, _tts_text_blocks(text))
+    text = _without(text, _tts_directives(text))
     return text.strip()
 
 

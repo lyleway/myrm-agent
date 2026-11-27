@@ -5,7 +5,7 @@ Only &, <, > need escaping in non-tag text — much simpler than MarkdownV2.
 
 [INPUT]
 - channels.rendering.splitter::CJK_BOUNDARY_CHARS, fenced_block_at, split_message (POS: shared CJK punctuation SSOT for smart splitting; the code block a cut would split; fence-safe UTF-8 splitting of a block bigger than a part)
-- channels.rendering.text_utils::FENCED_BLOCK_RE, fenced_block_html (POS: fenced block and its <pre> markup, shared with Matrix)
+- channels.rendering.text_utils::FENCED_BLOCK_RE, fenced_block_html, markdown_links_to_html (POS: fenced block and its <pre> markup, Markdown link and its <a> markup, shared with Matrix)
 - telegram.table_renderer::convert_tables (POS: GFM tables as monospace <pre> boxes)
 
 [OUTPUT]
@@ -28,7 +28,7 @@ import re
 
 from app.channels.rendering.splitter import CJK_BOUNDARY_CHARS, fenced_block_at
 from app.channels.rendering.splitter import split_message as split_fenced_message
-from app.channels.rendering.text_utils import FENCED_BLOCK_RE, fenced_block_html
+from app.channels.rendering.text_utils import FENCED_BLOCK_RE, fenced_block_html, markdown_links_to_html
 
 from .table_renderer import convert_tables
 
@@ -36,13 +36,11 @@ _MAX_MSG_LENGTH = 4096
 _WIDEST_CHAR_UNITS = 2  # a surrogate pair: the most UTF-16 units one character takes
 _MIN_TEXT_SHARE = 8  # after the tags it reopens, a chunk keeps at least this fraction (1/8) of the limit free for text
 
-# A span and a link target never hold a placeholder (NUL): backticks on both sides of a protected block stay text, and
-# a "link" to `code` is no href with markup in it.
+# A span never holds a placeholder (NUL): backticks on both sides of a protected block stay text.
 _INLINE_CODE_RE = re.compile(r"`([^`\x00]+)`")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 _STRIKE_RE = re.compile(r"~~(.+?)~~")
-_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\x00]+)\)")
 
 # Exact whitelist of Telegram supported HTML tags
 _TELEGRAM_TAGS_RE = re.compile(
@@ -84,7 +82,7 @@ def md_to_telegram_html(text: str) -> str:
     result = _BOLD_RE.sub(r"<b>\1</b>", result)
     result = _ITALIC_RE.sub(r"<i>\1</i>", result)
     result = _STRIKE_RE.sub(r"<s>\1</s>", result)
-    result = _LINK_RE.sub(r'<a href="\2">\1</a>', result)
+    result = markdown_links_to_html(result)
 
     for i, block in enumerate(preserved):
         result = result.replace(f"\x00PRESERVE{i}\x00", block)

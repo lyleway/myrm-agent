@@ -24,6 +24,7 @@ import hashlib
 import logging
 import re
 import shutil
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,7 +40,7 @@ from myrm_agent_harness.utils.markdown_frontmatter import (
 
 logger = logging.getLogger(__name__)
 
-_EMBED_IMAGE_RE = re.compile(r"!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|svg|webp|bmp|avif))\]\]", re.IGNORECASE)
+_EMBED_IMAGE_NAME_RE = re.compile(r"[^\]]+\.(?:png|jpg|jpeg|gif|svg|webp|bmp|avif)", re.IGNORECASE)
 _INLINE_TAG_RE = re.compile(r"(?<![\w/`])#([A-Za-z][A-Za-z0-9_/-]*)")
 _CANVAS_EXT = ".canvas"
 
@@ -120,27 +121,46 @@ def extract_inline_obsidian_tags(body: str) -> tuple[str, list[str]]:
     return cleaned, tags
 
 
+def _image_embeds(content: str) -> Iterator[tuple[int, int, str]]:
+    """The ``(start, end, name)`` of each ``![[name.png]]`` in ``content``.
+
+    A name holds no ``]``, so an embed closes at the first ``]`` after its ``![[`` or not at all, and the ``![[`` ahead
+    of that ``]`` fail with it: the scan resumes there. A pattern that starts over from each of them reads to that ``]``
+    once per ``![[``.
+    """
+    position = 0
+    while (start := content.find("![[", position)) != -1:
+        close = content.find("]", start + 3)
+        if close == -1:
+            return
+        if content.startswith("]]", close) and _EMBED_IMAGE_NAME_RE.fullmatch(content, start + 3, close):
+            yield start, close + 2, content[start + 3 : close]
+            position = close + 2
+        else:
+            position = close
+
+
 def rewrite_image_embeds(content: str, source_file: Path, vault_root: Path, assets_dest: Path) -> tuple[str, int]:
     """Replace ![[image.png]] embeds with standard Markdown and copy images."""
     copied = 0
-
-    def _replace(m: re.Match[str]) -> str:
-        nonlocal copied
-        img_name = m.group(1).strip()
-        img_source = _find_image(img_name, source_file.parent, vault_root)
-        if img_source and img_source.exists():
-            file_hash = hashlib.sha256(img_source.read_bytes()).hexdigest()[:12]
-            dest_name = f"{file_hash}_{img_source.name}"
-            dest = assets_dest / dest_name
-            if not dest.exists():
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(img_source, dest)
-            copied += 1
-            return f"![{img_source.stem}]({dest_name})"
-        return m.group(0)
-
-    result = _EMBED_IMAGE_RE.sub(_replace, content)
-    return result, copied
+    pieces: list[str] = []
+    last_end = 0
+    for start, end, name in _image_embeds(content):
+        img_source = _find_image(name.strip(), source_file.parent, vault_root)
+        if not (img_source and img_source.exists()):
+            continue
+        file_hash = hashlib.sha256(img_source.read_bytes()).hexdigest()[:12]
+        dest_name = f"{file_hash}_{img_source.name}"
+        dest = assets_dest / dest_name
+        if not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(img_source, dest)
+        copied += 1
+        pieces.append(content[last_end:start])
+        pieces.append(f"![{img_source.stem}]({dest_name})")
+        last_end = end
+    pieces.append(content[last_end:])
+    return "".join(pieces), copied
 
 
 def _find_image(name: str, current_dir: Path, vault_root: Path) -> Path | None:

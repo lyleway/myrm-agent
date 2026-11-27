@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import random
+import re
+import time
+import unicodedata
+from collections.abc import Callable
+
 import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetcherType, FetchResult
@@ -106,6 +112,46 @@ class TestStaticPageGateConditions:
             )
             is False
         )
+
+
+_OLD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_OLD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def _count_with_the_old_patterns(raw_markdown: str) -> int:
+    text_only = _OLD_LINK_RE.sub(r"\1", _OLD_IMAGE_RE.sub(" ", raw_markdown))
+    return sum(1 for ch in text_only if not ch.isspace() and unicodedata.category(ch)[0] not in ("P", "S", "C", "Z"))
+
+
+class TestLinkSyntaxScan:
+    """Unclosed ``[`` must cost time in proportion to the page, as the patterns did not (20,000 of them: about 0.9 s)."""
+
+    def test_counts_what_the_patterns_counted(self) -> None:
+        rng = random.Random(21)
+        pieces = ("[", "]", "(", ")", "!", "a", "b", " ", "![", "](", "[x](y)", "![i](j)", "\n", "é", "—")
+        for _ in range(20_000):
+            text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 16)))
+            assert count_visible_markdown_chars(text) == _count_with_the_old_patterns(text), repr(text)
+
+    @pytest.mark.parametrize(
+        "make",
+        [lambda n: "[" * n, lambda n: "![" * (n // 2), lambda n: "[a](" * (n // 4), lambda n: "[a](" * (n // 4) + ")"],
+        ids=["openers", "image-openers", "links-without-close", "links-closing-at-the-end"],
+    )
+    def test_time_grows_in_proportion_to_the_page(self, make: Callable[[int], str]) -> None:
+        def cpu_seconds(size: int) -> float:
+            text = make(size)
+            best = float("inf")
+            for _ in range(2):
+                started = time.process_time()
+                count_visible_markdown_chars(text)
+                best = min(best, time.process_time() - started)
+            return best
+
+        short = cpu_seconds(50_000)
+        assert short < 1.0
+
+        assert cpu_seconds(400_000) < 24 * max(short, 0.001)
 
 
 def test_pipeline_delivers_link_heavy_static_index_page_on_l1_without_reconverting() -> None:
