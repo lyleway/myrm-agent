@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import pytest
@@ -255,7 +256,7 @@ def test_tts_tool_is_mounted_for_a_full_selection() -> None:
 def test_tts_engine_gets_the_selection_and_a_persist_callback() -> None:
     captured: list[TTSConfig] = []
 
-    def capture(config: TTSConfig) -> object:
+    def capture(config: TTSConfig, *, allowed_roots: Sequence[str]) -> object:
         captured.append(config)
         return object()
 
@@ -265,6 +266,20 @@ def test_tts_engine_gets_the_selection_and_a_persist_callback() -> None:
     (config,) = captured
     assert (config.provider, config.model, config.voice) == ("volcengine", "seed-tts-2.0", "zh_female_vv")
     assert config.media_callback is not None
+
+
+def test_tts_tool_gets_the_workspace_the_agent_declares() -> None:
+    received: list[Sequence[str]] = []
+
+    def capture(config: TTSConfig, *, allowed_roots: Sequence[str]) -> object:
+        received.append(allowed_roots)
+        return object()
+
+    params = TTSParams(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="tts-key")
+    with patch("app.ai_agents.media_tools.create_tts_tool", side_effect=capture):
+        _mixin(tts_params=params, declared_allowed_roots=("/work/chat-1",))._setup_tts_tools([])
+
+    assert received == [("/work/chat-1",)]
 
 
 def test_tts_tool_load_failure_is_swallowed() -> None:

@@ -68,7 +68,7 @@ def access_roots_from_json(raw: object) -> tuple[AccessRoot, ...]:
         source_obj = item.get("source")
         roots.append(
             AccessRoot(
-                path=path_obj.strip(),
+                path=path_obj,  # exactly as saved: a folder whose own name ends in a space is not the one above it
                 writable=bool(writable_obj) if isinstance(writable_obj, bool) else True,
                 label=str(label_obj).strip() if isinstance(label_obj, str) else "",
                 source=(str(source_obj).strip() if isinstance(source_obj, str) else "persisted"),

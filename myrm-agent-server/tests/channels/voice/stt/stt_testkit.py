@@ -1,11 +1,15 @@
-"""Shared builders for the speech-to-text tests: a voice config, a throw-away audio file and faster-whisper stand-ins."""
+"""Shared builders for the speech-to-text tests: a voice config, a throw-away audio file, an HTTP stand-in and faster-whisper stand-ins."""
 
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 
 from app.channels.types import VoiceConfig
 
@@ -48,6 +52,18 @@ def audio_file(size: int = 8192, suffix: str = ".mp3") -> Path:
     tmp.write(b"\x00" * size)
     tmp.close()
     return Path(tmp.name)
+
+
+@contextmanager
+def mocked_http_client(response: httpx.Response) -> Iterator[AsyncMock]:
+    """Make the providers' ``httpx.AsyncClient`` answer every POST with ``response``; yields the client to inspect."""
+    with patch("app.channels.voice.stt.providers.httpx.AsyncClient") as client_cls:
+        client = AsyncMock()
+        client.post.return_value = response
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client_cls.return_value = client
+        yield client
 
 
 def mock_whisper_model() -> MagicMock:

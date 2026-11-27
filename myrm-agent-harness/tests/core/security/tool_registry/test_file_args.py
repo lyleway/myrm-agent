@@ -24,14 +24,34 @@ from myrm_agent_harness.core.security.tool_registry.file_args import (
 
 @pytest.mark.parametrize("key", FILE_ARG_KEYS)
 def test_every_spelling_yields_its_path_as_string_or_list(key: str) -> None:
-    assert list(file_arg_values({key: " a.txt "})) == ["a.txt"]
+    assert list(file_arg_values({key: "a.txt"})) == ["a.txt"]
     assert list(file_arg_values({key: ["a.txt", "b.txt"]})) == ["a.txt", "b.txt"]
     assert host_file_paths({key: ["a.txt", "b.txt"]}) == ["a.txt", "b.txt"]
 
 
-def test_non_string_and_blank_values_are_ignored() -> None:
-    args: dict[str, object] = {"paths": ["", "  ", 3, None, "ok.txt"], "path": None, "file": 7, "mode": "preview"}
+def test_non_string_and_empty_values_are_ignored() -> None:
+    args: dict[str, object] = {"paths": ["", 3, None, "ok.txt"], "path": None, "file": 7, "mode": "preview"}
     assert list(file_arg_values(args)) == ["ok.txt"]
+
+
+@pytest.mark.parametrize("key", FILE_ARG_KEYS)
+def test_whitespace_around_a_name_is_part_of_the_name_the_tools_open(key: str) -> None:
+    """The tools open the text as sent, so a file named ``" a.txt "`` is judged; the trimmed spelling follows."""
+    assert list(file_arg_values({key: " a.txt "})) == [" a.txt ", "a.txt"]
+    assert host_file_paths({key: " a.txt "}) == [" a.txt ", "a.txt"]
+
+
+@pytest.mark.parametrize("name", [" ", "   ", "\t", "\u00a0", "\u3000"])
+def test_a_name_made_only_of_whitespace_is_a_file_name(name: str) -> None:
+    assert list(file_arg_values({"paths": [name]})) == [name]
+    assert host_file_paths({"paths": [name]}) == [name]
+
+
+def test_whitespace_before_a_scheme_or_namespace_makes_it_a_file_name() -> None:
+    """``http://`` and ``/mcp/`` name a URL and a virtual file only at the start of the text; after a space they are
+    names on the host, and the trimmed spelling, which would be one of the two, is not judged."""
+    assert host_file_paths({"path": " http://x/.env"}) == [" http://x/.env", " http"]
+    assert host_file_paths({"path": " /mcp/a.md"}) == [" /mcp/a.md"]
 
 
 def test_unrelated_arguments_name_no_file() -> None:
@@ -129,9 +149,14 @@ class TestCoercePathList:
 class TestJsonArrayStringArguments:
     @pytest.mark.parametrize("key", FILE_ARG_KEYS)
     def test_every_spelling_reads_the_array_inside(self, key: str) -> None:
-        args: dict[str, object] = {key: '["/etc/hosts", " b.txt:1-5 "]'}
+        args: dict[str, object] = {key: '["/etc/hosts", "b.txt:1-5"]'}
         assert list(file_arg_values(args)) == ["/etc/hosts", "b.txt:1-5"]
         assert host_file_paths(args) == ["/etc/hosts", "b.txt"]
+
+    def test_whitespace_inside_an_item_is_read_like_whitespace_around_a_path(self) -> None:
+        args: dict[str, object] = {"paths": '["/etc/hosts", " b.txt:1-5 "]'}
+        assert list(file_arg_values(args)) == ["/etc/hosts", " b.txt:1-5 ", "b.txt:1-5"]
+        assert host_file_paths(args) == ["/etc/hosts", " b.txt:1-5 ", " b.txt", "b.txt"]
 
     def test_the_text_of_the_array_is_not_a_path_itself(self) -> None:
         assert host_file_paths({"paths": '["a.txt"]'}) == ["a.txt"]

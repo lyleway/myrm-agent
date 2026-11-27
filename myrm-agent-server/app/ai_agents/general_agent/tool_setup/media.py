@@ -8,6 +8,7 @@
 
 [POS]
 ToolSetupMixin 的一个工具族；由 mixin.py 组合。三个工具都要求用户已选择模型（供应商、音色）且凭据就绪才挂载，不补默认值。
+三个工具都拿到智能体声明的工作区目录（`declared_allowed_roots`），生成的媒体的副本放进其中第一个。
 """
 
 from __future__ import annotations
@@ -181,7 +182,7 @@ class MediaToolsMixin(ToolSetupBaseMixin):
                     chat_id=self._media_chat_id(), model_name=model, source="tts_generate"
                 ),
             )
-            tools.append(create_tts_tool(config))
+            tools.append(create_tts_tool(config, allowed_roots=self.declared_allowed_roots))
             logger.info("TTS tool loaded (provider=%s, model=%s, voice=%s)", provider, model, voice)
         except Exception as e:
             logger.warning("TTS tool failed to load: %s", e)
