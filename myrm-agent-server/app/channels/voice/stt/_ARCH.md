@@ -20,4 +20,4 @@
 - `core.py` → `common.py`、`local.py`、`providers.py`
 - `providers.py` → `common.py`、`models.py`
 - `local.py`、`models.py`、`common.py` 不依赖包内其他模块
-- 流式端点 `app/api/stt/ws_stream.py` 与语音会话端点 `app/api/voice/ws_session.py` 都经门面取 `deepgram_stream_url`；Deepgram 地址与默认模型只写在 `models.py`
+- 流式端点 `app/api/stt/ws_stream.py` 与语音会话端点 `app/api/voice/ws_session.py` 都经门面取 `deepgram_stream_url`；Deepgram 实时转写地址与默认模型只写在 `models.py`，批量转写的 REST 地址在 `providers.py`
