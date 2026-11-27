@@ -149,12 +149,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => {
-                let app_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    super::lifecycle::shutdown_and_exit(app_handle, 0).await;
-                });
-            }
+            "quit" => super::quit_gate::request_quit(app.clone()),
             "show" => show_main_window(app),
             "new_chat" => show_and_navigate(app, "tray:new_chat"),
             "settings" => show_and_navigate(app, "tray:settings"),

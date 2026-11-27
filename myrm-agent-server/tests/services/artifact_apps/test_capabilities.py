@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.artifact_apps.capabilities import MAX_FETCH_HOSTS, InvalidScopeError, normalize_scope
+from app.services.artifact_apps.capabilities import (
+    MAX_FETCH_HOSTS,
+    MAX_SHORTCUTS,
+    InvalidScopeError,
+    normalize_accelerator,
+    normalize_scope,
+)
 
 
 def test_fetch_scope_is_sorted_lower_cased_and_deduplicated() -> None:
@@ -42,3 +48,46 @@ def test_fetch_caps_the_number_of_hosts() -> None:
     with pytest.raises(InvalidScopeError):
         normalize_scope("fetch", hosts)
     assert len(normalize_scope("fetch", hosts[:MAX_FETCH_HOSTS])) == MAX_FETCH_HOSTS
+
+
+@pytest.mark.parametrize("capability", ["tray", "float"])
+def test_tray_and_float_carry_no_scope(capability: str) -> None:
+    assert normalize_scope(capability, []) == []  # type: ignore[arg-type]
+    with pytest.raises(InvalidScopeError):
+        normalize_scope(capability, ["x"])  # type: ignore[arg-type]
+
+
+def test_shortcut_scope_is_canonical_sorted_and_deduplicated() -> None:
+    scope = normalize_scope("shortcut", ["shift+commandorcontrol+k", "CommandOrControl+Shift+K", "alt+f5"])
+
+    assert scope == ["Alt+F5", "CommandOrControl+Shift+K"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "canonical"),
+    [
+        ("commandorcontrol+k", "CommandOrControl+K"),
+        (" Control + Alt + 7 ", "Control+Alt+7"),
+        ("Shift+Alt+F12", "Alt+Shift+F12"),
+    ],
+)
+def test_accelerators_are_spelled_canonically(raw: str, canonical: str) -> None:
+    assert normalize_accelerator(raw) == canonical
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["K", "Shift+K", "Alt", "Alt+", "Alt+KK", "Alt+F13", "Alt+F0", "Super+K", "Cmd+K", "Alt+Alt+K", "Alt+Space", "Alt+é", ""],
+)
+def test_accelerators_that_could_take_over_typing_or_are_not_supported_are_refused(raw: str) -> None:
+    with pytest.raises(InvalidScopeError):
+        normalize_accelerator(raw)
+
+
+def test_shortcut_needs_at_least_one_and_caps_the_number() -> None:
+    with pytest.raises(InvalidScopeError):
+        normalize_scope("shortcut", [])
+    combos = [f"Alt+{key}" for key in "ABCDE"]
+    with pytest.raises(InvalidScopeError):
+        normalize_scope("shortcut", combos)
+    assert len(normalize_scope("shortcut", combos[:MAX_SHORTCUTS])) == MAX_SHORTCUTS

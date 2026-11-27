@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-has-app-launcher"
+description = "Enables the has_app_launcher command without any pre-configured scope."
+commands.allow = ["has_app_launcher"]
+
+[[permission]]
+identifier = "deny-has-app-launcher"
+description = "Denies the has_app_launcher command without any pre-configured scope."
+commands.deny = ["has_app_launcher"]

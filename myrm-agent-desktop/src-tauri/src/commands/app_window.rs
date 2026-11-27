@@ -21,6 +21,7 @@ use tauri::{
     AppHandle, Manager, Runtime, State, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
+use super::app_surface::window_label;
 use crate::ipc_security::APP_WEBVIEW_PREFIX;
 use crate::runtime::ProductOrigin;
 use crate::utils::window_reveal::reveal_window;
@@ -29,15 +30,19 @@ const MAX_APP_ID_LEN: usize = 64;
 const MAX_TITLE_CHARS: usize = 80;
 const FALLBACK_TITLE: &str = "MyrmAgent";
 
-/// 标签只接受产物 ID 的字符集：窗口标签进入 ACL 匹配与窗口状态存储，不能带路径或通配字符。
-fn app_window_label(artifact_id: &str) -> Result<String, String> {
-    let valid = !artifact_id.is_empty()
+/// 只接受产物 ID 的字符集：ID 会进入窗口标签（ACL 匹配与窗口状态存储）、启动器文件内容与深链接，
+/// 不能带路径或通配字符。
+pub(super) fn is_valid_artifact_id(artifact_id: &str) -> bool {
+    !artifact_id.is_empty()
         && artifact_id.len() <= MAX_APP_ID_LEN
         && artifact_id
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if valid {
-        Ok(format!("{APP_WEBVIEW_PREFIX}{artifact_id}"))
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn app_window_label(artifact_id: &str) -> Result<String, String> {
+    if is_valid_artifact_id(artifact_id) {
+        Ok(window_label(artifact_id))
     } else {
         Err("Invalid app id".to_string())
     }

@@ -1,37 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { CapabilityStatus } from '../declaration';
-import { createAppBridgeHost, type AppBridgeActivity, type ProxyFetchReply, type ProxyFetchRequest } from '../host';
-import type { BridgeCapability, RpcResponse } from '../protocol';
-
-const SHA = 'c'.repeat(64);
-
-function setup(statuses: Partial<Record<BridgeCapability, CapabilityStatus>> = {}) {
-  const clock = { at: 1_000_000 };
-  const activity: AppBridgeActivity[] = [];
-  const proxyFetch = vi.fn<(request: ProxyFetchRequest) => Promise<ProxyFetchReply>>();
-  const showNotification = vi.fn<(title: string, body: string) => Promise<void>>().mockResolvedValue(undefined);
-  const handle = createAppBridgeHost({
-    appName: 'Weather',
-    versionSha256: SHA,
-    getStatuses: () => ({ notify: 'allowed', fetch: 'allowed', ...statuses }),
-    proxyFetch,
-    reportActivity: (entry) => activity.push(entry),
-    showNotification,
-    now: () => clock.at,
-  });
-  return { handle, clock, activity, proxyFetch, showNotification };
-}
-
-const request = (method: string, params?: unknown, id: number | string = 1) => ({ jsonrpc: '2.0', id, method, params });
-const reasonOf = (reply: RpcResponse | null) => (reply && 'error' in reply ? reply.error.data.reason : undefined);
-const okReply = (body = '{"t":1}'): ProxyFetchReply => ({
-  ok: true,
-  status: 200,
-  headers: { 'content-type': 'application/json' },
-  body,
-  code: null,
-  message: null,
-});
+import { okReply, reasonOf, request, setup, SHA } from './hostHarness';
 
 describe('foreign messages', () => {
   it('returns null for anything that is not a JSON-RPC request', async () => {

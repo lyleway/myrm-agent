@@ -6,8 +6,9 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
-use super::window_policy::{self, CloseAction};
-use super::{lifecycle, menu, tray};
+use super::window_policy::{self, AppWindows, CloseAction};
+use super::{lifecycle, menu, quit_gate, tray};
+use crate::commands::app_surface::{app_has_tray, on_app_window_destroyed, AppSurfaceRegistry};
 use crate::config::{BackendConfig, ConfigManager, FrontendConfig};
 use crate::runtime::{
     start_backend_with_config, start_frontend, NextJSFrontend, ProductOrigin, PythonBackend,
@@ -303,24 +304,33 @@ fn register_shortcut_from_config(
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     match event {
         tauri::WindowEvent::CloseRequested { api, .. } => {
-            let close_to_tray = window
-                .app_handle()
-                .state::<ConfigManager>()
-                .load()
-                .close_to_tray;
+            let app = window.app_handle();
+            let close_to_tray = app.state::<ConfigManager>().load().close_to_tray;
+            let registry = app.state::<AppSurfaceRegistry>();
+            let app_windows = AppWindows {
+                closing_app_has_tray: app_has_tray(&registry, window.label()),
+                open: quit_gate::app_window_count(app),
+            };
 
-            if window_policy::on_close_requested(window.label(), close_to_tray)
-                == CloseAction::HideToTray
-            {
-                let _ = window.hide();
-                api.prevent_close();
+            match window_policy::on_close_requested(window.label(), close_to_tray, app_windows) {
+                CloseAction::HideToTray => {
+                    let _ = window.hide();
+                    api.prevent_close();
 
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    }
                 }
+                CloseAction::HideApp => {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+                CloseAction::ConfirmQuit => {
+                    api.prevent_close();
+                    quit_gate::request_quit(app.clone());
+                }
+                CloseAction::Proceed => {}
             }
         }
         tauri::WindowEvent::Destroyed if window_policy::destroyed_stops_app(window.label()) => {
@@ -329,6 +339,9 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
                 lifecycle::graceful_shutdown(app_handle.clone()).await;
                 lifecycle::shutdown_and_exit(app_handle, 0).await;
             });
+        }
+        tauri::WindowEvent::Destroyed => {
+            on_app_window_destroyed(window.app_handle(), window.label());
         }
         _ => {}
     }

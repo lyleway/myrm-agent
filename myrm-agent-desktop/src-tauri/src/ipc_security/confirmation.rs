@@ -79,42 +79,12 @@ fn truncate_target_for_prompt(target_path: Option<&str>) -> String {
     truncated
 }
 
-pub(super) fn parse_confirmation_locale(raw: Option<&str>) -> ConfirmationLocale {
-    let Some(raw_value) = raw else {
-        return ConfirmationLocale::En;
-    };
-    let normalized = raw_value.trim().replace('_', "-").to_ascii_lowercase();
-    if normalized.is_empty() {
-        return ConfirmationLocale::En;
-    }
-    if normalized.starts_with("zh") {
-        return ConfirmationLocale::ZhHans;
-    }
-    ConfirmationLocale::En
-}
-
 fn resolve_confirmation_locale() -> ConfirmationLocale {
-    for candidate in [
-        std::env::var("MYRM_UI_LOCALE").ok(),
-        std::env::var("MYRM_LOCALE").ok(),
-        std::env::var("LC_ALL").ok(),
-        std::env::var("LC_MESSAGES").ok(),
-        std::env::var("LANG").ok(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let trimmed = candidate.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let normalized = trimmed.replace('_', "-").to_ascii_lowercase();
-        let parsed = parse_confirmation_locale(Some(trimmed));
-        if parsed != ConfirmationLocale::En || normalized.starts_with("en") {
-            return parsed;
-        }
+    if crate::utils::ui_locale::ui_locale_is_zh() {
+        ConfirmationLocale::ZhHans
+    } else {
+        ConfirmationLocale::En
     }
-    ConfirmationLocale::En
 }
 
 fn confirmation_locale_tag(locale: ConfirmationLocale) -> &'static str {

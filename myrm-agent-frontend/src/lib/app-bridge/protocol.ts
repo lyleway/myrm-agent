@@ -4,22 +4,36 @@
  *
  * [OUTPUT]
  * - BridgeCapability / BridgeFailure: the capabilities a page can ask the host for and why a call can fail.
- * - RpcRequest / RpcResponse / parseRpcRequest / rpcResult / rpcFailure: the JSON-RPC 2.0 envelope of the page-to-host channel.
+ * - DESKTOP_CAPABILITIES / isDesktopCapability: the capabilities that exist only in an app's own desktop window.
+ * - RpcRequest / RpcResponse / parseRpcRequest / rpcResult / rpcFailure / rpcEvent: the JSON-RPC 2.0 envelope of the
+ *   page-to-host channel and the host-to-page notification.
  * - BridgeError: thrown by host handlers; carries the stable `reason` the page sees.
- * - parseNotifyParams / parseFetchParams: shape checks for the two methods.
+ * - parseNotifyParams / parseFetchParams / parseTrayParams / parseShortcutParams / parseFloatParams: shape checks.
  *
  * [POS]
  * Wire contract between a sandboxed app page and the host that embeds it. A method is named after the capability it
- * needs. The host re-validates everything; the page-side shim only builds well-formed requests.
+ * needs (`tray.set` needs `tray`). The host re-validates everything; the page-side shim only builds well-formed
+ * requests. The host talks back with notifications named `myrm/event` (a revoked permission, a pressed key combination).
  */
 
-export type BridgeCapability = 'notify' | 'fetch';
+import { normalizeAccelerator } from './accelerator';
 
-export const BRIDGE_CAPABILITIES: readonly BridgeCapability[] = ['notify', 'fetch'];
+export type BridgeCapability = 'notify' | 'fetch' | 'tray' | 'shortcut' | 'float';
+
+export const BRIDGE_CAPABILITIES: readonly BridgeCapability[] = ['notify', 'fetch', 'tray', 'shortcut', 'float'];
+
+/** These act on the operating system around the app window, so they exist only in the app's own desktop window. */
+export const DESKTOP_CAPABILITIES: readonly BridgeCapability[] = ['tray', 'shortcut', 'float'];
+
+export function isDesktopCapability(capability: BridgeCapability): boolean {
+  return DESKTOP_CAPABILITIES.includes(capability);
+}
 
 export const NOTIFY_TITLE_MAX = 80;
 export const NOTIFY_BODY_MAX = 200;
 export const FETCH_URL_MAX = 2048;
+export const TRAY_TITLE_MAX = 24;
+export const TRAY_TOOLTIP_MAX = 80;
 
 /** Why a call failed, as the page sees it (`error.data.reason`; the shim exposes it as `error.code`). */
 export type BridgeFailure =
@@ -29,6 +43,9 @@ export type BridgeFailure =
   | 'permission_denied'
   | 'rate_limited'
   | 'host_not_granted'
+  | 'unsupported'
+  | 'shortcut_not_granted'
+  | 'shortcut_conflict'
   | 'bad_request'
   | 'blocked'
   | 'response_too_large'
@@ -91,6 +108,17 @@ export function rpcFailure(id: RpcId, error: BridgeError): RpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message: error.message, data: { reason: error.reason } } };
 }
 
+/** `myrm/event` notification: the host tells the page something happened (no reply is expected). */
+export const EVENT_METHOD = 'myrm/event';
+
+export type AppEvent =
+  | { name: 'permission-revoked'; data: { capability: BridgeCapability } }
+  | { name: 'shortcut'; data: { accelerator: string } };
+
+export function rpcEvent(event: AppEvent): { jsonrpc: '2.0'; method: typeof EVENT_METHOD; params: AppEvent } {
+  return { jsonrpc: '2.0', method: EVENT_METHOD, params: event };
+}
+
 export interface NotifyParams {
   title: string;
   body: string;
@@ -133,4 +161,37 @@ export function parseFetchParams(params: unknown): FetchParams | null {
     return null;
   }
   return { url: params.url, method: method as FetchMethod, headers: headers as Record<string, string>, body };
+}
+
+export interface TrayParams {
+  title: string;
+  tooltip: string;
+}
+
+/** At least one of `title` (menu-bar text on macOS) and `tooltip` must be given; each is trimmed and capped. */
+export function parseTrayParams(params: unknown): TrayParams | null {
+  if (!isRecord(params)) {
+    return null;
+  }
+  const { title = '', tooltip = '' } = params;
+  if (typeof title !== 'string' || typeof tooltip !== 'string') {
+    return null;
+  }
+  const parsed = { title: title.trim(), tooltip: tooltip.trim() };
+  if (parsed.title.length > TRAY_TITLE_MAX || parsed.tooltip.length > TRAY_TOOLTIP_MAX) {
+    return null;
+  }
+  return parsed.title || parsed.tooltip ? parsed : null;
+}
+
+/** The canonical combination, or `null` when the params carry anything else. */
+export function parseShortcutParams(params: unknown): string | null {
+  if (!isRecord(params) || typeof params.accelerator !== 'string') {
+    return null;
+  }
+  return normalizeAccelerator(params.accelerator);
+}
+
+export function parseFloatParams(params: unknown): boolean | null {
+  return isRecord(params) && typeof params.on === 'boolean' ? params.on : null;
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-app-tray"
+description = "Enables the clear_app_tray command without any pre-configured scope."
+commands.allow = ["clear_app_tray"]
+
+[[permission]]
+identifier = "deny-clear-app-tray"
+description = "Denies the clear_app_tray command without any pre-configured scope."
+commands.deny = ["clear_app_tray"]

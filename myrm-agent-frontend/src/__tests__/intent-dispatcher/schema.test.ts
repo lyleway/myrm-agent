@@ -37,6 +37,15 @@ describe('Universal Intent Protocol (UIP) Schema Parser', () => {
       });
     });
 
+    it('should parse an app intent into the installed app id', () => {
+      expect(parseIntentUrl('myrmagent://app/art_1-b')).toEqual({ scheme: 'myrmagent', action: 'app', id: 'art_1-b' });
+      expect(parseIntentUrl('https://app.example.com/intent/app/art-1')).toEqual({
+        scheme: 'https',
+        action: 'app',
+        id: 'art-1',
+      });
+    });
+
     it('should parse web-based intent correctly', () => {
       const result = parseIntentUrl('https://app.example.com/intent/chat/67890');
       expect(result).toEqual({ scheme: 'https', action: 'chat', id: '67890' });
@@ -105,6 +114,13 @@ describe('Universal Intent Protocol (UIP) Schema Parser', () => {
     it('should throw on install-skill with invalid URL', () => {
       expect(() => parseIntentUrl('myrmagent://install-skill?url=not-a-url')).toThrow();
     });
+
+    it.each(['myrmagent://app', 'myrmagent://app/a%2Fb', 'myrmagent://app/a.b', `myrmagent://app/${'a'.repeat(65)}`])(
+      'should throw on an app intent whose id is not an artifact id: %s',
+      (link) => {
+        expect(() => parseIntentUrl(link)).toThrow();
+      },
+    );
 
     it('should throw on empty install-skill URL', () => {
       expect(() => parseIntentUrl('myrmagent://install-skill')).toThrow();

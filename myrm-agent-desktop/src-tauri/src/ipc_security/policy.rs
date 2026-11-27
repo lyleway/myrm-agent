@@ -25,6 +25,8 @@ enum SurfacePolicy {
     MainOrSession,
     /// 命令作用于调用方窗口自身，只有应用窗口能调用。
     AppOnly,
+    /// 主窗口与应用窗口能调用；会话窗不能（命令内部再限定应用窗口只能管自己的应用）。
+    MainOrApp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +104,14 @@ fn policy_for_command(command: &str) -> Option<CommandPolicy> {
             | "open_app_window"
             | "close_app_window"
             | "set_app_window_always_on_top"
+            | "set_app_window_title"
+            | "set_app_tray"
+            | "clear_app_tray"
+            | "register_app_shortcut"
+            | "unregister_app_shortcut"
+            | "has_app_launcher"
+            | "create_app_launcher"
+            | "remove_app_launcher"
             | "set_tray_status"
             | "update_tray_info"
             | "show_privacy_curtain"
@@ -142,8 +152,22 @@ fn policy_for_command(command: &str) -> Option<CommandPolicy> {
             | "hide_privacy_curtain"
     ) {
         SurfacePolicy::MainOnly
-    } else if matches!(command, "close_app_window" | "set_app_window_always_on_top") {
+    } else if matches!(
+        command,
+        "close_app_window"
+            | "set_app_window_always_on_top"
+            | "set_app_window_title"
+            | "set_app_tray"
+            | "clear_app_tray"
+            | "register_app_shortcut"
+            | "unregister_app_shortcut"
+    ) {
         SurfacePolicy::AppOnly
+    } else if matches!(
+        command,
+        "has_app_launcher" | "create_app_launcher" | "remove_app_launcher"
+    ) {
+        SurfacePolicy::MainOrApp
     } else {
         SurfacePolicy::MainOrSession
     };
@@ -228,6 +252,17 @@ pub fn authorize_request(command: &str, webview_label: &str) -> Result<(), Denie
             webview_label: webview_label.to_string(),
             reason_code: "app_only_command",
             reason: "IPC command is restricted to app webviews".to_string(),
+            risk: policy.risk,
+            deny_mode: policy.deny_mode,
+        });
+    }
+
+    if matches!(policy.surface, SurfacePolicy::MainOrApp) && !is_main && !is_app {
+        return Err(DeniedInvoke {
+            command: command.to_string(),
+            webview_label: webview_label.to_string(),
+            reason_code: "main_or_app_command",
+            reason: "IPC command is restricted to main and app webviews".to_string(),
             risk: policy.risk,
             deny_mode: policy.deny_mode,
         });

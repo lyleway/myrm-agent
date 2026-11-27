@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { BridgeError, parseFetchParams, parseNotifyParams, parseRpcRequest, rpcFailure, rpcResult } from '../protocol';
+import {
+  BRIDGE_CAPABILITIES,
+  BridgeError,
+  isDesktopCapability,
+  parseFetchParams,
+  parseFloatParams,
+  parseNotifyParams,
+  parseRpcRequest,
+  parseShortcutParams,
+  parseTrayParams,
+  rpcEvent,
+  rpcFailure,
+  rpcResult,
+} from '../protocol';
 
 describe('parseRpcRequest', () => {
   it('accepts a JSON-RPC 2.0 request with a numeric or string id', () => {
@@ -100,5 +113,70 @@ describe('parseFetchParams', () => {
     ['array headers', { url: 'https://a.example.com', headers: ['a'] }],
   ])('rejects %s', (_label, params) => {
     expect(parseFetchParams(params)).toBeNull();
+  });
+});
+
+describe('parseTrayParams', () => {
+  it('trims title and tooltip, and accepts either alone', () => {
+    expect(parseTrayParams({ title: ' 3 unread ', tooltip: ' Inbox ' })).toEqual({ title: '3 unread', tooltip: 'Inbox' });
+    expect(parseTrayParams({ title: '3' })).toEqual({ title: '3', tooltip: '' });
+    expect(parseTrayParams({ tooltip: 'Inbox' })).toEqual({ title: '', tooltip: 'Inbox' });
+  });
+
+  it.each([
+    ['nothing', {}],
+    ['only blanks', { title: '  ', tooltip: ' ' }],
+    ['a title longer than the menu bar can show', { title: 'x'.repeat(25) }],
+    ['a tooltip over the limit', { tooltip: 'x'.repeat(81) }],
+    ['a non-string title', { title: 3 }],
+    ['not an object', 'text'],
+    ['an array', ['a']],
+  ])('rejects %s', (_label, params) => {
+    expect(parseTrayParams(params)).toBeNull();
+  });
+
+  it('accepts text exactly at the limits', () => {
+    expect(parseTrayParams({ title: 'x'.repeat(24), tooltip: 'y'.repeat(80) })).not.toBeNull();
+  });
+});
+
+describe('parseShortcutParams', () => {
+  it('returns the canonical combination', () => {
+    expect(parseShortcutParams({ accelerator: 'shift+commandorcontrol+k' })).toBe('CommandOrControl+Shift+K');
+  });
+
+  it.each([{}, { accelerator: 3 }, { accelerator: 'K' }, { accelerator: 'Ctrl+K' }, null, 'Alt+K'])('rejects %j', (params) => {
+    expect(parseShortcutParams(params)).toBeNull();
+  });
+});
+
+describe('parseFloatParams', () => {
+  it('needs a real boolean', () => {
+    expect(parseFloatParams({ on: true })).toBe(true);
+    expect(parseFloatParams({ on: false })).toBe(false);
+    for (const params of [{}, { on: 'true' }, { on: 1 }, null]) {
+      expect(parseFloatParams(params)).toBeNull();
+    }
+  });
+});
+
+describe('capabilities', () => {
+  it('has exactly the three desktop ones set apart from the two that work anywhere', () => {
+    expect(BRIDGE_CAPABILITIES.filter(isDesktopCapability)).toEqual(['tray', 'shortcut', 'float']);
+    expect(BRIDGE_CAPABILITIES.filter((capability) => !isDesktopCapability(capability))).toEqual(['notify', 'fetch']);
+  });
+});
+
+describe('rpcEvent', () => {
+  it('is a notification: no id, so a page cannot mistake it for the reply to a call', () => {
+    const event = rpcEvent({ name: 'shortcut', data: { accelerator: 'Alt+F1' } });
+
+    expect(event).toEqual({
+      jsonrpc: '2.0',
+      method: 'myrm/event',
+      params: { name: 'shortcut', data: { accelerator: 'Alt+F1' } },
+    });
+    expect('id' in event).toBe(false);
+    expect(parseRpcRequest(event)).toBeNull();
   });
 });

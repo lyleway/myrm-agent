@@ -2,6 +2,7 @@
 //!
 //! [INPUT]
 //! - tauri::AppHandle / tauri::App (POS: Tauri Builder 运行时)
+//! - quit_gate::request_quit (POS: macOS「Quit」项与 Cmd+Q 的退出确认)
 //!
 //! [OUTPUT]
 //! - setup_app_menu: 构建并注册包含 App Menu 与 Edit Menu 的系统级原生菜单
@@ -10,9 +11,16 @@
 //! 桌面端原生菜单与快捷键桥接模块。
 //! 确保在 macOS / Windows / Linux 的无边框沉浸式窗口中，
 //! 系统剪贴板与编辑快捷键（Cmd/Ctrl+C/V/X/A/Z）通过操作系统 Responder Chain 100% 坚如磐石。
+//! macOS 的 Quit 不用系统预置项：预置项直接调 `NSApp terminate:`，进程会不经任何确认就退出
+//! （应用窗口与藏在托盘里的应用一起消失）；自定义项把 Cmd+Q 接到 `quit_gate`。
 
+#[cfg(target_os = "macos")]
+use tauri::menu::MenuItem;
 use tauri::menu::{Menu, PredefinedMenuItem, Submenu};
 use tauri::AppHandle;
+
+#[cfg(target_os = "macos")]
+const QUIT_MENU_ID: &str = "app_quit";
 
 pub fn setup_app_menu(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let app_name = &app.package_info().name;
@@ -49,9 +57,20 @@ pub fn setup_app_menu(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
                 &PredefinedMenuItem::hide_others(app, Some("Hide Others"))?,
                 &PredefinedMenuItem::show_all(app, Some("Show All"))?,
                 &PredefinedMenuItem::separator(app)?,
-                &PredefinedMenuItem::quit(app, Some(&format!("Quit {}", app_name)))?,
+                &MenuItem::with_id(
+                    app,
+                    QUIT_MENU_ID,
+                    format!("Quit {}", app_name),
+                    true,
+                    Some("CmdOrCtrl+Q"),
+                )?,
             ],
         )?;
+        app.on_menu_event(|app, event| {
+            if event.id().as_ref() == QUIT_MENU_ID {
+                super::quit_gate::request_quit(app.clone());
+            }
+        });
 
         let menu = Menu::with_items(app, &[&app_submenu, &edit_submenu])?;
         app.set_menu(menu)?;

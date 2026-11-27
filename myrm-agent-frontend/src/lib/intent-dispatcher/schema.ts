@@ -43,6 +43,14 @@ export const InstallSkillIntentSchema = BaseIntentSchema.extend({
   url: z.string().url('Valid URL is required'),
 });
 
+// 6. Open an installed app: myrmagent://app/{artifact_id}
+// The id lands in a route and in a desktop window label, so it is held to the artifact id charset the desktop shell
+// accepts (letters, digits, `-` and `_`, up to 64 characters).
+export const AppIntentSchema = BaseIntentSchema.extend({
+  action: z.literal('app'),
+  id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'A valid app ID is required'),
+});
+
 // Union of all supported intents
 export const UIPIntentSchema = z.discriminatedUnion('action', [
   ChatIntentSchema,
@@ -50,6 +58,7 @@ export const UIPIntentSchema = z.discriminatedUnion('action', [
   QuickAskIntentSchema,
   OAuthIntentSchema,
   InstallSkillIntentSchema,
+  AppIntentSchema,
 ]);
 
 export type UIPIntent = z.infer<typeof UIPIntentSchema>;
@@ -137,6 +146,8 @@ export function parseIntentUrl(rawUrl: string): UIPIntent {
           exchange: url.searchParams.get('exchange') || '',
           state: url.searchParams.get('state') || '',
         });
+      case 'app':
+        return AppIntentSchema.parse({ ...basePayload, id });
       case 'install-skill':
         return InstallSkillIntentSchema.parse({
           ...basePayload,

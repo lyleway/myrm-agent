@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-app-launcher"
+description = "Enables the create_app_launcher command without any pre-configured scope."
+commands.allow = ["create_app_launcher"]
+
+[[permission]]
+identifier = "deny-create-app-launcher"
+description = "Denies the create_app_launcher command without any pre-configured scope."
+commands.deny = ["create_app_launcher"]

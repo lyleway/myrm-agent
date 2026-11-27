@@ -2,105 +2,23 @@
 
 /**
  * [INPUT]
+ * - ./appHostKit (POS: doubles and fixtures of the host page)
  * - ../AppHostView::AppHostView
  *
  * [OUTPUT]
- * - Tests: loading states, the permission question on open, the menu (permissions, uninstall), that the page is
- *   embedded with the client injected, and that it fills the window exactly when no shell is shown.
+ * - Tests: loading states, the permission question on open, the menu (permissions, uninstall), that the page is embedded with the client injected, and that desktop capabilities are not offered where nothing could act on them.
  *
  * [POS]
- * Behaviour of `/apps/[artifactId]`: what the user sees and which decisions and registry changes it leads to.
+ * Behaviour of `/apps/[artifactId]` in a browser tab: what the user sees and which decisions and registry changes it leads to.
  */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const mocks = vi.hoisted(() => ({
-  push: vi.fn(),
-  fetchAppDetail: vi.fn(),
-  saveGrant: vi.fn(),
-  uninstallApp: vi.fn(),
-  listInstalledApps: vi.fn(),
-  confirmAction: vi.fn(),
-  toastSuccess: vi.fn(),
-  toastError: vi.fn(),
-  htmlPreview: vi.fn(),
-  isTauriRuntime: vi.fn(),
-  closeAppWindow: vi.fn(),
-  setAppWindowAlwaysOnTop: vi.fn(),
-  ApiError: class extends Error {
-    constructor(
-      message: string,
-      public code: number,
-    ) {
-      super(message);
-    }
-  },
-}));
-
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: mocks.push }) }));
-const stableT = vi.hoisted(
-  () => (key: string, values?: Record<string, string>) => (values?.name ? `${key}:${values.name}` : key),
-);
-vi.mock('next-intl', () => ({ useTranslations: () => stableT, useLocale: () => 'en' }));
-vi.mock('sonner', () => ({ toast: { success: mocks.toastSuccess, error: mocks.toastError } }));
-vi.mock('@/lib/api', () => ({ ApiError: mocks.ApiError, getStorageUrl: (uri: string) => `/storage/${uri}` }));
-vi.mock('@/lib/deploy-mode', () => ({ isTauriRuntime: mocks.isTauriRuntime }));
-vi.mock('@/lib/desktop/appWindow', () => ({
-  closeAppWindow: mocks.closeAppWindow,
-  setAppWindowAlwaysOnTop: mocks.setAppWindowAlwaysOnTop,
-}));
-vi.mock('@/lib/app-dialog', () => ({ confirmAction: mocks.confirmAction }));
-vi.mock('@/services/artifactApps', () => ({
-  fetchAppDetail: mocks.fetchAppDetail,
-  saveGrant: mocks.saveGrant,
-  uninstallApp: mocks.uninstallApp,
-  listInstalledApps: mocks.listInstalledApps,
-  installApp: vi.fn(),
-  proxyAppFetch: vi.fn(),
-  reportAppActivity: vi.fn().mockResolvedValue(undefined),
-  fetchAppActivity: vi.fn().mockResolvedValue([]),
-}));
-vi.mock('@/services/appNotification', () => ({
-  showAppNotification: vi.fn(),
-  requestAppNotificationPermission: vi.fn(),
-}));
-vi.mock('@/components/features/artifacts/renderers/MediaPreview', () => ({
-  HtmlPreview: (props: { content: string; storageNamespace: string; chatId?: string }) => {
-    mocks.htmlPreview(props);
-    return <iframe title="app" srcDoc={props.content} />;
-  },
-}));
-
+import { SHA, detail, mocks, pageResponds, resetAppHostMocks } from './appHostKit';
 import { AppHostView } from '../AppHostView';
 
-const SHA = 'f'.repeat(64);
-const PAGE = `<html><body><script type="application/json" id="myrm-app">{"notify": true, "fetch": ["api.weather.com"]}</script><h1>Weather</h1></body></html>`;
-
-const detail = (grants: unknown[] = []) => ({
-  artifact_id: 'art-1',
-  name: 'weather.html',
-  chat_id: 'chat-1',
-  latest_version: { id: 'v1', vault_uri: 'vault://o1', sha256_hash: SHA },
-  grants,
-});
-
-function pageResponds(html: string, ok = true) {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok, text: async () => html }));
-}
-
 describe('AppHostView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.saveGrant.mockImplementation(async (_id: string, capability: string, body: object) => ({
-      capability,
-      ...body,
-    }));
-    mocks.listInstalledApps.mockResolvedValue([]);
-    mocks.isTauriRuntime.mockReturnValue(false);
-    window.history.replaceState({}, '', '/apps/art-1');
-    pageResponds(PAGE);
-  });
+  beforeEach(resetAppHostMocks);
 
   it('embeds the installed page with the client injected, bound to the app storage', async () => {
     mocks.fetchAppDetail.mockResolvedValue(detail());
@@ -297,100 +215,15 @@ describe('AppHostView', () => {
     expect(mocks.htmlPreview).not.toHaveBeenCalled();
   });
 
-  describe('in its own desktop window', () => {
-    const ALLOWED = [
-      { capability: 'notify', decision: 'allow', scope: [], version_sha256: SHA },
-      { capability: 'fetch', decision: 'allow', scope: ['api.weather.com'], version_sha256: SHA },
-    ];
+  it('does not ask about desktop capabilities in a browser tab, where nothing could act on them', async () => {
+    mocks.fetchAppDetail.mockResolvedValue(detail());
+    pageResponds(`<html><body><script type="application/json" id="myrm-app">{"tray": true, "float": true}</script></body></html>`);
 
-    async function openMenu() {
-      await waitFor(() => expect(mocks.htmlPreview).toHaveBeenCalled());
-      fireEvent.pointerDown(screen.getByRole('button', { name: 'menu.label' }), { button: 0, ctrlKey: false });
-    }
+    render(<AppHostView artifactId="art-1" />);
 
-    beforeEach(() => {
-      mocks.isTauriRuntime.mockReturnValue(true);
-      window.history.replaceState({}, '', '/apps/art-1?mode=focused');
-      mocks.fetchAppDetail.mockResolvedValue(detail(ALLOWED));
-      mocks.closeAppWindow.mockResolvedValue(true);
-      mocks.setAppWindowAlwaysOnTop.mockResolvedValue(true);
-    });
-
-    it('fills the whole window since no shell sits above it', async () => {
-      render(<AppHostView artifactId="art-1" />);
-
-      const root = await screen.findByTestId('app-host');
-      await waitFor(() => expect(root).toHaveClass('h-dvh'));
-      expect(root).not.toHaveClass('h-[calc(100vh-4rem)]');
-    });
-
-    it('offers keep-on-top, and applies the choice to the window', async () => {
-      render(<AppHostView artifactId="art-1" />);
-      await openMenu();
-
-      const item = await screen.findByRole('menuitemcheckbox', { name: 'keepOnTop' });
-      expect(item).toHaveAttribute('aria-checked', 'false');
-      fireEvent.click(item);
-
-      await waitFor(() => expect(mocks.setAppWindowAlwaysOnTop).toHaveBeenCalledWith(true));
-    });
-
-    it('shows the new state only after the window accepted it, and reports a refusal', async () => {
-      mocks.setAppWindowAlwaysOnTop.mockResolvedValue(false);
-      render(<AppHostView artifactId="art-1" />);
-      await openMenu();
-
-      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'keepOnTop' }));
-
-      await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('keepOnTopFailed'));
-      await openMenu();
-      expect(await screen.findByRole('menuitemcheckbox', { name: 'keepOnTop' })).toHaveAttribute(
-        'aria-checked',
-        'false',
-      );
-    });
-
-    it('closes the window instead of navigating after uninstall', async () => {
-      mocks.confirmAction.mockResolvedValue(true);
-      mocks.uninstallApp.mockResolvedValue(undefined);
-      render(<AppHostView artifactId="art-1" />);
-      await openMenu();
-
-      fireEvent.click(await screen.findByRole('menuitem', { name: 'menu.uninstall' }));
-
-      await waitFor(() => expect(mocks.closeAppWindow).toHaveBeenCalledTimes(1));
-      expect(mocks.push).not.toHaveBeenCalled();
-    });
-
-    it('falls back to the artifacts page when the window cannot be closed', async () => {
-      mocks.confirmAction.mockResolvedValue(true);
-      mocks.uninstallApp.mockResolvedValue(undefined);
-      mocks.closeAppWindow.mockResolvedValue(false);
-      render(<AppHostView artifactId="art-1" />);
-      await openMenu();
-
-      fireEvent.click(await screen.findByRole('menuitem', { name: 'menu.uninstall' }));
-
-      await waitFor(() => expect(mocks.push).toHaveBeenCalledWith('/artifacts'));
-    });
-
-    it('offers to close the window when the app is no longer installed', async () => {
-      mocks.fetchAppDetail.mockRejectedValue(new mocks.ApiError('App not installed', 404));
-      render(<AppHostView artifactId="art-1" />);
-
-      fireEvent.click(await screen.findByRole('button', { name: 'closeWindow' }));
-
-      await waitFor(() => expect(mocks.closeAppWindow).toHaveBeenCalled());
-      expect(mocks.push).not.toHaveBeenCalled();
-    });
-
-    it('has no keep-on-top in a browser tab, even with the focused flag', async () => {
-      mocks.isTauriRuntime.mockReturnValue(false);
-      render(<AppHostView artifactId="art-1" />);
-      await openMenu();
-
-      await screen.findByRole('menuitem', { name: 'menu.permissions' });
-      expect(screen.queryByRole('menuitemcheckbox', { name: 'keepOnTop' })).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(mocks.htmlPreview).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('undecided')).not.toBeInTheDocument();
+    expect(mocks.setAppWindowTitle).not.toHaveBeenCalled();
   });
 });

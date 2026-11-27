@@ -6800,11 +6800,13 @@
         "saveFailed": "Couldn't save your choice. Try again.",
         "notify": {
           "title": "Notifications",
-          "description": "Show notifications on this device."
+          "description": "Show notifications on this device.",
+          "destination": "Shown by your device. The text goes no further."
         },
         "fetch": {
           "title": "Network access",
-          "description": "Exchange data with these sites only:"
+          "description": "Let the app request data from these sites:",
+          "destination": "Your Myrm server sends the requests, not the page, and the replies go back to the app. The page can still show images from any site."
         },
         "activity": {
           "title": "Recent activity",
@@ -6815,7 +6817,35 @@
             "rate_limited": "Too frequent",
             "error": "Failed"
           }
+        },
+        "desktopOnly": "This app also asks for features that only the desktop app offers: menu bar item, keyboard shortcuts and floating.",
+        "tray": {
+          "title": "Menu bar item",
+          "description": "A small icon in the menu bar or system tray, with a short status text.",
+          "destination": "While it is on, closing the window only hides it. Quit the app from the icon's menu."
+        },
+        "shortcut": {
+          "title": "Keyboard shortcuts",
+          "description": "Key combinations that work in any program:",
+          "destination": "Pressing one tells this app, wherever you are. A combination another program already uses is refused."
+        },
+        "float": {
+          "title": "Float over other windows",
+          "description": "Let the app keep its window above other windows.",
+          "destination": "You can also switch this yourself in the app menu."
+        },
+        "notes": {
+          "unreviewed": "Nobody has reviewed this app's code. A permission covers this version of it only.",
+          "notFromConversation": "This file did not come from one of your conversations. Only allow what you expect it to do.",
+          "scripts": "Loads scripts from: {hosts}.",
+          "drift": "These scripts can change without asking you again: {hosts}."
         }
+      },
+      "launcher": {
+        "menu": "Add to system launcher",
+        "added": "Added. Find it in Spotlight, the Start menu or your application menu.",
+        "removed": "Launcher removed",
+        "failed": "Couldn't change the launcher. Try again."
       }
     }
   },

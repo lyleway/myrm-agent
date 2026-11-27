@@ -5,7 +5,8 @@
 //! - crate::runtime::{APPSHOT_SHORTCUT_STR, VOICE_PTT_SHORTCUT_STR, INLINE_INPUT_SHORTCUT_STR} (POS: 各快捷键当前生效值的展示缓存)
 //!
 //! [OUTPUT]
-//! - `update_global_shortcut`: 注销全部旧快捷键后重新注册 toggle + appshot + voice PTT + inline input，注册失败回滚到旧配置
+//! - `update_global_shortcut`: 注销全部旧快捷键后重新注册 toggle + appshot + voice PTT + inline input，注册失败回滚到旧配置；
+//!   最后把已安装应用占用的组合补回去（它们在整体注销时一并丢了）
 //!
 //! [POS]
 //! 桌面端全局快捷键 IPC 命令接口。注册与回滚的原子性在此保证，快捷键触发后的分发在 `app/shortcut_handler.rs`。
@@ -50,6 +51,9 @@ pub fn update_global_shortcut(
             &Some(old_config.inline_input_shortcut),
         );
     }
+
+    // 上面注销了插件里的全部组合，已安装应用占用的组合要补回去。
+    crate::commands::app_surface::shortcuts::restore(&app);
 
     result
 }

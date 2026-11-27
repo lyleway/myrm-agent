@@ -5,7 +5,8 @@
  * - ../useAppBridge::useAppBridge
  *
  * [OUTPUT]
- * - Tests: only the window of the embedded iframe is answered; its requests reach the notification and the fetch proxy.
+ * - Tests: only the window of the embedded iframe is answered; its requests reach the notification, the fetch proxy and
+ *   the desktop surface; the shell's events reach the page; a revoked permission takes its desktop side down.
  *
  * [POS]
  * Identity is the security boundary of the channel: another frame, extension or tab must not be able to spend the
@@ -22,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   showAppNotification: vi.fn(),
   proxyAppFetch: vi.fn(),
   reportAppActivity: vi.fn(),
+  stopEvents: vi.fn(),
+  surfaceEvents: { current: null as null | { onShortcut: (accelerator: string) => void; onOpenPermissions: () => void } },
 }));
 
 vi.mock('@/services/appNotification', () => ({ showAppNotification: mocks.showAppNotification }));
@@ -30,13 +33,52 @@ vi.mock('@/services/artifactApps', () => ({
   reportAppActivity: mocks.reportAppActivity,
 }));
 
+vi.mock('@/lib/desktop/appSurface', () => ({
+  onAppSurfaceEvent: vi.fn(async (handlers: NonNullable<typeof mocks.surfaceEvents.current>) => {
+    mocks.surfaceEvents.current = handlers;
+    return mocks.stopEvents;
+  }),
+}));
+
+import type { AppSurfaceDeps } from '@/lib/app-bridge/host';
 import { useAppBridge } from '../useAppBridge';
 
-const ALLOWED: Record<BridgeCapability, CapabilityStatus> = { notify: 'allowed', fetch: 'allowed' };
+const ALLOWED: Record<BridgeCapability, CapabilityStatus> = {
+  notify: 'allowed',
+  fetch: 'allowed',
+  tray: 'allowed',
+  shortcut: 'allowed',
+  float: 'allowed',
+};
 
-function Harness({ statuses = ALLOWED }: { statuses?: Record<BridgeCapability, CapabilityStatus> }) {
+const surface: AppSurfaceDeps = {
+  setTray: vi.fn(),
+  clearTray: vi.fn(),
+  registerShortcut: vi.fn(),
+  unregisterShortcut: vi.fn(),
+  setFloat: vi.fn(),
+};
+const onFloatChange = vi.fn();
+const onOpenPermissions = vi.fn();
+
+interface HarnessProps {
+  statuses?: Record<BridgeCapability, CapabilityStatus>;
+  desktop?: boolean;
+}
+
+function Harness({ statuses = ALLOWED, desktop = false }: HarnessProps) {
   const ref = useRef<HTMLDivElement>(null);
-  useAppBridge({ artifactId: 'art-1', appName: 'Weather', versionSha256: 'a'.repeat(64), statuses, frameHostRef: ref });
+  useAppBridge({
+    artifactId: 'art-1',
+    appName: 'Weather',
+    versionSha256: 'a'.repeat(64),
+    statuses,
+    declaredShortcuts: ['Alt+F1'],
+    frameHostRef: ref,
+    surface: desktop ? surface : null,
+    onFloatChange,
+    onOpenPermissions,
+  });
   return (
     <div ref={ref}>
       <iframe title="app" />
@@ -44,8 +86,8 @@ function Harness({ statuses = ALLOWED }: { statuses?: Record<BridgeCapability, C
   );
 }
 
-function setup(statuses?: Record<BridgeCapability, CapabilityStatus>) {
-  const view = render(<Harness statuses={statuses} />);
+function setup(statuses?: Record<BridgeCapability, CapabilityStatus>, desktop = false) {
+  const view = render(<Harness statuses={statuses} desktop={desktop} />);
   const frame = view.container.querySelector('iframe');
   if (!frame?.contentWindow) {
     throw new Error('the iframe has no window');
@@ -64,6 +106,12 @@ describe('useAppBridge', () => {
     vi.clearAllMocks();
     mocks.showAppNotification.mockResolvedValue(undefined);
     mocks.reportAppActivity.mockResolvedValue(undefined);
+    mocks.surfaceEvents.current = null;
+    vi.mocked(surface.setTray).mockResolvedValue(true);
+    vi.mocked(surface.clearTray).mockResolvedValue(true);
+    vi.mocked(surface.registerShortcut).mockResolvedValue('ok');
+    vi.mocked(surface.unregisterShortcut).mockResolvedValue(true);
+    vi.mocked(surface.setFloat).mockResolvedValue(true);
   });
 
   it('answers a request from the iframe window, posting the reply back to it', async () => {
@@ -125,7 +173,7 @@ describe('useAppBridge', () => {
   });
 
   it('refuses while the capability is undecided and logs the refusal for the user', async () => {
-    const { send, replies } = setup({ notify: 'ask', fetch: 'ask' });
+    const { send, replies } = setup({ ...ALLOWED, notify: 'ask', fetch: 'ask' });
 
     send(notify);
 
@@ -140,7 +188,7 @@ describe('useAppBridge', () => {
   });
 
   it('applies a decision saved after the page loaded without remounting', async () => {
-    const view = setup({ notify: 'ask', fetch: 'ask' });
+    const view = setup({ ...ALLOWED, notify: 'ask', fetch: 'ask' });
     view.send(notify);
     await waitFor(() => expect(view.replies).toHaveBeenCalledTimes(1));
 
@@ -159,5 +207,83 @@ describe('useAppBridge', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(replies).not.toHaveBeenCalled();
+  });
+
+  describe('the desktop surface', () => {
+    const trayRequest = { jsonrpc: '2.0', id: 7, method: 'tray.set', params: { title: '3 unread' } };
+    const eventTo = (name: string, data: unknown) => ({ jsonrpc: '2.0', method: 'myrm/event', params: { name, data } });
+
+    it('reaches the shell only in the app’s own desktop window', async () => {
+      const web = setup();
+      web.send(trayRequest);
+      await waitFor(() => expect(web.replies).toHaveBeenCalled());
+      expect(web.replies.mock.calls[0][0]).toMatchObject({ error: { data: { reason: 'unsupported' } } });
+      expect(surface.setTray).not.toHaveBeenCalled();
+      web.unmount();
+
+      const desktop = setup(undefined, true);
+      desktop.send(trayRequest);
+      await waitFor(() => expect(desktop.replies).toHaveBeenCalledWith({ jsonrpc: '2.0', id: 7, result: null }, '*'));
+      expect(surface.setTray).toHaveBeenCalledWith('3 unread', '');
+    });
+
+    it('keeps the host’s keep-on-top menu in step with what the page asks for', async () => {
+      const { send, replies } = setup(undefined, true);
+
+      send({ jsonrpc: '2.0', id: 1, method: 'float.set', params: { on: true } });
+
+      await waitFor(() => expect(replies).toHaveBeenCalled());
+      expect(onFloatChange).toHaveBeenCalledWith(true);
+    });
+
+    it('tells the page when the user presses a key combination it registered', async () => {
+      const { replies } = setup(undefined, true);
+      await waitFor(() => expect(mocks.surfaceEvents.current).not.toBeNull());
+
+      mocks.surfaceEvents.current?.onShortcut('Alt+F1');
+
+      expect(replies).toHaveBeenCalledWith(eventTo('shortcut', { accelerator: 'Alt+F1' }), '*');
+    });
+
+    it('does not tell the page about a key combination once the permission is gone', async () => {
+      const { replies } = setup({ ...ALLOWED, shortcut: 'denied' }, true);
+      await waitFor(() => expect(mocks.surfaceEvents.current).not.toBeNull());
+
+      mocks.surfaceEvents.current?.onShortcut('Alt+F1');
+
+      expect(replies).not.toHaveBeenCalled();
+    });
+
+    it('opens the permissions from the tray menu', async () => {
+      setup(undefined, true);
+      await waitFor(() => expect(mocks.surfaceEvents.current).not.toBeNull());
+
+      mocks.surfaceEvents.current?.onOpenPermissions();
+
+      expect(onOpenPermissions).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes the tray item down and tells the page when the permission is revoked', async () => {
+      const view = setup(undefined, true);
+      view.send(trayRequest);
+      await waitFor(() => expect(view.replies).toHaveBeenCalledTimes(1));
+
+      view.rerender(<Harness statuses={{ ...ALLOWED, tray: 'denied' }} desktop />);
+
+      await waitFor(() => expect(surface.clearTray).toHaveBeenCalledTimes(1));
+      expect(view.replies).toHaveBeenCalledWith(eventTo('permission-revoked', { capability: 'tray' }), '*');
+    });
+
+    it('gives back what the page set up, and stops listening, when the host page goes away', async () => {
+      const view = setup(undefined, true);
+      view.send(trayRequest);
+      await waitFor(() => expect(view.replies).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(mocks.surfaceEvents.current).not.toBeNull());
+
+      view.unmount();
+
+      await waitFor(() => expect(surface.clearTray).toHaveBeenCalledTimes(1));
+      expect(mocks.stopEvents).toHaveBeenCalledTimes(1);
+    });
   });
 });

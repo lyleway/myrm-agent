@@ -3,6 +3,7 @@
  * - lib/utils/locale/ (POS: Locale 工具集。供 middleware 自动检测、营销接力、客户端读取和后端格式归一化)
  * - lib/auth-cookie.ts (POS: SaaS sandbox 会话 cookie)
  * - lib/marketing-paths.ts (POS: SaaS 公开路径白名单)
+ * - lib/app-manifest.ts (POS: 已安装应用的 PWA manifest 路径判断)
  *
  * [OUTPUT]
  * - middleware(): 营销 `?locale=` 接力 + Accept-Language 自动检测（cookie 缺失或语言不受支持时）+ sandbox 未登录重定向
@@ -13,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { AUTH_SESSION_COOKIE } from '@/lib/auth-cookie';
+import { isAppManifestPath } from '@/lib/app-manifest';
 import { isSaasPublicPath } from '@/lib/marketing-paths';
 import {
   NEXT_LOCALE_COOKIE_NAME,
@@ -76,7 +78,9 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/icons/') ||
     pathname === '/favicon.ico' ||
     pathname === '/sw.js' ||
-    pathname === '/manifest.json'
+    pathname === '/manifest.json' ||
+    // Browsers fetch a manifest without credentials; only the manifest file is open, the app page still needs a session.
+    isAppManifestPath(pathname)
   ) {
     return NextResponse.next();
   }

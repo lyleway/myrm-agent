@@ -6800,11 +6800,13 @@
         "saveFailed": "保存失败，请重试。",
         "notify": {
           "title": "通知",
-          "description": "在本设备上显示通知。"
+          "description": "在本设备上显示通知。",
+          "destination": "由你的设备显示，文字不会发往别处。"
         },
         "fetch": {
           "title": "联网访问",
-          "description": "只会与以下站点收发数据："
+          "description": "允许应用向这些网站请求数据：",
+          "destination": "请求由你的 Myrm 服务发出，而不是页面本身，回复再交还给应用。页面仍可显示任意网站的图片。"
         },
         "activity": {
           "title": "最近活动",
@@ -6815,7 +6817,35 @@
             "rate_limited": "过于频繁",
             "error": "失败"
           }
+        },
+        "desktopOnly": "该应用还申请了只有桌面端才有的功能：菜单栏项、键盘快捷键与悬浮置顶。",
+        "tray": {
+          "title": "菜单栏项",
+          "description": "菜单栏或系统托盘里的小图标，可显示一行简短的状态文字。",
+          "destination": "开启期间，关闭窗口只会把它藏起来；要退出，请在图标菜单里选「退出应用」。"
+        },
+        "shortcut": {
+          "title": "键盘快捷键",
+          "description": "在任何程序里都有效的按键组合：",
+          "destination": "按下后会通知这个应用，无论你当时在哪个程序里。已被其他程序占用的组合会被拒绝。"
+        },
+        "float": {
+          "title": "悬浮在其他窗口之上",
+          "description": "允许应用让自己的窗口保持在其他窗口上方。",
+          "destination": "你也可以在应用菜单里自己切换。"
+        },
+        "notes": {
+          "unreviewed": "没有人审查过这个应用的代码，权限只对当前这个版本有效。",
+          "notFromConversation": "这个文件不是来自你的某次对话，只允许你预期它会做的事。",
+          "scripts": "会从以下网站加载脚本：{hosts}。",
+          "drift": "以下脚本可能在不再询问你的情况下发生变化：{hosts}。"
         }
+      },
+      "launcher": {
+        "menu": "添加到系统启动器",
+        "added": "已添加。可在 Spotlight、开始菜单或应用菜单里找到它。",
+        "removed": "已移除启动器",
+        "failed": "没能修改启动器，请重试。"
       }
     }
   },

@@ -3,16 +3,20 @@
 /**
  * [INPUT]
  * - ./useAppHostData (POS: loads the app, its page and the user's decisions)
- * - ./useAppBridge (POS: serves the embedded page's requests)
+ * - ./useAppBridge (POS: serves the embedded page's requests and the desktop surface it set up)
+ * - ./useAppLauncher (POS: the app's entry in Spotlight / Start menu / application menu)
+ * - ./useAppManifest (POS: the browser's install target for this app)
  * - ./AppPermissionsDialog (POS: where permissions are decided)
  * - @/components/features/artifacts/renderers/MediaPreview::HtmlPreview (POS: sandboxed iframe with theme and storage)
  * - @/store/useArtifactAppsStore (POS: install registry)
- * - @/lib/desktop/appWindow (POS: desktop window control: close, keep on top)
+ * - @/lib/desktop/appWindow (POS: desktop window control: close, keep on top, title)
+ * - @/lib/desktop/appSurface (POS: tray item, key combinations and floating requested by the page)
+ * - @/lib/desktop/appLauncher (POS: removes the launcher with the app)
  * - @/hooks/tauri/useIsAppWindow (POS: detects the app's own desktop window)
  * - @/hooks/ui/useFocusedMode (POS: whether the page is shown without the app shell)
  *
  * [OUTPUT]
- * - AppHostView: the page of one installed app: title bar with a permissions / keep-on-top / uninstall menu and a review
+ * - AppHostView: the page of one installed app: title bar with a permissions / keep-on-top / launcher / uninstall menu and a review
  *   reminder while a permission is undecided (icon only on narrow screens, with an accessible name), then the app.
  *
  * [POS]
@@ -41,35 +45,54 @@ import { Skeleton } from '@/components/primitives/skeleton';
 import { useIsAppWindow } from '@/hooks/tauri/useIsAppWindow';
 import { useFocusedMode } from '@/hooks/ui/useFocusedMode';
 import { confirmAction } from '@/lib/app-dialog';
-import { BRIDGE_CAPABILITIES } from '@/lib/app-bridge/protocol';
-import { closeAppWindow, setAppWindowAlwaysOnTop } from '@/lib/desktop/appWindow';
+import { offeredCapabilities } from '@/lib/app-bridge/declaration';
+import { removeAppLauncher } from '@/lib/desktop/appLauncher';
+import { appSurface, releaseAppSurface } from '@/lib/desktop/appSurface';
+import { closeAppWindow, setAppWindowAlwaysOnTop, setAppWindowTitle } from '@/lib/desktop/appWindow';
 import { cn } from '@/lib/utils/classnameUtils';
 import { useArtifactAppsStore } from '@/store/useArtifactAppsStore';
 import { AppPermissionsDialog, type PermissionsMode } from './AppPermissionsDialog';
 import { useAppBridge } from './useAppBridge';
 import { useAppHostData } from './useAppHostData';
+import { useAppLauncher } from './useAppLauncher';
+import { useAppManifest } from './useAppManifest';
 
 export function AppHostView({ artifactId }: { artifactId: string }) {
   const t = useTranslations('artifacts.apps');
   const router = useRouter();
   const uninstall = useArtifactAppsStore((state) => state.uninstall);
-  const { state, detail, html, declaration, statuses, applyGrants } = useAppHostData(artifactId);
+  const { state, detail, html, declaration, statuses, externalScripts, applyGrants } = useAppHostData(artifactId);
   const frameHostRef = useRef<HTMLDivElement>(null);
   const inAppWindow = useIsAppWindow();
   const withoutShell = useFocusedMode();
   const [keepOnTop, setKeepOnTop] = useState(false);
   const [dialogMode, setDialogMode] = useState<PermissionsMode | null>(null);
   const reviewedRef = useRef(false);
+  const launcher = useAppLauncher(artifactId, detail?.name ?? '');
+  useAppManifest(artifactId, detail?.name);
 
-  const undecided = BRIDGE_CAPABILITIES.some((capability) => statuses[capability] === 'ask');
+  const undecided = offeredCapabilities(statuses, inAppWindow).some((capability) => statuses[capability] === 'ask');
+  const openPermissions = useCallback(() => setDialogMode('manage'), []);
 
   useAppBridge({
     artifactId,
     appName: detail?.name ?? '',
     versionSha256: detail?.latest_version.sha256_hash ?? '',
     statuses,
+    declaredShortcuts: declaration.shortcuts,
     frameHostRef,
+    surface: inAppWindow ? appSurface : null,
+    onFloatChange: setKeepOnTop,
+    onOpenPermissions: openPermissions,
   });
+
+  // The window is opened before the app's name is known (a launcher or link carries only the id), so it follows the name.
+  const appName = detail?.name;
+  useEffect(() => {
+    if (inAppWindow && appName) {
+      void setAppWindowTitle(appName);
+    }
+  }, [inAppWindow, appName]);
 
   // The first question is asked once per visit; "Later" leaves the capabilities off and the banner below reopens it.
   useEffect(() => {
@@ -102,6 +125,15 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
     [t],
   );
 
+  const handleLauncher = useCallback(async () => {
+    const outcome = await launcher.toggle();
+    if (outcome === 'failed') {
+      toast.error(t('launcher.failed'));
+    } else {
+      toast.success(t(outcome === 'added' ? 'launcher.added' : 'launcher.removed'));
+    }
+  }, [launcher, t]);
+
   const handleUninstall = useCallback(async () => {
     if (!detail) {
       return;
@@ -117,12 +149,16 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
     }
     try {
       await uninstall(artifactId);
+      // What the app put on the desktop goes with it: a tray item would keep the closed window alive in the tray.
+      if (launcher.supported) {
+        await Promise.all([removeAppLauncher(artifactId), inAppWindow ? releaseAppSurface() : undefined]);
+      }
       toast.success(t('uninstall.done'));
       leave();
     } catch {
       toast.error(t('uninstall.failed'));
     }
-  }, [artifactId, detail, leave, t, uninstall]);
+  }, [artifactId, detail, inAppWindow, launcher.supported, leave, t, uninstall]);
 
   if (state === 'loading') {
     return <Skeleton className="m-4 h-[60vh] rounded-2xl" />;
@@ -169,10 +205,15 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="rounded-xl">
-            <DropdownMenuItem onSelect={() => setDialogMode('manage')}>{t('menu.permissions')}</DropdownMenuItem>
+            <DropdownMenuItem onSelect={openPermissions}>{t('menu.permissions')}</DropdownMenuItem>
             {inAppWindow && (
               <DropdownMenuCheckboxItem checked={keepOnTop} onCheckedChange={(next) => void handleKeepOnTop(next)}>
                 {t('keepOnTop')}
+              </DropdownMenuCheckboxItem>
+            )}
+            {launcher.supported && launcher.present !== null && (
+              <DropdownMenuCheckboxItem checked={launcher.present} onCheckedChange={() => void handleLauncher()}>
+                {t('launcher.menu')}
               </DropdownMenuCheckboxItem>
             )}
             <DropdownMenuItem
@@ -197,6 +238,9 @@ export function AppHostView({ artifactId }: { artifactId: string }) {
         versionSha256={detail.latest_version.sha256_hash}
         declaration={declaration}
         statuses={statuses}
+        desktopAvailable={inAppWindow}
+        notFromConversation={detail.chat_id === null}
+        externalScripts={externalScripts}
         onSaved={applyGrants}
         onClose={() => setDialogMode(null)}
       />

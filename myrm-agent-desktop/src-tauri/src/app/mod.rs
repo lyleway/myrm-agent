@@ -16,6 +16,7 @@ pub(crate) mod chain;
 pub(crate) mod lifecycle;
 mod linux_gpu;
 mod menu;
+mod quit_gate;
 mod setup;
 mod shortcut_handler;
 mod tray;
@@ -70,6 +71,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .manage(crate::commands::app_surface::AppSurfaceRegistry::default())
         .setup(setup::on_setup)
         .on_page_load(|_webview, payload| {
             println!("DESKTOP_PAGE_LOAD: {}", payload.url());
@@ -101,7 +103,7 @@ pub fn run() {
                     api.prevent_exit();
                     return;
                 }
-                println!("🛑 Exit requested (e.g., Cmd+Q), initiating graceful shutdown...");
+                println!("🛑 Exit requested, initiating graceful shutdown...");
                 api.prevent_exit();
                 let app_handle_clone = app_handle.clone();
                 let exit_code = code.unwrap_or(0);

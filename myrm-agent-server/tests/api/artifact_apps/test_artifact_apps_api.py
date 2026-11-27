@@ -179,9 +179,36 @@ async def test_a_grant_is_stored_with_a_canonical_scope_and_shown_in_the_detail(
     assert [(g["capability"], g["decision"], g["scope"]) for g in detail["grants"]] == [("fetch", "allow", ["api.weather.com"])]
 
 
+async def test_the_desktop_capabilities_are_stored_with_a_canonical_scope(client: httpx.AsyncClient) -> None:
+    await _install(client)
+
+    tray = await _grant(client, "tray", "allow", [])
+    float_ = await _grant(client, "float", "deny", [])
+    shortcut = await _grant(client, "shortcut", "allow", ["shift+commandorcontrol+k", "CommandOrControl+Shift+K"])
+
+    assert [r.status_code for r in (tray, float_, shortcut)] == [200, 200, 200]
+    assert shortcut.json()["data"]["scope"] == ["CommandOrControl+Shift+K"]
+    detail = (await client.get("/api/v1/artifact-apps/clock")).json()["data"]
+    assert {(g["capability"], g["decision"]) for g in detail["grants"]} == {
+        ("tray", "allow"),
+        ("float", "deny"),
+        ("shortcut", "allow"),
+    }
+
+
 @pytest.mark.parametrize(
     ("capability", "scope"),
-    [("fetch", ["127.0.0.1"]), ("fetch", []), ("fetch", ["*.example.com"]), ("notify", ["api.weather.com"])],
+    [
+        ("fetch", ["127.0.0.1"]),
+        ("fetch", []),
+        ("fetch", ["*.example.com"]),
+        ("notify", ["api.weather.com"]),
+        ("tray", ["x.example.com"]),
+        ("float", ["x"]),
+        ("shortcut", []),
+        ("shortcut", ["K"]),
+        ("shortcut", ["Shift+K"]),
+    ],
 )
 async def test_a_scope_the_capability_cannot_carry_is_refused(
     client: httpx.AsyncClient, capability: str, scope: list[str]

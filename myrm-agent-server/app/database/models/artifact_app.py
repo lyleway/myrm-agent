@@ -10,7 +10,7 @@
 
 [POS]
 Server business layer. An HTML artifact is untrusted generated code; installing it as an app is the user's opt-in to
-let its page ask the host for capabilities (notifications, proxied network access). A grant records what the user
+let its page ask the host for capabilities (notifications, proxied network access, a tray item, global keys, floating). A grant records what the user
 approved (decision, declared scope, the version they were looking at); the activity log records what the page then
 did, as metadata only — never request bodies, response bodies or notification text.
 """
@@ -40,8 +40,8 @@ class ArtifactApp(Base):
 class ArtifactAppGrant(Base):
     """The latest decision on one capability.
 
-    ``scope`` is the declared scope the user approved (a JSON list of exact host names for ``fetch``, ``[]`` for
-    ``notify``); a later version that declares something not covered by it is asked again. ``version_sha256`` is
+    ``scope`` is the declared scope the user approved (a JSON list of exact host names for ``fetch``, of key
+    combinations for ``shortcut``, ``[]`` for the others); a later version that declares something not covered by it is asked again. ``version_sha256`` is
     the version the user was looking at when they decided. A ``deny`` stays until the user flips it.
     """
 

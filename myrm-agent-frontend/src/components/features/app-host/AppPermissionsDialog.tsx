@@ -6,19 +6,21 @@
  * - @/services/artifactApps (POS: stores decisions, lists recent activity)
  * - @/services/appNotification (POS: asks the OS for notification permission)
  * - ./AppActivityList (POS: recent bridge activity of the app)
+ * - ./PermissionRow / ./AppRiskNotes (POS: one capability; what a permission cannot tell about the code)
  *
  * [OUTPUT]
  * - AppPermissionsDialog: lets the user decide what an installed app may use; `review` asks about what is still undecided,
  *   `manage` is the standing page behind the host menu, with the app's recent activity.
  *
  * [POS]
- * The only place a decision is made. Every capability the page declares is a switch; saving stores one decision per
- * capability together with the exact scope shown here, so a later version that asks for more is asked again.
+ * The only place a decision is made. Every capability the page declares and this window can offer is a switch (the tray
+ * item, key combinations and floating exist only in the app's own desktop window and are not listed elsewhere); saving
+ * stores one decision per capability together with the exact scope shown here, so a later version that asks for more
+ * is asked again.
  */
 
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { Bell, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/primitives/button';
 import {
@@ -30,11 +32,20 @@ import {
   DialogTitle,
 } from '@/components/primitives/dialog';
 import { Switch } from '@/components/primitives/switch';
-import { declaredScope, type CapabilityStatus, type Declaration, type GrantRecord } from '@/lib/app-bridge/declaration';
+import {
+  declaredScope,
+  offeredCapabilities,
+  type CapabilityStatus,
+  type Declaration,
+  type GrantRecord,
+} from '@/lib/app-bridge/declaration';
+import type { ExternalScript } from '@/lib/app-bridge/externalScripts';
 import { BRIDGE_CAPABILITIES, type BridgeCapability } from '@/lib/app-bridge/protocol';
 import { requestAppNotificationPermission } from '@/services/appNotification';
 import { saveGrant } from '@/services/artifactApps';
 import { AppActivityList } from './AppActivityList';
+import { AppRiskNotes } from './AppRiskNotes';
+import { PermissionRow } from './PermissionRow';
 
 export type PermissionsMode = 'review' | 'manage';
 
@@ -46,11 +57,14 @@ interface AppPermissionsDialogProps {
   versionSha256: string;
   declaration: Declaration;
   statuses: Record<BridgeCapability, CapabilityStatus>;
+  /** Whether this window can offer the capabilities that act on the desktop. */
+  desktopAvailable: boolean;
+  /** The page did not come out of one of the user's conversations. */
+  notFromConversation: boolean;
+  externalScripts: readonly ExternalScript[];
   onSaved: (grants: GrantRecord[]) => void;
   onClose: () => void;
 }
-
-const ICONS: Record<BridgeCapability, typeof Bell> = { notify: Bell, fetch: Globe };
 
 export function AppPermissionsDialog(props: AppPermissionsDialogProps) {
   const { open, onClose } = props;
@@ -71,16 +85,19 @@ function PermissionsForm({
   versionSha256,
   declaration,
   statuses,
+  desktopAvailable,
+  notFromConversation,
+  externalScripts,
   onSaved,
   onClose,
 }: AppPermissionsDialogProps) {
   const t = useTranslations('artifacts.apps.permissions');
-  const declared = BRIDGE_CAPABILITIES.filter((capability) => statuses[capability] !== 'undeclared');
+  const declared = offeredCapabilities(statuses, desktopAvailable);
+  const onlyOnDesktop = BRIDGE_CAPABILITIES.some((c) => statuses[c] !== 'undeclared' && !declared.includes(c));
   // A capability the user has not decided on starts switched on: the question is "allow what it asks for?".
-  const [choices, setChoices] = useState<Record<BridgeCapability, boolean>>(() => ({
-    notify: statuses.notify !== 'denied',
-    fetch: statuses.fetch !== 'denied',
-  }));
+  const [choices, setChoices] = useState<Record<BridgeCapability, boolean>>(
+    () => Object.fromEntries(BRIDGE_CAPABILITIES.map((c) => [c, statuses[c] !== 'denied'])) as Record<BridgeCapability, boolean>,
+  );
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
@@ -113,44 +130,27 @@ function PermissionsForm({
       <DialogHeader>
         <DialogTitle>{mode === 'review' ? t('reviewTitle', { name: appName }) : t('manageTitle')}</DialogTitle>
         <DialogDescription>
-          {declared.length === 0 ? t('none') : t(mode === 'review' ? 'reviewHint' : 'manageHint')}
+          {declared.length > 0 ? t(mode === 'review' ? 'reviewHint' : 'manageHint') : t(onlyOnDesktop ? 'desktopOnly' : 'none')}
         </DialogDescription>
       </DialogHeader>
 
       {declared.length > 0 && (
         <ul className="space-y-3">
-          {declared.map((capability) => {
-            const Icon = ICONS[capability];
-            const hosts = declaredScope(capability, declaration) ?? [];
-            return (
-              <li
-                key={capability}
-                className="flex items-start gap-3 rounded-xl border border-border/60 bg-muted/20 p-3"
-              >
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{t(`${capability}.title`)}</p>
-                  <p className="text-xs text-muted-foreground">{t(`${capability}.description`)}</p>
-                  {hosts.length > 0 && (
-                    <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                      {hosts.map((host) => (
-                        <li key={host} className="rounded-full bg-background px-2 py-0.5 text-xs text-foreground/80">
-                          {host}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <Switch
-                  checked={choices[capability]}
-                  onCheckedChange={(checked) => setChoices((current) => ({ ...current, [capability]: checked }))}
-                  aria-label={t(`${capability}.title`)}
-                />
-              </li>
-            );
-          })}
+          {declared.map((capability) => (
+            <PermissionRow
+              key={capability}
+              capability={capability}
+              scope={declaredScope(capability, declaration) ?? []}
+              checked={choices[capability]}
+              onCheckedChange={(checked) => setChoices((current) => ({ ...current, [capability]: checked }))}
+            />
+          ))}
         </ul>
       )}
+
+      {declared.length > 0 && onlyOnDesktop && <p className="text-xs text-muted-foreground">{t('desktopOnly')}</p>}
+
+      <AppRiskNotes notFromConversation={notFromConversation} scripts={externalScripts} />
 
       {mode === 'manage' && <AppActivityList artifactId={artifactId} />}
 
