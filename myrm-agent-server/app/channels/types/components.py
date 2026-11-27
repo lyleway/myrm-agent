@@ -7,6 +7,7 @@
 - ActionButton, QuickReply, SelectMenu, ComponentRow: Interactive components
 - ToolStep: Tool execution step
 - render_components_as_text, render_quick_replies_as_text: Plain-text fallback rendering (English and Chinese locales)
+- METADATA_SYSTEM_LINKS_KEY: Outbound metadata key naming the links a text fallback wrote into the content
 
 [POS]
 UI component type definitions. Cross-channel interactive component abstractions for buttons, quick replies, and select menus.
@@ -19,6 +20,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from app.channels.i18n import channel_t
+
+# Outbound metadata the downgrade of link buttons to text sets: the links it wrote into the content. They are the
+# system's own links, not references the reply cites, so the dead-link gate does not probe them.
+METADATA_SYSTEM_LINKS_KEY = "system_links"
 
 
 class ButtonStyle(StrEnum):

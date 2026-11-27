@@ -8,6 +8,7 @@ from app.channels.core.outbound_gate import (
     LinkProbeResult,
     OutboundContentGate,
 )
+from app.channels.types import METADATA_SYSTEM_LINKS_KEY
 from app.channels.types.messages import OutboundMessage
 
 
@@ -175,3 +176,34 @@ async def test_evaluate_and_apply_survives_a_raising_probe(gate: OutboundContent
 
     assert result is not None
     assert "Docs: https://example.org/a" in result.content
+
+
+@pytest.mark.asyncio
+async def test_a_link_the_system_wrote_from_a_button_is_not_probed(gate: OutboundContentGate) -> None:
+    """The text of a link button is the system's own link, not a reference to check, whether or not it answers."""
+    link = "https://handoff.example.com/chat-1"
+    msg = _make_msg(f"Answer\n\n• Continue in browser → {link}", metadata={METADATA_SYSTEM_LINKS_KEY: (link,)})
+
+    with patch.object(gate, "probe_url", new_callable=AsyncMock) as mock_probe:
+        result = await gate.evaluate_and_apply(msg)
+
+    mock_probe.assert_not_called()
+    assert result is msg
+
+
+@pytest.mark.asyncio
+async def test_a_cited_link_beside_a_system_link_is_still_probed(gate: OutboundContentGate) -> None:
+    link = "https://handoff.example.com/chat-1"
+    cited = "https://dead-domain-xyz.org/doc404"
+    msg = _make_msg(f"See {cited}\n\n• Continue in browser → {link}", metadata={METADATA_SYSTEM_LINKS_KEY: [link]})
+
+    async def _dead(url: str) -> LinkProbeResult:
+        return LinkProbeResult(url=url, is_alive=False, status_code=404, error="HTTP 404")
+
+    with patch.object(gate, "probe_url", side_effect=_dead) as mock_probe:
+        result = await gate.evaluate_and_apply(msg)
+
+    mock_probe.assert_called_once_with(cited)
+    note = result.content.removeprefix(msg.content)
+    assert cited in note
+    assert link not in note
