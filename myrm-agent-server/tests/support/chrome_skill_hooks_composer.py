@@ -7,14 +7,15 @@
 - tests.support.chrome_skill_hooks_observe (POS: persisted-message wait)
 
 [OUTPUT]
-- drive_chat_turn(): slash-pick the skill chip, optionally attach a file, type the request, press send
+- drive_chat_turn(): slash-pick the skill chip, optionally attach a file, type the request, press send; hooks run once the
+  page is open (before the bridge attaches the chat), before sending, and while the page stays open after sending
 - TextAttachment: a small text file picked through the composer's real file input
 - describe_page(): failure text for a turn the page sent: its requests, the stream events it saw, its open approvals
 - TRANSCRIPT_CHIP_JS: the sent message renders the skill as a chip, not as the raw ``[use skill]`` text
 
 [POS]
-Shared by tests/e2e/test_skill_hooks_live_chrome_e2e.py. Nothing here talks to the product API: the composer, not a
-test shortcut, builds the wire message, so the explicit-invocation tag takes the same path as for a real user.
+Shared by the Chrome E2E tests that send a turn through the real composer. Nothing here talks to the product API: the
+composer, not a test shortcut, builds the wire message, so the explicit-invocation tag takes the same path as for a real user.
 """
 
 from __future__ import annotations
@@ -242,6 +243,7 @@ def drive_chat_turn(
     invoke_skill: bool = True,
     attachment: TextAttachment | None = None,
     spilled: bool = False,
+    after_open: Callable[[ChromeMcpClient, McpPage], None] | None = None,
     before_send: Callable[[ChromeMcpClient, McpPage], None] | None = None,
     while_open: Callable[[ChromeMcpClient, McpPage], None] | None = None,
 ) -> str:
@@ -249,6 +251,8 @@ def drive_chat_turn(
 
     ``invoke_skill=False`` sends a plain message (a follow-up turn that does not invoke the skill).
     ``spilled`` for a request over the Context Guard's cap: the server stores a file reference behind the tag.
+    ``after_open`` runs as soon as the page is open, before the test bridge attaches it to the chat: it sees what the
+    page's own route made of the address (the attach would cover for a route that did not open the chat).
     ``before_send`` runs once the chat is attached and the composer is ready, for example to wait until the
     agent's own configuration (its tools) has reached the page: a message sent earlier runs on the defaults.
     ``while_open`` runs after sending, with the page still open (approval cards live there).
@@ -258,6 +262,8 @@ def drive_chat_turn(
     warm_ui_route(probe.ui_path)
     with open_mcp_page(chat_url, timeout_ms=120_000) as (client, page):
         dismiss_blocking_modals(client, page, recover_url=chat_url)
+        if after_open is not None:
+            after_open(client, page)
         bridge = wait_for_react_e2e_bridge(client, page, timeout_sec=90.0, page_url=chat_url)
         assert bridge.get("ready") is True, json.dumps(bridge, ensure_ascii=False)
         attached = wait_for_state(

@@ -4,7 +4,7 @@
 
 local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.md)。
 
-`__init__.py` 为聚合门面：include `_inline_core`、`_kanban` 与全部 23 个子模块的 router。上层通过 `from ..test_fixtures import router` 挂载。
+`__init__.py` 为聚合门面：include `_inline_core`、`_kanban` 与全部 24 个子模块的 router。上层通过 `from ..test_fixtures import router` 挂载。
 
 所有 seed 端点以 `POST /chats/test/seed-*` 暴露，`include_in_schema=False`，且仅 local/tauri 模式可用（`is_local_mode` 守卫）。
 
@@ -17,6 +17,7 @@ local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.
 | `_kanban.py` | Kanban seed：closure / IN_REVIEW |
 | `allowed_tools_recovery.py` | allowed_tools recovery seed |
 | `artifact_share.py` | 制品分享页 seed（`POST /chats/test/seed-artifact-share-fixture`：同一会话下登记两份制品，Chart.js 图表页与带脚本 / 事件处理器 / `javascript:` 链接的 Markdown 报告；各占一个文件夹，按聊天工作区根登记，与分享链接读取文件的根一致） |
+| `channel_chat.py` | IM 来源聊天 seed（`POST /chats/test/seed-channel-chat-fixture`：按渠道会话键经 `get_or_create_channel_chat` 建聊天，与渠道执行器落库同一入口，来源为渠道名、标题取自用户文本前 50 个字符，写入一问一答；可用查询参数 `agent_id` 指定绑定的智能体，缺省绑第一个智能体；Web 接续按钮的链接打开的就是这种聊天） |
 | `chat_share.py` | Chat Share 生命周期 seed（chat + user/assistant 消息，公开分享页可渲染） |
 | `clarify_refresh.py` | clarify refresh HITL hydrate seed（pending/answered/regenerate_sibling/structured_form） |
 | `context_retention.py` | context retention seed（compacted summary + pins + snapshot bookmarks） |
