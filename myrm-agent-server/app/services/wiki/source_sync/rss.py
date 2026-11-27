@@ -1,6 +1,7 @@
 """RSS/Atom feed → wiki raw sync.
 
 [INPUT]
+- app.services.wiki.source_sync.guarded_fetch (POS: GET of a user-configured address, public addresses only, capped body)
 - app.services.wiki.source_sync.publish_helpers (POS: publish_raw wrapper)
 - myrm_agent_harness.utils.html_tags::strip_tags (POS: tag stripping linear in the text)
 
@@ -18,15 +19,19 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 
-import httpx
 from defusedxml import ElementTree as DefusedElementTree
 from myrm_agent_harness.toolkits.wiki import WikiStructure
 from myrm_agent_harness.utils.html_tags import strip_tags
 
+from app.services.wiki.source_sync.guarded_fetch import fetch_configured_url
 from app.services.wiki.source_sync.publish_helpers import build_frontmatter, publish_source_markdown, sanitize_path_segment
 from app.services.wiki.source_sync.schemas import WikiSourceSyncResult
 
 logger = logging.getLogger(__name__)
+
+# Twice the largest public feed measured (a podcast of 5.3 MiB); the parse of a feed this size holds the event loop for
+# about 0.2 s.
+_MAX_FEED_BYTES = 10 * 1024 * 1024
 
 
 async def sync_rss_feeds_to_wiki(
@@ -108,12 +113,8 @@ class _FeedEntry:
 
 
 async def _fetch_feed_entries(url: str, *, limit: int) -> list[_FeedEntry]:
-    async with httpx.AsyncClient(timeout=25.0, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"User-Agent": "MyrmWikiSourceSync/1.0"})
-        resp.raise_for_status()
-        text = resp.text
-
-    root = DefusedElementTree.fromstring(text)
+    response = await fetch_configured_url(url, headers={"User-Agent": "MyrmWikiSourceSync/1.0"}, max_bytes=_MAX_FEED_BYTES)
+    root = DefusedElementTree.fromstring(response.text)
     entries: list[_FeedEntry] = []
 
     for item in root.iter():

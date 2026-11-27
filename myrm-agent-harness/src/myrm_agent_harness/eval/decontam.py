@@ -1,7 +1,7 @@
 """Evaluation decontamination helpers — keep benchmarks free of answer leakage.
 
 [INPUT]
-- none (pure functions)
+- utils.unicode_normalize::normalize (POS: Unicode normalization in time linear in the text, the one entry for text that can come from a model or a file)
 
 [OUTPUT]
 - HUGGINGFACE_DOMAINS: domain patterns for Hugging Face (hf.co / huggingface.co)
@@ -20,7 +20,8 @@ the model instead of the leak. The business layer decides when to apply them
 from __future__ import annotations
 
 import re
-import unicodedata
+
+from myrm_agent_harness.utils.unicode_normalize import normalize
 
 # Pattern set in DomainAllowlist/DomainBlocklist form (wildcard suffix).
 HUGGINGFACE_DOMAINS: tuple[str, ...] = (
@@ -50,7 +51,7 @@ def normalize_answer(text: str) -> str:
     ``3.140``) collapse. Non-empty guard is the caller's responsibility — an
     empty normalized string must never be treated as a match.
     """
-    normalized = unicodedata.normalize("NFKC", text)
+    normalized = normalize("NFKC", text)
     # Fold trailing zeros after a decimal point (42.50 -> 42.5, 3.140 -> 3.14)
     # before the point itself is treated as punctuation.
     normalized = re.sub(r"(\d\.\d*?)0+(?=\D|$)", r"\1", normalized)

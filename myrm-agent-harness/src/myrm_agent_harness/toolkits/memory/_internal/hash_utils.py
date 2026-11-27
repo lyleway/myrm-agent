@@ -8,7 +8,7 @@ Performance (measured, average of 10000 runs):
 - FULL: ~5μs (maximum deduplication)
 
 [INPUT]
-- (none)
+- utils.unicode_normalize::normalize (POS: Unicode normalization in time linear in the text, the one entry for text that can come from a file or a page)
 
 [OUTPUT]
 - NormalizationLevel: Content normalization strategies for hash deduplication.
@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import hashlib
 import re
-import unicodedata
 from enum import IntEnum
+
+from myrm_agent_harness.utils.unicode_normalize import normalize
 
 _HASH_LENGTH = 16
 
@@ -63,7 +64,7 @@ def compute_normalized_hash(content: str, level: NormalizationLevel = Normalizat
         text = re.sub(r"\s+", " ", text).strip()
         return hashlib.sha256(text.encode("utf-8")).hexdigest()[:_HASH_LENGTH]
 
-    text = unicodedata.normalize("NFKC", content)
+    text = normalize("NFKC", content)
     text = text.lower()
     text = re.sub(r"[^\w\s]", "", text)
     text = re.sub(r"\s+", " ", text)

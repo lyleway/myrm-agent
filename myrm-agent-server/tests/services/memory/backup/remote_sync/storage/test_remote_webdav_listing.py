@@ -74,6 +74,16 @@ async def test_a_refused_listing_raises_instead_of_looking_like_an_empty_folder(
         await _strategy().list_files()
 
 
+@pytest.mark.parametrize("body", ["", "Bad Gateway", "<html><body>Bad Gateway</body></html>"])
+async def test_an_answer_that_is_not_a_multistatus_document_raises_instead_of_looking_like_an_empty_folder(
+    monkeypatch: pytest.MonkeyPatch, body: str
+) -> None:
+    _serve(monkeypatch, lambda request: httpx.Response(207, text=body))
+
+    with pytest.raises(RemoteStorageError, match="WebDAV listing"):
+        await _strategy().list_files()
+
+
 async def test_an_unreachable_server_raises_instead_of_looking_like_an_empty_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("unreachable", request=request)

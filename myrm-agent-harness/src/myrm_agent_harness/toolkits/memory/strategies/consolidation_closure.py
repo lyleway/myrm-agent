@@ -3,6 +3,7 @@
 [INPUT]
 - strategies.exact_fact::{ExactFactClassifier, identifier_key} (POS: deterministic extractor of high-entropy identifiers and their comparison form)
 - strategies.named_entity_guard::NamedEntityGuard (POS: deterministic extractor of ports, addresses, URLs, variables and paths)
+- utils.unicode_normalize::normalize (POS: Unicode normalization in time linear in the text, the one entry for text that can come from a model or a file)
 
 [OUTPUT]
 - Facts: the numbers and identifiers a text states, with the comparison that finds what a text states beyond another
@@ -19,12 +20,12 @@ date in the sources writes still counts as stated. Both checks are deterministic
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
 from myrm_agent_harness.toolkits.memory.strategies.exact_fact import ExactFactClassifier, identifier_key
 from myrm_agent_harness.toolkits.memory.strategies.named_entity_guard import NamedEntityGuard
+from myrm_agent_harness.utils.unicode_normalize import normalize
 
 # A date or a time of day is derived from "today" and the wording of the source, so its digits are never a claim.
 # A month name is only a month when spelled out whole or in the usual abbreviation ("Marketing 2024" is no date),
@@ -89,7 +90,7 @@ def _quantities(text: str) -> tuple[set[Decimal], set[Decimal]]:
 
     A quantity is a canonical value: separators, ``k`` / ``万`` / ``亿`` and ``%`` folded in, dates and times left out.
     """
-    folded = unicodedata.normalize("NFKC", text)
+    folded = normalize("NFKC", text)
     years = {Decimal(year) for date in _DATE.findall(folded) for year in _YEAR.findall(date)}
     values: set[Decimal] = set()
     for match in _NUMBER.finditer(_DATE.sub(" ", folded)):

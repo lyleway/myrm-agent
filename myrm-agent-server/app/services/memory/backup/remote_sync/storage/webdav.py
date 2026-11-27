@@ -2,26 +2,32 @@
 
 [INPUT]
 httpx::AsyncClient (POS: external HTTP client, imported on first use)
+defusedxml.ElementTree::fromstring (POS: XML parser that refuses entity expansion and external references)
 app.services.memory.backup.remote_sync.storage.base::RemoteBackupStrategy/RemoteBackupFile/RemoteStorageError (POS: provider contract)
 
 [OUTPUT]
 WebDAVBackupConfig / WebDAVBackupStrategy: the WebDAV implementation of the storage contract
 
 [POS]
-A missing backup folder (HTTP 404) lists as empty because the first upload creates it; any other listing refusal raises
-``RemoteStorageError``. Listed names are percent-decoded and only direct ``.gz`` children count.
+A missing backup folder (HTTP 404) lists as empty because the first upload creates it; any other listing refusal, and
+any answer that is not a multistatus document, raises ``RemoteStorageError``. The answer is parsed as namespaced XML
+(each server picks its own prefix for ``DAV:``), in time linear in its size. Listed names are percent-decoded and only
+direct ``.gz`` children count.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote
+
+from defusedxml import DefusedXmlException
+from defusedxml import ElementTree as DefusedElementTree
 
 from app.services.memory.backup.remote_sync.storage.base import (
     RemoteBackupFile,
@@ -34,10 +40,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_HREF_PATTERN = re.compile(r"<[^>]*href[^>]*>([^<]+)</", re.IGNORECASE)
-_LASTMOD_PATTERN = re.compile(r"<[^>]*getlastmodified[^>]*>([^<]+)</", re.IGNORECASE)
-_LENGTH_PATTERN = re.compile(r"<[^>]*getcontentlength[^>]*>([^<]+)</", re.IGNORECASE)
-_RESPONSE_SPLIT = re.compile(r"<[^>]*response[^>]*>", re.IGNORECASE)
+_DAV = "{DAV:}"
 
 
 @dataclass
@@ -225,39 +228,61 @@ class _WebDAVClient:
             return False
 
 
-def _parse_webdav_multistatus(xml_text: str) -> list[RemoteBackupFile]:
-    """Parse WebDAV PROPFIND 207 multistatus response."""
-    results: list[RemoteBackupFile] = []
+def _property(response: ET.Element, name: str) -> str | None:
+    """The first value of the ``DAV:`` property ``name`` in ``response``.
 
-    for resp_block in _RESPONSE_SPLIT.split(xml_text)[1:]:
-        href_match = _HREF_PATTERN.search(resp_block)
-        if not href_match:
-            continue
-        href = href_match.group(1).strip()
+    A server lists the properties it lacks in a second ``propstat`` as empty elements; they carry no value.
+    """
+    for element in response.iterfind(f"{_DAV}propstat/{_DAV}prop/{_DAV}{name}"):
+        if element.text and element.text.strip():
+            return element.text.strip()
+    return None
+
+
+def _modified_time(value: str | None) -> datetime:
+    """The listed modification time; one that is missing or unreadable is the time of the listing."""
+    if value is None:
+        return datetime.now(UTC)
+    try:
+        modified = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return datetime.now(UTC)
+    return modified if modified.tzinfo else modified.replace(tzinfo=UTC)
+
+
+def _size_bytes(value: str | None) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except ValueError:
+        return 0
+
+
+def _parse_webdav_multistatus(xml_text: str) -> list[RemoteBackupFile]:
+    """Parse a PROPFIND 207 multistatus answer into the backups it lists.
+
+    Only the elements the protocol puts there are read (``multistatus/response/href`` and
+    ``response/propstat/prop/<property>``), so a response nested inside another one is ignored and the work stays
+    linear in the size of the answer.
+    """
+    try:
+        root = DefusedElementTree.fromstring(xml_text)
+    except (ET.ParseError, DefusedXmlException) as exc:
+        raise RemoteStorageError("WebDAV listing is not a readable XML document") from exc
+    if root.tag != f"{_DAV}multistatus":
+        raise RemoteStorageError("WebDAV listing is not a multistatus document")
+
+    results: list[RemoteBackupFile] = []
+    for response in root.iterfind(f"{_DAV}response"):
+        href = response.findtext(f"{_DAV}href", default="").strip()
         filename = unquote(href.rstrip("/").rsplit("/", 1)[-1])  # hrefs are percent-encoded
         # An encoded separator would turn a direct child into a path that leaves the backup folder.
         if not filename or "/" in filename or not filename.endswith(".gz"):
             continue
-
-        lastmod_match = _LASTMOD_PATTERN.search(resp_block)
-        length_match = _LENGTH_PATTERN.search(resp_block)
-
-        modified = datetime.now(UTC)
-        if lastmod_match:
-            try:
-                modified = parsedate_to_datetime(lastmod_match.group(1))
-                if modified.tzinfo is None:
-                    modified = modified.replace(tzinfo=UTC)
-            except (TypeError, ValueError):
-                pass  # an unreadable date keeps the listing time
-
-        size = 0
-        if length_match:
-            try:
-                size = int(length_match.group(1))
-            except ValueError:
-                pass
-
-        results.append(RemoteBackupFile(file_name=filename, modified_time=modified, size_bytes=size))
-
+        results.append(
+            RemoteBackupFile(
+                file_name=filename,
+                modified_time=_modified_time(_property(response, "getlastmodified")),
+                size_bytes=_size_bytes(_property(response, "getcontentlength")),
+            )
+        )
     return results

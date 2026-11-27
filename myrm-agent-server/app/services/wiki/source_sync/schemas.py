@@ -28,7 +28,10 @@ class WikiSourceSyncConfig(BaseModel):
     zotero_base_url: str = Field(
         default="https://api.zotero.org",
         max_length=256,
-        description="Zotero Web API base (override for local Zotero servers)",
+        description=(
+            "Zotero Web API base; a server on a private address is reachable only when the operator "
+            "lists its host in MYRM_ALLOWED_INTERNAL_HOSTS"
+        ),
     )
     auto_compile: bool = True
     max_items_per_run: int = Field(default=10, ge=1, le=50)
@@ -73,7 +76,5 @@ class WikiSourceSyncRunSummary(BaseModel):
         parts: list[str] = []
         for item in self.results:
             if item.published or item.failed:
-                parts.append(
-                    f"{item.source}: +{item.published} skip {item.skipped} fail {item.failed}"
-                )
+                parts.append(f"{item.source}: +{item.published} skip {item.skipped} fail {item.failed}")
         return "; ".join(parts) if parts else "[SILENT]"
