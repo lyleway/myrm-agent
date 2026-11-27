@@ -9,7 +9,6 @@ Run with ``-m integration``. A CLI that is not installed skips its tests, unless
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -23,21 +22,15 @@ from myrm_agent_harness.toolkits.acp.auth import (
     resolve_login_state,
 )
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
-from tests.toolkits.acp.cli_contract import cli_binary, probe_env
+from tests.toolkits.acp.cli_contract import (
+    CLAUDE_OAUTH,
+    CODEX_API_KEY,
+    cli_binary,
+    probe_env,
+    write_credential_file,
+)
 
 pytestmark = pytest.mark.integration
-
-# Content the CLI itself accepts as a login without contacting any server.
-_CLAUDE_OAUTH = {
-    "claudeAiOauth": {
-        "accessToken": "sk-ant-oat01-contract",
-        "refreshToken": "sk-ant-ort01-contract",
-        "expiresAt": 4102444800000,
-        "scopes": ["user:inference"],
-        "subscriptionType": "max",
-    }
-}
-_CODEX_API_KEY = {"OPENAI_API_KEY": "sk-contract-0000000000000000000000000000"}
 
 
 async def _report(backend: str, home: Path) -> LoginReport | None:
@@ -53,25 +46,18 @@ async def _state(backend: str, home: Path) -> CredentialState:
     )
 
 
-def _credential_file(home: Path, backend: str, content: dict[str, object]) -> None:
-    directory = home / ("claude_config_dir" if backend == "claude" else "codex_home")
-    directory.mkdir(exist_ok=True)
-    name = ".credentials.json" if backend == "claude" else "auth.json"
-    (directory / name).write_text(json.dumps(content))
-
-
 async def test_claude_in_an_empty_home_reports_logged_out(tmp_path: Path) -> None:
     assert await _report("claude", tmp_path) == LoginReport(False)
 
 
 async def test_claude_reads_oauth_credentials_as_a_subscription_login(tmp_path: Path) -> None:
-    _credential_file(tmp_path, "claude", _CLAUDE_OAUTH)
+    write_credential_file(tmp_path, "claude", CLAUDE_OAUTH)
 
     assert await _report("claude", tmp_path) == LoginReport(True, "claude.ai")
 
 
 async def test_claude_does_not_take_a_credential_file_it_rejects_for_a_login(tmp_path: Path) -> None:
-    _credential_file(tmp_path, "claude", {"unrelated": True})
+    write_credential_file(tmp_path, "claude", {"unrelated": True})
     assert (
         CredentialStore(probe_env(tmp_path)).state("claude").status is AuthStatus.AUTHENTICATED
     )  # the file check is fooled
@@ -86,6 +72,6 @@ async def test_codex_in_an_empty_home_reports_logged_out(tmp_path: Path) -> None
 
 
 async def test_codex_reads_an_api_key_file_as_a_login(tmp_path: Path) -> None:
-    _credential_file(tmp_path, "codex", _CODEX_API_KEY)
+    write_credential_file(tmp_path, "codex", CODEX_API_KEY)
 
     assert await _report("codex", tmp_path) == LoginReport(True, "api_key")

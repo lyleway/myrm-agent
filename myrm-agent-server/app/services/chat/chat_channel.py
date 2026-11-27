@@ -17,7 +17,6 @@ from datetime import datetime
 from uuid import uuid4
 
 from app.database.dto import ChatDTO
-from app.database.repositories.channel_key_match import channel_key_extends
 from app.database.repositories.uow import UnitOfWork
 
 from ._base import _ChatServiceBase
@@ -36,28 +35,6 @@ class _ChatChannelMixin(_ChatServiceBase):
         """Resolve the channel chat stored under ``session_key``."""
         async with UnitOfWork() as uow:
             return await _ChatServiceBase._cr(uow).get_channel_chat_by_key(session_key)
-
-    @staticmethod
-    async def get_newest_channel_chat_under(base_key: str) -> ChatDTO | None:
-        """Return the most recently active Chat whose key is ``base_key`` or extends it.
-
-        ``channel_session_key`` appends the reset epoch and the bound agent, so the key a caller
-        can build is not always the one stored. An extension continues after a ``:`` segment
-        boundary, so ``…:peer-a`` never matches ``…:peer-ab`` (see ``channel_key_extends``).
-        """
-        from sqlalchemy import select
-
-        from app.database.models import Chat
-
-        async with UnitOfWork() as uow:
-            assert uow.session is not None
-            result = await uow.session.execute(
-                select(Chat.channel_session_key).where(channel_key_extends(base_key)).order_by(Chat.updated_at.desc()).limit(1)
-            )
-            row = result.first()
-            if row is None:
-                return None
-            return await _ChatServiceBase._cr(uow).get_channel_chat_by_key(str(row[0]))
 
     @staticmethod
     async def get_or_create_channel_chat(

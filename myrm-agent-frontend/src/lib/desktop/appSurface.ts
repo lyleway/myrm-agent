@@ -14,7 +14,7 @@
  * refused or failed call is `false` (`'failed'`), a combination another app or the system holds is `'conflict'`.
  */
 
-import type { AppSurfaceDeps } from '@/lib/app-bridge/host';
+import type { AppSurfaceDeps } from '@/lib/app-bridge/hostTypes';
 
 async function call(command: string, args: Record<string, unknown>): Promise<boolean> {
   try {

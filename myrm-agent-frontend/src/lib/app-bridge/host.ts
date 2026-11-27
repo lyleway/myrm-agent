@@ -2,27 +2,27 @@
  * [INPUT]
  * - ./protocol (POS: JSON-RPC envelope, params checks, BridgeError)
  * - ./callLimiter (POS: per-capability call pacing)
- * - ./declaration::CapabilityStatus (POS: whether a declared capability may be used)
+ * - ./hostTypes (POS: what the host is given and what it hands back)
  *
  * [OUTPUT]
- * - AppBridgeDeps / AppSurfaceDeps / AppBridgeActivity / ProxyFetchRequest / ProxyFetchReply: what the host supplies and sends on.
- * - AppBridgeHost / createAppBridgeHost: `handle` turns one page message into a reply (or `null` for a foreign message);
+ * - createAppBridgeHost: `handle` turns one page message into a reply (or `null` for a foreign message);
  *   `revoke` and `dispose` take down what the page set up on the desktop.
  *
  * [POS]
  * Host half of the channel, free of React and of the DOM so every path is testable: capability gate, per-method call
- * limiter, parameter checks, then the notification, the proxied fetch or the desktop surface (tray item, global key
- * combinations, floating window). Who sent the message is decided by the caller (`useAppBridge`); everything here treats
+ * limiter, parameter checks, then the notification, the proxied fetch, the proxied model call or the desktop surface
+ * (tray item, global key combinations, floating window). Who sent the message is decided by the caller (`useAppBridge`); everything here treats
  * the message as untrusted page input. What the page registered on the desktop is tracked here so that a revoked
  * permission, or the page going away, takes it down immediately.
  */
 
 import { createCallLimiter } from './callLimiter';
-import type { CapabilityStatus } from './declaration';
+import type { AppBridgeDeps, AppBridgeHost, AppSurfaceDeps, ProxyAiReply, ProxyFetchReply } from './hostTypes';
 import {
   BRIDGE_CAPABILITIES,
   BridgeError,
   isDesktopCapability,
+  parseAiParams,
   parseFetchParams,
   parseFloatParams,
   parseNotifyParams,
@@ -33,69 +33,17 @@ import {
   rpcResult,
   type BridgeCapability,
   type BridgeFailure,
-  type FetchParams,
-  type RpcResponse,
 } from './protocol';
 
-export interface AppBridgeActivity {
-  capability: BridgeCapability;
-  outcome: 'ok' | 'denied' | 'rate_limited' | 'error';
-  /** A host name, a key combination or `on` / `off` only; never a path, query, body or text the page chose. */
-  detail: string | null;
-}
-
-export interface ProxyFetchRequest extends FetchParams {
-  version_sha256: string;
-}
-
-export interface ProxyFetchReply {
-  ok: boolean;
-  status: number | null;
-  headers: Record<string, string>;
-  body: string;
-  code: string | null;
-  message: string | null;
-}
-
-/** The desktop window's side of `tray`, `shortcut` and `float`; each call says whether the shell did it. */
-export interface AppSurfaceDeps {
-  setTray: (title: string, tooltip: string) => Promise<boolean>;
-  clearTray: () => Promise<boolean>;
-  registerShortcut: (accelerator: string) => Promise<'ok' | 'conflict' | 'failed'>;
-  /** `null` releases every combination of this app. */
-  unregisterShortcut: (accelerator: string | null) => Promise<boolean>;
-  setFloat: (on: boolean) => Promise<boolean>;
-}
-
-export interface AppBridgeDeps {
-  appName: string;
-  versionSha256: string;
-  getStatuses: () => Record<BridgeCapability, CapabilityStatus>;
-  /** The key combinations the page declared; with `shortcut` allowed, the user approved exactly these. */
-  getDeclaredShortcuts: () => readonly string[];
-  proxyFetch: (request: ProxyFetchRequest) => Promise<ProxyFetchReply>;
-  /** `null` outside the app's own desktop window, where the capabilities that act on the desktop cannot exist. */
-  surface: AppSurfaceDeps | null;
-  /** Fire-and-forget log of what the host itself decided; calls the server proxies are logged by the server. */
-  reportActivity: (activity: AppBridgeActivity) => void;
-  showNotification: (title: string, body: string) => Promise<void>;
-  now?: () => number;
-}
-
-export interface AppBridgeHost {
-  handle: (data: unknown) => Promise<RpcResponse | null>;
-  /** Takes down what the page set up under `capability` (a no-op for capabilities that leave nothing behind). */
-  revoke: (capability: BridgeCapability) => Promise<void>;
-  /** Takes down everything; for when the page goes away. */
-  dispose: () => Promise<void>;
-}
-
 const SERVER_FAILURES: readonly BridgeFailure[] = [
+  'permission_denied',
   'rate_limited',
   'host_not_granted',
   'bad_request',
   'blocked',
   'response_too_large',
+  'budget_exceeded',
+  'unavailable',
   'timeout',
   'upstream_error',
 ];
@@ -208,6 +156,24 @@ export function createAppBridgeHost(deps: AppBridgeDeps): AppBridgeHost {
     return { status: reply.status, headers: reply.headers, body: reply.body };
   }
 
+  async function completeThroughHost(params: unknown): Promise<{ text: string }> {
+    await gate('ai', null);
+    const parsed = parseAiParams(params);
+    if (!parsed) {
+      throw new BridgeError('invalid_params', 'ai.complete needs a prompt and optionally a system text and maxTokens');
+    }
+    let reply: ProxyAiReply;
+    try {
+      reply = await deps.proxyAi({ ...parsed, version_sha256: deps.versionSha256 });
+    } catch {
+      throw new BridgeError('failed', 'The model call could not be sent');
+    }
+    if (!reply.ok) {
+      throw new BridgeError(toFailure(reply.code), reply.message ?? 'The model call was refused');
+    }
+    return { text: reply.text };
+  }
+
   async function setTray(params: unknown): Promise<null> {
     await gate('tray', null);
     const parsed = parseTrayParams(params);
@@ -248,7 +214,10 @@ export function createAppBridgeHost(deps: AppBridgeDeps): AppBridgeHost {
     }
     if (!deps.getDeclaredShortcuts().includes(accelerator)) {
       deps.reportActivity({ capability: 'shortcut', outcome: 'denied', detail: accelerator });
-      throw new BridgeError('shortcut_not_granted', `${accelerator} is not among the key combinations this app declared`);
+      throw new BridgeError(
+        'shortcut_not_granted',
+        `${accelerator} is not among the key combinations this app declared`,
+      );
     }
     const result = await surface()
       .registerShortcut(accelerator)
@@ -309,6 +278,8 @@ export function createAppBridgeHost(deps: AppBridgeDeps): AppBridgeHost {
         return notify(params);
       case 'fetch':
         return fetchThroughHost(params);
+      case 'ai.complete':
+        return completeThroughHost(params);
       case 'tray.set':
         return setTray(params);
       case 'tray.clear':

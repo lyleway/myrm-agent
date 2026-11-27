@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app.core.channel_bridge.topic_config import (
     _CHANNEL_LEVEL_KEY,
@@ -54,36 +55,37 @@ def client() -> Iterator[TestClient]:
     app.router.lifespan_context = original_lifespan
 
 
+def _create_agent(client: TestClient, name: str, description: str, system_prompt: str) -> str:
+    res = client.post(
+        "/api/v1/user-agents",
+        json={"name": name, "description": description, "model": "gpt-4o", "systemPrompt": system_prompt, "skills": []},
+    )
+    assert res.status_code == 200, res.text
+    agent_id: str = res.json()["data"]["id"]
+    return agent_id
+
+
+def _bind(client: TestClient, channel_name: str, topic_id: str, body: dict[str, object]) -> Response:
+    return client.post(f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind", json=body)
+
+
 def test_topic_binding_e2e(client: TestClient) -> None:
     """End-to-end test for channel topic binding without mocks."""
 
     unique_id = str(uuid.uuid4())[:8]
 
     # 0. Create an agent
-    agent_payload = {
-        "name": f"E2E Test Agent {unique_id}",
-        "description": "Agent for E2E testing",
-        "model": "gpt-4o",
-        "systemPrompt": "You are a helpful assistant.",
-        "skills": [],
-    }
-    res = client.post("/api/v1/user-agents", json=agent_payload)
-    assert res.status_code == 200, res.text
-    agent_id = res.json()["data"]["id"]
+    agent_id = _create_agent(client, f"E2E Test Agent {unique_id}", "Agent for E2E testing", "You are a helpful assistant.")
 
     channel_name = f"test_e2e_channel_{unique_id}"
     topic_id = f"test_e2e_chat_{unique_id}:test_e2e_thread_{unique_id}"
 
     # 1. Bind an agent to a topic
-    bind_payload = {
-        "agentId": agent_id,
-        "displayName": "E2E Test Group",
-        "avatarUrl": "http://example.com/e2e.png",
-    }
-
-    response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json=bind_payload,
+    response = _bind(
+        client,
+        channel_name,
+        topic_id,
+        {"agentId": agent_id, "displayName": "E2E Test Group", "avatarUrl": "http://example.com/e2e.png"},
     )
     assert response.status_code == 200, response.text
 
@@ -114,14 +116,11 @@ def test_topic_binding_e2e(client: TestClient) -> None:
     assert data["globalAgentId"] == agent_id
 
     # 5. Unbind agent
-    unbind_payload = {
-        "agentId": None,
-        "displayName": "E2E Test Group Unbound",
-        "avatarUrl": "http://example.com/e2e.png",
-    }
-    response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json=unbind_payload,
+    response = _bind(
+        client,
+        channel_name,
+        topic_id,
+        {"agentId": None, "displayName": "E2E Test Group Unbound", "avatarUrl": "http://example.com/e2e.png"},
     )
     assert response.status_code == 200, response.text
 
@@ -135,18 +134,13 @@ def test_topic_binding_e2e(client: TestClient) -> None:
             assert t["displayName"] == "E2E Test Group Unbound"
 
     # 6. Bind invalid agent
-    invalid_payload = {
-        "agentId": "invalid-uuid",
-        "displayName": "E2E Test Group Invalid",
-        "avatarUrl": "http://example.com/e2e.png",
-    }
-    response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json=invalid_payload,
+    response = _bind(
+        client,
+        channel_name,
+        topic_id,
+        {"agentId": "invalid-uuid", "displayName": "E2E Test Group Invalid", "avatarUrl": "http://example.com/e2e.png"},
     )
     assert response.status_code == 404, response.text
-
-    print("E2E Test Passed Successfully (Including Edge Cases)!")
 
 
 def test_search_agent_channel_bind_rejected_e2e(client: TestClient) -> None:
@@ -171,10 +165,7 @@ def test_search_agent_channel_bind_rejected_e2e(client: TestClient) -> None:
     assert topics_response.status_code == 200, topics_response.text
     assert topics_response.json()["globalAgentId"] is None
 
-    topic_response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": "builtin-fast-search"},
-    )
+    topic_response = _bind(client, channel_name, topic_id, {"agentId": "builtin-fast-search"})
     assert topic_response.status_code == 400, topic_response.text
     topic_body = topic_response.json()
     assert SEARCH_AGENT_CHANNEL_BIND_MSG in topic_body.get("detail", topic_body.get("message", ""))
@@ -190,25 +181,15 @@ def test_topic_team_identity_e2e(client: TestClient) -> None:
 
     unique_id = str(uuid.uuid4())[:8]
 
-    agent_payload = {
-        "name": f"E2E Identity Agent {unique_id}",
-        "description": "Agent for team identity testing",
-        "model": "gpt-4o",
-        "systemPrompt": "You are a team Ariel.",
-        "skills": [],
-    }
-    res = client.post("/api/v1/user-agents", json=agent_payload)
-    assert res.status_code == 200, res.text
-    agent_id = res.json()["data"]["id"]
+    agent_id = _create_agent(
+        client, f"E2E Identity Agent {unique_id}", "Agent for team identity testing", "You are a team Ariel."
+    )
 
     channel_name = f"test_identity_channel_{unique_id}"
     topic_id = f"test_group_{unique_id}"
 
     # 1. Bind a named shared identity
-    response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id, "identityName": "YiFu", "identityScope": "shared"},
-    )
+    response = _bind(client, channel_name, topic_id, {"agentId": agent_id, "identityName": "YiFu", "identityScope": "shared"})
     assert response.status_code == 200, response.text
     data = response.json()
     assert data["identityName"] == "YiFu"
@@ -224,24 +205,15 @@ def test_topic_team_identity_e2e(client: TestClient) -> None:
     assert listed[0]["identityName"] == "YiFu"
 
     # 3. Collapsing explicit ids are rejected (fail-closed, no shared compartment)
-    bad = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id, "identityId": "???", "identityName": "YiFu"},
-    )
+    bad = _bind(client, channel_name, topic_id, {"agentId": agent_id, "identityId": "???", "identityName": "YiFu"})
     assert bad.status_code == 400, bad.text
 
     # 4. Revoke freezes (memory retained), restore reopens
-    revoked = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id, "identityRevoked": True},
-    )
+    revoked = _bind(client, channel_name, topic_id, {"agentId": agent_id, "identityRevoked": True})
     assert revoked.status_code == 200, revoked.text
     assert revoked.json()["identityRevoked"] is True
     assert revoked.json()["identityName"] == "YiFu"
-    restored = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id, "identityRevoked": False},
-    )
+    restored = _bind(client, channel_name, topic_id, {"agentId": agent_id, "identityRevoked": False})
     assert restored.status_code == 200, restored.text
     assert restored.json()["identityRevoked"] is False
 
@@ -251,34 +223,21 @@ def test_topic_follow_up_policy_e2e(client: TestClient) -> None:
 
     unique_id = str(uuid.uuid4())[:8]
 
-    agent_payload = {
-        "name": f"E2E FollowUp Agent {unique_id}",
-        "description": "Agent for follow-up policy testing",
-        "model": "gpt-4o",
-        "systemPrompt": "You are a team Ariel.",
-        "skills": [],
-    }
-    res = client.post("/api/v1/user-agents", json=agent_payload)
-    assert res.status_code == 200, res.text
-    agent_id = res.json()["data"]["id"]
+    agent_id = _create_agent(
+        client, f"E2E FollowUp Agent {unique_id}", "Agent for follow-up policy testing", "You are a team Ariel."
+    )
 
     channel_name = f"test_followup_channel_{unique_id}"
     topic_id = f"test_group_{unique_id}"
 
     # Defaults: receipts on, stall nudge off
-    response = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id},
-    )
+    response = _bind(client, channel_name, topic_id, {"agentId": agent_id})
     assert response.status_code == 200, response.text
     assert response.json()["completionReceipts"] is True
     assert response.json()["stallNudge"] is False
 
     # Explicit opt-in to stall nudges, receipts off
-    updated = client.post(
-        f"/api/v1/channels/manage/{channel_name}/topics/{topic_id}/bind",
-        json={"agentId": agent_id, "completionReceipts": False, "stallNudge": True},
-    )
+    updated = _bind(client, channel_name, topic_id, {"agentId": agent_id, "completionReceipts": False, "stallNudge": True})
     assert updated.status_code == 200, updated.text
     assert updated.json()["completionReceipts"] is False
     assert updated.json()["stallNudge"] is True
@@ -400,5 +359,5 @@ def test_cron_delivery_revoked_identity_fails_closed(client: TestClient) -> None
     )
     result = JobResult(success=True, output="hello")
 
-    with __import__("pytest").raises(RuntimeError, match="identity revoked"):
+    with pytest.raises(RuntimeError, match="identity revoked"):
         asyncio.run(ChannelResultDelivery().deliver(job, result))

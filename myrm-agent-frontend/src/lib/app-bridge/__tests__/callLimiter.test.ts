@@ -38,6 +38,15 @@ describe('createCallLimiter', () => {
     expect(limiter('tray')).toBe('admit');
   });
 
+  it('paces ai below fetch, on a budget of its own', () => {
+    const limiter = createCallLimiter(clock().now);
+    const outcomes = Array.from({ length: 41 }, () => limiter('ai'));
+
+    expect(outcomes.slice(0, 40)).toEqual(Array(40).fill('admit'));
+    expect(outcomes[40]).toBe('first_over');
+    expect(limiter('fetch')).toBe('admit');
+  });
+
   it('gives the desktop capabilities their own, higher limits', () => {
     const limiter = createCallLimiter(clock().now);
     const outcomes = (capability: Parameters<typeof limiter>[0], count: number) =>

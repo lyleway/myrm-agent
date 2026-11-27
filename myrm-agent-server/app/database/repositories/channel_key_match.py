@@ -5,7 +5,8 @@
 
 [OUTPUT]
 - channel_key_extends(): the conversation's key and every key that continues it after a ``:``
-- channel_key_epochs(): the conversation's key and its reset-epoch keys (``:e=<epoch>``)
+- channel_key_epochs(): the conversation's key and every ``:e=`` key under it: its reset-epoch keys (``:e=<epoch>``) and
+  the conversations opened on request (``:e=s<stamp>``)
 - channel_key_started(): the keys of the conversations a person opened on request (``:e=s<stamp>``), which no reset
   policy derives
 
@@ -31,7 +32,10 @@ def channel_key_extends(base_key: str) -> ColumnElement[bool]:
 
 
 def channel_key_epochs(base_key: str) -> ColumnElement[bool]:
-    """Match ``base_key`` and its reset-epoch keys, not the keys of a topic or an agent of the same peer."""
+    """Match ``base_key`` and every ``:e=`` key under it, not the keys of a topic or an agent of the same peer.
+
+    That is its reset-epoch keys (``:e=<epoch>``) and the conversations opened on request (``:e=s<stamp>``).
+    """
     key = Chat.channel_session_key
     return or_(key == base_key, (key >= f"{base_key}:e=") & (key < f"{base_key}:e>"))
 

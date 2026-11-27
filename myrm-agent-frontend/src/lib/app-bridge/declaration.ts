@@ -33,13 +33,21 @@ export interface Declaration {
   notify: boolean;
   /** Sorted, lower-cased, de-duplicated; empty when `fetch` is not declared. */
   fetchHosts: string[];
+  ai: boolean;
   tray: boolean;
   float: boolean;
   /** Canonical and sorted; empty when `shortcut` is not declared. */
   shortcuts: string[];
 }
 
-export const EMPTY_DECLARATION: Declaration = { notify: false, fetchHosts: [], tray: false, float: false, shortcuts: [] };
+export const EMPTY_DECLARATION: Declaration = {
+  notify: false,
+  fetchHosts: [],
+  ai: false,
+  tray: false,
+  float: false,
+  shortcuts: [],
+};
 
 function parseHosts(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === 'string')) {
@@ -65,7 +73,7 @@ function parseShortcuts(value: unknown): string[] {
 }
 
 /**
- * Reads `<script type="application/json" id="myrm-app">{"notify": true, "fetch": ["api.example.com"]}</script>`.
+ * Reads `<script type="application/json" id="myrm-app">{"notify": true, "ai": true, "fetch": ["api.example.com"]}</script>`.
  * The parse is inert (no script runs). A malformed block, a `fetch` list with anything but exact host names, or a
  * `shortcut` list with a combination that is not allowed, declares nothing for that capability: the page then simply
  * cannot use it.
@@ -86,10 +94,11 @@ export function parseDeclaration(html: string): Declaration {
   if (typeof block !== 'object' || block === null) {
     return EMPTY_DECLARATION;
   }
-  const { notify, fetch: fetchHosts, tray, float, shortcut } = block as Record<string, unknown>;
+  const { notify, fetch: fetchHosts, ai, tray, float, shortcut } = block as Record<string, unknown>;
   return {
     notify: notify === true,
     fetchHosts: parseHosts(fetchHosts),
+    ai: ai === true,
     tray: tray === true,
     float: float === true,
     shortcuts: parseShortcuts(shortcut),
@@ -101,6 +110,8 @@ export function declaredScope(capability: BridgeCapability, declaration: Declara
   switch (capability) {
     case 'notify':
       return declaration.notify ? [] : null;
+    case 'ai':
+      return declaration.ai ? [] : null;
     case 'tray':
       return declaration.tray ? [] : null;
     case 'float':

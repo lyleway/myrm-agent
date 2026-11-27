@@ -13,7 +13,7 @@
 | `sources.py` | 核心 | 自定义技能来源：列表、探测添加、删除 |  |
 | `index_admin.py` | 核心 | 静态索引状态/刷新与技能池同步 |  |
 | `install.py` | 核心 | `/discovery/*` 写路径：install/update/uninstall（受沙箱能力门控）、analyze-url、install-from-url；uninstall 支持父子技能级联清理与依赖者校验，安装响应形状只在这里构造 | ✅ |
-| `schemas.py` | 契约 | 请求/响应 Pydantic 模型（含 `SkillInstallRequest`、`SkillPreviewResponse`、`CustomSource*`、`SkillPoolSync*`、`StaticIndexStatusResponse`） | ✅ |
+| `schemas.py` | 契约 | 请求/响应 Pydantic 模型（含 `SkillInstallRequest`、`SkillPreviewResponse`、`CustomSource*`、`SkillPoolSync*`、`StaticIndexStatusResponse`）；响应里带注册表、包或扫描器文字的字段都是 `EncodableStr`（定义在上级 `schemas.py`），孤立代理字符在校验时换成 `U+FFFD`，JSON 响应才编码得了 | ✅ |
 
 ## 依赖
 

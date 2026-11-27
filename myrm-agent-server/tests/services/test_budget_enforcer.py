@@ -344,7 +344,49 @@ class TestResetSessionBudget:
 
 
 class TestQueryTodayCost:
-    """Verify _query_today_cost error handling."""
+    """Verify _query_today_cost recovery sources and error handling."""
+
+    @pytest.mark.asyncio
+    async def test_counts_artifact_app_model_calls_next_to_assistant_messages(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+        from app.database.models import Base, Message
+        from app.database.models.artifact_app import ArtifactAppAiUsage
+        from app.services.budget.budget_day import budget_day_start_utc
+        from app.services.budget.enforcer import _query_today_cost
+
+        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with factory() as db:
+            db.add(
+                Message(
+                    id="m1",
+                    chat_id="c1",
+                    role="assistant",
+                    content="hi",
+                    sent_at=datetime.now(UTC),
+                    sent_timezone="UTC",
+                    extra_data={"costUsd": 1.5},
+                )
+            )
+            db.add_all(
+                [
+                    ArtifactAppAiUsage(artifact_id="a1", cost_usd=0.25),
+                    ArtifactAppAiUsage(artifact_id="a2", cost_usd=0.5),
+                    ArtifactAppAiUsage(artifact_id="a1", cost_usd=9.0, created_at=budget_day_start_utc() - timedelta(hours=1)),
+                ]
+            )
+            await db.commit()
+
+        with patch("app.services.budget.enforcer.get_session_factory", return_value=factory):
+            result = await _query_today_cost()
+        await engine.dispose()
+
+        assert result == pytest.approx(2.25)
 
     @pytest.mark.asyncio
     async def test_returns_zero_on_db_error(self) -> None:

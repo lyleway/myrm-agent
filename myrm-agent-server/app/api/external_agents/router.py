@@ -3,7 +3,8 @@
 GUI-driven authentication for delegated CLI agents (Codex / Claude Code /
 Gemini / Qwen): query login status for badges, drive an interactive login over
 SSE (surfacing the login URL / device code), feed a pasted code, import a
-credential captured elsewhere, or log out. Mounted globally since subscription
+credential captured elsewhere, or log out (through the CLI itself, which alone can remove a login it keeps
+outside its home). Mounted globally since subscription
 auth is an agent-config concern, not channel management. Login and import store
 the user's own subscription credential on the host, so they are refused where the
 host is not the user's machine (a managed sandbox runs delegated CLIs on an API
@@ -17,6 +18,7 @@ themselves are managed by ``accounts_router``, mounted under ``/accounts``).
 - app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
 - app.api.external_agents._account_scope::account_env (POS: the environment of the account a request names)
 - app.api.external_agents.accounts_router::router (POS: named account endpoints)
+- app.services.external_agents.logout::log_out_of_home (POS: logout through the CLI, shared with account removal)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
 
 [OUTPUT]
@@ -30,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,6 +43,7 @@ from app.api.external_agents._account_scope import account_env
 from app.api.external_agents._deploy_capability import require_subscription_login_capability
 from app.api.external_agents.accounts_router import router as accounts_router
 from app.platform_utils.deployment_capabilities import get_deployment_capabilities
+from app.services.external_agents.logout import log_out_of_home
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,10 @@ class ExternalAgentLoginRequest(BaseModel):
     session_id: str = Field(..., alias="sessionId", min_length=1, max_length=128)
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=30, le=1800)
     account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
+    remote: bool = Field(
+        default=False,
+        description="The browser that signs in is on another machine than this server, so the CLI is asked for a login that works from there",
+    )
 
     class Config:
         populate_by_name = True
@@ -104,7 +112,6 @@ async def external_agent_auth_status() -> dict[str, object]:
     macOS Keychain, which no credential-file check sees); a CLI without a status command is judged by its file.
     """
     import asyncio
-    import os
 
     from myrm_agent_harness.toolkits.acp.auth import (
         CredentialStore,
@@ -207,6 +214,7 @@ async def external_agent_auth_login(
         profile,
         base_env=account_env(profile.backend, body.account, create=True),
         timeout_seconds=body.timeout_seconds,
+        remote=body.remote,
     )
     _login_registry.add(body.session_id, session)
 
@@ -284,12 +292,14 @@ async def external_agent_auth_import(
 async def external_agent_auth_logout(
     body: ExternalAgentLogoutRequest,
 ) -> dict[str, object]:
-    """Remove a backend's stored subscription credentials (those of the named account, when one is named)."""
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore
+    """Log a backend out of its login (the named account's, when one is named) and remove its stored credentials.
 
-    store = CredentialStore(account_env(body.backend, body.account, create=False))
+    The CLI is asked to log itself out first: a login it keeps outside its home survives the removal of files. The
+    answer is what the CLI reports afterwards, so a login that could not be removed is still reported as one.
+    """
+    env = account_env(body.backend, body.account, create=False)
     try:
-        state = store.clear(body.backend)
+        state = await log_out_of_home(body.backend, env if env is not None else os.environ)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

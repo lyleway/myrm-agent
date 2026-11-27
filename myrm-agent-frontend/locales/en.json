@@ -6808,6 +6808,11 @@
           "description": "Let the app request data from these sites:",
           "destination": "Your Myrm server sends the requests, not the page, and the replies go back to the app. The page can still show images from any site."
         },
+        "ai": {
+          "title": "Ask your AI model",
+          "description": "Let the app send text to the AI model you set up and read the answer.",
+          "destination": "Your Myrm server sends only that text to your model provider. The app can't see your conversations or files. It uses your model quota: every call counts toward your budget, and each app has its own daily limit."
+        },
         "activity": {
           "title": "Recent activity",
           "empty": "Nothing yet.",
@@ -6816,6 +6821,15 @@
             "denied": "Blocked",
             "rate_limited": "Too frequent",
             "error": "Failed"
+          },
+          "reason": {
+            "permission_denied": "Not allowed",
+            "rate_limited": "Too many calls",
+            "budget_exceeded": "Budget used up",
+            "unavailable": "No usable model",
+            "upstream_error": "Model error",
+            "timeout": "Model too slow",
+            "risk_held": "Held by risk rules"
           }
         },
         "desktopOnly": "This app also asks for features that only the desktop app offers: menu bar item, keyboard shortcuts and floating.",
@@ -14901,6 +14915,7 @@
         "accountDeleteConfirm": "Delete the account “{name}”? Its login, settings and history are removed, and agents that use it go back to the default login.",
         "accountDeleted": "Account deleted",
         "accountDeleteFailed": "Could not delete the account.",
+        "accountDeleteKept": "Could not remove this account's login, so the account was kept.",
         "env": "Environment variables",
         "envAdd": "Add variable",
         "envRemove": "Remove variable",
@@ -14931,6 +14946,7 @@
         "import": "Import",
         "importSuccess": "Credential imported",
         "logoutSuccess": "Logged out",
+        "logoutIncomplete": "Could not log out: the login is still active.",
         "badgeLoggedIn": "Logged in",
         "badgeLoggedOut": "Not logged in",
         "badgeInstalled": "Installed",

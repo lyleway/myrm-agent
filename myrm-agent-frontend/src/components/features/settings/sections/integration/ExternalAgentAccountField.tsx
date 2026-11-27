@@ -107,7 +107,8 @@ const ExternalAgentAccountField = memo(
       } catch (error) {
         // An account that is already gone is what was asked for.
         if (!(error instanceof ApiError && error.code === 404)) {
-          toast.error(t('accountDeleteFailed'));
+          // 409: the CLI could not log out of the account, so it is kept rather than left with a login nothing can remove.
+          toast.error(t(error instanceof ApiError && error.code === 409 ? 'accountDeleteKept' : 'accountDeleteFailed'));
           return;
         }
       }

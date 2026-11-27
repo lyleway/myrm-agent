@@ -13,7 +13,14 @@
 import { BRIDGE_CAPABILITIES, type BridgeCapability } from './protocol';
 
 const WINDOW_MS = 60_000;
-const CALL_LIMITS: Record<BridgeCapability, number> = { notify: 5, fetch: 120, tray: 30, shortcut: 20, float: 30 };
+const CALL_LIMITS: Record<BridgeCapability, number> = {
+  notify: 5,
+  fetch: 120,
+  ai: 40,
+  tray: 30,
+  shortcut: 20,
+  float: 30,
+};
 
 type Admission = 'admit' | 'first_over' | 'over';
 
@@ -42,4 +49,3 @@ export function createCallLimiter(now: () => number) {
     return 'admit';
   };
 }
-

@@ -42,8 +42,13 @@ const ExternalAgentAuthControls = memo(({ command, status, account, accountState
     }
     setLoggingOut(true);
     try {
-      await logoutExternalAgent(status.backend, account);
-      toast.success(t('logoutSuccess'));
+      const state = await logoutExternalAgent(status.backend, account);
+      // The CLI's own report decides: a login it could not remove is still there.
+      if (state.authenticated) {
+        toast.error(t('logoutIncomplete'));
+      } else {
+        toast.success(t('logoutSuccess'));
+      }
       onChanged();
     } catch {
       toast.error(t('loginFailed'));

@@ -244,7 +244,7 @@ class TestWhatTheHostOffers:
 class TestWaitingForAPerson:
     async def test_the_time_a_person_takes_is_not_the_time_the_agent_has(self, tmp_path: Path) -> None:
         # A turn limit a loaded machine can still start the agent within, and an answer that comes after it has run out.
-        agent_seconds = 3
+        agent_seconds = 5
 
         class _SlowBroker:
             async def decide(self, request: PermissionRequest) -> PermissionVerdict:
