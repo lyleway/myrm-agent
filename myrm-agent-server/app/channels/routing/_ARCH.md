@@ -46,16 +46,16 @@ button click — so the three cannot disagree. It judges the answer against the 
   `message.sender_id`. A message that names no sender, or a request whose asker is unknown, leaves nobody
   who qualifies.
 
-The chat counts as a group when the request or the answer says so, because a flag is only evidence when it
-says group. A channel that cannot tell reports a direct chat, so the message that answers a request asked in
-a group must not turn that group into a DM. Button clicks report the kind of chat they happened in: a
-Telegram click takes it from the chat of the message its button sits on, a Feishu card callback — which names
-its chat but not its kind — from the group chats that chat's typed messages were seen in
-(`providers/feishu/group_chats.py`; a chat none has been seen in counts as direct). A click in a group is a
-group message like a typed one: it counts as addressing the bot (`mentioned`) and shares the group's session
-and admission policy, so a request that a click started is registered as a group request that another
-member's click cannot take. The answer is not judged against the chat's registry entry
-(`_ActiveTask.requester_id`) either: a delegated run asks while another member's turn can hold that entry.
+The chat counts as a group when the request or the answer says so, because a flag is only evidence when it says
+group. A channel that cannot tell reports a direct chat, so the message that answers a request asked in a group
+must not turn that group into a DM. A button click's chat kind depends on the channel: Telegram takes it from the
+chat of the message the button sits on; a Feishu card callback, which names its chat but not its kind, takes it
+from the group chats that chat's typed messages were seen in (`providers/feishu/group_chats.py`; a chat none has
+been seen in counts as direct); Slack always says group; LINE reports `is_group` but is not a mention; Teams names
+no kind and counts as direct. A click reported as a group is a group message like a typed one, sharing the group's
+session and admission policy and, except LINE's, counting as addressing the bot (`mentioned`), so a request it
+started is a group request that another member's click cannot take. The answer is not judged against the chat's
+registry entry (`_ActiveTask.requester_id`): a delegated run asks while another member's turn can hold it.
 
 The question is asked at the moment the request is taken. `_handle_approval_command` asks it after the last
 `await` of the handler (the risk screening of a `/deny <reason>`) and directly before `PendingApprovals.pop`.
