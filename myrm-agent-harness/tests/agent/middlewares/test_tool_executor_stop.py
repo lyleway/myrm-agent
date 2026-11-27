@@ -1,22 +1,26 @@
-"""A stopped request is never retried, and a call still running when it is stopped does not outlive the request.
+"""A stopped request starts no call and retries none, and a call still running when it is stopped does not outlive it.
 
 The retry would run again a call the user already stopped; a call that only watches its own deadline would keep going
-(and keep its side effects) long after the turn ended.
+(and keep its side effects) long after the turn ended; a call that had not started would begin as the run is torn down.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Iterator
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import ToolMessage
 
 from myrm_agent_harness.agent.errors.tool_error_category import ToolErrorCategory
 from myrm_agent_harness.agent.middlewares.tooling import tool_executor
+from myrm_agent_harness.agent.middlewares.tooling._tool_guards import run_pre_call_guards
 from myrm_agent_harness.agent.middlewares.tooling.tool_executor import execute_with_retry
+from myrm_agent_harness.agent.security.guards.estop import EStopLevel, EStopState
+from myrm_agent_harness.agent.security.guards.loop_guard import LoopAction
 from myrm_agent_harness.agent.streaming.event_handlers import _handle_tool_result
 from myrm_agent_harness.agent.streaming.types import AgentEventType
 from myrm_agent_harness.utils.runtime.cancellation import CancellationToken, CancelReason, set_cancel_token
@@ -255,3 +259,81 @@ async def test_a_call_without_a_request_token_is_not_cut_by_anything_but_its_dea
 
     assert isinstance(result, ToolMessage)
     assert result.content == "ok"
+
+
+_PRE_CALL = "myrm_agent_harness.agent.middlewares.tooling._tool_guards.pre_call"
+_ESTOP_ON = EStopState(level=EStopLevel.TOOL_FREEZE, reason="test", activated_at=0.0, activated_by="test")
+
+
+@contextlib.contextmanager
+def _guards_around_the_loop_guard(estop: EStopState | None = None) -> Iterator[MagicMock]:
+    """Hold still what the pre-call guards before and around the loop guard consult; yields the audit recorder."""
+    with (
+        patch(
+            "myrm_agent_harness.agent.hooks.executor.fire_hook",
+            new_callable=AsyncMock,
+            return_value=MagicMock(blocked=False, updated_input=None),
+        ),
+        patch(f"{_PRE_CALL}.check_estop", return_value=estop),
+        patch(f"{_PRE_CALL}.record_decision") as audit,
+        patch(f"{_PRE_CALL}._emit_loop_guard_event", new_callable=AsyncMock),
+    ):
+        yield audit
+
+
+@pytest.mark.asyncio
+async def test_a_call_that_reaches_the_guards_after_the_stop_is_refused_before_the_loop_guard_records_it(
+    token: CancellationToken,
+) -> None:
+    token.cancel(CancelReason.USER_CANCELLED)
+    loop_guard = MagicMock()
+
+    with _guards_around_the_loop_guard():
+        result = await run_pre_call_guards(
+            _request(), "file_edit_tool", "tc_1", {}, get_loop_guard_fn=lambda: loop_guard
+        )
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.additional_kwargs["error_category"] == ToolErrorCategory.TOOL_CANCELLED
+    assert result.content == "file_edit_tool was not started: the request was stopped first."
+    loop_guard.pre_check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_estop_keeps_its_own_audited_refusal_for_a_call_of_a_request_it_stopped(
+    token: CancellationToken,
+) -> None:
+    """An E-Stop cancels every request's token as well; the call is refused as the E-Stop's, not as a plain stop."""
+    token.cancel(CancelReason.ESTOP)
+    loop_guard = MagicMock()
+
+    with _guards_around_the_loop_guard(estop=_ESTOP_ON) as audit:
+        result = await run_pre_call_guards(
+            _request(), "file_edit_tool", "tc_1", {}, get_loop_guard_fn=lambda: loop_guard
+        )
+
+    assert isinstance(result, ToolMessage)
+    assert result.additional_kwargs["error_category"] == ToolErrorCategory.ESTOP
+    assert audit.call_args.args[:2] == ("file_edit_tool", "ESTOP_BLOCKED")
+    loop_guard.pre_check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_call_of_a_request_nobody_stopped_still_meets_the_loop_guard(token: CancellationToken) -> None:
+    """Control: the refusals above are the stop's and the E-Stop's doing, not the order of the guards."""
+    refusing = MagicMock(
+        action=LoopAction.BREAK, reason="repeated", backoff_hint="try another way", loop_kind="repetition"
+    )
+    loop_guard = MagicMock()
+    loop_guard.pre_check.return_value = refusing
+    loop_guard.get_metrics.return_value = MagicMock(total_calls=1)
+
+    with _guards_around_the_loop_guard():
+        result = await run_pre_call_guards(
+            _request(), "file_edit_tool", "tc_1", {}, get_loop_guard_fn=lambda: loop_guard
+        )
+
+    loop_guard.pre_check.assert_called_once()
+    assert isinstance(result, ToolMessage)
+    assert result.additional_kwargs["error_category"] == ToolErrorCategory.LOOP_GUARD

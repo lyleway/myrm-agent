@@ -1,7 +1,7 @@
 """Markdown → Matrix HTML conversion utilities.
 
 [INPUT]
-- channels.rendering.text_utils::extract_safe_regions, FENCED_BLOCK_RE, fenced_block_html (POS: Universal text utilities; fenced block and its <pre> markup, shared with Telegram)
+- channels.rendering.text_utils::extract_safe_regions, FENCED_BLOCK_RE, fenced_block_html, markdown_links_to_html (POS: Universal text utilities; fenced block and its <pre> markup, Markdown link and its <a> markup, shared with Telegram)
 
 [OUTPUT]
 - md_to_matrix_html: Markdown → HTML subset (or None for plain text)
@@ -24,15 +24,13 @@ import html
 import re
 from collections.abc import Sequence
 
-from app.channels.rendering.text_utils import FENCED_BLOCK_RE, extract_safe_regions, fenced_block_html
+from app.channels.rendering.text_utils import FENCED_BLOCK_RE, extract_safe_regions, fenced_block_html, markdown_links_to_html
 
-# A span and a link target never hold a placeholder (NUL): backticks on both sides of a protected block stay text, and
-# a "link" to `code` is no href with markup in it.
+# A span never holds a placeholder (NUL): backticks on both sides of a protected block stay text.
 _INLINE_CODE_RE = re.compile(r"`([^`\x00]+)`")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 _STRIKE_RE = re.compile(r"~~(.+?)~~")
-_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\x00]+)\)")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
 _UL_LINE_RE = re.compile(r"^[-*]\s+(.+)$")
 _OL_LINE_RE = re.compile(r"^\d+\.\s+(.+)$")
@@ -100,7 +98,7 @@ def md_to_matrix_html(text: str) -> str | None:
     result = _BOLD_RE.sub(r"<strong>\1</strong>", result)
     result = _ITALIC_RE.sub(r"<em>\1</em>", result)
     result = _STRIKE_RE.sub(r"<del>\1</del>", result)
-    result = _LINK_RE.sub(r'<a href="\2">\1</a>', result)
+    result = markdown_links_to_html(result)
     result = _HEADING_RE.sub(
         lambda m: f"<h{len(m.group(1))}>{m.group(2)}</h{len(m.group(1))}>",
         result,

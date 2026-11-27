@@ -217,6 +217,9 @@ class TestNormalize:
     def test_unicodedata_never_gets_a_run_past_the_limit(
         self, monkeypatch: pytest.MonkeyPatch, form: NormalizationForm, unit: str
     ) -> None:
+        # The first non-ASCII text builds the character table with thousands of calls of its own, and the spy would
+        # count them when this is the first test of the process to run.
+        normalize(form, unit)
         real = unicodedata.normalize
         longest: list[int] = []
 

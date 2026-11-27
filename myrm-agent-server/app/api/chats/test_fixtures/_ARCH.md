@@ -26,7 +26,7 @@ local-only Chrome E2E seed 路由子包。上级文档：[../_ARCH.md](../_ARCH.
 | `file_edit_batch.py` | file_edit batch live/read_ui + workspace-only seed |
 | `file_mutation.py` | file mutation seed |
 | `guardrail_bash.py` | guardrail bash Badge seed |
-| `installed_app.py` | 已安装应用 seed（`POST /chats/test/seed-installed-app-fixture`：一条助手回答携带一份声明了 notify 与 fetch（`example.com`）的 HTML 应用制品，由产品自己的制品处理器登记；页面收到宿主发来的 `e2e-run` 后各调一次允许的主机、未声明的主机与通知并回传结果，收到 `e2e-burst` 则同一瞬间连发指定次数的通知；`POST /chats/test/seed-installed-app-fixture/revise` 以另一组 `fetch` 主机重新登记同一页面，等于智能体改了页面） |
+| `installed_app.py` | 已安装应用 seed（`POST /chats/test/seed-installed-app-fixture`：一条助手回答携带一份声明了 notify 与 fetch（`example.com`）的 HTML 应用制品，由产品自己的制品处理器登记；页面收到宿主发来的 `e2e-run` 后各调一次允许的主机、未声明的主机与通知并回传结果，收到 `e2e-burst` 则同一瞬间连发指定次数的通知，收到 `e2e-ask` 则向用户的模型问一个单词的问题、只回传是否拿到了答案；`POST /chats/test/seed-installed-app-fixture/revise` 以另一组 `fetch` 主机（以及可选的 `ai` 声明）重新登记同一页面，等于智能体改了页面） |
 | `media_cards.py` | 生成媒体卡片 seed（`POST /chats/test/seed-media-cards-fixture`：图像任务 / 视频任务 / 同步图像编辑 / 语音各一条已登记条目，媒体经落库回调真实存储；`address=file` 为任务结果指向不可加载地址的负向对照，`address=expired` 为任务记录已不存在） |
 | `memory_lifecycle.py` | memory lifecycle seed |
 | `prior_chat.py` | composer @chat: mention seed（`POST /chats/test/seed-prior-chat-fixture`；可选 `sent_at`（须带 UTC 偏移）给消息盖固定时刻，可选 `marker`（单个字母数字词）追加到两条消息末尾让一次 seed 能被单独搜到；非 local 模式不论查询串写什么一律 404（local 守卫是路由依赖，先于参数校验）；Cmd+K 与共享上下文历史搜索的时间检查用） |
