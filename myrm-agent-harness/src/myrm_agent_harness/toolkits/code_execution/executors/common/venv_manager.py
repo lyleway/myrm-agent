@@ -6,9 +6,10 @@ Manages shared virtual environment creation, initialization, and pip command rew
 - toolkits.code_execution.config::ExecutionConfig (POS: Code execution configuration layer. Defines execution modes, network policies, and runtime settings for the Agent-in-Sandbox architecture.)
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
 - infra.data_dir::resolve_data_dir (POS: Single entry point for the Myrm state root; harness and server code derive every state path from it)
+- toolkits.code_execution.executors.common.detached_process::DetachedProcess, spawn_detached (POS: A child process that keeps running when the process that started it exits)
 
 [OUTPUT]
-- VenvManager: Shared virtual environment manager (single-flight lazy create, pip installed in the background, pip rewrite with a quoted path, crash-safe discard).
+- VenvManager: Shared virtual environment manager (single-flight lazy create, pip installed in the background by a build that outlives the process that started it, pip rewrite with a quoted path, crash-safe discard that stops a build still running).
 - mentions_pip: True when a command or snippet names pip, so it must wait for the venv's pip.
 
 [POS]
@@ -29,6 +30,10 @@ from typing import BinaryIO
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.infra.data_dir import resolve_data_dir
 from myrm_agent_harness.toolkits.code_execution.config import ExecutionConfig
+from myrm_agent_harness.toolkits.code_execution.executors.common.detached_process import (
+    DetachedProcess,
+    spawn_detached,
+)
 from myrm_agent_harness.toolkits.code_execution.executors.common.subprocess_guard import (
     guarded_communicate,
 )
@@ -77,7 +82,8 @@ class VenvManager:
 
     ``python -m venv`` links the interpreter within milliseconds and then spends seconds installing pip. A Python run
     needs only the link, so it starts as soon as the link exists while the command finishes in the background; a command
-    or snippet that names pip waits for the command to end.
+    or snippet that names pip waits for the command to end. The command runs detached, so it also finishes when the
+    process that started it exits first.
     """
 
     def __init__(self, config: ExecutionConfig):
@@ -86,6 +92,7 @@ class VenvManager:
         self._venv_initialized = False
         self._resolve_lock = asyncio.Lock()
         self._build: asyncio.Task[bool] | None = None
+        self._build_process: DetachedProcess | None = None
 
     def get_venv_path(self) -> Path:
         """Return the shared virtual environment path."""
@@ -109,7 +116,8 @@ class VenvManager:
         """Remove the shared venv so the next use rebuilds it from an empty interpreter.
 
         Only call this while no process is using the venv: a live process keeps its cached
-        interpreter path. A build still running for the removed venv is cancelled.
+        interpreter path. A build still running for the removed venv is stopped, with what it started: left
+        running it would go on installing into the path the next build uses.
 
         Returns:
             True if a venv existed and was removed.
@@ -119,6 +127,9 @@ class VenvManager:
         if self._build is not None:
             self._build.cancel()
             self._build = None
+        if self._build_process is not None:
+            self._build_process.terminate()
+            self._build_process = None
 
         venv_path = self.get_venv_path()
         if not self._delete(venv_path):
@@ -183,16 +194,18 @@ class VenvManager:
         The stock command links the interpreter and then installs pip, nearly all of its time. A Python run needs only the link, so
         the command finishes in the background (``_finish_build``) and ``ensure_pip_ready_for`` holds back whatever needs pip. The
         command does both steps itself, so whatever becomes of this process the venv ends as complete as a synchronous build leaves
-        it; its output goes to a file because a pipe nobody reads any more kills it. Falls back to system Python if it fails.
+        it: the command runs detached, because a child of the event loop dies with it, and its output goes to a file, because a
+        pipe nobody reads any more kills it. Falls back to system Python if it fails.
         """
         logger.warning(f" [VenvManager] Creating shared venv: {venv_path}")
         started = time.monotonic()
         try:
-            process, log = await self._start_venv_command(venv_path)
+            process, log = self._start_venv_command(venv_path)
         except Exception as exc:
             logger.error(f" [VenvManager] Failed to create venv: {exc}")
             return self._fall_back_to_system_python()
 
+        self._build_process = process
         build = self._build = asyncio.create_task(self._finish_build(process, log, venv_path, started))
         while process.returncode is None and not _interpreter_linked(venv_path):
             await asyncio.sleep(_LINK_POLL_SECONDS)
@@ -206,8 +219,8 @@ class VenvManager:
         return self._fall_back_to_system_python()
 
     @staticmethod
-    async def _start_venv_command(venv_path: Path) -> tuple[asyncio.subprocess.Process, BinaryIO]:
-        """Start ``python -m venv`` writing to an unlinked file next to the venv, which the caller must close (``_finish_build`` does).
+    def _start_venv_command(venv_path: Path) -> tuple[DetachedProcess, BinaryIO]:
+        """Start ``python -m venv`` detached, writing to an unlinked file next to the venv, which the caller must close (``_finish_build`` does).
 
         The file sits in the state directory the venv is created in, which has to be writable anyway; the system temp
         directory may be read-only or tiny, and the build must not depend on it.
@@ -215,17 +228,13 @@ class VenvManager:
         venv_path.parent.mkdir(parents=True, exist_ok=True)
         log = tempfile.TemporaryFile(dir=venv_path.parent)  # noqa: SIM115  outlives this call: the child writes to it until the build ends
         try:
-            process = await asyncio.create_subprocess_exec(
-                sys.executable, "-m", "venv", str(venv_path), stdout=log, stderr=log
-            )
+            process = spawn_detached(sys.executable, "-m", "venv", str(venv_path), stdout=log, stderr=log)
         except BaseException:
             log.close()
             raise
         return process, log
 
-    async def _finish_build(
-        self, process: asyncio.subprocess.Process, log: BinaryIO, venv_path: Path, started: float
-    ) -> bool:
+    async def _finish_build(self, process: DetachedProcess, log: BinaryIO, venv_path: Path, started: float) -> bool:
         """Wait for ``python -m venv`` to end; when it fails, fall back to system Python.
 
         The deadline counts from the start of the command, so a hang is bounded once however early the interpreter was linked.

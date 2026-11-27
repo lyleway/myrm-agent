@@ -1,10 +1,10 @@
-"""Test kit for the shared venv: a stand-in for its ``python -m venv <path>`` subprocess, and the manager and loop helpers around it.
+"""Test kit for the shared venv: a stand-in for its ``python -m venv <path>`` child, and the manager and loop helpers around it.
 
 The stdlib command links the interpreter first (``bin/python``, ``python3`` and ``python3.N``, symlinks), then installs pip, which is most of its
 time. The fake does the same on a schedule the test controls: the links appear once ``release_links`` is set (``python3`` and ``python3.N``
 once ``release_aliases`` is set too), pip appears and the process ends once ``release_build`` is set; a failing build writes its message to the
-log file the manager gave it. ``terminate()`` ends it at any point. Patch ``asyncio.create_subprocess_exec`` of the venv manager with an
-instance (``patch(VENV_SPAWN, side_effect=FakeVenvSpawn())``).
+log file the manager gave it. ``terminate()`` ends it at any point. Patch ``spawn_detached`` of the venv manager with an instance
+(``patch(VENV_SPAWN, side_effect=FakeVenvSpawn())``).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 from myrm_agent_harness.toolkits.code_execution.config import ExecutionConfig
 from myrm_agent_harness.toolkits.code_execution.executors.common.venv_manager import VenvManager
 
-VENV_SPAWN = "myrm_agent_harness.toolkits.code_execution.executors.common.venv_manager.asyncio.create_subprocess_exec"
+VENV_SPAWN = "myrm_agent_harness.toolkits.code_execution.executors.common.venv_manager.spawn_detached"
 ALIASES = ("python3", f"python3.{sys.version_info[1]}")
 TERMINATED = -15
 
@@ -113,7 +113,7 @@ class _FakeVenvProcess:
 
 
 class FakeVenvSpawn:
-    """``asyncio.create_subprocess_exec`` as the venv manager calls it."""
+    """``spawn_detached`` as the venv manager calls it."""
 
     def __init__(
         self,
@@ -147,7 +147,7 @@ class FakeVenvSpawn:
         return self.calls
 
     def __call__(self, *argv: str, **kwargs: object) -> _FakeVenvProcess:
-        """Synchronous on purpose: the ``AsyncMock`` that ``patch`` builds awaits the call for the code under test."""
+        """Synchronous, like ``spawn_detached``."""
         if argv[1:3] != ("-m", "venv") or not Path(argv[-1]).is_absolute():
             raise AssertionError(
                 f"the venv manager started something other than `python -m venv <absolute path>`: {argv}"

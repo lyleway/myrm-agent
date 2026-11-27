@@ -186,6 +186,7 @@ async def test_discard_cancels_the_pending_build_and_the_next_use_builds_again(t
         assert manager.discard() is True
         await let_the_loop_run()
         assert spawn.abandoned == 1
+        assert spawn.terminated == 1
         waiter = asyncio.create_task(manager.ensure_pip_ready_for("pip list"))
         await let_the_loop_run()
         assert len(spawn.creations) == 2

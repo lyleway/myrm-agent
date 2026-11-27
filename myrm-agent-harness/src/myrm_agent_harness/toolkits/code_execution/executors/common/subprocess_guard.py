@@ -1,10 +1,10 @@
 """Subprocess timeout guard for code executors.
 
-Wraps ``asyncio.subprocess.Process.communicate()`` with a timeout and
-graceful termination (SIGTERM → 2 s grace → SIGKILL).  All code execution
-modules that spawn subprocesses (docker cp, docker exec, venv creation,
-etc.) should use ``guarded_communicate`` instead of bare ``communicate``
-to prevent indefinite hangs.
+Wraps the ``communicate()`` of a child (an ``asyncio.subprocess.Process`` or a
+``DetachedProcess``) with a timeout and graceful termination (SIGTERM → 2 s
+grace → SIGKILL).  All code execution modules that spawn subprocesses (docker
+cp, docker exec, venv creation, etc.) should use ``guarded_communicate``
+instead of bare ``communicate`` to prevent indefinite hangs.
 
 [INPUT]
 - none (imports no other project module)
@@ -22,8 +22,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
+
+
+class Child(Protocol):
+    """What the guard needs of a child: ``asyncio.subprocess.Process`` and ``DetachedProcess`` both have it."""
+
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+    async def communicate(self) -> tuple[bytes, bytes]: ...
+
+    async def wait(self) -> int: ...
+
+    def terminate(self) -> None: ...
+
+    def kill(self) -> None: ...
 
 
 class SubprocessTimeoutError(TimeoutError):
@@ -36,7 +55,7 @@ class SubprocessTimeoutError(TimeoutError):
         super().__init__(f"Subprocess timed out after {timeout}s{detail}")
 
 
-async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
+async def _terminate_process(proc: Child) -> None:
     """Gracefully terminate: SIGTERM → 2 s wait → SIGKILL."""
     if proc.returncode is not None:
         return
@@ -49,7 +68,7 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
 
 
 async def guarded_communicate(
-    proc: asyncio.subprocess.Process,
+    proc: Child,
     timeout: float,
     *,
     label: str = "",
