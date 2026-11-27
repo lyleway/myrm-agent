@@ -191,6 +191,7 @@ class TestMaskedOpeners:
             ("[a](b) [c]", False, "[a](b) \x00c]"),  # no ``](`` after the second opener
             ("[[[", False, "\x00\x00\x00"),
             ("[a](", False, "\x00a]("),  # no ")" to close a target
+            ("[a](bc", False, "\x00a](bc"),  # a "](" ahead of the end closes nothing without a ")" after it
             ("[a]())", False, "\x00a]())"),  # an empty target closes nothing
             ("[a]())", True, "[a]())"),  # a target may begin with the ")" that ends the first one
             ("[a]()", True, "\x00a]()"),
@@ -292,6 +293,10 @@ class TestLinearTime:
     # time about sixty-four-fold.
     @pytest.mark.parametrize("family", sorted(_HOSTILE))
     def test_time_grows_in_proportion_to_the_text(self, family: str) -> None:
+        # The patterns take seconds on the probe where the scans take about a millisecond, and could not return
+        # from the longer texts at all, so the probe has to fail the test before they are tried.
+        assert _scan_in(_HOSTILE[family](4_000)) < 0.5
+
         short = _scan_in(_HOSTILE[family](50_000))
         assert short < 1.0  # a scan that restarts from every opener fails here, before the long text is tried
 

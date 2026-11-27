@@ -189,6 +189,10 @@ class TestLinearTime:
     # The text grows eightfold: linear time grows about eightfold, quadratic about sixty-four-fold, cubic more.
     @pytest.mark.parametrize("family", sorted(_HOSTILE))
     def test_time_grows_in_proportion_to_the_message(self, family: str) -> None:
+        # A cubic scan takes seconds on the probe where the linear one takes about a millisecond, and could not
+        # return from the longer messages at all, so the probe has to fail the test before they are tried.
+        assert _read_in(_HOSTILE[family](4_000)) < 0.5
+
         short = _read_in(_HOSTILE[family](50_000))
         assert short < 1.0
 

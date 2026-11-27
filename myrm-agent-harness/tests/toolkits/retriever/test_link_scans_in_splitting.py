@@ -46,6 +46,10 @@ def _cpu_seconds(work: Callable[[], object]) -> float:
 
 def _assert_linear(make: Callable[[int], str], work: Callable[[str], object], small: int = 50_000) -> None:
     """The text grows eightfold: linear time grows about eightfold, quadratic about sixty-four-fold."""
+    # A cubic scan takes seconds on the probe where the linear one takes about a millisecond, and could not
+    # return from the longer texts at all, so the probe has to fail the test before they are tried.
+    assert _cpu_seconds(lambda: work(make(4_000))) < 0.5
+
     short = _cpu_seconds(lambda: work(make(small)))
     assert short < 1.0
 
