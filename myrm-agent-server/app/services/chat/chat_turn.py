@@ -7,6 +7,7 @@
 - services.chat.chat_title::generate_chat_title, generate_fallback_title, call_llm_for_title (POS: Chat title generation layer decoupled from turn management)
 - services.chat.session_continuity_service::hold_session_for_continuity, pause_active_goal_for_rewind, invalidate_chat_checkpoint (POS: Server-layer adapter for truncate/undo/retry/rewind checkpoint consistency; holds the chat while a rewind runs)
 - services.chat.rewind_files::snapshot_pre_rewind, restore_pre_rewind_snapshot, revert_files_for_messages, cleanup_orphan_snapshots (POS: File side of a chat rewind: the protective snapshot, the file revert and the snapshot cleanup)
+- services.chat.compact.history_change::settle_compaction_after_history_change (POS: Runs in the transaction of every history rewrite so the compaction summary and its messages never disagree)
 
 [OUTPUT]
 - _ChatTurnMixin: 重试、撤销、截断、重新生成、兄弟切换、原子回滚自愈
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.database.repositories.chat_repo import SiblingDetail
@@ -26,6 +28,7 @@ from app.database.repositories.uow import UnitOfWork
 
 from ._base import _ChatServiceBase
 from .chat_helpers import RegenerateResult, RetryResult, RewindResult, TruncateResult, UndoResult
+from .compact.history_change import settle_compaction_after_history_change
 from .rewind_files import (
     cleanup_orphan_snapshots,
     restore_pre_rewind_snapshot,
@@ -42,11 +45,12 @@ logger = logging.getLogger(__name__)
 class _ChatTurnMixin(_ChatServiceBase):
     """Retry, undo, truncate, sibling, and title generation operations.
 
-    Retry, undo and the delete step of a rewind read and then delete, and take the write lock on entry: another writer's
-    commit between their read and their delete would abort the delete with SQLITE_BUSY_SNAPSHOT. The lock is needed by
-    the compression-exhausted undo (its failure is only logged) and by a rewind that has already reverted files; IM
-    /retry and /undo answer a failed command and the user repeats it, so their lock is a free precaution. Truncate,
-    regenerate and sibling switching are HTTP-only and change nothing before their write: a lost write fails the request.
+    Every operation that rewrites the message history reads and then writes, and takes the write lock on entry: another
+    writer's commit between its read and its write would abort the write with SQLITE_BUSY_SNAPSHOT. Each one settles the
+    compaction summary in that same transaction (``_settle_compaction``), which reads the summary's write time first.
+    The lock is needed by the compression-exhausted undo (its failure is only logged) and by a rewind that has already
+    reverted files; the HTTP-only operations would otherwise fail the request, and IM /retry and /undo answer a failed
+    command that the user repeats.
     """
 
     @staticmethod
@@ -62,6 +66,13 @@ class _ChatTurnMixin(_ChatServiceBase):
             clean_content, _ = extract_and_strip_think_blocks(remaining.content)
             new_last = clean_content[:100]
         await _ChatServiceBase._cr(uow).update_chat_fields(chat_id, {"last_message": new_last})
+
+    @staticmethod
+    async def _settle_compaction(uow: UnitOfWork, chat_id: str, *, since: datetime, rows_deleted: bool) -> None:
+        """Drop a compaction summary the history change made stale, in the change's own transaction."""
+        session = uow.session
+        assert session is not None
+        await settle_compaction_after_history_change(session, chat_id, since=since, rows_deleted=rows_deleted)
 
     @staticmethod
     async def _invalidate_checkpoint_after_mutation(chat_id: str) -> None:
@@ -104,6 +115,7 @@ class _ChatTurnMixin(_ChatServiceBase):
                 last_user,
                 include_anchor=False,
             )
+            await _ChatTurnMixin._settle_compaction(uow, chat_id, since=last_user.created_at, rows_deleted=bool(deleted_ids))
             result = RetryResult(
                 success=True,
                 query=last_user.content,
@@ -123,7 +135,7 @@ class _ChatTurnMixin(_ChatServiceBase):
         Retry deletes later messages; regenerate preserves inactive sibling
         responses so users can switch between generated versions.
         """
-        async with UnitOfWork() as uow:
+        async with UnitOfWork(write=True) as uow:
             chat = await _ChatServiceBase._cr(uow).get_chat_by_id(chat_id, load_messages=False)
             if not chat:
                 return RegenerateResult(success=False, query="", sibling_group_id="")
@@ -131,6 +143,7 @@ class _ChatTurnMixin(_ChatServiceBase):
             if not last_user:
                 return RegenerateResult(success=False, query="", sibling_group_id="")
             query, group_id = await _ChatServiceBase._cr(uow).deactivate_last_assistant_siblings(chat_id, last_user)
+            await _ChatTurnMixin._settle_compaction(uow, chat_id, since=last_user.created_at, rows_deleted=False)
         await _ChatTurnMixin._sync_usage_after_mutation(chat_id)
         await _ChatTurnMixin._sync_todos_for_active_branch(chat_id)
         return RegenerateResult(success=True, query=query, sibling_group_id=group_id)
@@ -138,8 +151,12 @@ class _ChatTurnMixin(_ChatServiceBase):
     @staticmethod
     async def switch_sibling(chat_id: str, sibling_group_id: str, target_message_id: str) -> bool:
         """Switch the active sibling in a group. Returns True on success."""
-        async with UnitOfWork() as uow:
+        async with UnitOfWork(write=True) as uow:
             ok = await _ChatServiceBase._cr(uow).switch_active_sibling(sibling_group_id, target_message_id)
+            if ok:
+                # Every version of the turn is in the group, so a summary written before its first one holds none of them.
+                versions = await _ChatServiceBase._cr(uow).get_sibling_info(sibling_group_id)
+                await _ChatTurnMixin._settle_compaction(uow, chat_id, since=versions[0]["created_at"], rows_deleted=False)
         if ok:
             await _ChatTurnMixin._sync_usage_after_mutation(chat_id)
             await _ChatTurnMixin._sync_todos_for_active_branch(chat_id)
@@ -167,6 +184,7 @@ class _ChatTurnMixin(_ChatServiceBase):
             )
             if deleted_ids:
                 await _ChatTurnMixin._refresh_last_message(uow, chat_id)
+            await _ChatTurnMixin._settle_compaction(uow, chat_id, since=last_user.created_at, rows_deleted=bool(deleted_ids))
             result = UndoResult(
                 success=True,
                 deleted_count=len(deleted_ids),
@@ -185,7 +203,7 @@ class _ChatTurnMixin(_ChatServiceBase):
         Used by edit-resend: truncate old messages from the DB so agent
         context stays clean when the user edits and re-sends a message.
         """
-        async with UnitOfWork() as uow:
+        async with UnitOfWork(write=True) as uow:
             chat = await _ChatServiceBase._cr(uow).get_chat_by_id(chat_id, load_messages=False)
             if not chat:
                 return TruncateResult(success=False, deleted_count=0)
@@ -199,6 +217,7 @@ class _ChatTurnMixin(_ChatServiceBase):
             )
             if deleted_ids:
                 await _ChatTurnMixin._refresh_last_message(uow, chat_id)
+            await _ChatTurnMixin._settle_compaction(uow, chat_id, since=msg.created_at, rows_deleted=bool(deleted_ids))
             result = TruncateResult(success=True, deleted_count=len(deleted_ids))
         if result.success and result.deleted_count > 0:
             await _ChatTurnMixin._invalidate_checkpoint_after_mutation(chat_id)
@@ -306,8 +325,9 @@ class _ChatTurnMixin(_ChatServiceBase):
                     await restore_pre_rewind_snapshot(chat_id, pre_snap_id)
                 raise exc
 
-        # Phase 2: delete the rows the first step found and refresh the chat preview in one write transaction. It takes the
-        # write lock on entry: Phase 1 may already have reverted files, so another writer's commit must not abort it now.
+        # Phase 2: delete the rows the first step found, refresh the chat preview and settle the compaction summary in one
+        # write transaction. It takes the write lock on entry: Phase 1 may already have reverted files, so another
+        # writer's commit must not abort it now.
         async with UnitOfWork(write=True) as uow:
             deleted_ids = await _ChatServiceBase._cr(uow).delete_messages_after(
                 chat_id,
@@ -317,6 +337,7 @@ class _ChatTurnMixin(_ChatServiceBase):
             )
             if deleted_ids:
                 await _ChatTurnMixin._refresh_last_message(uow, chat_id)
+            await _ChatTurnMixin._settle_compaction(uow, chat_id, since=msg.created_at, rows_deleted=bool(deleted_ids))
 
         if not deleted_ids:
             return RewindResult(

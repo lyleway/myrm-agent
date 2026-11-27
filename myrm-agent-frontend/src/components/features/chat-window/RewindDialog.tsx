@@ -3,6 +3,7 @@
  * @/services/chat::rewindToMessage (POS: Chat session truncation and rollback API client)
  * @/store/useChatStore::useChatStore (POS: Global chat store for message state)
  * @/store/chat/goals/usePlanStore::usePlanStore (POS: Store of the active plan, refetched after a rewind)
+ * @/store/chat/compactionAfterHistoryChange::refreshCompactionAfterHistoryChange (POS: Re-reads the summary card the rewind may have invalidated)
  * @/lib/utils/messageUtils::splitUserMessageForComposer (POS: Message text cleanup, explicit skill wire format)
  * @/lib/utils/apiConfig::getBackendUrl (POS: Backend base URL without the API path prefix)
  * @/lib/utils/authHeaders::getAuthHeaders (POS: Authorization headers of backend requests)
@@ -43,6 +44,7 @@ import { getBackendUrl } from '@/lib/utils/apiConfig';
 import { useToast } from '@/hooks/shared/useToast';
 import useChatStore from '@/store/useChatStore';
 import { usePlanStore } from '@/store/chat/goals/usePlanStore';
+import { refreshCompactionAfterHistoryChange } from '@/store/chat/compactionAfterHistoryChange';
 import { splitUserMessageForComposer } from '@/lib/utils/messageUtils';
 import { focusComposer } from './useComposerFastFocus';
 
@@ -230,6 +232,7 @@ export function RewindDialog({ open, onOpenChange, chatId, messageId, messageInd
             composer.activation ?? (draftKept ? live.pendingExplicitSkillActivation : null),
         });
         void usePlanStore.getState().fetchPlan(chatId);
+        refreshCompactionAfterHistoryChange(chatId);
       }
 
       const revertedCount = payload.reverted_files?.length ?? 0;
