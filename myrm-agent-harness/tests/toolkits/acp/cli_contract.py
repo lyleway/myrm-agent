@@ -12,6 +12,7 @@ shown to reject garbage counts: a CLI that accepts anything at parse time proves
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -25,6 +26,18 @@ import pytest
 
 # Names a probe passes as a value no CLI lists; a probe that accepts it cannot tell a good value from a bad one.
 _GARBAGE_VALUE = "__not_a_listed_value__"
+
+# Content each CLI itself accepts as a login without contacting any server.
+CLAUDE_OAUTH: Mapping[str, object] = {
+    "claudeAiOauth": {
+        "accessToken": "sk-ant-oat01-contract",
+        "refreshToken": "sk-ant-ort01-contract",
+        "expiresAt": 4102444800000,
+        "scopes": ["user:inference"],
+        "subscriptionType": "max",
+    }
+}
+CODEX_API_KEY: Mapping[str, object] = {"OPENAI_API_KEY": "sk-contract-0000000000000000000000000000"}
 _HELP_TIMEOUT_SECONDS = 90
 
 # An option starts a help entry when it opens a line shallower than any wrapped description.
@@ -165,6 +178,14 @@ def probe_env(home: Path) -> dict[str, str]:
         config_dir.mkdir(exist_ok=True)
         env[var] = str(config_dir)
     return env
+
+
+def write_credential_file(home: Path, backend: str, content: Mapping[str, object]) -> None:
+    """Put ``content`` where ``backend`` looks for its credentials in the home ``probe_env`` made."""
+    directory = home / ("claude_config_dir" if backend == "claude" else "codex_home")
+    directory.mkdir(exist_ok=True)
+    name = ".credentials.json" if backend == "claude" else "auth.json"
+    (directory / name).write_text(json.dumps(content))
 
 
 def run_probe(

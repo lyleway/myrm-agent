@@ -34,7 +34,7 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   transport: 'cli',
   authenticated: false,
   authStatus: 'not_authenticated',
-  loginStrategy: 'device_code',
+  loginStrategy: 'browser_oauth',
   scriptableLogin: true,
   needsCodeInput: false,
   subscriptionLoginAllowed: true,
@@ -118,6 +118,24 @@ describe('ExternalAgentAuthControls', () => {
 
     expect(mocks.toast.error).toHaveBeenCalledWith('loginFailed');
     expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it('says so when the CLI still reports the login after a logout, and refreshes to show it', async () => {
+    const onChanged = vi.fn();
+    mocks.logout.mockResolvedValue({ backend: 'claude', authenticated: true, authStatus: 'authenticated' });
+    render(
+      <ExternalAgentAuthControls
+        command="claude"
+        status={status({ backend: 'claude', authenticated: true, authStatus: 'authenticated' })}
+        onChanged={onChanged}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'logout' }));
+
+    expect(mocks.toast.error).toHaveBeenCalledWith('logoutIncomplete');
+    expect(mocks.toast.success).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
   describe('in a hosted deployment', () => {

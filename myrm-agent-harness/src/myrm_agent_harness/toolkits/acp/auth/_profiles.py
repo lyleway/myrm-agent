@@ -41,9 +41,8 @@ Transport = Literal["cli", "acp", "app_server"]
 class LoginStrategy(StrEnum):
     """How a CLI backend performs an interactive subscription login."""
 
-    DEVICE_CODE = "device_code"  # CLI prints a URL/code; user authorizes in a browser, CLI polls
     BROWSER_OAUTH = "browser_oauth"  # CLI opens a browser and runs a local loopback callback
-    SETUP_TOKEN = "setup_token"  # CLI prints a URL; user pastes the returned auth code back via stdin
+    PASTE_CODE = "paste_code"  # CLI prints a URL; the page it leads to shows a code the user pastes back via stdin
     MANUAL_IMPORT = "manual_import"  # no scriptable login on this host; only credential import works
 
 
@@ -61,9 +60,8 @@ class AuthProfile:
     home_dir: str  # default home subdir under $HOME (e.g. ".codex")
     credential_files: tuple[str, ...]  # candidate credential filenames within the home dir
     login_strategy: LoginStrategy
-    login_args: tuple[str, ...]  # args appended to the command to start login ("" → not scriptable)
-    logout_args: tuple[str, ...] | None
-    needs_code_input: bool  # whether login expects the user to paste a code back via stdin
+    login_args: tuple[str, ...]  # args appended to the command to start login; empty: not scriptable
+    logout_args: tuple[str, ...] | None  # args that make the CLI remove its own login, wherever it keeps it
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
     # The transport the agent's own contract calls for, and the args that start it that way (never permission flags,
     # except the one an ACP agent needs to ask at all): a CLI agent's baseline headless invocation; the flag that puts
@@ -73,9 +71,14 @@ class AuthProfile:
     launch_args: tuple[str, ...] = ()
     # The session mode an ACP agent reports once it asks the host; anything else in ``safe`` mode is not left standing.
     acp_ask_mode: str | None = None
-    login_probe: tuple[
-        str, ...
-    ] = ()  # args that make the CLI report its own login state; empty: it has no such command
+    # The args that make the CLI report its own login state; empty: it has no such command.
+    login_probe: tuple[str, ...] = ()
+    # The login for a browser on another machine than the CLI: a loopback callback cannot reach it from there, so the
+    # CLI is asked for the flow that works from anywhere. Empty: ``login_args`` already works from anywhere.
+    remote_login_args: tuple[str, ...] = ()
+    # The text of the CLI's own prompt for the code the user pastes back through stdin; empty: the login asks for none.
+    # The CLI prints it again after a rejected code, so it is never the reason a login failed.
+    code_prompt: str = ""
     # What a home of its own needs beyond ``home_env``. ``home_env_is_base``: the variable stands in for ``$HOME``, so
     # the CLI's state lives in ``<value>/<home_dir>`` rather than in the value itself. ``isolation_env``: variables that
     # keep the login inside the home; a CLI that keeps it in the operating system's keychain unless told otherwise
@@ -106,6 +109,15 @@ class AuthProfile:
         base = self.resolve_home(env)
         return [base / name for name in self.credential_files]
 
+    def login_command(self, *, remote: bool) -> tuple[str, ...]:
+        """The args that start the login, for a browser on another machine than the CLI when ``remote``."""
+        return self.remote_login_args if remote and self.remote_login_args else self.login_args
+
+    @property
+    def needs_code_input(self) -> bool:
+        """Whether the login asks the user to paste a code back through stdin."""
+        return bool(self.code_prompt)
+
     @property
     def scriptable_login(self) -> bool:
         """Whether an interactive login can be driven by spawning the CLI."""
@@ -121,10 +133,10 @@ _PROFILES: dict[str, AuthProfile] = {
         home_env="CLAUDE_CONFIG_DIR",
         home_dir=".claude",
         credential_files=(".credentials.json",),
-        login_strategy=LoginStrategy.SETUP_TOKEN,
-        login_args=("setup-token",),
-        logout_args=None,
-        needs_code_input=True,
+        login_strategy=LoginStrategy.PASTE_CODE,
+        login_args=("auth", "login", "--claudeai"),
+        logout_args=("auth", "logout"),
+        code_prompt="Paste code here",
         api_key_env=("ANTHROPIC_API_KEY",),
         login_probe=("auth", "status"),
         launch_args=("-p", "--output-format", "stream-json", "--verbose"),
@@ -134,10 +146,10 @@ _PROFILES: dict[str, AuthProfile] = {
         home_env="CODEX_HOME",
         home_dir=".codex",
         credential_files=("auth.json",),
-        login_strategy=LoginStrategy.DEVICE_CODE,
+        login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=("login",),
+        remote_login_args=("login", "--device-auth"),
         logout_args=("logout",),
-        needs_code_input=False,
         # The app server reads no key from its environment; the runtime hands the first of these the host injected to
         # the server as a login that is never written to disk.
         api_key_env=("OPENAI_API_KEY", "CODEX_API_KEY"),
@@ -154,7 +166,6 @@ _PROFILES: dict[str, AuthProfile] = {
         login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=(),
         logout_args=None,
-        needs_code_input=False,
         api_key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         transport="acp",
         launch_args=("--acp", "--approval-mode", "default"),
@@ -170,7 +181,6 @@ _PROFILES: dict[str, AuthProfile] = {
         login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=(),
         logout_args=None,
-        needs_code_input=False,
         api_key_env=("DASHSCOPE_API_KEY", "QWEN_API_KEY"),
         transport="acp",
         launch_args=("--acp", "--approval-mode", "default"),

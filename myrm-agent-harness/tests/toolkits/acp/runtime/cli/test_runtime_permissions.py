@@ -155,9 +155,11 @@ class TestClaudeAsksTheHost:
 class TestTimeAndEndings:
     async def test_the_time_a_person_takes_is_not_the_time_claude_has(self, fake_cli: FakeCli) -> None:
         fake_cli.set_scenario({"asks": [_BASH]})
-        runtime = make_runtime(fake_cli, timeout_seconds=2)
+        # The person takes longer than the whole budget; the budget must still cover only the CLI's own work,
+        # with enough room that a loaded machine starting the stand-in does not spend it.
+        runtime = make_runtime(fake_cli, timeout_seconds=5)
 
-        events = await _turn(runtime, _Broker(delay=3.0))
+        events = await _turn(runtime, _Broker(delay=6.0))
 
         assert errors_of(events) == []
         assert text_of(events) == "allow"

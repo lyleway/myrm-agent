@@ -18,7 +18,7 @@
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
 import type { ExternalAgentType } from '@/services/config';
 
-export type ExternalAgentLoginStrategy = 'device_code' | 'browser_oauth' | 'setup_token' | 'manual_import';
+export type ExternalAgentLoginStrategy = 'browser_oauth' | 'paste_code' | 'manual_import';
 
 export interface ExternalAgentAuthStatus {
   backend: string;
@@ -199,7 +199,10 @@ export function importExternalAgentCredential(
   });
 }
 
-/** Remove a backend's stored subscription credentials (those of the named account, when one is given). */
+/**
+ * Log a backend out through its CLI and remove its stored credentials (those of the named account, when one is given).
+ * The state it returns is what the CLI reports afterwards: a login that could not be removed is still `authenticated`.
+ */
 export function logoutExternalAgent(backend: string, account?: string): Promise<ExternalAgentCredentialState> {
   return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/logout', {
     method: 'POST',
@@ -222,7 +225,10 @@ export function createExternalAgentAccount(backend: string, name: string): Promi
   });
 }
 
-/** Remove an account with its login, settings and history. */
+/**
+ * Remove an account with its login, settings and history. The account's CLI logs out first; when the login still
+ * stands afterwards the account is kept and this rejects with an `ApiError` of code 409.
+ */
 export function deleteExternalAgentAccount(backend: string, name: string): Promise<{ ok: boolean }> {
   return apiRequest<{ ok: boolean }>(
     `/external-agents/accounts/${encodeURIComponent(backend)}/${encodeURIComponent(name)}`,
@@ -230,7 +236,7 @@ export function deleteExternalAgentAccount(backend: string, name: string): Promi
   );
 }
 
-/** Forward a user-supplied code to a live login session (setup_token flow). */
+/** Forward a user-supplied code to a live login session (paste_code flow). */
 export function feedExternalAgentLogin(sessionId: string, text: string): Promise<{ ok: boolean }> {
   return apiRequest<{ ok: boolean }>(`/external-agents/auth/login/${encodeURIComponent(sessionId)}/feed`, {
     method: 'POST',
@@ -240,10 +246,11 @@ export function feedExternalAgentLogin(sessionId: string, text: string): Promise
 
 /**
  * Drive an interactive CLI login over SSE, invoking `onEvent` for each event
- * until the stream closes. Pass an AbortSignal to cancel mid-flight.
+ * until the stream closes. Pass an AbortSignal to cancel mid-flight. `remote`: the browser that signs in is on
+ * another machine than the CLI, so the CLI is asked for a login that works from there.
  */
 export async function streamExternalAgentLogin(
-  params: { command: string; backend?: string; sessionId: string; account?: string },
+  params: { command: string; backend?: string; sessionId: string; account?: string; remote?: boolean },
   onEvent: (event: ExternalAgentAuthEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -257,6 +264,7 @@ export async function streamExternalAgentLogin(
         backend: params.backend,
         sessionId: params.sessionId,
         account: params.account,
+        remote: params.remote,
       }),
       signal,
     },

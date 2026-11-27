@@ -16,6 +16,7 @@ import {
 import { IconLoader } from '@/components/features/icons/PremiumIcons';
 import { Input } from '@/components/primitives/input';
 import { Textarea } from '@/components/primitives/textarea';
+import { isLoopbackDevHost, isRemoteGatewayActive, isTauriRuntime } from '@/lib/deploy-mode';
 import {
   feedExternalAgentLogin,
   importExternalAgentCredential,
@@ -29,6 +30,22 @@ function newSessionId(): string {
     return crypto.randomUUID();
   }
   return `login-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Whether the browser that signs in is on another machine than the CLI: behind a remote gateway, or on a host that is not this one. */
+function browserIsRemote(): boolean {
+  return isRemoteGatewayActive() || !(isTauriRuntime() || isLoopbackDevHost());
+}
+
+/** The latest `url` or `code` the CLI has shown. A CLI may print the link and the code as separate lines. */
+function latestPromptField(events: readonly ExternalAgentAuthEvent[], field: 'url' | 'code'): string | undefined {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.type === 'prompt' && event[field]) {
+      return event[field];
+    }
+  }
+  return undefined;
 }
 
 interface Props {
@@ -66,7 +83,7 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, ac
     abortRef.current = controller;
     try {
       await streamExternalAgentLogin(
-        { command, backend, sessionId, account },
+        { command, backend, sessionId, account, remote: browserIsRemote() },
         (event) => {
           setEvents((prev) => [...prev, event]);
           if (event.type === 'success') {
@@ -144,7 +161,8 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, ac
     [onOpenChange],
   );
 
-  const prompt = [...events].reverse().find((e) => e.type === 'prompt');
+  const link = latestPromptField(events, 'url');
+  const deviceCode = latestPromptField(events, 'code');
   const last = events[events.length - 1];
 
   return (
@@ -166,16 +184,18 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, ac
                   {last?.message || t('loginConnecting')}
                 </div>
               )}
-              {prompt?.url && (
+              {(link || deviceCode) && (
                 <div className="space-y-1.5 rounded-md border border-border p-3 text-sm">
                   <p className="text-muted-foreground">{t('loginOpenUrl')}</p>
-                  <a href={prompt.url} target="_blank" rel="noreferrer" className="text-primary break-all underline">
-                    {prompt.url}
-                  </a>
-                  {prompt.code && <p className="font-mono text-base tracking-widest">{prompt.code}</p>}
+                  {link && (
+                    <a href={link} target="_blank" rel="noreferrer" className="text-primary break-all underline">
+                      {link}
+                    </a>
+                  )}
+                  {deviceCode && <p className="font-mono text-base tracking-widest">{deviceCode}</p>}
                 </div>
               )}
-              {needsCode && (
+              {needsCode && running && (
                 <div className="flex items-end gap-2">
                   <div className="flex-1 space-y-1">
                     <label className="text-xs text-muted-foreground">{t('loginCode')}</label>

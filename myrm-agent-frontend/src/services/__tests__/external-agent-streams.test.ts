@@ -167,6 +167,21 @@ describe('streamExternalAgentLogin', () => {
     });
   });
 
+  it('says so when the browser that signs in is on another machine than the CLI', async () => {
+    mocks.fetchWithTimeout.mockResolvedValue(sseResponse([frame({ type: 'success', message: 'done' })]));
+
+    await streamExternalAgentLogin({ command: 'codex', backend: 'codex', sessionId: 's1', remote: true }, () => {
+      /* events are not under test */
+    });
+
+    expect(JSON.parse(mocks.fetchWithTimeout.mock.calls[0][1].body)).toEqual({
+      command: 'codex',
+      backend: 'codex',
+      sessionId: 's1',
+      remote: true,
+    });
+  });
+
   it('throws when the server refuses the login stream', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(new Response('no', { status: 400 }));
 
