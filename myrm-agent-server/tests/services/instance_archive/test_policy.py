@@ -27,6 +27,8 @@ from tests.services.instance_archive.conftest import PERMISSIONS_ENFORCED
         (("vault.key",), PathCategory.MACHINE_KEY),
         (("session_vault", "x"), PathCategory.SECRET),
         (("whatsapp_auth", "creds.json"), PathCategory.SECRET),
+        (("external-agents", "accounts", "claude", "work", ".credentials.json"), PathCategory.SECRET),
+        (("external-agents", "accounts", "_api_key", "codex", "config.toml"), PathCategory.SECRET),
         (("webui", "admin.json"), PathCategory.HOST_BOUND),
         (("qdrant", "collection", "_semantic_x", "storage.sqlite"), PathCategory.DATA),  # memory content lives here
         (("instance_archive", "pending.json"), PathCategory.RUNTIME),
@@ -55,6 +57,7 @@ def test_classify_path(parts: tuple[str, ...], category: PathCategory) -> None:
     [
         ".encryption_key",
         "webui/admin.json",
+        "external-agents/accounts/claude/work/.credentials.json",
         "instance_archive/pending.json",
         "data.db-wal",
         "data/subagent_checkpoints.sqlite",
@@ -83,7 +86,7 @@ def test_scan_state_dir_splits_carried_and_excluded(source_state: Path) -> None:
     carried = {s.rel for s in scan.sources}
     assert {"data.db", "wiki/page.md", "skills/demo/scripts/run.sh", "unknown_store.db"} <= carried
     assert "harness/workspace/proj/token-notes.txt" in carried
-    assert not any(rel.startswith(("webui", "harness/workspace/node_modules")) for rel in carried)
+    assert not any(rel.startswith(("webui", "external-agents", "harness/workspace/node_modules")) for rel in carried)
     assert "qdrant/collection/_semantic_memory/storage.sqlite" in carried  # the vector store is carried
     assert ".encryption_key" not in carried
     assert "data.db-wal" not in carried
@@ -91,6 +94,7 @@ def test_scan_state_dir_splits_carried_and_excluded(source_state: Path) -> None:
     excluded_by_rel = {e.rel: e.category for e in scan.excluded}
     assert excluded_by_rel[".encryption_key"] is PathCategory.MACHINE_KEY
     assert excluded_by_rel["session_vault"] is PathCategory.SECRET
+    assert excluded_by_rel["external-agents"] is PathCategory.SECRET  # the logins of delegated CLI accounts
     assert excluded_by_rel["webui"] is PathCategory.HOST_BOUND
     assert excluded_by_rel["qdrant/.lock"] is PathCategory.RUNTIME
     assert "wiki/link.md" in excluded_by_rel  # symlinks are never followed

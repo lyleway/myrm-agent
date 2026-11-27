@@ -31,15 +31,17 @@ function newSessionId(): string {
   return `login-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-interface LoginDialogProps {
+interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   command: string;
   status: ExternalAgentAuthStatus;
+  /** The named account to log in to; absent: the login the CLI keeps on this machine. */
+  account?: string;
   onChanged: () => void;
 }
 
-const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, onChanged }: LoginDialogProps) => {
+const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, account, onChanged }: Props) => {
   const t = useTranslations('settings.developer.externalAgents');
   const [events, setEvents] = useState<ExternalAgentAuthEvent[]>([]);
   const [running, setRunning] = useState(false);
@@ -64,7 +66,7 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, on
     abortRef.current = controller;
     try {
       await streamExternalAgentLogin(
-        { command, backend, sessionId },
+        { command, backend, sessionId, account },
         (event) => {
           setEvents((prev) => [...prev, event]);
           if (event.type === 'success') {
@@ -84,7 +86,7 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, on
     } finally {
       setRunning(false);
     }
-  }, [command, backend, t, onChanged, onOpenChange]);
+  }, [command, backend, account, t, onChanged, onOpenChange]);
 
   useEffect(() => {
     if (open && scriptable && !startedRef.current) {
@@ -120,7 +122,7 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, on
     }
     setImporting(true);
     try {
-      await importExternalAgentCredential(backend, content);
+      await importExternalAgentCredential(backend, content, undefined, account);
       toast.success(t('importSuccess'));
       setImportContent('');
       onChanged();
@@ -130,7 +132,7 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, on
     } finally {
       setImporting(false);
     }
-  }, [backend, importContent, t, onChanged, onOpenChange]);
+  }, [backend, account, importContent, t, onChanged, onOpenChange]);
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -149,7 +151,9 @@ const ExternalAgentLoginDialog = memo(({ open, onOpenChange, command, status, on
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t('loginTitle', { backend })}</DialogTitle>
+          <DialogTitle>
+            {account ? t('loginTitleAccount', { backend, account }) : t('loginTitle', { backend })}
+          </DialogTitle>
           <DialogDescription>{t('authModeHint')}</DialogDescription>
         </DialogHeader>
 

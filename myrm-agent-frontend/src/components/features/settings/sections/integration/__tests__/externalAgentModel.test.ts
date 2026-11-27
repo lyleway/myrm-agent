@@ -5,11 +5,14 @@ import type { ExternalAgentAuthStatus } from '@/services/external-agents';
 import {
   AGENT_PRESETS,
   DEFAULT_AGENT,
+  accountBackend,
   backendKeyFromCommand,
   cleanAgent,
   contractTransport,
+  detachAccount,
   effectiveAuthMode,
   envRowProblems,
+  isValidAccountName,
   knownBackendOfCommand,
   newEnvRow,
   normalizePermissionMode,
@@ -255,5 +258,89 @@ describe('the transport of a known agent', () => {
     expect(presets.gemini.args).toEqual([]);
     expect(presets.qwen.args).toEqual([]);
     expect(presets.codex.args).toEqual([]);
+  });
+});
+
+describe('accounts', () => {
+  it.each(['work', 'a', 'a-b_c', '0x', 'x'.repeat(32)])('accepts the name %s', (name) => {
+    expect(isValidAccountName(name)).toBe(true);
+  });
+
+  it.each(['', 'Work', '-lead', '_lead', 'a b', 'a.b', 'a/b', '..', 'x'.repeat(33), 'é', 'work\n'])(
+    'refuses the name %j',
+    (name) => {
+      expect(isValidAccountName(name)).toBe(false);
+    },
+  );
+
+  it.each([
+    ['claude', 'subscription', true, 'claude'],
+    ['/opt/bin/codex', undefined, true, 'codex'],
+    ['C:\\tools\\gemini.cmd', 'subscription', true, 'gemini'],
+    ['claude', 'api_key', true, null],
+    ['claude', 'subscription', false, null],
+    ['claude-code', 'subscription', true, null],
+    ['aider', 'subscription', true, null],
+    ['', 'subscription', true, null],
+  ] as const)(
+    'lets the command %s on %s login (allowed: %s) choose an account of %s',
+    (command, mode, allowed, backend) => {
+      expect(accountBackend(command, mode, allowed)).toBe(backend);
+    },
+  );
+
+  describe('when stored', () => {
+    const work = (overrides: Partial<ExternalAgentConfig> = {}) =>
+      stored({ authMode: 'subscription', account: 'work', ...overrides });
+
+    it('keeps the account of a known agent on its subscription login', () => {
+      expect(cleanAgent(toDraft(work()), true).account).toBe('work');
+    });
+
+    it.each([
+      ['an API key', work({ authMode: 'api_key' }), true],
+      ['a deployment without subscription login', work(), false],
+      ['a command the app does not know', work({ command: 'aider' }), true],
+      ['a blank account', work({ account: '' }), true],
+    ])('drops the account of an agent on %s', (_label, agent, allowed) => {
+      expect(cleanAgent(toDraft(agent), allowed)).not.toHaveProperty('account');
+    });
+
+    it('stores an agent without an account as it was', () => {
+      expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), true)).not.toHaveProperty('account');
+    });
+  });
+
+  describe('when one is removed', () => {
+    const agent = (name: string, command: string, account?: string): ExternalAgentConfig =>
+      stored({ name, command, ...(account ? { account } : {}) });
+
+    it('detaches it from the agents of that backend that ran as it, and from no other', () => {
+      const agents = [
+        agent('a', 'claude', 'work'),
+        agent('b', 'claude', 'home'),
+        agent('c', '/usr/bin/claude', 'work'),
+        agent('d', 'codex', 'work'),
+        agent('e', 'claude'),
+      ];
+
+      const left = detachAccount(agents, 'claude', 'work');
+
+      expect(left.map(({ name, account }) => [name, account])).toEqual([
+        ['a', undefined],
+        ['b', 'home'],
+        ['c', undefined],
+        ['d', 'work'],
+        ['e', undefined],
+      ]);
+      expect(left[0]).not.toHaveProperty('account');
+      expect(agents[0].account).toBe('work');
+    });
+
+    it('hands back the same list when no agent ran as it', () => {
+      const agents = [agent('a', 'claude', 'home'), agent('b', 'codex', 'work')];
+
+      expect(detachAccount(agents, 'claude', 'work')).toBe(agents);
+    });
   });
 });

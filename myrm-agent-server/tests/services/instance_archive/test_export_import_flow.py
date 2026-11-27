@@ -52,13 +52,16 @@ def test_export_carries_no_plaintext_secret_and_leaves_machine_state_behind(sour
     assert "payload/wiki/page.md" in names
     assert "payload/harness/workspace/proj/token-notes.txt" in names
     assert not [
-        n for n in names if any(x in n for x in (".encryption_key", "webui/", "node_modules", "whatsapp_auth", "session_vault"))
+        n
+        for n in names
+        if any(x in n for x in (".encryption_key", "webui/", "node_modules", "whatsapp_auth", "session_vault", "external-agents"))
     ]
     for secret in (
         b"RESIDUE-SECRET-MARKER",  # deleted row must not survive in free pages
         b"sk-source-provider",
         b"tg-secret",
         b"external-agent-secret",
+        b"external-agent-account-login",  # a delegated CLI account's login file
         b"voice-stt-secret",
         b"voice-tts-secret",
         b"local-model-secret",
@@ -76,7 +79,9 @@ def test_export_carries_no_plaintext_secret_and_leaves_machine_state_behind(sour
     assert metadata["source_user_id"] == "user-a"
     assert "config:telegramCredentials" in metadata["reentry"]
     assert "table:agent_secrets" in metadata["reentry"]
-    assert {"path:whatsapp_auth", "path:session_vault"} <= set(metadata["reentry"])  # sign-ins the user must redo
+    assert {"path:whatsapp_auth", "path:session_vault", "path:external-agents"} <= set(
+        metadata["reentry"]
+    )  # sign-ins the user must redo
     assert not [r for r in metadata["reentry"] if r in ("path:.encryption_key", "path:vault.key")]  # machine keys
 
 

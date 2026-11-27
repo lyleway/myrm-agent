@@ -21,7 +21,7 @@
 | 类别 | 行为 | 例 |
 |------|------|-----|
 | DATA | 随备份走 | 会话、消息、智能体、技能、wiki、记忆（含内嵌向量库 `qdrant/`：语义/情景记忆正文只存在于其中）、cron、工作区文件 |
-| SECRET | 不进归档，恢复后由用户重新登录/填写 | `session_vault`、`agent_secrets`、`vault_credentials`、渠道登录态（`whatsapp_auth`、`matrix`） |
+| SECRET | 不进归档，恢复后由用户重新登录/填写 | `session_vault`、`agent_secrets`、`vault_credentials`、渠道登录态（`whatsapp_auth`、`matrix`）、委派 CLI 的命名账号目录（`external-agents`：每个账号目录里是该 CLI 的登录令牌、设置与会话历史） |
 | MACHINE_KEY | 不进归档，目标机保留或自行生成，用户无需操作 | `.encryption_key`、`vault.key` |
 | HOST_BOUND | 目标主机保留自己的（归档不会放宽目标安全姿态） | 工具白名单、风险规则、审批、配对、API key、`channelInstances` 等配置行 |
 | EPHEMERAL | 清空 | 分享链接、中断回合标记、定时任务的在飞标记（`cron_inflight`：标记属于源机器上正在跑的那次运行，带到新机器会在首次启动时凭空记一次中断与一次失败） |

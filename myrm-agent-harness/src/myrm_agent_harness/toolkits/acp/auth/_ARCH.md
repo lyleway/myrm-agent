@@ -12,10 +12,11 @@ whether the deployment may keep a user's subscription credential at all.
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Public surface of the ACP auth subsystem. | ✅ |
-| _profiles.py | Internal | The contract of each known agent: credential paths, login command, strategy, api-key env, and the transport it is driven over (`cli` with its baseline launch args, `acp` with its entry args and the session mode that asks the host, or `app_server` with the subcommand that starts its own server). Resolves a name (`profile_for`) or an exact executable (`command_profile`, `effective_transport`) to its contract. | ✅ |
+| _profiles.py | Internal | The contract of each known agent: credential paths, login command, strategy, api-key env, and the transport it is driven over (`cli` with its baseline launch args, `acp` with its entry args and the session mode that asks the host, or `app_server` with the subcommand that starts its own server). Names how the CLI is relocated into a home of its own (`isolated_env`, `relocation_vars`). Resolves a name (`profile_for`) or an exact executable (`command_profile`, `effective_transport`) to its contract. | ✅ |
+| accounts.py | Core | Named accounts: one login of a CLI in a home of its own. `AccountStore(root)` keeps `<root>/<backend>/<name>` (the directory tree is the whole registry, a link in an account's place is never followed) with `create` / `ensure` / `get` / `list` / `delete`, and `api_key_home(backend)`: a stable per-agent home under `<root>/_api_key/` for runs that bill an API key, never logged in to and never listed. A name is a lower-case slug (`[a-z0-9][a-z0-9_-]{0,31}`) because it is a path component and a URL segment. `Account.env()` is the environment that reaches the account, for probes, login and import. | ✅ |
 | _launch_args.py | Internal | The command line of a known agent: `resolve_cli_args` (permission mode → flags of a CLI agent), `resolve_acp_args` (the entry args of an ACP agent, every approval-skipping flag dropped and reported) and `resolve_app_server_args` (the subcommand of an app-server agent plus the configuration overrides it understands, everything else dropped and reported). Sole owner of the permission flags of every known agent. | ✅ |
 | credential_store.py | Core | Detect / import / clear subscription credentials (atomic, owner-only writes). A store built with `accepts_new_credentials=False` refuses an import before writing anything and still detects and clears, so a deployment that must not hold subscription credentials can still remove ones stored earlier. | ✅ |
-| launch_env.py | Core | `cli_base_env`: the environment every launch of a CLI starts from (core variables, the CLI's own login-home variable, the managed Node on PATH for a CLI the isolated toolchain installed); shared by turns and probes so a probe sees what a turn will see. | ✅ |
+| launch_env.py | Core | `cli_base_env`: the environment every launch of a CLI starts from (core variables, the variables that relocate the CLI's own login home, the managed Node on PATH for a CLI the isolated toolchain installed); shared by turns and probes so a probe sees what a turn will see. `account_env`: the variables that put a known CLI in the home of the account it runs as, applied after everything else a launch is given. | ✅ |
 | login_session.py | Core | Drive `<cli> login` and stream structured AuthEvents (URL/code → SUCCESS/ERROR). | ✅ |
 | login_state.py | Core | `probe_login` / `resolve_login_state`: the login state a CLI reports about itself (`claude auth status`, `codex login status`), the credential file only as the fallback. | ✅ |
 
@@ -23,6 +24,20 @@ whether the deployment may keep a user's subscription credential at all.
 - **Environment-aware paths**: `AuthProfile.resolve_home` honours per-CLI home
   overrides (`CODEX_HOME`, `CLAUDE_CONFIG_DIR`), so the control plane redirects a
   CLI's home to a persistent volume without any change here.
+- **An account is a directory the CLI is relocated into**: two logins of the same CLI (a work and a personal
+  subscription) cannot share the directory it keeps its login in. The host makes one directory per account under a root it
+  chooses and hands it to the runtime as `RuntimeConfig.account_home`; the CLI then finds only that account's login,
+  settings and history, and the login in the user's own home is left alone. How a CLI is relocated is part of its contract
+  (`AuthProfile.isolated_env`): Claude `CLAUDE_CONFIG_DIR`, Codex `CODEX_HOME`, Qwen `QWEN_HOME`, Gemini `GEMINI_CLI_HOME`
+  (its state is under `<root>/.gemini`) together with `GEMINI_FORCE_FILE_STORAGE=true`, since Gemini otherwise keeps its
+  credential in the system keychain that every home shares and two accounts would silently share one login. The home is a typed
+  field applied after the agent's configured environment, because the variables of Gemini and Qwen carry a provider prefix
+  that a subscription-mode launch strips from that mapping as a secret; it must be an absolute path and the command a known
+  agent, which `RuntimePool.register` checks when the agent is registered. No binding of a session to an account is stored:
+  an agent moved to another account no longer finds the remembered session there, which the stale-resume retry turns into a
+  new session with a notice. Measured against the real binaries (`tests/toolkits/acp/test_real_cli_account_home.py`): a turn
+  as an account writes everything inside the account's home while the process's own home stays empty, a conversation
+  continues in its own account only, and the login one account holds is the login the CLI reports for that account alone.
 - **Auth never enters the model**: credentials and auth state stay in the backend /
   config layers; they are never injected into prompts or tool descriptions, so the
   prompt prefix cache is unaffected.

@@ -11,7 +11,7 @@ no — leaf module, standard library only
 [OUTPUT]
 - LoginStrategy: How a CLI performs interactive login.
 - Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
-- AuthProfile: Per-backend contract: login state, launch, transport.
+- AuthProfile: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
 - profile_for: Resolve an AuthProfile from a backend name or command (a name that merely contains a backend's counts).
 - command_profile: Resolve the AuthProfile of a command that is exactly a known agent's executable.
 - effective_transport: The transport an agent really runs over: a known agent's contract wins over a stored choice.
@@ -57,7 +57,7 @@ class AuthProfile:
     """
 
     backend: str
-    home_env: str | None  # env var that overrides the CLI home dir, if the CLI honours one
+    home_env: str  # env var that relocates the CLI home dir
     home_dir: str  # default home subdir under $HOME (e.g. ".codex")
     credential_files: tuple[str, ...]  # candidate credential filenames within the home dir
     login_strategy: LoginStrategy
@@ -76,15 +76,30 @@ class AuthProfile:
     login_probe: tuple[
         str, ...
     ] = ()  # args that make the CLI report its own login state; empty: it has no such command
+    # What a home of its own needs beyond ``home_env``. ``home_env_is_base``: the variable stands in for ``$HOME``, so
+    # the CLI's state lives in ``<value>/<home_dir>`` rather than in the value itself. ``isolation_env``: variables that
+    # keep the login inside the home; a CLI that keeps it in the operating system's keychain unless told otherwise
+    # shares one login between every home.
+    home_env_is_base: bool = False
+    isolation_env: tuple[tuple[str, str], ...] = ()
 
     def resolve_home(self, env: Mapping[str, str]) -> Path:
-        """Resolve the CLI home directory, honouring an override env var if set."""
-        if self.home_env:
-            override = env.get(self.home_env)
-            if override:
-                return Path(override).expanduser()
+        """Resolve the CLI home directory, honouring the relocation variable if set."""
+        override = env.get(self.home_env)
+        if override:
+            base = Path(override).expanduser()
+            return base / self.home_dir if self.home_env_is_base else base
         home = env.get("HOME") or os.path.expanduser("~")
         return Path(home) / self.home_dir
+
+    @property
+    def relocation_vars(self) -> tuple[str, ...]:
+        """The variables that relocate this CLI's home and keep its login inside it."""
+        return (self.home_env, *(name for name, _ in self.isolation_env))
+
+    def isolated_env(self, root: Path) -> dict[str, str]:
+        """The environment that makes this CLI keep all its state and its login under ``root``."""
+        return {self.home_env: str(root), **dict(self.isolation_env)}
 
     def resolve_credential_paths(self, env: Mapping[str, str]) -> list[Path]:
         """Candidate credential file paths in priority order."""
@@ -132,9 +147,10 @@ _PROFILES: dict[str, AuthProfile] = {
     ),
     "gemini": AuthProfile(
         backend="gemini",
-        home_env=None,
+        home_env="GEMINI_CLI_HOME",
         home_dir=".gemini",
-        credential_files=("oauth_creds.json",),
+        # The legacy file, and the encrypted file the CLI moves it into when it is told to keep its login in a file.
+        credential_files=("oauth_creds.json", "gemini-credentials.json"),
         login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=(),
         logout_args=None,
@@ -143,10 +159,12 @@ _PROFILES: dict[str, AuthProfile] = {
         transport="acp",
         launch_args=("--acp", "--approval-mode", "default"),
         acp_ask_mode="default",
+        home_env_is_base=True,
+        isolation_env=(("GEMINI_FORCE_FILE_STORAGE", "true"),),
     ),
     "qwen": AuthProfile(
         backend="qwen",
-        home_env=None,
+        home_env="QWEN_HOME",
         home_dir=".qwen",
         credential_files=("oauth_creds.json",),
         login_strategy=LoginStrategy.BROWSER_OAUTH,

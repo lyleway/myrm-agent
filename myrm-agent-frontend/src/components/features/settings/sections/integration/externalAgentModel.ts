@@ -8,6 +8,8 @@
  * - PERMISSION_MODE_OPTIONS, permissionHintKey, normalizePermissionMode: the permission modes on offer and what each
  *   means for the agent being edited
  * - knownBackendOfCommand, backendKeyFromCommand: command → the known agent it is, command → the agent its login belongs to
+ * - isValidAccountName, accountBackend, detachAccount: the account names the server accepts, the agent an account applies
+ *   to, and the agents left after an account is removed
  * - contractTransport: the transport a known agent's contract fixes for a command
  * - ExternalAgentDraft, EnvRow, toDraft, newEnvRow, envRowProblems, effectiveAuthMode, cleanAgent: the editable
  *   form of an agent and the rules for turning it back into what is stored
@@ -47,6 +49,46 @@ function executableName(command: string): string {
 export function knownBackendOfCommand(command: string): string | null {
   const name = executableName(command);
   return KNOWN_BACKENDS.find((backend) => backend === name) ?? null;
+}
+
+// The server owns the rule; this mirrors it for immediate feedback while typing.
+const ACCOUNT_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+
+export const isValidAccountName = (name: string): boolean => ACCOUNT_NAME.test(name);
+
+/**
+ * The agent an account can be chosen for, or null. An account is a subscription login of a known agent, so an
+ * agent on an API key, a command the app does not know and a deployment without subscription login have none.
+ */
+export function accountBackend(
+  command: string,
+  authMode: ExternalAgentAuthMode | undefined,
+  subscriptionLoginAllowed: boolean,
+): string | null {
+  return effectiveAuthMode(authMode, subscriptionLoginAllowed) === 'subscription'
+    ? knownBackendOfCommand(command)
+    : null;
+}
+
+/** The agents with the account taken off those that ran as `name` of `backend`; the same list when none did. */
+export function detachAccount(
+  agents: readonly ExternalAgentConfig[],
+  backend: string,
+  name: string,
+): readonly ExternalAgentConfig[] {
+  const uses = (agent: ExternalAgentConfig): boolean =>
+    agent.account === name && knownBackendOfCommand(agent.command) === backend;
+  if (!agents.some(uses)) {
+    return agents;
+  }
+  return agents.map((agent) => {
+    if (!uses(agent)) {
+      return agent;
+    }
+    const detached = { ...agent };
+    delete detached.account;
+    return detached;
+  });
 }
 
 /** The agent a command's login belongs to: the agent it is, else one whose name it carries (`claude-code`). */
@@ -201,7 +243,8 @@ export function effectiveAuthMode(
 /**
  * The agent as it is stored: trimmed text, the transport its contract fixes (`contractTransport`) in place of a
  * stale choice, no blank arguments, a permission mode its type can honour (otherwise switching type could persist
- * a mode the form never showed), the auth mode the deployment supports, and an `env` only when it has entries.
+ * a mode the form never showed), the auth mode the deployment supports, an `account` only where one can be chosen
+ * (`accountBackend`), and an `env` only when it has entries.
  * The environment lines must have passed `envRowProblems`.
  */
 export function cleanAgent(
@@ -209,7 +252,7 @@ export function cleanAgent(
   subscriptionLoginAllowed = true,
   fixedTransport: ExternalAgentType | null = null,
 ): ExternalAgentConfig {
-  const { envRows, ...rest } = draft;
+  const { envRows, account, ...rest } = draft;
   const env = Object.fromEntries(envRows.filter((row) => !isBlankRow(row)).map((row) => [row.name.trim(), row.value]));
   const cleaned: ExternalAgentConfig = {
     ...rest,
@@ -221,6 +264,9 @@ export function cleanAgent(
   };
   if (!subscriptionLoginAllowed) {
     cleaned.authMode = 'api_key';
+  }
+  if (account && accountBackend(cleaned.command, draft.authMode, subscriptionLoginAllowed) !== null) {
+    cleaned.account = account;
   }
   if (Object.keys(env).length > 0) {
     cleaned.env = env;

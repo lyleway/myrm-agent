@@ -4,13 +4,16 @@
  *
  * [OUTPUT]
  * - ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
+ * - ExternalAgentAccount 类型
  * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
  *   / feedExternalAgentLogin / importExternalAgentCredential / logoutExternalAgent
+ * - listExternalAgentAccounts / createExternalAgentAccount / deleteExternalAgentAccount
  *
  * [POS]
  * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
  * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、凭据导入/登出，
- * 供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
+ * 命名账号的列出、创建、删除，供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
+ * 登录、导入、登出可带账号名，作用于该账号目录里的登录而不是 CLI 自己的。
  */
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
 import type { ExternalAgentType } from '@/services/config';
@@ -44,6 +47,14 @@ interface ExternalAgentCredentialState {
   backend: string;
   authenticated: boolean;
   authStatus: string;
+}
+
+/** One named login of a delegated CLI, kept in a home of its own. */
+export interface ExternalAgentAccount {
+  backend: string;
+  name: string;
+  authenticated: boolean;
+  authStatus: ExternalAgentAuthStatus['authStatus'];
 }
 
 /** Fetch install + login state for every known delegated backend (drives badges). */
@@ -175,24 +186,48 @@ export async function* streamExternalAgentInstall(
   yield* readSseEvents(response.body);
 }
 
-/** Persist a credential blob captured elsewhere (universal fallback). */
+/** Persist a credential blob captured elsewhere (universal fallback), into the named account when one is given. */
 export function importExternalAgentCredential(
   backend: string,
   content: string,
   filename?: string,
+  account?: string,
 ): Promise<ExternalAgentCredentialState> {
   return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/import', {
     method: 'POST',
-    body: JSON.stringify({ backend, content, filename }),
+    body: JSON.stringify({ backend, content, filename, account }),
   });
 }
 
-/** Remove a backend's stored subscription credentials. */
-export function logoutExternalAgent(backend: string): Promise<ExternalAgentCredentialState> {
+/** Remove a backend's stored subscription credentials (those of the named account, when one is given). */
+export function logoutExternalAgent(backend: string, account?: string): Promise<ExternalAgentCredentialState> {
   return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/logout', {
     method: 'POST',
-    body: JSON.stringify({ backend }),
+    body: JSON.stringify({ backend, account }),
   });
+}
+
+/** Every named account with whether it is logged in. */
+export async function listExternalAgentAccounts(): Promise<ExternalAgentAccount[]> {
+  const res = await apiRequest<{ accounts: ExternalAgentAccount[] }>('/external-agents/accounts', { silent: true });
+  return res.accounts ?? [];
+}
+
+/** Make a new, empty account. A name that is taken rejects with an `ApiError` of code 409. */
+export function createExternalAgentAccount(backend: string, name: string): Promise<{ backend: string; name: string }> {
+  return apiRequest<{ backend: string; name: string }>('/external-agents/accounts', {
+    method: 'POST',
+    body: JSON.stringify({ backend, name }),
+    silent: true,
+  });
+}
+
+/** Remove an account with its login, settings and history. */
+export function deleteExternalAgentAccount(backend: string, name: string): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>(
+    `/external-agents/accounts/${encodeURIComponent(backend)}/${encodeURIComponent(name)}`,
+    { method: 'DELETE', silent: true },
+  );
 }
 
 /** Forward a user-supplied code to a live login session (setup_token flow). */
@@ -208,7 +243,7 @@ export function feedExternalAgentLogin(sessionId: string, text: string): Promise
  * until the stream closes. Pass an AbortSignal to cancel mid-flight.
  */
 export async function streamExternalAgentLogin(
-  params: { command: string; backend?: string; sessionId: string },
+  params: { command: string; backend?: string; sessionId: string; account?: string },
   onEvent: (event: ExternalAgentAuthEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -217,7 +252,12 @@ export async function streamExternalAgentLogin(
     {
       method: 'POST',
       headers: withBearerToken({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ command: params.command, backend: params.backend, sessionId: params.sessionId }),
+      body: JSON.stringify({
+        command: params.command,
+        backend: params.backend,
+        sessionId: params.sessionId,
+        account: params.account,
+      }),
       signal,
     },
     0,

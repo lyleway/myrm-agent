@@ -7,12 +7,16 @@ credential captured elsewhere, or log out. Mounted globally since subscription
 auth is an agent-config concern, not channel management. Login and import store
 the user's own subscription credential on the host, so they are refused where the
 host is not the user's machine (a managed sandbox runs delegated CLIs on an API
-key); status and logout stay available so a leftover credential can be removed.
+key); status and logout stay available so a leftover credential can be removed. Login, import and logout act
+on the login in the CLI's own home, or on the one of a named account when the request names one (the accounts
+themselves are managed by ``accounts_router``, mounted under ``/accounts``).
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.auth (POS: ACP subscription auth subsystem)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
 - app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
+- app.api.external_agents._account_scope::account_env (POS: the environment of the account a request names)
+- app.api.external_agents.accounts_router::router (POS: named account endpoints)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
 
 [OUTPUT]
@@ -32,12 +36,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.api.external_agents._account_scope import account_env
 from app.api.external_agents._deploy_capability import require_subscription_login_capability
+from app.api.external_agents.accounts_router import router as accounts_router
 from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+router.include_router(accounts_router, prefix="/accounts")
+
+
+_ACCOUNT_DESCRIPTION = "Named account to act on; omitted: the login in the CLI's own home"
 
 
 class ExternalAgentLoginRequest(BaseModel):
@@ -45,6 +55,7 @@ class ExternalAgentLoginRequest(BaseModel):
     backend: str | None = Field(default=None, description="Backend key; inferred from command if omitted")
     session_id: str = Field(..., alias="sessionId", min_length=1, max_length=128)
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=30, le=1800)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
 
     class Config:
         populate_by_name = True
@@ -58,10 +69,12 @@ class ExternalAgentImportRequest(BaseModel):
     backend: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
     filename: str | None = Field(default=None)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
 
 
 class ExternalAgentLogoutRequest(BaseModel):
     backend: str = Field(..., min_length=1)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
 
 
 class _LoginRegistry:
@@ -189,7 +202,12 @@ async def external_agent_auth_login(
             detail=f"Unknown external agent backend: {body.backend or body.command}",
         )
 
-    session = CliLoginSession(body.command, profile, timeout_seconds=body.timeout_seconds)
+    session = CliLoginSession(
+        body.command,
+        profile,
+        base_env=account_env(profile.backend, body.account, create=True),
+        timeout_seconds=body.timeout_seconds,
+    )
     _login_registry.add(body.session_id, session)
 
     async def event_stream() -> AsyncIterator[str]:
@@ -245,7 +263,10 @@ async def external_agent_auth_import(
     """
     from myrm_agent_harness.toolkits.acp.auth import CredentialStorageDisabledError, CredentialStore
 
-    store = CredentialStore(accepts_new_credentials=get_deployment_capabilities().allows_subscription_login)
+    store = CredentialStore(
+        account_env(body.backend, body.account, create=True),
+        accepts_new_credentials=get_deployment_capabilities().allows_subscription_login,
+    )
     try:
         state = store.import_credential(body.backend, body.content, filename=body.filename)
     except CredentialStorageDisabledError as exc:
@@ -263,10 +284,10 @@ async def external_agent_auth_import(
 async def external_agent_auth_logout(
     body: ExternalAgentLogoutRequest,
 ) -> dict[str, object]:
-    """Remove a backend's stored subscription credentials."""
+    """Remove a backend's stored subscription credentials (those of the named account, when one is named)."""
     from myrm_agent_harness.toolkits.acp.auth import CredentialStore
 
-    store = CredentialStore()
+    store = CredentialStore(account_env(body.backend, body.account, create=False))
     try:
         state = store.clear(body.backend)
     except ValueError as exc:

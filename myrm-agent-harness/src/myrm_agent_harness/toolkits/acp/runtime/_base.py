@@ -6,12 +6,12 @@ environment variable sanitization, timeout control, and response truncation.
 [INPUT]
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
-- toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
+- toolkits.acp.auth.launch_env::account_env, cli_base_env (POS: The environment every launch of a CLI starts from)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 
 [OUTPUT]
 - BaseRuntime: Abstract base for RuntimeBackend implementations; a runtime belongs to one workspace for its whole life.
-- build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the system trust store while enterprise network compatibility is on.
+- build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the home of its account, plus the system trust store while enterprise network compatibility is on.
 - truncate_response: Truncate response text if it exceeds the configured limit.
 - KEEPALIVE_SECONDS / working_status: how long a turn may be silent, and the ``working`` status it reports then.
 - UNAUTHORIZED_RETRIES_LIMIT: how many refused-login retries in a row an agent's turn is given up after.
@@ -29,7 +29,7 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
-from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
+from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env, cli_base_env
 from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
@@ -110,7 +110,7 @@ def build_safe_env(
 ) -> dict[str, str]:
     """Build the environment of a delegated child process.
 
-    Two layers, both honouring ``config.auth_mode``, then the trust setting:
+    Two layers, both honouring ``config.auth_mode``, then the account's home and the trust setting:
 
     1. Baseline — from the parent environment only the shared core variables (PATH, HOME, locale, proxy, …)
        and the variable that relocates this CLI's own login home are inherited. A delegated CLI hands its
@@ -122,6 +122,9 @@ def build_safe_env(
        - ``subscription``: only non-secret entries are applied; injected provider
          secrets are dropped so the CLI is forced onto its own logged-in
          subscription session rather than silently falling back to a key.
+
+    The home of the account the agent runs as (``config.account_home``) is applied last, over whatever the baseline or
+    ``config.env`` says, so the agent can only ever see that account's login.
 
     While enterprise network compatibility is on, ``NODE_USE_SYSTEM_CA=1`` is added so a Node-based CLI validates
     against the operating system's trust store the way the host does; a value ``config.env`` sets wins.
@@ -141,6 +144,7 @@ def build_safe_env(
         else:
             env.update(config.env)
 
+    env.update(account_env(config.command, config.account_home))
     return with_node_system_ca(env)
 
 
