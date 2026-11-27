@@ -1,23 +1,18 @@
-"""Tests for WebPushService — subscription CRUD, broadcast, and error handling."""
+"""Tests for WebPushService — subscription CRUD, broadcast, and push-service reply handling.
+
+pywebpush's call is mocked here; test_web_push_delivery.py runs the real library.
+"""
 
 from __future__ import annotations
 
 import hashlib
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pywebpush import WebPushException
 
-# Mock pywebpush before importing service (pywebpush may not be installed in test env)
-_mock_pywebpush = MagicMock()
-_mock_pywebpush.WebPushException = type("WebPushException", (Exception,), {})
-_mock_pywebpush.webpush = MagicMock()
-sys.modules.setdefault("pywebpush", _mock_pywebpush)
-
-from app.core.web_push.service import WebPushService, get_web_push_service  # noqa: E402
-
-WebPushException = _mock_pywebpush.WebPushException
+from app.core.web_push.service import WebPushService, get_web_push_service
 
 
 def _mock_session_ctx(mock_db: AsyncMock) -> AsyncMock:
@@ -240,17 +235,13 @@ class TestBroadcast:
 
 class TestSendOne:
     @pytest.mark.asyncio
-    async def test_successful_send(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_successful_send(self, keyed_service: WebPushService) -> None:
         with patch(
             "asyncio.to_thread",
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",
@@ -261,16 +252,11 @@ class TestSendOne:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_removes_gone_subscription_on_410(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_removes_gone_subscription_on_410(self, keyed_service: WebPushService) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 410
 
-        exc = WebPushException("gone")
-        exc.response = mock_response
+        exc = WebPushException("gone", response=mock_response)
 
         with (
             patch(
@@ -278,9 +264,9 @@ class TestSendOne:
                 new_callable=AsyncMock,
                 side_effect=exc,
             ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
+            patch.object(keyed_service, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",
@@ -292,16 +278,11 @@ class TestSendOne:
         mock_remove.assert_called_once_with("h_gone")
 
     @pytest.mark.asyncio
-    async def test_removes_gone_subscription_on_404(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_removes_gone_subscription_on_404(self, keyed_service: WebPushService) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 404
 
-        exc = WebPushException("not found")
-        exc.response = mock_response
+        exc = WebPushException("not found", response=mock_response)
 
         with (
             patch(
@@ -309,9 +290,9 @@ class TestSendOne:
                 new_callable=AsyncMock,
                 side_effect=exc,
             ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
+            patch.object(keyed_service, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",
@@ -323,17 +304,13 @@ class TestSendOne:
         mock_remove.assert_called_once_with("h_404")
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_generic_exception(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_returns_false_on_generic_exception(self, keyed_service: WebPushService) -> None:
         with patch(
             "asyncio.to_thread",
             new_callable=AsyncMock,
             side_effect=ConnectionError("network"),
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",
@@ -344,11 +321,7 @@ class TestSendOne:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_returns_false_on_webpush_exception_without_response(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_returns_false_on_webpush_exception_without_response(self, keyed_service: WebPushService) -> None:
         exc = WebPushException("server error")
 
         with patch(
@@ -356,7 +329,7 @@ class TestSendOne:
             new_callable=AsyncMock,
             side_effect=exc,
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",
@@ -367,16 +340,11 @@ class TestSendOne:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_webpush_exception_with_non_gone_status(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
+    async def test_webpush_exception_with_non_gone_status(self, keyed_service: WebPushService) -> None:
         mock_response = MagicMock()
         mock_response.status_code = 500
 
-        exc = WebPushException("server error")
-        exc.response = mock_response
+        exc = WebPushException("server error", response=mock_response)
 
         with (
             patch(
@@ -384,9 +352,9 @@ class TestSendOne:
                 new_callable=AsyncMock,
                 side_effect=exc,
             ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
+            patch.object(keyed_service, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
         ):
-            result = await svc._send_one(
+            result = await keyed_service._send_one(
                 endpoint="https://e.com",
                 p256dh="k",
                 auth="a",

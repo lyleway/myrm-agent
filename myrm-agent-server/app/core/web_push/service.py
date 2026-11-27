@@ -2,6 +2,7 @@
 
 [INPUT]
 - app.core.web_push.vapid_keys::load_vapid_keys
+- pywebpush::Vapid, WebPushException, webpush (POS: VAPID signing and the encrypted push request)
 - app.database.models::WebPushSubscription
 - app.database.connection::get_session
 - app.core.brand::NOREPLY_EMAIL (POS: the VAPID contact address)
@@ -31,6 +32,9 @@ from app.core.brand import NOREPLY_EMAIL
 logger = logging.getLogger(__name__)
 
 _GONE_STATUS_CODES = frozenset({404, 410})
+
+# requests treats timeout=None as "wait forever", which would pin an executor thread on a stalled push service.
+_PUSH_REQUEST_TIMEOUT_SECONDS = 10
 
 
 class WebPushService:
@@ -182,15 +186,17 @@ class WebPushService:
             "sub": f"mailto:{NOREPLY_EMAIL}",
         }
 
-        from pywebpush import WebPushException, webpush
+        from pywebpush import Vapid, WebPushException, webpush
 
         try:
             await asyncio.to_thread(
                 webpush,
                 subscription_info=subscription_info,
                 data=payload,
-                vapid_private_key=private_pem,
+                # pywebpush takes a Vapid object, a key file path or a raw base64 key, but not PEM text.
+                vapid_private_key=Vapid.from_pem(private_pem.encode()),
                 vapid_claims=vapid_claims,
+                timeout=_PUSH_REQUEST_TIMEOUT_SECONDS,
             )
             return True
         except WebPushException as exc:

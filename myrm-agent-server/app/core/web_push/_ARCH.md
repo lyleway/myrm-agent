@@ -71,6 +71,10 @@ Keys are stored in `{state_dir}/web_push/`:
 Generated lazily on first access. Protected by `filelock` for thread safety.
 File permissions follow `app/remote_access/e2ee/keystore.py` security conventions.
 
+`WebPushService._send_one` builds a `Vapid` object from the PEM for each push: pywebpush accepts a `Vapid` object, a key
+file path or a raw base64 key, but not PEM text. Each push request carries a 10 s timeout (`requests` waits forever by default).
+`tests/core/web_push/test_web_push_delivery.py` runs this path through the real pywebpush with only the HTTP POST stubbed.
+
 ## Subscription Storage
 
 SQLite table `web_push_subscriptions`:
