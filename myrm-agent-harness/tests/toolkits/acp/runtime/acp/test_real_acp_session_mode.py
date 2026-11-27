@@ -81,7 +81,7 @@ async def _session_mode(agent: str, args: list[str], tmp_path: Path, *, settings
     _, workspace, env = _prepare(agent, tmp_path, settings=settings)
     binary = cli_binary(agent)
     handler = AcpCallbackHandler(
-        RuntimeConfig(backend_type="acp", command=binary), session_id="", agent=binary, workspace=str(workspace)
+        RuntimeConfig(backend_type="acp", command=binary), agent=binary, workspace=str(workspace)
     )
     async with asyncio.timeout(_TIMEOUT_SECONDS):
         async with spawn_agent_process(
@@ -131,7 +131,7 @@ async def test_a_missing_login_is_refused_with_the_error_code_of_a_refused_login
     _, workspace, env = _prepare(agent, tmp_path, settings=False, login=False)
     binary = cli_binary(agent)
     handler = AcpCallbackHandler(
-        RuntimeConfig(backend_type="acp", command=binary), session_id="", agent=binary, workspace=str(workspace)
+        RuntimeConfig(backend_type="acp", command=binary), agent=binary, workspace=str(workspace)
     )
 
     with pytest.raises(RequestError) as refused:

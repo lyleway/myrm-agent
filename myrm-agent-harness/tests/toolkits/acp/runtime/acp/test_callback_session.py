@@ -4,99 +4,167 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Self
-from unittest.mock import MagicMock
 
 import pytest
 from acp import RequestError
+from acp.schema import AgentMessageChunk, AgentThoughtChunk, TextContentBlock, ToolCallProgress, ToolCallStart
 
 from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler
-from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeConfig
+from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeConfig, RuntimeEvent, RuntimeEventType
 from tests.support.windows_text_mode import emulate_windows_text_mode
 
 _WORKSPACE = "/tmp/ws"
 
 
+def _handler() -> AcpCallbackHandler:
+    handler = AcpCallbackHandler(RuntimeConfig(backend_type="acp", command="dummy"), agent="mock", workspace=_WORKSPACE)
+    handler.begin_turn(None, "s1")
+    return handler
+
+
+def _queued(handler: AcpCallbackHandler) -> list[RuntimeEvent]:
+    events: list[RuntimeEvent] = []
+    while not handler.event_queue.empty():
+        queued = handler.event_queue.get_nowait()
+        assert queued is not None
+        events.append(queued)
+    return events
+
+
+def _texts(handler: AcpCallbackHandler) -> list[str]:
+    return [str(event.data["content"]) for event in _queued(handler) if event.type is RuntimeEventType.TEXT_DELTA]
+
+
+def _said(text: str) -> AgentMessageChunk:
+    return AgentMessageChunk(content=TextContentBlock(text=text))
+
+
+def _called(call_id: str = "t1", title: str = "bash") -> ToolCallStart:
+    return ToolCallStart(tool_call_id=call_id, title=title, kind="execute")
+
+
 class TestAcpCallbackHandlerSessionUpdate:
-    @pytest.mark.asyncio
-    async def test_agent_message_chunk_text(self) -> None:
-        handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy"),
-            "s1",
-            agent="mock",
-            workspace=_WORKSPACE,
-        )
-        update = MagicMock()
-        update.session_update = "agent_message_chunk"
-        update.sessionUpdate = None
-        update.content = MagicMock()
-        update.content.type = "text"
-        update.content.text = "hello world"
-        await handler.session_update("s1", update)
-        assert "hello world" in handler.response_text
+    async def test_an_agent_message_is_text_of_the_turn_the_host_named(self) -> None:
+        handler = _handler()
 
-    @pytest.mark.asyncio
-    async def test_tool_call_update(self) -> None:
-        handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy"),
-            "s1",
-            agent="mock",
-            workspace=_WORKSPACE,
-        )
-        update = MagicMock()
-        update.session_update = "tool_call"
-        update.sessionUpdate = None
-        update.title = "bash"
-        update.status = "running"
-        update.content = None
-        await handler.session_update("s1", update)
-        assert "bash" in handler.response_text
+        await handler.session_update("agent-session", _said("hello world"))
 
-    @pytest.mark.asyncio
-    async def test_tool_call_update_completed(self) -> None:
-        handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy"),
+        (event,) = _queued(handler)
+        assert (event.type, event.data["content"], event.session_id) == (
+            RuntimeEventType.TEXT_DELTA,
+            "hello world",
             "s1",
-            agent="mock",
-            workspace=_WORKSPACE,
         )
-        update = MagicMock()
-        update.session_update = "tool_call_update"
-        update.sessionUpdate = None
-        update.status = "completed"
-        update.tool_call_id = "tc1"
-        update.toolCallId = None
-        update.content = None
-        await handler.session_update("s1", update)
-        assert "tc1" in handler.response_text
 
-    @pytest.mark.asyncio
-    async def test_agent_thought_chunk(self) -> None:
-        handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy"),
-            "s1",
-            agent="mock",
-            workspace=_WORKSPACE,
-        )
-        update = MagicMock()
-        update.session_update = "agent_thought_chunk"
-        update.sessionUpdate = None
-        update.content = MagicMock()
-        update.content.type = "text"
-        update.content.text = "thinking..."
-        await handler.session_update("s1", update)
-        assert "thinking..." in handler.response_text
+    async def test_a_tool_call_starts_and_finishes_as_tool_events(self) -> None:
+        handler = _handler()
 
-    @pytest.mark.asyncio
-    async def test_reset_clears_text(self) -> None:
-        handler = AcpCallbackHandler(
-            RuntimeConfig(backend_type="acp", command="dummy"),
-            "s1",
-            agent="mock",
-            workspace=_WORKSPACE,
+        await handler.session_update("agent-session", _called("tc1"))
+        await handler.session_update("agent-session", ToolCallProgress(tool_call_id="tc1", status="completed"))
+
+        start, result = _queued(handler)
+        assert (start.type, start.data["tool_name"], start.data["tool_call_id"]) == (
+            RuntimeEventType.TOOL_START,
+            "bash",
+            "tc1",
         )
-        handler._text_parts.append("old text")
-        handler.reset()
-        assert handler.response_text == ""
+        assert (result.type, result.data["tool_call_id"], result.data["is_error"]) == (
+            RuntimeEventType.TOOL_RESULT,
+            "tc1",
+            False,
+        )
+
+    async def test_a_failed_tool_call_is_a_failed_result(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("agent-session", ToolCallProgress(tool_call_id="tc1", status="failed"))
+
+        (result,) = _queued(handler)
+        assert result.data["is_error"] is True
+
+    async def test_a_thought_is_reasoning(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("agent-session", AgentThoughtChunk(content=TextContentBlock(text="thinking...")))
+
+        (event,) = _queued(handler)
+        assert (event.type, event.data["content"]) == (RuntimeEventType.REASONING_DELTA, "thinking...")
+
+    async def test_a_new_turn_drops_what_an_earlier_one_left_queued(self) -> None:
+        handler = _handler()
+        await handler.session_update("agent-session", _said("left over"))
+
+        handler.begin_turn(None, "s2")
+
+        assert _queued(handler) == []
+
+    async def test_what_the_agent_sent_before_the_turn_began_is_not_its_output(self) -> None:
+        """The history a loaded session replays arrives before the turn, and is dropped when the turn begins."""
+        handler = _handler()
+        await handler.session_update("agent-session", _said("replayed history"))
+
+        handler.begin_turn(None, "chat-1")
+        await handler.session_update("agent-session", _said("new"))
+
+        assert _texts(handler) == ["new"]
+
+
+class TestMessagesAroundAToolCall:
+    async def test_the_text_after_a_tool_call_is_set_apart_from_the_text_before_it(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("a", _said("Let me look."))
+        await handler.session_update("a", _called())
+        await handler.session_update("a", _said("Found it."))
+
+        assert _texts(handler) == ["Let me look.", "\n\nFound it."]
+
+    async def test_chunks_of_one_message_are_not_broken_up(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("a", _said("Let me "))
+        await handler.session_update("a", _said("look."))
+
+        assert _texts(handler) == ["Let me ", "look."]
+
+    async def test_the_newlines_the_agent_wrote_count_towards_the_break(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("a", _said("one\n"))
+        await handler.session_update("a", _called("t1"))
+        await handler.session_update("a", _said("two"))
+        await handler.session_update("a", _called("t2"))
+        await handler.session_update("a", _said("\n\nthree"))
+
+        assert _texts(handler) == ["one\n", "\ntwo", "\n\nthree"]
+
+    async def test_several_tool_calls_in_a_row_make_one_break(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("a", _said("before"))
+        await handler.session_update("a", _called("t1"))
+        await handler.session_update("a", _called("t2"))
+        await handler.session_update("a", _said("after"))
+
+        assert _texts(handler) == ["before", "\n\nafter"]
+
+    async def test_text_with_nothing_before_it_is_left_alone(self) -> None:
+        handler = _handler()
+
+        await handler.session_update("a", _called())
+        await handler.session_update("a", _said("first words"))
+
+        assert _texts(handler) == ["first words"]
+
+    async def test_a_new_turn_does_not_continue_the_text_of_the_one_before(self) -> None:
+        handler = _handler()
+        await handler.session_update("a", _said("earlier turn"))
+        handler.begin_turn(None, "s2")
+
+        await handler.session_update("a", _called())
+        await handler.session_update("a", _said("fresh start"))
+
+        assert _texts(handler) == ["fresh start"]
 
 
 class TestAcpCallbackHandlerFileOps:
@@ -104,7 +172,6 @@ class TestAcpCallbackHandlerFileOps:
     def _handler(workspace: Path, mode: PermissionMode = "allow_all") -> AcpCallbackHandler:
         return AcpCallbackHandler(
             RuntimeConfig(backend_type="acp", command="dummy", permission_mode=mode),
-            "s1",
             agent="mock",
             workspace=str(workspace),
         )

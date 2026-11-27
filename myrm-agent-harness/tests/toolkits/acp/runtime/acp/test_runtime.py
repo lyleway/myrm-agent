@@ -11,9 +11,17 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from acp.schema import AgentCapabilities, InitializeResponse, SessionCapabilities, SessionCloseCapabilities
+from acp.schema import AgentCapabilities as AdvertisedCapabilities
+from acp.schema import (
+    InitializeResponse,
+    PromptCapabilities,
+    SessionCapabilities,
+    SessionCloseCapabilities,
+    SessionResumeCapabilities,
+)
 
 from myrm_agent_harness.toolkits.acp.runtime.acp import runtime as acp_runtime
+from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabilities
 from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEventType
 
@@ -37,6 +45,12 @@ def _live_process() -> MagicMock:
     proc = MagicMock()
     proc.returncode = None
     return proc
+
+
+async def _with_session(rt: AcpRuntime, conn: MagicMock, *, close: bool = False) -> None:
+    """Give ``rt`` the open session ``s1`` (the agent's ``sess-1``) the way a turn opens one."""
+    conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1", modes=None))
+    await rt._sessions.open(conn, "s1", AgentCapabilities(close_session=close), None)
 
 
 class TestAcpRuntimeProperties:
@@ -83,7 +97,8 @@ class TestAcpRuntimeTurn:
         conn.initialize.assert_awaited_once()
         conn.new_session.assert_awaited_once()
         conn.prompt.assert_awaited_once()
-        assert rt._session_id == "sess-1"
+        assert conn.prompt.await_args.kwargs["session_id"] == "sess-1"
+        assert rt._sessions.agent_session("s1") == "sess-1"
         assert any(e.type == RuntimeEventType.DONE for e in events)
 
     @pytest.mark.asyncio
@@ -129,9 +144,19 @@ class TestAcpRuntimeLifecycle:
         conn = MagicMock()
         conn.cancel = AsyncMock()
         rt._conn = conn
-        rt._session_id = "sess-1"
+        await _with_session(rt, conn)
         await rt._do_cancel("s1")
         conn.cancel.assert_awaited_once_with(session_id="sess-1")
+
+    @pytest.mark.asyncio
+    async def test_do_cancel_of_a_session_the_agent_does_not_hold_is_noop(self) -> None:
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
+        conn = MagicMock()
+        conn.cancel = AsyncMock()
+        rt._conn = conn
+        await _with_session(rt, conn)
+        await rt._do_cancel("another-session")
+        conn.cancel.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_do_cancel_without_connection_is_noop(self) -> None:
@@ -143,8 +168,9 @@ class TestAcpRuntimeLifecycle:
         rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         assert await rt._do_resume("s1") is False
         rt._process = _live_process()
-        rt._session_id = "sess-1"
+        await _with_session(rt, MagicMock())
         assert await rt._do_resume("s1") is True
+        assert await rt._do_resume("another-session") is False
 
     @pytest.mark.asyncio
     async def test_do_get_status_stopped(self) -> None:
@@ -174,11 +200,11 @@ class TestAcpRuntimeLifecycle:
         ctx = MagicMock()
         ctx.__aexit__ = AsyncMock()
         rt._conn = conn
-        rt._session_id = "sess-1"
+        await _with_session(rt, conn, close=True)
+        rt._agent = AgentCapabilities(close_session=True)
         rt._ctx_manager = ctx
         rt._handler = MagicMock()
         rt._process = _live_process()
-        rt._supports_session_close = True
 
         await rt._do_close()
 
@@ -186,9 +212,9 @@ class TestAcpRuntimeLifecycle:
         ctx.__aexit__.assert_awaited_once()
         assert rt._conn is None
         assert rt._process is None
-        assert rt._session_id is None
+        assert rt._sessions.agent_session("s1") is None
         assert rt._handler is None
-        assert rt._supports_session_close is False
+        assert rt._agent == AgentCapabilities()
 
     @pytest.mark.asyncio
     async def test_do_close_skips_close_session_when_not_advertised(self) -> None:
@@ -199,7 +225,7 @@ class TestAcpRuntimeLifecycle:
         ctx = MagicMock()
         ctx.__aexit__ = AsyncMock()
         rt._conn = conn
-        rt._session_id = "sess-1"
+        await _with_session(rt, conn)
         rt._ctx_manager = ctx
         rt._process = _live_process()
 
@@ -223,11 +249,11 @@ class TestAcpRuntimeLifecycle:
         ctx = MagicMock()
         ctx.__aexit__ = AsyncMock()
         rt._conn = conn
-        rt._session_id = "sess-1"
+        await _with_session(rt, conn, close=True)
+        rt._agent = AgentCapabilities(close_session=True)
         rt._ctx_manager = ctx
         rt._handler = MagicMock()
         rt._process = _live_process()
-        rt._supports_session_close = True
 
         await asyncio.wait_for(rt._do_close(), timeout=2.0)
 
@@ -235,23 +261,53 @@ class TestAcpRuntimeLifecycle:
         ctx.__aexit__.assert_awaited_once()
         assert rt._conn is None
         assert rt._process is None
-        assert rt._session_id is None
+        assert rt._sessions.agent_session("s1") is None
         assert rt._ctx_manager is None
         assert rt._handler is None
 
     @pytest.mark.asyncio
+    async def test_do_close_closes_every_session_the_agent_holds(self) -> None:
+        rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
+        conn = MagicMock()
+        conn.close_session = AsyncMock()
+        ctx = MagicMock()
+        ctx.__aexit__ = AsyncMock()
+        rt._conn = conn
+        for index in (1, 2):
+            conn.new_session = AsyncMock(return_value=MagicMock(session_id=f"sess-{index}", modes=None))
+            await rt._sessions.open(conn, f"s{index}", AgentCapabilities(), None)
+        rt._agent = AgentCapabilities(close_session=True)
+        rt._ctx_manager = ctx
+        rt._process = _live_process()
+
+        await rt._do_close()
+
+        assert [call.kwargs["session_id"] for call in conn.close_session.await_args_list] == ["sess-1", "sess-2"]
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("agent_capabilities", "expected"),
+        ("advertised", "expected"),
         [
-            (AgentCapabilities(session_capabilities=SessionCapabilities(close=SessionCloseCapabilities())), True),
-            (AgentCapabilities(), False),
-            (None, False),
+            (
+                AdvertisedCapabilities(
+                    load_session=True,
+                    prompt_capabilities=PromptCapabilities(image=True),
+                    session_capabilities=SessionCapabilities(
+                        close=SessionCloseCapabilities(), resume=SessionResumeCapabilities()
+                    ),
+                ),
+                AgentCapabilities(image_prompts=True, load_session=True, resume_session=True, close_session=True),
+            ),
+            (AdvertisedCapabilities(load_session=True), AgentCapabilities(load_session=True)),
+            (AdvertisedCapabilities(), AgentCapabilities()),
+            (None, AgentCapabilities()),
         ],
-        ids=["advertised", "not-advertised", "no-capabilities"],
+        ids=["everything", "load-only", "nothing-advertised", "no-capabilities"],
     )
-    async def test_ensure_connection_records_session_close_capability(
-        self, agent_capabilities: AgentCapabilities | None, expected: bool
+    async def test_ensure_connection_records_what_the_agent_advertised(
+        self, advertised: AdvertisedCapabilities | None, expected: AgentCapabilities
     ) -> None:
+        agent_capabilities = advertised
         rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         conn = MagicMock()
         conn.initialize = AsyncMock(
@@ -262,7 +318,7 @@ class TestAcpRuntimeLifecycle:
         with patch("acp.spawn_agent_process", return_value=ctx):
             await rt._ensure_connection()
 
-        assert rt._supports_session_close is expected
+        assert rt._agent == expected
 
     @pytest.mark.asyncio
     async def test_ensure_connection_requires_command(self) -> None:
@@ -271,7 +327,7 @@ class TestAcpRuntimeLifecycle:
             await rt._ensure_connection()
 
     @pytest.mark.asyncio
-    async def test_create_session_without_connection(self) -> None:
+    async def test_open_session_without_connection(self) -> None:
         rt = AcpRuntime("acp", _make_config(), workspace=_WORKSPACE)
         with pytest.raises(RuntimeError):
-            await rt._create_session()
+            await rt._open_session(MagicMock(), "s1", None)

@@ -1,4 +1,4 @@
-"""Tests for the ACP runtime types: RuntimeConfig and RuntimeEvent."""
+"""Tests for the ACP runtime types: RuntimeConfig, RuntimeEvent and StopReason."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     RuntimeConfig,
     RuntimeEventType,
+    StopReason,
     create_event,
     delegation_session_id,
     normalize_workspace,
@@ -120,3 +121,22 @@ class TestRuntimeEvent:
         assert len(AcpErrorCode) == 8
         assert AcpErrorCode.MAX_TURNS == "max_turns"
         assert AcpErrorCode.BACKEND_NOT_FOUND == "backend_not_found"
+
+
+class TestStopReason:
+    @pytest.mark.parametrize("reason", list(StopReason))
+    def test_a_reason_is_recognized_by_the_text_an_agent_reports(self, reason: StopReason) -> None:
+        assert StopReason.of(reason.value) is reason
+
+    @pytest.mark.parametrize("unknown", ["something_new", "", None, 5, {"stop": "end_turn"}])
+    def test_anything_else_is_not_a_reason(self, unknown: object) -> None:
+        assert StopReason.of(unknown) is None
+
+    def test_only_the_endings_the_user_must_hear_about_have_a_notice(self) -> None:
+        assert {reason: reason.notice for reason in StopReason} == {
+            StopReason.END_TURN: None,
+            StopReason.CANCELLED: None,
+            StopReason.MAX_TOKENS: "max_tokens",
+            StopReason.MAX_TURN_REQUESTS: "turn_limit",
+            StopReason.REFUSAL: "refusal",
+        }

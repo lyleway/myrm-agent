@@ -6,7 +6,7 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 
 [INPUT]
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus, StopReason (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 - toolkits.acp.runtime.cli.permission_bridge::PermissionBridge (POS: Loopback MCP endpoint through which Claude Code puts its permission prompts to the host)
@@ -62,6 +62,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
+    StopReason,
     create_event,
 )
 
@@ -360,7 +361,7 @@ class CliRuntime(BaseRuntime):
             notice=attempt.notice,
             auth_rejection=attempt.auth_rejection,
         )
-        done = create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+        done = create_event(RuntimeEventType.DONE, session_id, stop_reason=StopReason.END_TURN)
         if error is None:
             return [done]
         if error.code is AcpErrorCode.PROCESS_CRASHED:

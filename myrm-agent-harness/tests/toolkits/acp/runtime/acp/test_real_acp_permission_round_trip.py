@@ -13,61 +13,35 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     PermissionMode,
     PermissionRequest,
     PermissionVerdict,
-    RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
 )
-from tests.toolkits.acp._fake_model_apis import FakeGeminiApi, FakeOpenAiChatApi, ScriptedModelApi, ToolCall
-from tests.toolkits.acp.cli_contract import cli_binary
+from tests.toolkits.acp._fake_model_apis import ToolCall
+
+from ._real_agents import SCRIPTED_AGENTS, TURN_SECONDS, scripted_pool
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(sys.platform == "win32", reason="the scripted shell command is POSIX"),
 ]
 
-_TURN_SECONDS = 90
 _PROMPT = "do the scripted work"
 
-
-@dataclass(frozen=True)
-class _Agent:
-    """How to point one agent at its scripted model, and the names its tools go by."""
-
-    api: Callable[[Sequence[ToolCall]], ScriptedModelApi]
-    env: Callable[[str], dict[str, str]]
-    edit_tool: str
-    # What the edit tool takes besides the file and the two strings.
-    edit_extra: Mapping[str, object] = field(default_factory=dict)
-
-
-_AGENTS = {
-    "gemini": _Agent(
-        api=lambda calls: FakeGeminiApi(calls=calls),
-        env=lambda url: {
-            "GEMINI_API_KEY": "fake-key",
-            "GOOGLE_GEMINI_BASE_URL": url,
-            "GEMINI_MODEL": "gemini-2.5-flash",
-        },
-        edit_tool="replace",
-        edit_extra={"instruction": "Rename alpha to omega"},
-    ),
-    "qwen": _Agent(
-        api=lambda calls: FakeOpenAiChatApi(calls=calls),
-        env=lambda url: {"OPENAI_API_KEY": "fake-key", "OPENAI_BASE_URL": f"{url}/v1", "OPENAI_MODEL": "fake-model"},
-        edit_tool="edit",
-    ),
+# The name each agent gives its edit tool, and what that tool takes besides the file and the two strings.
+_EDIT_TOOLS: dict[str, tuple[str, Mapping[str, object]]] = {
+    "gemini": ("replace", {"instruction": "Rename alpha to omega"}),
+    "qwen": ("edit", {}),
 }
+_AGENT_NAMES = sorted(SCRIPTED_AGENTS)
 
 
 class _Broker:
@@ -105,23 +79,6 @@ def home(tmp_path: Path) -> Path:
     return path
 
 
-def _pool(name: str, api: ScriptedModelApi, home: Path, mode: PermissionMode) -> RuntimePool:
-    """A pool with the agent registered the way every config stored before the move to ACP says: as a CLI."""
-    pool = RuntimePool(max_concurrent=1)
-    pool.register(
-        name,
-        RuntimeConfig(
-            backend_type="cli",
-            command=cli_binary(name),
-            auth_mode="api_key",
-            env={**_AGENTS[name].env(api.base_url), "HOME": str(home)},
-            timeout_seconds=_TURN_SECONDS,
-            permission_mode=mode,
-        ),
-    )
-    return pool
-
-
 async def _turn(
     name: str,
     workspace: Path,
@@ -131,8 +88,8 @@ async def _turn(
     mode: PermissionMode = "safe",
     broker: _Broker | None = None,
 ) -> list[RuntimeEvent]:
-    async with _AGENTS[name].api(calls) as api:
-        pool = _pool(name, api, home, mode)
+    async with SCRIPTED_AGENTS[name].api(calls=calls) as api:
+        pool = scripted_pool(name, api, home, mode)
         events: list[RuntimeEvent] = []
         try:
             async for event in pool.run_turn(name, _PROMPT, "chat-1", workspace=str(workspace), permissions=broker):
@@ -162,7 +119,7 @@ def _ended_cleanly(events: list[RuntimeEvent]) -> bool:
     return RuntimeEventType.ERROR not in _types(events) and _types(events)[-1] is RuntimeEventType.DONE
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_a_new_file_is_created_once_the_host_allows_it(agent: str, workspace: Path, home: Path) -> None:
     broker = _Broker(True)
 
@@ -176,7 +133,7 @@ async def test_a_new_file_is_created_once_the_host_allows_it(agent: str, workspa
     assert str((workspace / "out.txt").resolve()) in request.paths
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_a_refused_write_makes_no_file_and_the_turn_still_ends(agent: str, workspace: Path, home: Path) -> None:
     broker = _Broker(False)
 
@@ -188,7 +145,7 @@ async def test_a_refused_write_makes_no_file_and_the_turn_still_ends(agent: str,
     assert len(_failed_tool_results(events)) == 1
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_allow_all_writes_without_asking_anyone(agent: str, workspace: Path, home: Path) -> None:
     events = await _turn(agent, workspace, home, [_write(workspace)], mode="allow_all")
 
@@ -196,7 +153,7 @@ async def test_allow_all_writes_without_asking_anyone(agent: str, workspace: Pat
     assert (workspace / "out.txt").read_text() == "hello"
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_with_nobody_to_ask_a_safe_agent_cannot_write(agent: str, workspace: Path, home: Path) -> None:
     events = await _turn(agent, workspace, home, [_write(workspace)])
 
@@ -205,7 +162,7 @@ async def test_with_nobody_to_ask_a_safe_agent_cannot_write(agent: str, workspac
     assert len(_failed_tool_results(events)) == 1
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_a_shell_command_asks_as_an_execution_and_runs_once_allowed(
     agent: str, workspace: Path, home: Path
 ) -> None:
@@ -220,7 +177,7 @@ async def test_a_shell_command_asks_as_an_execution_and_runs_once_allowed(
     assert "echo ran > ran.txt" in f"{request.title} {request.input}"
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_a_refused_shell_command_does_not_run(agent: str, workspace: Path, home: Path) -> None:
     broker = _Broker(False)
 
@@ -231,7 +188,7 @@ async def test_a_refused_shell_command_does_not_run(agent: str, workspace: Path,
     assert len(broker.asked) == 1
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_reading_a_file_asks_nobody(agent: str, workspace: Path, home: Path) -> None:
     (workspace / "existing.txt").write_text("alpha beta\n")
     broker = _Broker(False)
@@ -244,15 +201,12 @@ async def test_reading_a_file_asks_nobody(agent: str, workspace: Path, home: Pat
     assert _failed_tool_results(events) == []
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_an_existing_file_is_edited_once_the_host_allows_it(agent: str, workspace: Path, home: Path) -> None:
     target = workspace / "existing.txt"
     target.write_text("alpha beta\n")
-    spec = _AGENTS[agent]
-    edit = ToolCall(
-        spec.edit_tool,
-        {"file_path": str(target), "old_string": "alpha", "new_string": "omega", **spec.edit_extra},
-    )
+    edit_tool, edit_extra = _EDIT_TOOLS[agent]
+    edit = ToolCall(edit_tool, {"file_path": str(target), "old_string": "alpha", "new_string": "omega", **edit_extra})
     broker = _Broker(True)
 
     events = await _turn(
@@ -265,14 +219,14 @@ async def test_an_existing_file_is_edited_once_the_host_allows_it(agent: str, wo
     assert request.kind == "edit"
 
 
-@pytest.mark.parametrize("agent", sorted(_AGENTS))
+@pytest.mark.parametrize("agent", _AGENT_NAMES)
 async def test_stopping_a_turn_while_the_host_is_asked_ends_it_without_the_write(
     agent: str, workspace: Path, home: Path
 ) -> None:
     broker = _Broker(None)
 
-    async with _AGENTS[agent].api([_write(workspace)]) as api:
-        pool = _pool(agent, api, home, "safe")
+    async with SCRIPTED_AGENTS[agent].api(calls=[_write(workspace)]) as api:
+        pool = scripted_pool(agent, api, home)
         events: list[RuntimeEvent] = []
 
         async def run() -> None:
@@ -281,7 +235,7 @@ async def test_stopping_a_turn_while_the_host_is_asked_ends_it_without_the_write
 
         try:
             turn = asyncio.create_task(run())
-            await asyncio.wait_for(broker.asked_event.wait(), timeout=_TURN_SECONDS)
+            await asyncio.wait_for(broker.asked_event.wait(), timeout=TURN_SECONDS)
             await pool.cancel(agent, "chat-1")
             await asyncio.wait_for(turn, timeout=60)
         finally:

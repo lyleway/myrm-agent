@@ -34,7 +34,7 @@ def _is_working(event: RuntimeEvent) -> bool:
 class TestSilentAgent:
     @pytest.mark.asyncio
     async def test_a_quiet_agent_keeps_reporting_how_long_the_turn_has_been_running(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1", agent="mock", workspace=_WORKSPACE)
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         events = AcpRuntime._consume_events(handler, "s1", silence_seconds=0.05)
 
         quiet = [await asyncio.wait_for(anext(events), timeout=5) for _ in range(3)]
@@ -45,7 +45,7 @@ class TestSilentAgent:
 
     @pytest.mark.asyncio
     async def test_what_the_agent_says_comes_through_between_the_reports(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1", agent="mock", workspace=_WORKSPACE)
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         events = AcpRuntime._consume_events(handler, "s1", silence_seconds=0.05)
         text = create_event(RuntimeEventType.TEXT_DELTA, "s1", content="hello")
 
@@ -59,7 +59,7 @@ class TestSilentAgent:
 
     @pytest.mark.asyncio
     async def test_an_agent_that_keeps_talking_is_never_reported_as_waiting(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1", agent="mock", workspace=_WORKSPACE)
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         handler.event_queue.put_nowait(create_event(RuntimeEventType.TEXT_DELTA, "s1", content="a"))
         handler.event_queue.put_nowait(None)
 

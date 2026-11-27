@@ -12,7 +12,8 @@
 [POS]
 绕过 LangChain Agent 的外部 Agent 直连路由的事件翻译层。每次外部工具调用是一个带 tool_call_id 的独立步骤
 （开始与结果落在同一步）。状态步骤的措辞由前端按当前语言给出，这里只带 CLI 自己给的内容（已运行时长、CLI 的
-警告原文）；会话没有被续接、图片没有直接交给外部 Agent、回合停在轮数上限，都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
+警告原文）；会话没有被续接、图片没有直接交给外部 Agent、回合在中途结束（停在轮数上限、输出被截断、Agent 拒绝继续），
+都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
 终止外部进程，外部 Agent 静默时同样即时生效。失败时：用户能自己处置的（未登录、未安装、超时）给带处置步骤的
 错误事件（API Key 被拒时点名该 Agent 读取的环境变量），CLI 的原话改记 WARNING 日志（脱敏并截断）；其余保持 CLI 的原话。
 """
@@ -32,6 +33,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     ContinuityStatus,
     RuntimeEventType,
+    StopReason,
 )
 
 from app.services.external_agents.delegation.errors import delegate_error_event
@@ -117,6 +119,8 @@ class _TurnTranslator:
                 return self._usage(data)
             case RuntimeEventType.ERROR:
                 return self._error(data)
+            case RuntimeEventType.DONE:
+                return self._done(data)
             case _:
                 return []
 
@@ -199,6 +203,16 @@ class _TurnTranslator:
         if status in _STATUSES_WITH_BODY and isinstance(message, str):
             return self._status_step(message)
         return self._status_step()
+
+    def _done(self, data: Mapping[str, object]) -> list[SseEvent]:
+        """A turn the agent ended before it finished says so; one that finished, or that the user stopped, does not."""
+        reason = StopReason.of(data.get("stop_reason"))
+        if reason is StopReason.MAX_TURN_REQUESTS:
+            # The agent's own turn limit, with its work and session intact: reported once the turn closes.
+            self.outcome = _Outcome.TURN_LIMIT
+            return []
+        kind = reason.notice if reason is not None else None
+        return [self._notice(kind)] if kind is not None else []
 
     def _usage(self, data: Mapping[str, object]) -> list[SseEvent]:
         input_tokens = _token_count(data.get("input_tokens"))

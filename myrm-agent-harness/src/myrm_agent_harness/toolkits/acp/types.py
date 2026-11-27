@@ -13,14 +13,15 @@ no - Base type definition module
 - DelegationPool: the pool surface a delegation caller needs (RuntimePool and host-side wrappers satisfy it)
 - RuntimeEvent: Runtime Event type
 - AcpErrorCode: ACP error enum
-- ContinuityStatus: status_update statuses for a CLI conversation that could not be continued
+- ContinuityStatus: status_update statuses for an agent conversation that could not be continued
+- StopReason: how an agent ended a turn (the ``stop_reason`` of ``done``), in the vocabulary of ACP, and the notice each unfinished ending earns
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
 - BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
 - RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
 - delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
-- CliSessionRecord: a CLI-native session id bound to the working directory that created it
-- CliSessionStore: protocol a host implements to keep CLI session records across process restarts
+- CliSessionRecord: an agent-native session id bound to the working directory that created it
+- CliSessionStore: protocol a host implements to keep agent session records across process restarts
 - PermissionMode: what a delegated agent may do without asking (``safe`` or ``allow_all``)
 - PermissionRequest, PermissionVerdict, PermissionBroker: one action a ``safe`` agent asks to take, the answer, and the host-side party that puts it to a person
 
@@ -70,7 +71,7 @@ class AcpErrorCode(StrEnum):
 
 
 class ContinuityStatus(StrEnum):
-    """``status_update`` statuses telling that the conversation a CLI agent recorded earlier is not continued."""
+    """``status_update`` statuses telling that the conversation an agent recorded earlier is not continued."""
 
     SESSION_EXPIRED = "session_expired"
     WORKSPACE_CHANGED = "session_workspace_changed"
@@ -85,6 +86,45 @@ class ContinuityStatus(StrEnum):
         except ValueError:
             return None
 
+
+class StopReason(StrEnum):
+    """How an agent ended a turn: the ``stop_reason`` of ``done``, in the vocabulary of ACP's ``PromptResponse``.
+
+    ``end_turn`` is the normal end. The others tell the person that the reply is not what a finished turn leaves:
+    ``max_tokens`` cut it off, ``max_turn_requests`` stopped it at the agent's own limit, ``refusal`` declined it (and
+    the agent dropped the prompt from its context); ``cancelled`` is the host's own stop.
+    """
+
+    END_TURN = "end_turn"
+    MAX_TOKENS = "max_tokens"
+    MAX_TURN_REQUESTS = "max_turn_requests"
+    REFUSAL = "refusal"
+    CANCELLED = "cancelled"
+
+    @classmethod
+    def of(cls, stop_reason: object) -> StopReason | None:
+        """The stop reason that ``stop_reason`` stands for, or None for any other value."""
+        if not isinstance(stop_reason, str):
+            return None
+        try:
+            return cls(stop_reason)
+        except ValueError:
+            return None
+
+    @property
+    def notice(self) -> str | None:
+        """The kind of notice (``delegation_<agent>_<kind>``) a person is shown for a turn that ended this way.
+
+        None when there is nothing to say: the turn finished, or the person stopped it.
+        """
+        return _STOP_NOTICES.get(self)
+
+
+_STOP_NOTICES: dict[StopReason, str] = {
+    StopReason.MAX_TOKENS: "max_tokens",
+    StopReason.MAX_TURN_REQUESTS: "turn_limit",
+    StopReason.REFUSAL: "refusal",
+}
 
 # The ``status_update`` status of a turn whose images were not handed to the agent (its backend or the agent itself
 # takes none); the agent still has the image's location in the prompt.
@@ -192,7 +232,7 @@ class RuntimeConfig:
 
 @dataclass(frozen=True, slots=True)
 class CliSessionRecord:
-    """A CLI-native session id bound to the working directory it was created in.
+    """An agent-native session id (a CLI's, an ACP agent's, a Codex thread's) bound to the directory that created it.
 
     Claude Code files a conversation under its project directory, and before v2.1.223 ``--resume <id>`` finds
     it only from that directory. A turn resumes a record only when it starts in the directory that created
@@ -311,10 +351,10 @@ class DelegationPool(Protocol):
 class CliSessionStore(Protocol):
     """Durable home of ``CliSessionRecord`` keyed by harness session id; one store serves one conversation scope.
 
-    A host implements it so CLI sessions survive a restart of the host process. The runtime awaits every call
-    while a turn runs (a record is saved as soon as the CLI announces its session), so an implementation bounds
-    its own latency; a call that raises is degraded by the runtime to a fresh CLI session and never fails a turn.
-    A record is never deleted: the next session the CLI announces overwrites it.
+    A host implements it so agent sessions survive a restart of the host process or of the agent. The runtime awaits
+    every call while a turn runs (a record is saved as soon as the agent announces its session), so an implementation
+    bounds its own latency; a call that raises is degraded by the runtime to a fresh agent session and never fails a
+    turn. A record is never deleted: the next session the agent announces overwrites it.
     """
 
     async def load(self, session_id: str) -> CliSessionRecord | None: ...

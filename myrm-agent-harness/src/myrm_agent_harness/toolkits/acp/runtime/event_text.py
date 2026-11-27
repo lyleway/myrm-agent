@@ -1,4 +1,4 @@
-"""Bounded one-line texts shared by the runtimes: what a tool call works on and what a failure said.
+"""Texts shared by the runtimes: what a tool call works on, what a failure said and how messages are set apart.
 
 [INPUT]
 no — leaf module, standard library only
@@ -7,6 +7,7 @@ no — leaf module, standard library only
 - tool_summary: one short line telling what a tool call works on
 - MAX_TOOL_OUTPUT_CHARS: the most a tool result carries (one result can be a whole file; consumers show an excerpt)
 - condense_failure_text / FAILURE_TEXT_CHARS: an agent's failure text as one bounded line (a quoted web page shrinks to its title)
+- paragraph_break: the newlines that set a message apart from the text before it (a tool call came between)
 
 [POS]
 Text shaping of the events every runtime emits, kept in one place so a tool call or a failure reads the same whichever
@@ -35,6 +36,18 @@ def tool_summary(tool_input: object) -> str:
                 return first_line[: _MAX_SUMMARY_CHARS - 1] + "…"
             return first_line
     return ""
+
+
+def paragraph_break(before: str, after: str) -> str:
+    """The newlines that set ``after`` apart from ``before`` by a blank line, counting the ones already there.
+
+    An agent streams the text before and after a tool call as separate messages with no break between them, which
+    read as one run-on sentence once the tool call is not shown inline. Nothing precedes the first message.
+    """
+    if not before:
+        return ""
+    present = len(before) - len(before.rstrip("\n")) + len(after) - len(after.lstrip("\n"))
+    return "\n" * max(0, 2 - present)
 
 
 FAILURE_TEXT_CHARS = 500

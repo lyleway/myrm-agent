@@ -142,12 +142,19 @@ export const inferStageLabel = (step: ProgressItem, t: TranslateFn): string => {
 
 // `delegation_<agent>_<kind>` steps of a delegation to an external agent: its status line, one of its tool calls,
 // or a title-only notice (the conversation it had earlier did not continue, the images were not handed to it, or the
-// turn stopped at its turn limit).
+// turn ended before the agent finished: its turn limit, its reply length limit, or its refusal).
 const DELEGATION_STEP_RE =
-  /^delegation_(.+)_(status|tool|session_expired|session_workspace_changed|images_not_sent|turn_limit)$/;
+  /^delegation_(.+)_(status|tool|session_expired|session_workspace_changed|images_not_sent|turn_limit|max_tokens|refusal)$/;
 
 type DelegationKind =
-  'status' | 'tool' | 'session_expired' | 'session_workspace_changed' | 'images_not_sent' | 'turn_limit';
+  | 'status'
+  | 'tool'
+  | 'session_expired'
+  | 'session_workspace_changed'
+  | 'images_not_sent'
+  | 'turn_limit'
+  | 'max_tokens'
+  | 'refusal';
 
 const parseDelegationStep = (stepKey: string | undefined): { agentName: string; kind: DelegationKind } | null => {
   const match = stepKey ? DELEGATION_STEP_RE.exec(stepKey) : null;

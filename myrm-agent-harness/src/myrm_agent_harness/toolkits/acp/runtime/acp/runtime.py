@@ -4,11 +4,13 @@ Spawns an external ACP-compatible agent process (Gemini CLI, Qwen Code, etc.)
 and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
 - toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler, client_capabilities (POS: ACP callback handler for the AcpRuntime backend.)
+- toolkits.acp.runtime.acp.capabilities::AgentCapabilities (POS: What an ACP agent said it can do in ``initialize``)
+- toolkits.acp.runtime.acp.sessions::AUTH_REQUIRED_CODE, AgentSessions, OpenedSession (POS: The continuity half of AcpRuntime)
 - toolkits.acp.runtime.image_blocks::ImageBlock, load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
 - toolkits.acp.runtime.acp.stalled_agent::cancel_session, leave_transport (POS: Bounded stop of an ACP agent that has stopped reading its stdin)
 
@@ -16,8 +18,10 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 - AcpRuntime: RuntimeBackend implementation using the ACP protocol (stdin/stdout JSON-RPC).
 
 [POS]
-ACP protocol runtime backend. Sends `session/close` only when the agent advertises it (ACP capability
-negotiation) and bounds it, so a silent agent cannot skip the transport teardown that terminates its process.
+ACP protocol runtime backend. Every optional ACP method is used only when the agent advertised it in ``initialize``
+(``AgentCapabilities``). A harness session is an ACP session of the agent, recorded so that a new agent process or host
+process gets the conversation back (``sessions``); ``session/close`` is bounded, so a silent agent cannot skip the
+transport teardown that terminates its process.
 The host's policy answers every permission request the agent makes, so a known agent is started with its contract's
 entry args (the flag that makes it ask the host included) and without the configured flags that let it skip asking
 (``--yolo``, ``--approval-mode``). In ``safe`` mode a session that the agent reports in a mode that never asks is put
@@ -28,7 +32,7 @@ A silent agent (one long tool call) is reported as still working at a fixed inte
 missing ACP SDK (the optional ``acp`` extra) ends the turn with a ``BACKEND_NOT_FOUND`` error that says how to install it.
 
 The images of a turn travel as image content blocks after the text, only to an agent that advertised
-``promptCapabilities.image`` in ``initialize``; for any other agent the turn opens with an ``images_not_sent`` status
+``promptCapabilities.image``; for any other agent the turn opens with an ``images_not_sent`` status
 update and carries the text alone. Cancel and transport exit are bounded (``stalled_agent``), so an agent that has
 stopped reading a prompt of several MiB cannot hold up a stop. A prompt failure surfaces as an error event only
 once the events have been consumed to the end; when the consumer closed the turn first (the stop ended the agent) it
@@ -53,6 +57,8 @@ from myrm_agent_harness.toolkits.acp.runtime._base import (
     working_status,
 )
 from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler, client_capabilities
+from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabilities
+from myrm_agent_harness.toolkits.acp.runtime.acp.sessions import AUTH_REQUIRED_CODE, AgentSessions, OpenedSession
 from myrm_agent_harness.toolkits.acp.runtime.acp.stalled_agent import cancel_session, leave_transport
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock, load_image_blocks
 from myrm_agent_harness.toolkits.acp.types import (
@@ -60,6 +66,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     BackendCapabilities,
     BackendStatus,
+    CliSessionStore,
     McpServerConfig,
     PermissionBroker,
     RuntimeConfig,
@@ -73,16 +80,12 @@ if TYPE_CHECKING:
     from asyncio.subprocess import Process
 
     from acp import ClientSideConnection
-    from acp.schema import NewSessionResponse
 
 logger = logging.getLogger(__name__)
 
 # `session/close` is advisory. Bounded so an agent that advertises it but never answers still reaches the
 # transport teardown (SDK-bounded terminate/kill) that actually stops the process.
 _CLOSE_SESSION_TIMEOUT_SECONDS = 4.0
-
-# JSON-RPC error code of ACP's ``auth_required``: how Gemini and Qwen answer ``session/new`` without a login.
-_AUTH_REQUIRED_CODE = -32000
 
 
 class _AcpSdkMissingError(Exception):
@@ -103,7 +106,7 @@ class AcpRuntime(BaseRuntime):
     """RuntimeBackend implementation using the ACP protocol (stdin/stdout JSON-RPC).
 
     Spawns an external agent process and communicates via the official ACP SDK.
-    Supports session reuse, cancel, and resume.
+    Supports session reuse, cancel, and resume (across an agent restart too, given a ``CliSessionStore``).
     """
 
     def __init__(
@@ -112,15 +115,15 @@ class AcpRuntime(BaseRuntime):
         config: RuntimeConfig,
         *,
         workspace: str,
+        session_store: CliSessionStore | None = None,
     ) -> None:
         super().__init__(runtime_name, config, backend_type="acp", workspace=workspace)
         self._conn: ClientSideConnection | None = None
         self._process: Process | None = None
-        self._session_id: str | None = None
         self._ctx_manager: AbstractAsyncContextManager[tuple[ClientSideConnection, Process]] | None = None
         self._handler: AcpCallbackHandler | None = None
-        self._supports_session_close = False
-        self._prompt_images = False
+        self._agent = AgentCapabilities()
+        self._sessions = AgentSessions(runtime_name, self._workspace, session_store)
 
     @property
     def capabilities(self) -> BackendCapabilities:
@@ -166,17 +169,17 @@ class AcpRuntime(BaseRuntime):
                 )
                 return
 
-        if self._session_id is None:
-            await self._create_session(mcp_servers=mcp_servers)
-
         handler = self._handler
         if handler is None:
             msg = "Handler not initialized"
             raise RuntimeError(msg)
+        opened = await self._open_session(handler, session_id, mcp_servers)
         handler.begin_turn(permissions, session_id)
+        if opened.notice is not None:
+            yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=opened.notice)
 
         blocks: list[ImageBlock] = []
-        if images and self._prompt_images:
+        if images and self._agent.image_prompts:
             blocks = await asyncio.to_thread(load_image_blocks, images)
         elif images:
             logger.info(
@@ -185,7 +188,7 @@ class AcpRuntime(BaseRuntime):
                 len(images),
             )
             yield images_not_sent_event(session_id, len(images))
-        prompt_task = asyncio.create_task(self._run_prompt(prompt, blocks, handler))
+        prompt_task = asyncio.create_task(self._run_prompt(prompt, blocks, handler, opened.agent_session_id))
 
         drained = False
         try:
@@ -213,7 +216,9 @@ class AcpRuntime(BaseRuntime):
                     # behavior instead of degrading to a silent DONE.
                     raise
 
-    async def _run_prompt(self, prompt: str, blocks: list[ImageBlock], handler: AcpCallbackHandler) -> None:
+    async def _run_prompt(
+        self, prompt: str, blocks: list[ImageBlock], handler: AcpCallbackHandler, agent_session_id: str
+    ) -> None:
         """Run the ACP prompt (the text, then its images) and signal completion via the handler's queue."""
         from acp.schema import ImageContentBlock, TextContentBlock
 
@@ -222,7 +227,7 @@ class AcpRuntime(BaseRuntime):
         try:
             response = await self._conn.prompt(  # type: ignore[union-attr]
                 prompt=content,
-                session_id=self._session_id,
+                session_id=agent_session_id,
             )
             handler.mark_done(response.stop_reason)
         except Exception as exc:
@@ -253,23 +258,30 @@ class AcpRuntime(BaseRuntime):
             yield event
 
     async def _do_cancel(self, session_id: str) -> None:
-        if self._conn is None or self._session_id is None:
+        agent_session_id = self._sessions.agent_session(session_id)
+        if self._conn is None or agent_session_id is None:
             return
         # An agent that waits for the answer to a request does not end its prompt on ``session/cancel`` alone: the
         # requests still waiting are answered as cancelled, which ACP asks of a client that cancels.
         if self._handler is not None:
             self._handler.end_turn()
-        await cancel_session(self._conn, self._session_id, self._process, self._name)
+        await cancel_session(self._conn, agent_session_id, self._process, self._name)
 
     async def _do_resume(self, session_id: str) -> bool:
-        return self._session_id is not None and self.is_alive
+        return session_id in self._sessions and self.is_alive
 
     async def _do_close(self) -> None:
+        await self._stop_agent()
+        self._sessions.clear_memory()
+
+    async def _stop_agent(self) -> None:
+        """Stop the agent process, and with it the sessions it held; the conversations recorded stay resumable."""
         # ACP: a client MUST NOT call `session/close` unless the agent advertised sessionCapabilities.close.
-        if self._conn is not None and self._session_id is not None and self._supports_session_close:
+        if self._conn is not None and self._agent.close_session:
             try:
                 async with asyncio.timeout(_CLOSE_SESSION_TIMEOUT_SECONDS):
-                    await self._conn.close_session(session_id=self._session_id)
+                    for agent_session_id in self._sessions.held():
+                        await self._conn.close_session(session_id=agent_session_id)
             except TimeoutError:
                 logger.warning(
                     "acp_close_session_timeout name=%s timeout_s=%.0f", self._name, _CLOSE_SESSION_TIMEOUT_SECONDS
@@ -285,11 +297,10 @@ class AcpRuntime(BaseRuntime):
 
         self._conn = None
         self._process = None
-        self._session_id = None
         self._ctx_manager = None
         self._handler = None
-        self._supports_session_close = False
-        self._prompt_images = False
+        self._agent = AgentCapabilities()
+        self._sessions.agent_lost()
 
     async def _do_get_status(self) -> BackendStatus:
         if self.is_alive:
@@ -303,12 +314,12 @@ class AcpRuntime(BaseRuntime):
     async def _ensure_connection(self) -> None:
         """Spawn the external agent process and establish ACP connection."""
         _require_acp_sdk()
-        await self._do_close()
+        await self._stop_agent()
 
         from acp import PROTOCOL_VERSION, spawn_agent_process
         from acp.schema import Implementation
 
-        self._handler = AcpCallbackHandler(self._config, session_id="", agent=self._name, workspace=self._workspace)
+        self._handler = AcpCallbackHandler(self._config, agent=self._name, workspace=self._workspace)
         safe_env = build_safe_env(self._config)
 
         command = self._config.command
@@ -343,32 +354,21 @@ class AcpRuntime(BaseRuntime):
             client_capabilities=client_capabilities(),
             client_info=Implementation(name="myrm-acp-client", version="1.0.0"),
         )
-        agent_caps = init_response.agent_capabilities
-        session_caps = agent_caps.session_capabilities if agent_caps is not None else None
-        self._supports_session_close = session_caps is not None and session_caps.close is not None
-        prompt_caps = agent_caps.prompt_capabilities if agent_caps is not None else None
-        self._prompt_images = prompt_caps is not None and bool(prompt_caps.image)
-        logger.info("acp_runtime_connected name=%s pid=%s", self._name, process.pid)
+        self._agent = AgentCapabilities.of(init_response)
+        logger.info("acp_runtime_connected name=%s pid=%s capabilities=%s", self._name, process.pid, self._agent)
 
-    async def _create_session(self, *, mcp_servers: list[McpServerConfig] | None = None) -> None:
-        """Create a new ACP session."""
+    async def _open_session(
+        self, handler: AcpCallbackHandler, session_id: str, mcp_servers: list[McpServerConfig] | None
+    ) -> OpenedSession:
+        """The ACP session of ``session_id`` (opened, or given back from the agent's storage), in a mode that asks."""
         if self._conn is None:
-            msg = "Cannot create session: connection not established"
+            msg = "Cannot open a session: connection not established"
             raise RuntimeError(msg)
+        opened = await self._sessions.open(self._conn, session_id, self._agent, mcp_servers)
+        await self._require_ask_mode(opened)
+        return opened
 
-        acp_mcp = _mcp_configs_to_acp_stdio(mcp_servers)
-        if acp_mcp:
-            response = await self._conn.new_session(cwd=self._workspace, mcp_servers=acp_mcp)
-        else:
-            response = await self._conn.new_session(cwd=self._workspace)
-        await self._require_ask_mode(response)
-        session_id = response.session_id
-        self._session_id = session_id
-        if self._handler is not None:
-            self._handler.session_id = session_id
-        logger.info("acp_runtime_session_created name=%s session_id=%s", self._name, session_id)
-
-    async def _require_ask_mode(self, response: NewSessionResponse) -> None:
+    async def _require_ask_mode(self, opened: OpenedSession) -> None:
         """In ``safe`` mode, put a session that never asks back in the mode that asks, or refuse to run it.
 
         The launch args ask for the mode in which the agent puts its actions to the host, but the agent's own settings
@@ -377,7 +377,7 @@ class AcpRuntime(BaseRuntime):
         """
         profile = command_profile(self._config.command)
         expected = profile.acp_ask_mode if profile is not None else None
-        modes = response.modes
+        modes = opened.modes
         if self._config.permission_mode != "safe" or expected is None or modes is None:
             return
         if modes.current_mode_id == expected:
@@ -388,14 +388,14 @@ class AcpRuntime(BaseRuntime):
         if self._conn is None or expected not in {mode.id for mode in modes.available_modes}:
             await self._refuse_session(f"{problem}, and offers no mode '{expected}' to leave it for")
         try:
-            await self._conn.set_session_mode(session_id=response.session_id, mode_id=expected)
+            await self._conn.set_session_mode(session_id=opened.agent_session_id, mode_id=expected)
         except Exception as exc:
             await self._refuse_session(f"{problem}, and could not be put in '{expected}': {exc}")
         logger.warning("acp_session_mode_reset name=%s from=%s to=%s", self._name, modes.current_mode_id, expected)
 
     async def _refuse_session(self, reason: str) -> NoReturn:
         """End the agent whose session cannot be run safely, so no later turn finds it half set up, and fail the turn."""
-        await self._do_close()
+        await self._stop_agent()
         raise RuntimeError(reason)
 
     def _classify_failure(self, exc: Exception) -> AcpError | None:
@@ -403,24 +403,6 @@ class AcpRuntime(BaseRuntime):
             from acp import RequestError
         except ImportError:
             return None
-        if isinstance(exc, RequestError) and exc.code == _AUTH_REQUIRED_CODE:
+        if isinstance(exc, RequestError) and exc.code == AUTH_REQUIRED_CODE:
             return AcpError(AcpErrorCode.AUTH_FAILED, str(exc))
         return None
-
-
-def _mcp_configs_to_acp_stdio(
-    mcp_servers: list[McpServerConfig] | None,
-) -> list[object] | None:
-    if not mcp_servers:
-        return None
-    from acp.schema import EnvVariable, McpServerStdio
-
-    return [
-        McpServerStdio(
-            name=server.name,
-            command=server.command,
-            args=list(server.args),
-            env=[EnvVariable(name=key, value=value) for key, value in sorted((server.env or {}).items())],
-        )
-        for server in mcp_servers
-    ]

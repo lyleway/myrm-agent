@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEventType
 
@@ -91,11 +92,10 @@ async def test_pool_respawns_an_acp_process_that_died_between_turns(tmp_path: Pa
 
 def _resident(backend: object) -> tuple[int, str]:
     """The (pid, ACP session id) a backend is currently running."""
-    process = getattr(backend, "_process", None)
-    session_id = getattr(backend, "_session_id", None)
-    assert process is not None
-    assert session_id is not None
-    return int(process.pid), str(session_id)
+    assert isinstance(backend, AcpRuntime)
+    assert backend._process is not None
+    (session_id,) = backend._sessions.held()
+    return int(backend._process.pid), session_id
 
 
 @pytest.mark.asyncio

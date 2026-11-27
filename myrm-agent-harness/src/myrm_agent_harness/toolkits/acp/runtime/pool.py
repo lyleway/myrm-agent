@@ -68,7 +68,7 @@ def _create_runtime(
     if config.backend_type == "acp":
         from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 
-        return AcpRuntime(name, config, workspace=workspace)
+        return AcpRuntime(name, config, workspace=workspace, session_store=cli_session_store)
 
     if config.backend_type == "cli":
         from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
@@ -301,8 +301,9 @@ class RuntimePool:
         """Stop the backends that keep an OS process between turns (ACP, app server) and keep the rest.
 
         A CLI backend runs one process per turn, so between turns it holds nothing but the session id
-        behind ``--resume``; that stays. A released backend is recreated by its next turn; an app-server
-        conversation continues there only from a ``CliSessionStore`` (its threads live in the released process).
+        behind ``--resume``; that stays. A released backend is recreated by its next turn; an ACP or app-server
+        conversation continues there only from a ``CliSessionStore`` (the records that name it live in the released
+        backend otherwise).
         Call it only while no turn is running on this pool.
         """
         resident = {

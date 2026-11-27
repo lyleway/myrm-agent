@@ -51,11 +51,11 @@ def _stalled_runtime(directory: Path, tool_pid_file: Path | None = None) -> tupl
 async def _wait_until_stalled(runtime: AcpRuntime) -> Process:
     """The agent process, once its session exists and the 5 MiB prompt sits half written in its pipe."""
     deadline = time.monotonic() + 20
-    while getattr(runtime, "_session_id", None) is None:
+    while not runtime._sessions.held():
         assert time.monotonic() < deadline, "the agent never created a session"
         await asyncio.sleep(0.05)
     await asyncio.sleep(1.0)
-    process = getattr(runtime, "_process", None)
+    process: Process | None = getattr(runtime, "_process", None)
     assert process is not None
     return process
 

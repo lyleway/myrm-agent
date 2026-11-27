@@ -5,7 +5,7 @@
 - toolkits.acp.runtime.codex.rpc::JsonRpcPeer, RpcError (POS: A JSON-RPC peer over the stdio of Codex's app server)
 - toolkits.acp.runtime.codex.usage::UsageMeter (POS: Token usage of a Codex thread, as the step each model request cost)
 - toolkits.acp.runtime.codex.wire::as_obj, as_str (POS: Typed reads of the decoded JSON that Codex's app server sends)
-- toolkits.acp.runtime.session_book::CliSessionBook (POS: Session continuity state of CliRuntime and CodexRuntime)
+- toolkits.acp.runtime.session_book::CliSessionBook (POS: Session continuity state of the runtimes that continue an agent's own conversation)
 - toolkits.acp.types::CliSessionRecord, CliSessionStore, ContinuityStatus, McpServerConfig (POS: ACP runtime type definitions layer.)
 
 [OUTPUT]

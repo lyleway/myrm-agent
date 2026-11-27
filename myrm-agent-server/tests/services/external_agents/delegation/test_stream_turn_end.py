@@ -1,6 +1,6 @@
 """Direct delegation: how the end of an external agent's turn reaches the frontend.
 
-Status and continuity notices, the turn limit, a failed turn, and a stop from the user.
+Status and continuity notices, the turn limit, a turn the agent ended early, a failed turn, and a stop from the user.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     ContinuityStatus,
     RuntimeEvent,
     RuntimeEventType,
+    StopReason,
 )
 from myrm_agent_harness.utils import CancellationToken
 
@@ -119,6 +120,60 @@ async def test_reaching_the_turn_limit_is_a_stop_and_not_an_error() -> None:
         "data": [],
     }
     assert events[-1]["type"] == MESSAGE_END
+
+
+@pytest.mark.parametrize(("reason", "kind"), [(StopReason.MAX_TOKENS, "max_tokens"), (StopReason.REFUSAL, "refusal")])
+async def test_a_turn_the_agent_ended_early_becomes_a_title_only_notice(reason: StopReason, kind: str) -> None:
+    pool = ScriptedPool(
+        playing(
+            scripted_event(RuntimeEventType.TEXT_DELTA, content="half"),
+            scripted_event(RuntimeEventType.DONE, stop_reason=reason.value),
+        )
+    )
+
+    events = await stream_turn(pool)
+
+    (notice,) = steps_of(events, f"delegation_claude_{kind}")
+    assert notice == {
+        "type": STEPS,
+        "step_key": f"delegation_claude_{kind}",
+        "tool_name": "delegate:claude",
+        "status": "completed",
+        "data": [],
+    }
+    assert AgentEventType.ERROR.value not in event_types(events)
+    assert (events[-2]["step_key"], events[-2]["status"]) == ("delegation_claude_status", "completed")
+    assert events[-1]["type"] == MESSAGE_END
+
+
+async def test_an_agent_that_stopped_at_its_own_turn_limit_ends_like_one_that_reported_the_limit() -> None:
+    pool = ScriptedPool(
+        playing(
+            scripted_event(RuntimeEventType.TEXT_DELTA, content="half"),
+            scripted_event(RuntimeEventType.DONE, stop_reason=StopReason.MAX_TURN_REQUESTS.value),
+        )
+    )
+
+    events = await stream_turn(pool)
+
+    assert AgentEventType.ERROR.value not in event_types(events)
+    status, notice = events[-3], events[-2]
+    assert (status["step_key"], status["status"]) == ("delegation_claude_status", "completed")
+    assert (notice["step_key"], notice["status"], notice["data"]) == ("delegation_claude_turn_limit", "completed", [])
+
+
+@pytest.mark.parametrize("stop_reason", [StopReason.END_TURN.value, StopReason.CANCELLED.value, "something_new", None])
+async def test_a_turn_that_finished_or_was_stopped_adds_no_notice(stop_reason: str | None) -> None:
+    pool = ScriptedPool(
+        playing(
+            scripted_event(RuntimeEventType.TEXT_DELTA, content="all of it"),
+            scripted_event(RuntimeEventType.DONE, stop_reason=stop_reason),
+        )
+    )
+
+    events = await stream_turn(pool)
+
+    assert [event["step_key"] for event in events if event["type"] == STEPS] == ["delegation_claude_status"] * 2
 
 
 async def test_a_failed_turn_reports_the_error_and_marks_its_last_step_failed() -> None:

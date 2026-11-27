@@ -110,7 +110,8 @@ RuntimeEvent (frozen dataclass)
 **设计亮点**：
 - `reasoning_delta` — 支持思维链展示
 - `usage_update` — 实时 Token 监控
-- `status_update` — 后端状态变化通知（starting, compacting, reconnecting 等），UI 可精确展示后端状态；会话连续性通知由 `types.ContinuityStatus` 定义：`session_expired`（CLI 已不认识上次的会话，本回合改开新会话）与 `session_workspace_changed`（工作目录变了，不续接），宿主据此提示用户而不是当作错误；图片没有交给 agent 时（后端不收图，或 ACP agent 没声明 `promptCapabilities.image`）回合以一条 `images_not_sent`（`types.IMAGES_NOT_SENT_STATUS`，带 `images` 张数）开头，由 `types.images_not_sent_event` 构造，宿主据此如实告诉用户
+- `status_update` — 后端状态变化通知（starting, compacting, reconnecting 等），UI 可精确展示后端状态；会话连续性通知由 `types.ContinuityStatus` 定义：`session_expired`（CLI、Codex 或 ACP Agent 已不认识上次的会话，本回合改开新会话）与 `session_workspace_changed`（工作目录变了，不续接），宿主据此提示用户而不是当作错误；图片没有交给 agent 时（后端不收图，或 ACP agent 没声明 `promptCapabilities.image`）回合以一条 `images_not_sent`（`types.IMAGES_NOT_SENT_STATUS`，带 `images` 张数）开头，由 `types.images_not_sent_event` 构造，宿主据此如实告诉用户
+- `done` 的 `stop_reason` 由 `types.StopReason` 认得：`max_tokens`（输出被截断）、`max_turn_requests`（Agent 自己的回合上限）与 `refusal`（Agent 拒绝继续）是人需要知道的提前结束，各对应一条只带标题的通知（`max_tokens`、`turn_limit`、`refusal`），`end_turn` 与 `cancelled` 不产生通知，不认得的取值按没有原因处理；经 delegate 工具返回给调用模型的结果末尾另加一行注记（`delegate_report.STOP_NOTES`），免得把半截回复当作整段
 - 权限请求不是事件：它是回合内的一次问答，由 `PermissionBroker` 回答（见 3.4），所以事件流里没有它
 
 ### 3.3 结构化错误体系
@@ -190,6 +191,14 @@ PermissionVerdict (frozen dataclass)   # allowed；message 是拒绝的理由，
 - 两个 Agent 的请求形状不同，宿主界面不能假定同形：Gemini 的 `kind` 是 `edit`、`input` 是空对象、标题是缩略的、`paths` 有值（macOS 上是解析后的 `/private/var/...`）；Qwen 的 `input` 带 `file_path` 与 `content`。
 - 宿主宣告过读能力时，Gemini 创建新文件失败，权限请求根本没有发出，工具以「Error checking existing file: Resource not found」结束：Gemini 的 `AcpFileSystemService` 只把 `Error` 实例当作文件不存在，ACP 的 JS SDK 却用普通的 JSON-RPC 错误对象拒绝，宿主回答「资源不存在」于是被当作真正的失败。两种改法都验证过能建出文件：读不到时回空内容，或不宣告读能力；选了后者，因为空内容等于告诉 Agent 文件存在。
 - 停止：Gemini 在等宿主回答一条权限请求时，只收到 `session/cancel` 并不结束提示——宿主没有回答，回合在取消 60 秒后仍未结束；宿主按 ACP 对取消的要求把等待中的请求答为 `cancelled` 之后，Gemini 2.3～2.6 秒结束，`DONE` 的 `stop_reason` 是 `cancelled`，文件没有写出，人那边的等待被撤回。Qwen 收到 `session/cancel` 就结束提示（宿主不回答也一样，去掉这个回答后 Qwen 的停止测试仍通过，Gemini 的不通过），回答之后 1.5 秒结束。
+
+**Gemini / Qwen 会话续接的真二进制事实**（gemini 0.71.1、qwen 0.28.6，`tests/toolkits/acp/runtime/acp/test_real_acp_session_continuity.py`；同样由脚本化的假模型 API 驱动，证据是 Agent 发给模型的请求里还有上一个回合说过的话）：
+
+- 握手声明各不相同：Gemini 只有 `loadSession`（没有 `sessionCapabilities`，对 `session/resume` 回「method not found」），Qwen 有 `loadSession` 与 `sessionCapabilities.list` / `resume`，opencode 另有 `fork` / `delete` / `additionalDirectories` / `close`。运行时只调用 Agent 声明过的方法，声明记在 `AgentCapabilities`，能力与使用它的代码一起进入。
+- 续接：Qwen 经 `session/resume`，响应前没有历史重放；Gemini 经 `session/load`，响应前把整段历史（用户与 Agent 的消息）作为 `session/update` 重放。重放在 `begin_turn` 时被丢掉，回合输出里没有上一个回合的回复；新进程续接后发给模型的请求带着上一个回合的内容。
+- 失效：Gemini 对不认识的会话回 -32603「Invalid session identifier」，Qwen 回 -32002；除 `auth_required`（-32000，登录问题，记录保留）外，宿主一律按「Agent 不认识这个会话」处理：开新会话、发出 `session_expired`、记录被新会话替换。
+- 一个运行时对每个 harness 会话持有一个 ACP 会话；事件带的是宿主的会话 id，不是 Agent 的。Qwen 另会发出不是 ACP 方法名的厂商通知（`qwen/notify/…`），SDK 把它们记成 ERROR 日志（Method not found），不影响回合。
+- `fork`、`list`、`additionalDirectories` 已在握手里读到，但没有使用它们的功能前不进 `AgentCapabilities`：分叉随会话/任务的 worktree 与 /fork，多目录随账号档案与工作区集合。
 
 ### 3.6 BackendDetector（后端自动检测）
 
@@ -300,6 +309,7 @@ acp/
 ├── __init__.py             # 惰性导出 RuntimePool / RuntimeConfig / RuntimeBackend + Server
 ├── __main__.py             # CLI 入口
 ├── acp_agent_tools.py      # delegate 工具门面（业务层委托入口）
+├── delegate_report.py      # 一次委托回合的报告：用量与计数、只带标题的通知步骤、Agent 提前结束时给调用模型的注记
 ├── types.py                # RuntimeEvent、Protocol（含 CliSessionStore）、RuntimeConfig、CliSessionRecord、错误码等
 ├── ACP_SYSTEM.md           # 本设计文档
 ├── _ARCH.md                # 模块索引
@@ -323,15 +333,17 @@ acp/
 ├── runtime/                # Runtime 方向（Agent → 外部 Agent）
 │   ├── __init__.py
 │   ├── _base.py            # BaseRuntime、build_safe_env、各运行时共用的静默心跳（KEEPALIVE_SECONDS / working_status）与连续 401 重试上限 UNAUTHORIZED_RETRIES_LIMIT
-│   ├── event_text.py       # 各运行时共用的有界单行文本：工具调用摘要、失败文本整理 condense_failure_text
+│   ├── event_text.py       # 各运行时共用的文本：工具调用摘要、失败文本整理 condense_failure_text、消息之间的段落分隔 paragraph_break
 │   ├── process.py          # ManagedProcess / spawn_managed_process：逐行 stdout（静默满一个周期产出 None 供心跳）、有界 stderr 尾部、唯一的停止入口（SIGTERM → SIGKILL）；程序不存在抛 ProcessLaunchError
-│   ├── session_book.py     # 会话记录簿 CliSessionBook（Claude 会话 id、Codex 线程 id；内存优先 + 写穿到宿主 CliSessionStore）
+│   ├── session_book.py     # 会话记录簿 CliSessionBook（Claude 会话 id、Codex 线程 id、ACP 会话 id；内存优先 + 写穿到宿主 CliSessionStore）
 │   ├── image_blocks.py     # 回合图片文件 → base64 块（ImageBlock）：按文件头判定格式，读不了或不是图片的略去并记 WARNING；各运行时共用
 │   ├── pool.py             # RuntimePool
 │   ├── turn_permissions.py # TurnPermissions：回合内的权限请求守卫（broker 出错按拒绝、等人时暂停时间上限、回合结束撤销等待）
 │   ├── acp/                # ACP 后端子包
 │   │   ├── __init__.py
 │   │   ├── runtime.py      # AcpRuntime：ACP 子进程 + JSON-RPC（静默心跳；ACP SDK 缺失 → BACKEND_NOT_FOUND）
+│   │   ├── capabilities.py # AgentCapabilities：Agent 在 initialize 里声明的能力（图片、load、resume、close），运行时只按它决定调用什么
+│   │   ├── sessions.py     # AgentSessions：harness 会话对应的 ACP 会话、续接（resume 优先于 load）、失效与工作目录变化
 │   │   ├── callback.py     # ACP 回调处理器（会话更新、工作区内按字节读写的文件回调；权限请求交给 permission_policy）
 │   │   ├── permission_policy.py # AcpPermissionPolicy：`safe` 下放行读类动作、其余交给 broker，记住人同意过的文件
 │   │   └── stalled_agent.py # 对不再读 stdin 的 agent 有界停止：5 s 后结束 agent 及它启动的全部进程
@@ -425,7 +437,7 @@ acp/
 - **流式事件消费**：`invoke_acp_agent_tool` 通过 `pool.run_turn()` 逐事件消费，实时日志输出工具调用和状态更新，返回结果包含 tool_calls 计数等元数据
 - **前端实时进度推送**：通过 ContextVar + `ToolProgressSink` 机制，`invoke_acp_agent_tool` 在执行期间将外部 Agent 的工具调用和状态事件实时推送至前端 SSE 流（复用 `TASKS_STEPS` 事件类型；会话连续性通知是只带标题的已完成步骤，措辞由前端按 `step_key` 本地化）
 - **前端预设模板**：新增模式下提供 Claude Code / Codex CLI / Gemini CLI / Qwen Code 一键填充，降低配置门槛；命令恰好是已知 Agent 时，设置页按服务端 `/auth/status` 报告的通道只读显示类型，保存时存契约的通道而不是旧值
-- **Max Turns 双层安全护栏**：Layer 1 是 CLI 自己的轮次上限——`CliDialect.with_max_turns` 为 Claude 追加 `--max-turns`，到限后 CLI 自行结束并在 `result` 行报告，`classify_failure` 把它归为 `AcpErrorCode.MAX_TURNS`，工具路径据此返回「已达轮次上限」而不是故障；Layer 2 是 delegate 工具对 `TOOL_START` 的计数，只用于没有原生上限的后端（`has_native_turn_limit`），超限时 `pool.cancel()`——Claude 的一个 agent 轮次可发出多个工具调用，对它计数会提前截断
+- **Max Turns 双层安全护栏**：Layer 1 是 CLI 自己的轮次上限——`CliDialect.with_max_turns` 为 Claude 追加 `--max-turns`，到限后 CLI 自行结束并在 `result` 行报告，`classify_failure` 把它归为 `AcpErrorCode.MAX_TURNS`，工具路径据此返回「已达轮次上限」而不是故障；Layer 2 是 delegate 工具对 `TOOL_START` 的计数，只用于没有原生上限的后端（`has_native_turn_limit`），超限时 `pool.cancel()`——Claude 的一个 agent 轮次可发出多个工具调用，对它计数会提前截断；ACP Agent 自己的回合上限以 `DONE` 的 `stop_reason=max_turn_requests` 到达，同样按「已达轮次上限」收尾（见 3.2 的 `StopReason`）
 - **稳定 Tool Schema**：`invoke_acp_agent_tool` 使用固定 tool description（不含动态 agent 列表），保护 Turn1 Prompt Cache；`agent_name` 无效时错误响应列出 `available_backends`
 - **Deploy 门控（Server）**：`external_cli_deploy.is_external_cli_deploy_supported()` + profile `strip_deploy_incompatible_builtin_tools`；沙箱自动剔除 `external_cli`；BuiltinToolsPanel sandbox 硬禁用 toggle
 - **MCP 会话注入**：`RuntimePool.run_turn` → `AcpRuntime.new_session(mcp_servers=…)`，Codex 经 `thread/start` 的 `config.mcp_servers`（无 MCP 时 Server 不传参数（None）；`RuntimeConfig.mcp_servers` 为配置源；注入前经 `capabilities.supports_mcp` 能力守卫，跳过不支持的 backends 并记录 `pool_mcp_skipped`）

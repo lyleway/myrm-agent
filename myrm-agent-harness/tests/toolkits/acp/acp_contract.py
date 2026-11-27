@@ -1,10 +1,11 @@
 """What an ACP agent's ``initialize`` answer must still carry for the runtime to drive it, and the judge of that answer.
 
-``AcpRuntime`` sends images only to an agent that advertises ``promptCapabilities.image`` and closes a session only
-when ``sessionCapabilities.close`` is there; resuming, listing, forking and extra workspace roots are negotiated the
-same way. An agent that stops advertising one of them changes what a delegated turn can do without any of our code
-changing, so each agent's answer is held to what it advertised when the runtime was built on it. The judge compares
-subsets: an agent that starts advertising more is no regression.
+``AcpRuntime`` sends images only to an agent that advertises ``promptCapabilities.image``, closes a session only
+when ``sessionCapabilities.close`` is there, and continues a stored conversation by ``session/resume`` or else
+``session/load``, whichever the agent advertised. Listing, forking and extra workspace roots are held to the same record,
+though nothing acts on them yet. An agent that stops advertising one of them changes what a delegated turn can do without
+any of our code changing, so each agent's answer is held to what it advertised when the runtime was built on it. The
+judge compares subsets: an agent that starts advertising more is no regression.
 """
 
 from __future__ import annotations

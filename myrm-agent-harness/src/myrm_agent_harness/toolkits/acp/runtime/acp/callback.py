@@ -8,6 +8,7 @@ inside the workspace, reporting every refusal and failure to the agent as a JSON
 [INPUT]
 - toolkits.acp.types::PermissionBroker, RuntimeConfig, RuntimeEvent, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime.acp.permission_policy::AcpPermissionPolicy (POS: How a turn of an ACP agent is answered when the agent asks to do something)
+- toolkits.acp.runtime.event_text::paragraph_break (POS: Texts shared by the runtimes)
 - acp (POS: ACP SDK; optional extra, imported when a callback runs)
 
 [OUTPUT]
@@ -19,6 +20,9 @@ ACP callback handler for the AcpRuntime backend. It receives the SDK's own typed
 bytes, so what the agent writes is what lands on disk (line endings included). It serves no file reads: the
 runtime does not offer them, because the agent shares the host's disk and a refusal to read a file that does not
 exist yet (the way a new file is told apart from an existing one) is not understood by every agent.
+Updates are the turn's output only once the turn begins: the history an agent replays on ``session/load`` arrives
+before it and is dropped by ``begin_turn``, and the messages an agent streams on either side of a tool call are set
+apart by a blank line.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.security.path import is_within_boundary
 from myrm_agent_harness.toolkits.acp.runtime.acp.permission_policy import AcpPermissionPolicy
+from myrm_agent_harness.toolkits.acp.runtime.event_text import paragraph_break
 from myrm_agent_harness.toolkits.acp.types import (
     PermissionBroker,
     RuntimeConfig,
@@ -122,45 +127,38 @@ class AcpCallbackHandler:
     """Implements acp.Client callbacks for the ACP runtime.
 
     Streams RuntimeEvent instances through an asyncio.Queue for real-time
-    consumption by AcpRuntime._do_run_turn. Also collects full response text
-    for truncation and final assembly.
+    consumption by AcpRuntime._do_run_turn.
     """
 
-    def __init__(self, config: RuntimeConfig, session_id: str, *, agent: str, workspace: str) -> None:
+    def __init__(self, config: RuntimeConfig, *, agent: str, workspace: str) -> None:
         self._config = config
-        self._session_id = session_id
+        # The host's id of the running turn: the id every event of the turn carries.
+        self._session_id = ""
         self._cwd = normalize_workspace(workspace)
         self._policy = AcpPermissionPolicy(config.permission_mode, agent, self._cwd)
-        self._text_parts: list[str] = []
         self._event_queue: asyncio.Queue[RuntimeEvent | None] = asyncio.Queue()
-
-    @property
-    def session_id(self) -> str:
-        return self._session_id
-
-    @session_id.setter
-    def session_id(self, value: str) -> None:
-        self._session_id = value
+        # The last characters of the text streamed this turn, and whether a tool call has come since.
+        self._text_tail = ""
+        self._break_pending = False
 
     @property
     def event_queue(self) -> asyncio.Queue[RuntimeEvent | None]:
         return self._event_queue
 
-    @property
-    def response_text(self) -> str:
-        return "".join(self._text_parts)
+    def begin_turn(self, permissions: PermissionBroker | None, session_id: str) -> None:
+        """Start the turn ``session_id`` (the host's id for it): ``permissions`` is who is asked while it runs.
 
-    def reset(self) -> None:
-        self._text_parts.clear()
+        What the agent sent before is not the turn's output and is dropped: the history of a session it was given
+        back with ``session/load``, which the SDK has handed over in full by the time that call returns.
+        """
+        self._session_id = session_id
+        self._text_tail = ""
+        self._break_pending = False
         while not self._event_queue.empty():
             try:
                 self._event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-
-    def begin_turn(self, permissions: PermissionBroker | None, session_id: str) -> None:
-        """Start the turn ``session_id`` (the host's id for it): ``permissions`` is who is asked while it runs."""
-        self.reset()
         self._policy.begin_turn(permissions, session_id)
 
     def end_turn(self) -> None:
@@ -192,13 +190,13 @@ class AcpCallbackHandler:
         if update_type == "agent_message_chunk":
             text = _extract_text_content(content)
             if text:
-                self._text_parts.append(text)
+                text = self._message_text(text)
                 self._push_event(create_event(RuntimeEventType.TEXT_DELTA, self._session_id, content=text))
 
         elif update_type == "tool_call":
             title = str(_get_attr(update, "title") or "unknown")
-            status = str(_get_attr(update, "status") or "")
-            self._text_parts.append(f"\n[tool: {title} ({status})]\n")
+            # What the agent says next is a new message; it is set apart from the one before the call.
+            self._break_pending = True
             tool_call_id = str(_get_attr(update, "tool_call_id", "toolCallId") or title)
             self._push_event(
                 create_event(
@@ -213,7 +211,6 @@ class AcpCallbackHandler:
             status = str(_get_attr(update, "status") or "")
             if status in ("completed", "failed"):
                 tool_id = str(_get_attr(update, "tool_call_id", "toolCallId") or "")
-                self._text_parts.append(f"[tool update: {tool_id} -> {status}]\n")
                 self._push_event(
                     create_event(
                         RuntimeEventType.TOOL_RESULT,
@@ -227,8 +224,15 @@ class AcpCallbackHandler:
         elif update_type == "agent_thought_chunk":
             text = _extract_text_content(content)
             if text:
-                self._text_parts.append(text)
                 self._push_event(create_event(RuntimeEventType.REASONING_DELTA, self._session_id, content=text))
+
+    def _message_text(self, text: str) -> str:
+        """``text`` of the agent's message, set apart from what it said before the tool call that came between."""
+        if self._break_pending:
+            self._break_pending = False
+            text = paragraph_break(self._text_tail, text) + text
+        self._text_tail = (self._text_tail + text)[-2:]
+        return text
 
     async def request_permission(
         self,

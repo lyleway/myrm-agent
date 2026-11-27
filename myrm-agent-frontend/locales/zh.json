@@ -3923,6 +3923,8 @@
     "delegation_session_expired": "之前的对话无法继续，{agentName} 已开启新对话",
     "delegation_session_workspace_changed": "工作文件夹已更改，{agentName} 已开启新对话",
     "delegation_turn_limit": "{agentName} 已达到回合上限而停止，发送消息即可继续",
+    "delegation_max_tokens": "{agentName} 的回复已达长度上限，内容可能不完整，发送消息即可继续",
+    "delegation_refusal": "{agentName} 拒绝继续处理此请求",
     "delegation_images_not_sent": "{agentName} 无法直接接收图片，只告知了图片所在的位置",
     "system_step": "系统步骤",
     "tool_execution": "工具执行",

@@ -1,4 +1,4 @@
-"""How the delegate tool handles the stream of a delegated turn: stopping, the native turn limit, step text."""
+"""How the delegate tool handles the stream of a delegated turn: stopping, turn limits, early endings, step text."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     ContinuityStatus,
     RuntimeConfig,
     RuntimeEventType,
+    StopReason,
     create_event,
 )
 
@@ -96,6 +97,65 @@ class TestNativeTurnLimit:
         result, _ = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert "max turns limit reached" in result
+
+
+class TestAnAgentThatEndsItsTurnEarly:
+    @staticmethod
+    def _ending_with(reason: str | None):
+        async def stream(name, task, session_id, *, workspace, mode="persistent", permissions=None):
+            yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="the first half")
+            yield create_event(RuntimeEventType.DONE, session_id, stop_reason=reason)
+
+        return stream
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("reason", "note"),
+        [
+            (StopReason.MAX_TOKENS, "[stopped — the agent reached its output limit; the reply above is incomplete]"),
+            (StopReason.MAX_TURN_REQUESTS, "[stopped — the agent reached its own turn limit]"),
+            (StopReason.REFUSAL, "[stopped — the agent declined to continue]"),
+        ],
+    )
+    async def test_the_result_says_why_it_is_incomplete(self, reason: StopReason, note: str) -> None:
+        """The calling model reads the result; without the note it would take half a reply for the whole one."""
+        pool = _pool("gemini")
+        pool.run_turn = self._ending_with(reason.value)
+
+        result, meta = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
+
+        assert result == f"the first half\n\n{note}"
+        assert meta["errors"] == 0
+        pool.cancel.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reason", [StopReason.END_TURN.value, StopReason.CANCELLED.value, "something_new", None])
+    async def test_a_turn_that_finished_adds_nothing(self, reason: str | None) -> None:
+        pool = _pool("gemini")
+        pool.run_turn = self._ending_with(reason)
+
+        result, _ = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
+
+        assert result == "the first half"
+
+    @pytest.mark.asyncio
+    async def test_the_user_is_told_with_a_finished_step_without_text(self) -> None:
+        pool = _pool("gemini")
+        pool.run_turn = self._ending_with(StopReason.MAX_TOKENS.value)
+        sink = AsyncMock()
+
+        with patch(f"{_TOOLS}.get_tool_progress_sink", return_value=sink):
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
+
+        assert [call.args[0] for call in sink.emit.await_args_list] == [
+            {
+                "type": "tasks_steps",
+                "step_key": "delegation_agent_max_tokens",
+                "tool_name": "delegate:agent",
+                "status": "completed",
+                "data": [],
+            }
+        ]
 
 
 class TestStopping:

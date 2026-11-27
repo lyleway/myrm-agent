@@ -20,7 +20,7 @@ resumes from the thread id the server announced. The prompt and its images trave
 - toolkits.acp.runtime.event_text::condense_failure_text (POS: Text shaping of the events every runtime emits)
 - toolkits.acp.runtime.process::ProcessLaunchError (POS: Process ownership of every runtime that starts an agent)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionStore (POS: ACP runtime type definitions layer.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionStore, StopReason (POS: ACP runtime type definitions layer.)
 
 [OUTPUT]
 - CodexRuntime: RuntimeBackend that runs Codex conversations over its app server
@@ -80,6 +80,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
+    StopReason,
     create_event,
 )
 
@@ -270,7 +271,7 @@ class CodexRuntime(BaseRuntime):
             await self._drop_connection(graceful=False)
             return _event(session_id, error)
         if outcome.status == "completed":
-            return create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+            return create_event(RuntimeEventType.DONE, session_id, stop_reason=StopReason.END_TURN)
         if translator.auth_rejection:
             return _event(session_id, AcpError(AcpErrorCode.AUTH_FAILED, translator.auth_rejection))
         if outcome.status == "interrupted":

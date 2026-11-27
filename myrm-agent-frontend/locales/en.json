@@ -3923,6 +3923,8 @@
     "delegation_session_expired": "Earlier conversation could not be continued — {agentName} started a new one",
     "delegation_session_workspace_changed": "Working folder changed — {agentName} started a new conversation",
     "delegation_turn_limit": "{agentName} stopped at its turn limit — send a message to continue",
+    "delegation_max_tokens": "{agentName} reached its reply length limit — the answer may be incomplete, send a message to continue",
+    "delegation_refusal": "{agentName} declined to continue with this request",
     "delegation_images_not_sent": "{agentName} can't take images directly — it was only told where the image is",
     "system_step": "System Step",
     "tool_execution": "Tool Execution",
