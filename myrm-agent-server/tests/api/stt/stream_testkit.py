@@ -17,6 +17,9 @@ from app.channels.types import STTResult, VoiceConfig
 
 Frame = Mapping[str, object] | Exception
 
+# Seconds a provider needs to answer a close request: the answer never lands in the loop turn that sent the request.
+_ROUND_TRIP = 0.02
+
 
 def scripted_receive(frames: Iterable[Frame], *, hang: bool = False) -> Callable[[], Awaitable[Mapping[str, object]]]:
     """A browser socket's `receive()`: replays `frames` (an exception is raised), then disconnects or, with `hang`, waits forever."""
@@ -79,7 +82,11 @@ def stored_voice_settings(
 
 
 class FakeDeepgram(ClientConnection):
-    """A Deepgram connection that replays `transcripts`, then raises `then` or hangs, and records what is sent to it."""
+    """A Deepgram connection that replays `transcripts`, then raises `then` or hangs, and records what is sent to it.
+
+    With `flush_on_close` it behaves like the real service: once `CloseStream` arrives it answers with those final
+    results, a network round trip later, and ends the stream.
+    """
 
     def __init__(
         self,
@@ -87,6 +94,7 @@ class FakeDeepgram(ClientConnection):
         then: Exception | None = None,
         hang: bool = False,
         send_error: Exception | None = None,
+        flush_on_close: Iterable[Data] | None = None,
     ) -> None:
         # The real connection needs a live socket; the handlers under test only send messages and iterate.
         self.sent: list[Data] = []
@@ -94,16 +102,26 @@ class FakeDeepgram(ClientConnection):
         self._then = then
         self._hang = hang
         self._send_error = send_error
+        self._flush_on_close = None if flush_on_close is None else tuple(flush_on_close)
+        self._close_stream_sent = asyncio.Event()
 
     async def send(self, message: DataLike | Iterable[DataLike] | AsyncIterable[DataLike], *, text: bool | None = None) -> None:
         if self._send_error is not None:
             raise self._send_error
         assert isinstance(message, (str, bytes)), "the handlers under test send whole messages"
         self.sent.append(message)
+        if isinstance(message, str) and json.loads(message) == {"type": "CloseStream"}:
+            self._close_stream_sent.set()
 
     async def __aiter__(self) -> AsyncIterator[Data]:
         for transcript in self._transcripts:
             yield transcript
+        if self._flush_on_close is not None:
+            await self._close_stream_sent.wait()
+            await asyncio.sleep(_ROUND_TRIP)
+            for result in self._flush_on_close:
+                yield result
+            return
         if self._then is not None:
             raise self._then
         if self._hang:

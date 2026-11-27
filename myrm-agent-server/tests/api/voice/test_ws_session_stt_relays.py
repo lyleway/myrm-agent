@@ -161,9 +161,19 @@ class TestControlMessages:
         assert _drain(session._tts_queue) == queued
 
     @pytest.mark.parametrize(
-        "message", ["not json", json.dumps({"type": "volume"}), "{}"], ids=["garbage", "unknown", "typeless"]
+        "message",
+        [
+            "not json",
+            "[]",
+            "null",
+            json.dumps({"type": ["close"]}),
+            json.dumps({"type": "tts", "text": 5}),
+            json.dumps({"type": "volume"}),
+            "{}",
+        ],
+        ids=["garbage", "an array", "null", "type not a string", "text not a string", "unknown", "typeless"],
     )
-    async def test_unparsable_and_unknown_messages_change_nothing(self, message: str) -> None:
+    async def test_unusable_and_unknown_messages_change_nothing(self, message: str) -> None:
         session = voice_session()
 
         session._handle_text_message(message)

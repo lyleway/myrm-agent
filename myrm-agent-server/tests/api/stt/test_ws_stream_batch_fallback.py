@@ -63,8 +63,13 @@ class TestBatchTranscription:
         assert transcriber.audio == b"\x01" * _MIN_AUDIO_BYTES
         assert sent_json(ws)[-1] == {"type": "transcript", "text": "hello", "is_final": True}
 
-    async def test_unparsable_control_frames_are_ignored(self) -> None:
-        ws, transcriber = await _run([{"type": "websocket.receive", "text": "not json"}, audio_frame(b"\x01" * _MIN_AUDIO_BYTES)])
+    @pytest.mark.parametrize(
+        "text",
+        ["not json", "[]", "null", json.dumps({"action": ["close"]})],
+        ids=["garbled", "an array", "null", "action not a string"],
+    )
+    async def test_unusable_control_frames_are_ignored(self, text: str) -> None:
+        ws, transcriber = await _run([{"type": "websocket.receive", "text": text}, audio_frame(b"\x01" * _MIN_AUDIO_BYTES)])
 
         assert transcriber.audio == b"\x01" * _MIN_AUDIO_BYTES
         assert sent_json(ws)[-1]["text"] == "hello"
