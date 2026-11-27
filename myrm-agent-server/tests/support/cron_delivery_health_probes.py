@@ -23,7 +23,9 @@ import re
 
 # A probe runs against the page it is handed (``doc`` and ``win``): the test page itself, or the app in a fixed-size
 # same-origin frame, because ``window.resizeTo`` is a no-op in this Chrome and the layout switches to the phone shell
-# below 1024px, so only a frame pins the viewport under test.
+# below 1024px, so only a frame pins the viewport under test. A document that is still loading has no body, and a script
+# that dereferences it ends `wait_for_state` as a failed transport instead of letting it poll, so the page text is
+# always read with `?.`.
 HOST_PRELUDE = "const win = window; const doc = document;"
 FRAME_PRELUDE = """
   const frame = document.getElementById('e2e-app-frame');
@@ -43,11 +45,11 @@ PILL = """
     card.dataset.e2eOpenedAt = String(Date.now());
     card.click();
   }
-  const bodyText = doc.body.innerText || '';
+  const bodyText = doc.body?.innerText || '';
   return {
     ready: status !== null && age !== null,
     status: status ? status.textContent.trim() : null,
-    lang: doc.documentElement.lang,
+    lang: doc.documentElement?.lang,
     tail: bodyText.slice(-300),
     // Read by `wait_for_state` to tell a blank or errored page, which it reloads, from one that is still loading.
     bodyLength: bodyText.length,
@@ -96,7 +98,7 @@ POPOVER_TEXT = """
   const spec = __SPEC__;
   const time = new Intl.DateTimeFormat(spec.locale, { dateStyle: 'medium', timeStyle: 'short' });
   const lastFailure = spec.lastFailure.replace('{time}', time.format(new Date(spec.attemptAt)));
-  const text = doc.body.innerText || '';
+  const text = doc.body?.innerText || '';
   const missing = [spec.headline, spec.hint, spec.streak, lastFailure, spec.basis].filter((part) => !text.includes(part));
   return { ready: missing.length === 0, missing, text: text.slice(-600) };
 """
@@ -116,7 +118,7 @@ FRAME_PILL = """
     viewportWidth: win.innerWidth,
     path: win.location.pathname + win.location.search,
     errorOverlay: !!doc.querySelector('nextjs-portal')?.shadowRoot?.querySelector('[data-nextjs-dialog]'),
-    tail: (doc.body.innerText || '').slice(-300),
+    tail: (doc.body?.innerText || '').slice(-300),
   };
 """
 
@@ -171,6 +173,9 @@ FRAME_MEASURE = """
   const edges = (rect) => [rect.left, rect.top, rect.right, rect.bottom].map(Math.round);
   return {
     ready: settled,
+    lang: doc.documentElement.lang,
+    // The status word the pill shows, so the test knows which of the statuses' tones was measured.
+    statusText: (status.textContent || '').trim(),
     viewportWidth: win.innerWidth,
     // Where each box sits (left, top, right, bottom), so a misfit reports how far it is off.
     viewportHeight: win.innerHeight,

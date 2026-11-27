@@ -1,9 +1,10 @@
 """Chrome E2E: the delivery-health pill dates its verdict, says what the status rests on and stays legible, over the real chain.
 
-A reminder that delivers to an address inside the network is refused by the application's SSRF guard before any request
-goes out, which takes the destination down at once with the category ``address_rejected``. That is the failure a model-free
-run can produce on the isolated stack; a destination that answers (healthy, degraded, recovery) needs a receiver the
-guard lets through and is covered over real HTTP deliveries in tests/api/cron/test_delivery_health_http_chain.py.
+A model-free run on the isolated stack can produce two failures. A reminder that delivers to an address inside the network
+is refused by the application's SSRF guard before any request goes out, which takes the destination down at once with the
+category ``address_rejected``. A host under ``.invalid``, a name reserved never to resolve, fails its first delivery as
+``network_unreachable`` and leaves the destination degraded. A destination that answers (healthy, recovery) needs a
+receiver the guard lets through and is covered over real HTTP deliveries in tests/api/cron/test_delivery_health_http_chain.py.
 
 [INPUT]
 - tests.support.chrome_mcp_e2e (POS: the real Chrome session, the loopback API helpers and the settings page opener)
@@ -14,11 +15,12 @@ guard lets through and is covered over real HTTP deliveries in tests/api/cron/te
 
 [OUTPUT]
 - The route answers a refused local address with status ``down``, a streak of one, the category ``address_rejected`` and
-  the time its newest attempt finished (`last_attempt_at`), without `last_failed_at`
+  the time its newest attempt finished (`last_attempt_at`), without `last_failed_at`; a host that never resolves with
+  ``degraded``, a streak of one and the category ``network_unreachable``
 - In both app languages the job's settings page shows the status word, an age that fits the attempt, and in the popover
   the category and its hint, the streak, the time of the last failure and the note that only real deliveries change the status
-- Opened on a phone-width viewport the pill and its popover fit the screen, the page does not scroll sideways, and all
-  of their text keeps a contrast of at least 4.5 in both themes
+- Opened on a phone-width viewport, for each of the two failures, the pill shows that status, the pill and its popover fit
+  the screen, the page does not scroll sideways, and all of their text keeps a contrast of at least 4.5 in both themes
 
 [POS]
 Executor -> run record -> verdict route -> settings page, with nothing mocked. The reminder runner needs no model, so
@@ -33,6 +35,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from pathlib import Path
@@ -70,13 +73,28 @@ from tests.support.cron_delivery_health_probes import (
 _LOCALES_DIR = Path(__file__).resolve().parents[3] / "myrm-agent-frontend" / "locales"
 _LOCALES = ("en", "zh")
 
-# Inside the network, so the SSRF guard refuses it before anything is sent; the port is never reached.
-_LOCAL_ADDRESS = "http://127.0.0.1:9/hook"
 _VERDICT_TIMEOUT_SEC = 90.0
 # The page reads the verdict once its job panel is open, and on a host under load that takes far longer than on an idle one.
 _PILL_TIMEOUT_SEC = 120.0
 _PHONE_VIEWPORT = (390, 844)
 _MIN_TEXT_CONTRAST = 4.5
+
+
+@dataclass(frozen=True)
+class _Destination:
+    """An address a model-free run fails to deliver to, with the verdict the route must give for it."""
+
+    address: str
+    status: str
+    category: str
+
+
+# Each job gets a path of its own below these addresses: the verdict belongs to the address, so jobs sharing one would
+# count each other's failures as soon as two runs reach the same backend.
+# Inside the network, so the SSRF guard refuses it before anything is sent (the port is never reached): down at once.
+_REFUSED = _Destination("http://127.0.0.1:9/hook", "down", "address_rejected")
+# `.invalid` is reserved never to resolve, so the first delivery fails as unreachable: degraded until the failures pile up.
+_UNRESOLVED = _Destination("https://e2e-delivery-health.invalid/hook", "degraded", "network_unreachable")
 
 
 @cache
@@ -92,8 +110,8 @@ def _one_failure(locale: str) -> str:
     return f"1 {plural_one.group(1)}" if plural_one else message.replace("{count}", "1")
 
 
-def _create_reminder_to_local_address(api_url: str, name: str) -> str:
-    """A zero-model reminder that never fires on its own schedule within the test, delivering to a local address."""
+def _create_reminder_to(api_url: str, name: str, address: str) -> str:
+    """A zero-model reminder that never fires on its own schedule within the test, delivering to ``address``."""
     job = http_json(
         "POST",
         f"{api_url}/api/v1/cron/",
@@ -102,7 +120,7 @@ def _create_reminder_to_local_address(api_url: str, name: str) -> str:
             "job_type": "reminder",
             "prompt": "Delivery health probe",
             "schedule": {"kind": "cron", "expr": "0 0 1 1 *"},
-            "delivery": {"channel": "webhook", "target": _LOCAL_ADDRESS},
+            "delivery": {"channel": "webhook", "target": address},
         },
     )
     job_id = job.get("id") if isinstance(job, dict) else None
@@ -122,10 +140,13 @@ def _verdict_after_one_run(api_url: str, job_id: str) -> dict[str, object]:
     raise AssertionError(f"no delivery verdict within {_VERDICT_TIMEOUT_SEC:.0f}s of the run of job {job_id}")
 
 
-def _assert_refused_verdict(verdict: dict[str, object]) -> None:
-    """What the route must say about a destination whose address was refused."""
-    assert (verdict["status"], verdict["failure_streak"]) == ("down", 1), verdict
-    assert verdict["last_error_category"] == "address_rejected", verdict
+def _assert_verdict(verdict: dict[str, object], destination: _Destination) -> None:
+    """What the route must say about a destination that failed its first delivery."""
+    assert (verdict["status"], verdict["failure_streak"], verdict["last_error_category"]) == (
+        destination.status,
+        1,
+        destination.category,
+    ), verdict
     assert "last_failed_at" not in verdict, verdict
     attempt = datetime.fromisoformat(str(verdict["last_attempt_at"]))
     assert attempt.tzinfo is not None, f"the time of the attempt must carry its zone: {verdict}"
@@ -139,13 +160,14 @@ def _stored_delivery(api_url: str, job_id: str) -> object:
 
 
 @contextmanager
-def _refused_destination(api_url: str) -> Iterator[tuple[str, str, dict[str, object]]]:
-    """A job whose delivery to a local address was refused once, as (job id, job name, the route's verdict); removed on exit.
+def _failed_destination(api_url: str, destination: _Destination) -> Iterator[tuple[str, str, dict[str, object]]]:
+    """A job whose delivery to ``destination`` failed once, as (job id, job name, the route's verdict); removed on exit.
 
-    The name is unique, so the page's list can be told which card is the job's.
+    The name is unique, so the page's list can be told which card is the job's, and so is the address.
     """
-    name = f"e2e delivery health {uuid.uuid4().hex[:8]}"
-    job_id = _create_reminder_to_local_address(api_url, name)
+    token = uuid.uuid4().hex[:8]
+    name = f"e2e delivery health {token}"
+    job_id = _create_reminder_to(api_url, name, f"{destination.address}/{token}")
     try:
         yield job_id, name, _verdict_after_one_run(api_url, job_id)
     finally:
@@ -199,8 +221,8 @@ def _assert_page_says_what_the_locale_says(
 @pytest.mark.timeout(600)
 def test_delivery_health_pill_dates_its_verdict_and_says_what_it_rests_on_in_both_languages() -> None:
     api_url = get_e2e_api_url()
-    with _refused_destination(api_url) as (job_id, name, verdict):
-        _assert_refused_verdict(verdict)
+    with _failed_destination(api_url, _REFUSED) as (job_id, name, verdict):
+        _assert_verdict(verdict, _REFUSED)
         attempt_at = str(verdict["last_attempt_at"])
 
         prepare_e2e_ui_session(api_url)
@@ -222,10 +244,11 @@ def test_delivery_health_pill_dates_its_verdict_and_says_what_it_rests_on_in_bot
 @pytest.mark.chrome_e2e(execution_mode="SHARED", access_scope="NAMESPACE_WRITE", workload="STANDARD")
 @pytest.mark.integration
 @pytest.mark.timeout(600)
-def test_delivery_health_pill_and_popover_fit_a_phone_and_stay_legible_in_both_themes() -> None:
+@pytest.mark.parametrize("destination", [_REFUSED, _UNRESOLVED], ids=["refused", "unresolved"])
+def test_delivery_health_pill_and_popover_fit_a_phone_and_stay_legible_in_both_themes(destination: _Destination) -> None:
     api_url = get_e2e_api_url()
-    with _refused_destination(api_url) as (job_id, _, verdict):
-        _assert_refused_verdict(verdict)
+    with _failed_destination(api_url, destination) as (job_id, _, verdict):
+        _assert_verdict(verdict, destination)
 
         prepare_e2e_ui_session(api_url)
         warm_ui_route("/settings/cron")
@@ -243,6 +266,10 @@ def test_delivery_health_pill_and_popover_fit_a_phone_and_stay_legible_in_both_t
                 # Spelled out: pytest abbreviates a dict in an assertion message, which hides where a box is.
                 shown = json.dumps(measured, sort_keys=True)
                 assert measured["viewportWidth"] == width, shown
+                # The tone of the status is what is measured, so the pill must be the one of the status under test.
+                assert measured["lang"] in _LOCALES, shown
+                expected_word = _cron_messages(str(measured["lang"]))[f"connectorStatus{destination.status.capitalize()}"]
+                assert measured["statusText"] == expected_word, shown
                 assert measured["popoverInside"] is True and measured["pillInside"] is True, shown
                 assert measured["pageOverflowsX"] is False, shown
                 backgrounds.add(tuple(cast(list[int], measured["popoverBackground"])))
