@@ -7,7 +7,9 @@ skill ids / server names to an Agent profile.
 [INPUT]
 - ._models::PluginImportSession, PluginConfirmItem (POS: business-layer DTOs.)
 - myrm_agent_harness.agent.plugins.models::PluginMcpServer (POS: framework
-  parser output dataclasses.)
+    parser output dataclasses.)
+- myrm_agent_harness.toolkits.mcp.config::mcp_tool_prefix (POS:
+  tool prefix of a server name; two servers with one prefix cannot coexist.)
 - app.services.config.service::config_service (POS: global UserConfig store.)
 - app.core.channel_bridge.config_cache::invalidate_user_configs_cache (POS:
   force config cache invalidation after updates.)
@@ -34,7 +36,7 @@ skill ids / server names to an Agent profile.
   agent's mcp_ids (uninstall).
 
 [POS]
-Business-layer MCP/agent persistence for plugin import (dedup by name,
+Business-layer MCP/agent persistence for plugin import (dedup by tool prefix,
 disabled-by-default, atomic binding).
 """
 
@@ -46,6 +48,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from myrm_agent_harness.agent.plugins.models import PluginMcpServer
+from myrm_agent_harness.toolkits.mcp.config import mcp_tool_prefix
 
 from ._gates import server_block_reason
 from ._models import ComponentFailure, PluginConfirmItem, PluginImportSession
@@ -208,13 +211,13 @@ def _unreadable_failures(configs: list[dict[str, object]]) -> list[ComponentFail
 async def _write_mcp_servers(
     configs: list[dict[str, object]],
 ) -> tuple[list[str], list[ComponentFailure]]:
-    """Persist MCP servers, skipping existing names; returns ``(persisted names, failures)``.
+    """Persist MCP servers whose tool prefix is still free; returns ``(persisted names, failures)``.
 
     ``mcpServers`` is stored as ``{"mcpConfigs": [...]}`` to match the frontend
     config sync and runtime config loader contract. Existing user-configured
     servers and any other key of the stored value are kept so a plugin import
     never drops them. The returned names reflect only entries actually written
-    (a duplicate name is skipped, not counted, not bound).
+    (a server whose tool prefix is taken, ``my-api`` next to ``my_api`` included, is skipped, not counted, not bound).
 
     A row that cannot be read back is left as it is and every server is reported
     as failed: it reads as empty, and writing over it would destroy what the
@@ -228,15 +231,16 @@ async def _write_mcp_servers(
         logger.warning("MCP servers were not imported: the stored mcpServers cannot be read back")
         return [], _unreadable_failures(configs)
 
-    taken_names = {str(cfg.get("name", "")) for cfg in stored.configs}
+    taken_prefixes = {mcp_tool_prefix(str(cfg.get("name", ""))) for cfg in stored.configs}
     added: list[dict[str, object]] = []
     persisted_names: list[str] = []
     for cfg in configs:
         name = str(cfg.get("name", "")).strip()
-        if not name or name in taken_names:
+        prefix = mcp_tool_prefix(name)
+        if not name or prefix in taken_prefixes:
             continue
         added.append({**cfg, "enabled": False})
-        taken_names.add(name)
+        taken_prefixes.add(prefix)
         persisted_names.append(name)
 
     if added:

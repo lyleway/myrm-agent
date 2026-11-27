@@ -1,6 +1,7 @@
 import type { MCPServiceConfig } from '@/store/useConfigStore';
 import type { MCPOptionsResponse } from '@/services/llm-config';
 import type { MCPScanFinding, MCPScanResult } from '@/store/config/types';
+import { findSameMcpServer } from '@/lib/utils/mcp-config';
 
 export const DEFAULT_FORM_DATA: MCPServiceConfig = {
   name: '',
@@ -191,11 +192,21 @@ export function parseFinalFormData(
   };
 }
 
-export function validateMCPFormFields(formData: MCPServiceConfig, t: (key: string) => string): Record<string, string> {
+/** `others` are the other configured services; a name that would share the tool prefix of one of them is refused. */
+export function validateMCPFormFields(
+  formData: MCPServiceConfig,
+  t: (key: string, values?: Record<string, string>) => string,
+  others: readonly MCPServiceConfig[],
+): Record<string, string> {
   const newErrors: Record<string, string> = {};
 
   if (!formData.name.trim()) {
     newErrors.name = t('mcpNameRequired');
+  } else {
+    const conflict = findSameMcpServer(others, formData.name);
+    if (conflict) {
+      newErrors.name = t('mcpNameConflict', { name: conflict.name });
+    }
   }
 
   if (formData.type === 'sse' || formData.type === 'streamable_http') {

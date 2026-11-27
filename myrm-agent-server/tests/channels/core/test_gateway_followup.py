@@ -12,7 +12,14 @@ import pytest
 
 from app.channels.core.base import BaseChannel
 from app.channels.core.gateway import ChannelGateway
-from app.channels.types import ChannelCapabilities, InboundMessage, MediaAttachment, MediaType, OutboundMessage
+from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
+    ChannelCapabilities,
+    InboundMessage,
+    MediaAttachment,
+    MediaType,
+    OutboundMessage,
+)
 
 _ORIGIN = InboundMessage(channel="pingchat", sender_id="u1", chat_id="room-1", content="research it", metadata={"locale": "en"})
 
@@ -45,18 +52,19 @@ async def running_gateway() -> AsyncIterator[tuple[ChannelGateway, _RecordingCha
 
 
 @pytest.mark.asyncio
-async def test_the_reply_reaches_the_channel_of_the_conversation(
+async def test_the_reply_reaches_the_channel_of_the_conversation_and_names_the_chat_it_belongs_to(
     running_gateway: tuple[ChannelGateway, _RecordingChannel],
 ) -> None:
     gateway, channel = running_gateway
 
-    assert await gateway.deliver_followup(_ORIGIN, "The research is done.") is True
+    assert await gateway.deliver_followup(_ORIGIN, "The research is done.", stored_chat_id="chat-db-1") is True
     for _ in range(200):
         if channel.sent:
             break
         await asyncio.sleep(0.01)
 
     assert [(sent.recipient_id, sent.content) for sent in channel.sent] == [("room-1", "The research is done.")]
+    assert [(sent.metadata or {}).get(METADATA_STORED_CHAT_KEY) for sent in channel.sent] == ["chat-db-1"]
 
 
 @pytest.mark.asyncio
@@ -67,7 +75,7 @@ async def test_a_gateway_without_a_router_delivers_nothing_and_leaves_no_temp_at
     attachment = MediaAttachment(media_type=MediaType.IMAGE, path=str(path), filename=path.name, ephemeral=True)
 
     try:
-        assert await ChannelGateway().deliver_followup(_ORIGIN, "done", (attachment,)) is False
+        assert await ChannelGateway().deliver_followup(_ORIGIN, "done", (attachment,), stored_chat_id="chat-db-1") is False
 
         assert not path.exists()
     finally:

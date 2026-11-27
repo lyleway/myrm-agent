@@ -15,7 +15,6 @@ from myrm_agent_harness.core.features import _reset_for_testing
 from app.api.tts.router import _ensure_edge_tts_if_needed
 from app.channels.types import TTSMode, VoiceConfig
 from app.channels.voice.tts import EDGE_TTS_INSTALL_HINT
-from app.core.channel_bridge.config_loader import UserConfigs
 from tests.support.feature_flags import seed_voice_interaction_flags
 from tests.support.minimal_app import API_PREFIX, build_minimal_app
 
@@ -120,8 +119,6 @@ def test_synthesize_stream_returns_422_when_no_audio(client: TestClient) -> None
 
 def test_synthesize_accepts_tts_mode_off_voice_dict(client: TestClient, tmp_path: Path) -> None:
     """Web /tts must not reject voice settings when channel ttsMode is off."""
-    from app.core.types import ModelConfig
-
     voice_dict: dict[str, object] = {
         "sttEnabled": False,
         "ttsMode": "off",
@@ -130,21 +127,11 @@ def test_synthesize_accepts_tts_mode_off_voice_dict(client: TestClient, tmp_path
     mp3_path = tmp_path / "tts_output.mp3"
     mp3_path.write_bytes(b"ID3fake")
 
-    configs = UserConfigs(
-        model_cfg=ModelConfig(provider="openai", model="test", api_key="test"),
-        search_cfg=None,
-        search_is_user_configured=False,
-        retrieval_dict={},
-        personal_settings_dict={},
-        mcp_dict={},
-        voice_dict=voice_dict,
-    )
-
     with (
         patch(
-            "app.core.channel_bridge.config_loader.load_user_configs",
+            "app.core.channel_bridge.config_loader.load_voice_config_only",
             new_callable=AsyncMock,
-            return_value=configs,
+            return_value=voice_dict,
         ),
         patch("app.channels.voice.tts.is_edge_tts_available", return_value=True),
         patch(

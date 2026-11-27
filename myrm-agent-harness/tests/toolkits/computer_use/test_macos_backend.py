@@ -10,7 +10,6 @@ pytestmark = pytest.mark.skipif(
 from myrm_agent_harness.toolkits.computer_use.backends.macos.backend import (
     MacOSBackend,
     _detect_dpi_scale_quartz,
-    _has_blocking_dialog,
     _is_browser_active,
 )
 from myrm_agent_harness.toolkits.computer_use.backends.macos.input import _Point, _Size
@@ -121,41 +120,6 @@ def test_screen_context(backend):
         assert ctx.active_window == "Title"
         assert ctx.mouse_x == 10
         assert ctx.mouse_y == 20
-
-
-@pytest.mark.asyncio
-async def test_window_text(backend):
-    with patch("asyncio.to_thread", return_value=MagicMock(success=True, window_title="Title")):
-        res = await backend.window_text()
-        assert res.success is True
-        assert res.window_title == "Title"
-
-
-def test_has_blocking_dialog_true():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="Google Chrome|||true")
-        result = _has_blocking_dialog(["Google Chrome"])
-        assert result is True
-
-
-def test_has_blocking_dialog_false_no_dialog():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="Google Chrome|||false")
-        result = _has_blocking_dialog(["Google Chrome"])
-        assert result is False
-
-
-def test_has_blocking_dialog_false_wrong_app():
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=0, stdout="Firefox|||true")
-        result = _has_blocking_dialog(["Google Chrome"])
-        assert result is False
-
-
-def test_has_blocking_dialog_exception():
-    with patch("subprocess.run", side_effect=Exception("error")):
-        result = _has_blocking_dialog(["Google Chrome"])
-        assert result is False
 
 
 def test_is_browser_active_true():

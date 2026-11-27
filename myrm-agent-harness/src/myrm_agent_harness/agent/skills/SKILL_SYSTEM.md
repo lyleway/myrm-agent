@@ -421,7 +421,7 @@ Scanner（编排器）
   └── ScanPolicy（可配置策略）
 ```
 
-### 8.2 威胁类别（27 类 117 模式）
+### 8.2 威胁类别（27 类 121 模式）
 
 | 类别 | 说明 | 模式数 |
 |------|------|--------|
@@ -450,7 +450,7 @@ Scanner（编排器）
 | `persistence` | 持久化（含 agent config 劫持） | 4 |
 | `path_traversal` | 路径穿越 | 3 |
 | `crypto_mining` | 加密货币挖矿 | 1 |
-| `reverse_shell` | 反向 Shell | 5 |
+| `reverse_shell` | 反向 Shell（含 bash `/dev/tcp`、`nc -e`、mkfifo 管道、Python socket 写法） | 9 |
 | `prompt_secret_exfiltration` | Prompt 诱导泄露密钥 | 4 |
 
 扫描器还包含 LLM 二次审计能力（可选），通过 `SkillLLMAuditor` 提供语义级威胁检测，遵循"只升不降"原则。

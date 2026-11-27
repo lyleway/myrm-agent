@@ -1,6 +1,7 @@
 """[INPUT]
 - .shared::PreCallResult / _emit_loop_guard_event (POS: 共用事件与阶段间状态)
 - agent.middlewares.tooling._circuit_breaker::check_circuit_breaker (POS: 硬熔断器)
+- agent.middlewares.tooling._request_stop::check_request_stopped (POS: 已停止的请求不再启动调用)
 - agent.middlewares.tooling._tool_helpers (POS: 无状态助手)
 - agent.middlewares._session_context::get_active_resolved_tools (POS: 本次运行绑定的工具)
 - agent.security.guards.estop::check_estop (POS: 全局急停)
@@ -15,6 +16,7 @@
 
 [POS]
 `_tool_guards/` 的调用前阶段；阻断时返回错误 ToolMessage，放行时返回 PreCallResult。
+紧随急停检查判断请求是否已被停止（急停保留自己的拒绝与审计）：停止之后才轮到的调用（例如排在冲突闸门里的调用）在循环守卫登记、回合预算计数之前被拒绝启动。
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from langchain_core.messages import ToolMessage
 from myrm_agent_harness.agent.errors.tool_error_category import ToolErrorCategory
 from myrm_agent_harness.agent.middlewares.tooling._circuit_breaker import check_circuit_breaker
 from myrm_agent_harness.agent.middlewares.tooling._model_round import model_round_id
+from myrm_agent_harness.agent.middlewares.tooling._request_stop import check_request_stopped
 from myrm_agent_harness.agent.middlewares.tooling._tool_helpers import (
     check_tool_params_pii,
     check_trust_attenuation,
@@ -120,6 +123,10 @@ async def run_pre_call_guards(
         if estop_state.level == EStopLevel.KILL_ALL:
             msg = f"EMERGENCY: {msg}"
         return make_error_msg(tool_name, tool_call_id, msg, error_category=ToolErrorCategory.ESTOP)
+
+    not_started = check_request_stopped(tool_name, tool_call_id)
+    if not_started is not None:
+        return not_started
 
     loop_guard = get_loop_guard_fn()
     tracker = get_token_tracker()

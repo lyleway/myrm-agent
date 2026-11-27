@@ -127,7 +127,6 @@ def test_registry_wiring_exposes_skill_tools_with_boundary_descriptions() -> Non
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     registry.register(_mount_market_tool(market_backend), source=ToolSource.USER)
@@ -157,7 +156,6 @@ async def test_skill_agent_build_tools_wires_boundary_descriptions() -> None:
         tools=[_mount_market_tool(_StubMarketBackend())],
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
 
     tools = await agent._build_tools()
@@ -184,7 +182,6 @@ def test_discover_description_omits_market_tool_when_market_not_mounted() -> Non
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     sync_discover_capability_tool(registry, skills=skills)
@@ -205,7 +202,6 @@ def test_registry_omits_marketplace_tool_without_user_mount() -> None:
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     sync_discover_capability_tool(registry, skills=skills)
@@ -226,7 +222,6 @@ def test_registry_omits_discover_tool_when_all_skills_inline() -> None:
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     registry.register(_mount_market_tool(_StubMarketBackend()), source=ToolSource.USER)
@@ -247,7 +242,6 @@ def test_registry_omits_discover_tool_when_no_searchable_skills() -> None:
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     registry.register(_mount_market_tool(_StubMarketBackend()), source=ToolSource.USER)
@@ -270,7 +264,6 @@ async def test_discover_runtime_returns_bound_skills_xml() -> None:
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     registry.register(_mount_market_tool(_StubMarketBackend()), source=ToolSource.USER)
@@ -299,7 +292,6 @@ async def test_discover_runtime_bm25_synonym_expansion_finds_skill() -> None:
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     registry.register_many(meta_tools, source=ToolSource.META)
     registry.register(_mount_market_tool(_StubMarketBackend()), source=ToolSource.USER)
@@ -338,7 +330,6 @@ async def test_skill_select_static_description_and_catalog_delivery_wiring() -> 
         registry=registry,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     select_tool = next(t for t in meta_tools if getattr(t, "name", None) == _SELECT_TOOL)
     woven_select = _weave_dynamic_schemas([select_tool])[0]

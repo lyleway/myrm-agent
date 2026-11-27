@@ -14,9 +14,36 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
-_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(#[^\]|]+)?(\|[^\]]+)?\]\]")
+_TARGET_END_RE = re.compile(r"[\]|#]")
+_ANCHOR_END_RE = re.compile(r"[\]|]")
+_BRACKET_RE = re.compile(r"\]")
+
+
+class _NextMark:
+    """The first position at or after an index that holds a character of a set, remembered for the next question.
+
+    No character of the set lies between the index asked and the position found, so the same answer serves every
+    later question that falls inside that stretch.
+    """
+
+    __slots__ = ("_asked_from", "_found", "_pattern", "_text")
+
+    def __init__(self, pattern: re.Pattern[str], text: str) -> None:
+        self._pattern = pattern
+        self._text = text
+        self._asked_from = 0
+        self._found = -1
+
+    def at_or_after(self, index: int) -> int:
+        """The position of the first mark at or after ``index``; the length of the text when there is none."""
+        if not self._asked_from <= index <= self._found:
+            match = self._pattern.search(self._text, index)
+            self._asked_from = index
+            self._found = match.start() if match else len(self._text)
+        return self._found
 
 
 def rewrite_wikilinks_in_tree(workspace: str, moved_files: list[tuple[str, str]]) -> int:
@@ -49,19 +76,64 @@ def rewrite_wikilinks_in_tree(workspace: str, moved_files: list[tuple[str, str]]
     return updated
 
 
+def _wikilinks(text: str) -> Iterator[tuple[int, int, int]]:
+    """The ``(start, target_end, end)`` of each ``[[target#anchor|alias]]`` in ``text``.
+
+    The target is not empty and holds none of ``]|#``. An anchor (``#`` and what follows) holds neither ``]`` nor
+    ``|``, an alias (``|`` and what follows) no ``]``, and neither is empty. Every part stops at a ``]``, and the link
+    closes there or not at all, so the ``[[`` ahead of the same target end fail alike and the scan resumes at that end.
+    A pattern that starts over from each of them reads to the end of the part once per ``[[``: 4,000 of them take half
+    a second.
+    """
+    length = len(text)
+    target_ends = _NextMark(_TARGET_END_RE, text)
+    anchor_ends = _NextMark(_ANCHOR_END_RE, text)
+    brackets = _NextMark(_BRACKET_RE, text)
+    position = 0
+    while (start := text.find("[[", position)) != -1:
+        target_end = target_ends.at_or_after(start + 2)
+        if target_end == length:
+            return  # no "]" ahead: no later link closes either
+        position = target_end
+        if target_end == start + 2:
+            continue
+        end = _link_end(text, target_end, anchor_ends, brackets)
+        if end != -1:
+            yield start, target_end, end
+            position = end
+
+
+def _link_end(text: str, target_end: int, anchor_ends: _NextMark, brackets: _NextMark) -> int:
+    """The position after the ``]]`` that closes the link whose target ends at ``target_end``; -1 when none does."""
+    index = target_end
+    if text[index] == "#":
+        index = anchor_ends.at_or_after(index + 1)
+        if index < target_end + 2 or index == len(text):
+            return -1  # an empty anchor, or no "]" ahead
+    if text[index] == "|":
+        bracket = brackets.at_or_after(index + 1)
+        if bracket < index + 2 or bracket == len(text):
+            return -1  # an empty alias, or no "]" ahead
+        index = bracket
+    return index + 2 if text.startswith("]]", index) else -1
+
+
 def _rewrite_text(text: str, path_map: dict[str, str]) -> str:
-    def repl(match: re.Match[str]) -> str:
-        target = match.group(1).strip()
+    pieces: list[str] = []
+    last_end = 0
+    for start, target_end, end in _wikilinks(text):
+        target = text[start + 2 : target_end].strip()
         mapped = path_map.get(target)
         if mapped is None:
             mapped = path_map.get(Path(target).stem)
         if mapped is None:
-            return match.group(0)
-        suffix = (match.group(2) or "") + (match.group(3) or "")
+            continue
         display = Path(mapped).stem if "/" not in mapped and "\\" not in mapped else mapped
-        return f"[[{display}{suffix}]]"
-
-    return _WIKILINK_RE.sub(repl, text)
+        pieces.append(text[last_end:start])
+        pieces.append(f"[[{display}{text[target_end : end - 2]}]]")
+        last_end = end
+    pieces.append(text[last_end:])
+    return "".join(pieces)
 
 
 def _as_posix_relpath(workspace: Path, path: str) -> str:

@@ -7,6 +7,7 @@
 
 [OUTPUT]
 - setup_skill_chat(): providers + agent owning the adopted hook skill (its declared shell permission granted) + empty chat
+- setup_file_read_chat(): providers + HITL pinned on + agent following a given system prompt + empty chat, no skill adopted
 - SkillChat: one probe (agent, chat, the folder hooks write into)
 - audit_hooks() / fail_closed_hooks(): SKILL.md ``hooks:`` blocks that write observable files
 - BASH_TOOL / DONE_TOKEN / BLOCKED_TOKEN / COMMAND_OUTPUT: the words the probe turns agree on
@@ -119,7 +120,7 @@ def fail_closed_hooks(out: Path) -> str:
 # --- product API setup -----------------------------------------------------------------------------
 
 
-def _create_agent(api_url: str, suffix: str, *, yolo: bool) -> str:
+def _create_agent(api_url: str, suffix: str, *, yolo: bool, system_prompt: str = _AGENT_SYSTEM_PROMPT) -> str:
     """Custom agent with the bash tool; ``yolo`` decides whether approval cards interrupt the turn."""
     overrides: dict[str, object] = {"yoloModeEnabled": True, "yolo_mode_enabled_at": time.time()} if yolo else {}
     created = http_json(
@@ -128,7 +129,7 @@ def _create_agent(api_url: str, suffix: str, *, yolo: bool) -> str:
         body={
             "name": f"Skill Hooks E2E {suffix}",
             "description": "Skill hooks live E2E probe agent",
-            "system_prompt": _AGENT_SYSTEM_PROMPT,
+            "system_prompt": system_prompt,
             "skill_ids": [],
             "mcp_ids": [],
             "enabled_builtin_tools": ["code_execute"],
@@ -246,4 +247,27 @@ def setup_skill_chat(
         chat_id=chat_id,
         out=out,
         log_offset=snapshot_backend_log_offset(api_url),
+    )
+
+
+def setup_file_read_chat(tmp_path: Path, ledger: E2EResourceLedger, prefix: str, system_prompt: str) -> SkillChat:
+    """Providers, HITL pinned on, an agent that follows ``system_prompt``, and an empty chat for it; no skill is adopted.
+
+    The probe's ``skill_name`` is empty, so turns on it are sent with ``invoke_skill=False``.
+    """
+    api_url = get_e2e_api_url()
+    prepare_e2e_ui_session(api_url)
+    seed_live_e2e_providers(api_url)
+    if not wait_e2e_provider_ready(timeout_sec=90.0):
+        pytest.fail("Provider not ready — run ./myrm-dev ready --chrome")
+    pin_private_hitl_mode(api_url)
+
+    suffix = uuid.uuid4().hex[:8]
+    agent_id = _create_agent(api_url, suffix, yolo=False, system_prompt=system_prompt)
+    ledger.register("agent", agent_id)
+    chat_id = f"{prefix}{suffix}"
+    _create_chat(api_url, chat_id, agent_id)
+    ledger.register("chat", chat_id)
+    return SkillChat(
+        skill_name="", agent_id=agent_id, chat_id=chat_id, out=tmp_path, log_offset=snapshot_backend_log_offset(api_url)
     )

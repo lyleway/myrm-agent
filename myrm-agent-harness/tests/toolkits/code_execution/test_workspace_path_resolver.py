@@ -179,7 +179,7 @@ class TestContainerPath:
             ("/etc/passwd", False),
         ],
     )
-    def test_is_container_path(self, path, expected):
+    def test_is_container_path(self, path: str, expected: bool) -> None:
         assert WorkspacePathResolver.is_container_path(path) is expected
 
     def test_to_local_path_keeps_double_slash_inside_workspace(self, tmp_path):

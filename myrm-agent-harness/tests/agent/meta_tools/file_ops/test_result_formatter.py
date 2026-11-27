@@ -80,7 +80,7 @@ def test_format_strips_bom_in_view_range_first_line():
     assert "\ufeff" not in result
 
 
-def test_format_shows_plain_lines_for_a_crlf_file():
+def test_format_shows_plain_lines_for_a_crlf_file() -> None:
     lines = ["a\r", "b\r", "c"]
 
     result = _format(lines)
@@ -92,7 +92,7 @@ def test_format_shows_plain_lines_for_a_crlf_file():
     assert lines == ["a\r", "b\r", "c"]
 
 
-def test_format_shows_plain_lines_for_a_crlf_file_in_view_range():
+def test_format_shows_plain_lines_for_a_crlf_file_in_view_range() -> None:
     result = _format(["a\r", "b\r", "c\r", "d"], view_range=ViewRange(start=2, end=3))
 
     assert "\r" not in result
@@ -100,7 +100,7 @@ def test_format_shows_plain_lines_for_a_crlf_file_in_view_range():
     assert "3|c\n" in result
 
 
-def test_format_ends_a_line_at_a_bare_carriage_return():
+def test_format_ends_a_line_at_a_bare_carriage_return() -> None:
     result = _format(["a\rb\r", "c"])
 
     assert "\r" not in result
@@ -110,7 +110,7 @@ def test_format_ends_a_line_at_a_bare_carriage_return():
     assert "3|c\n" in result
 
 
-def test_format_numbers_a_cr_only_file_by_its_lines_in_a_view_range():
+def test_format_numbers_a_cr_only_file_by_its_lines_in_a_view_range() -> None:
     result = _format(["a1\rb2\rc3\r"], view_range=ViewRange(start=2, end=2))
 
     assert "(lines 2-2 of 4)" in result
@@ -118,7 +118,7 @@ def test_format_numbers_a_cr_only_file_by_its_lines_in_a_view_range():
     assert "1|a1" not in result
 
 
-def test_format_clamps_a_crlf_line_by_its_text_without_the_carriage_return():
+def test_format_clamps_a_crlf_line_by_its_text_without_the_carriage_return() -> None:
     result = _format(["x" * 10 + "\r", "y"], max_line_length=10)
 
     assert "truncated" not in result

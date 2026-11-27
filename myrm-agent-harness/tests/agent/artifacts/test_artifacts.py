@@ -569,14 +569,14 @@ class TestFileIdRegistry:
         assert id1 == id2
         assert len(registry.path_to_id) == 1
 
-    def test_lookup_returns_the_id_of_a_registered_path(self):
+    def test_lookup_returns_the_id_of_a_registered_path(self) -> None:
         with ArtifactContextManager():
             assert register_file("/workspace/data.json") == "@file_001"
 
             assert lookup_short_file_id("/workspace/data.json") == "@file_001"
             assert lookup_short_file_id("/workspace/other.json") is None
 
-    def test_lookup_and_register_without_a_context(self):
+    def test_lookup_and_register_without_a_context(self) -> None:
         assert register_file("/workspace/data.json") is None
         assert lookup_short_file_id("/workspace/data.json") is None
 

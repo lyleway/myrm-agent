@@ -21,7 +21,6 @@ from myrm_agent_harness.agent.security.guards.loop_guard import (
 from tests.support.completion_guard_harness import (
     LOOP_GUARD_PATCH,
     make_state,
-    pending,
     reasons_of,
 )
 
@@ -39,7 +38,7 @@ class TestCompletionGuardTriggerConditions:
 
     @pytest.mark.asyncio
     async def test_skips_when_ai_has_tool_calls(self) -> None:
-        """Should skip when AIMessage HAS tool_calls (except finish tools)."""
+        """Should skip when AIMessage HAS tool_calls."""
         state = make_state(
             [
                 AIMessage(
@@ -50,41 +49,6 @@ class TestCompletionGuardTriggerConditions:
         )
         result = await self.guard.aafter_model(state, None)
         assert result is None
-
-    @pytest.mark.asyncio
-    async def test_triggers_when_ai_calls_finish_tool_with_unverified_writes(
-        self,
-    ) -> None:
-        """Should trigger when AIMessage calls finish tool after modifying code without verification."""
-        state = make_state(
-            [
-                HumanMessage(content="Change main.py and tell me when it is done."),
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "id": "tc_answer",
-                            "name": "request_answer_user_tool",
-                            "args": {"reason": "Task complete"},
-                        }
-                    ],
-                ),
-            ]
-        )
-
-        code_write_record = CallRecord(
-            tool_name="file_write_tool",
-            args_hash="hash_code_write",
-            args={"path": "/src/main.py"},
-            success_level=SuccessLevel.FULL_SUCCESS,
-        )
-
-        with patch(LOOP_GUARD_PATCH) as mock_guard:
-            mock_guard.return_value.recorded_calls.return_value = [code_write_record]
-            result = await self.guard.aafter_model(state, None)
-
-        user_message = state["messages"][0]
-        assert pending(result).anchor_id == user_message.id
 
     @pytest.mark.asyncio
     async def test_skips_when_no_critical_errors(self) -> None:
@@ -339,21 +303,7 @@ class TestCompletionGuardTriggerConditions:
         """After max-rejections force-finish, subsequent completions pass through."""
         self.guard._max_rejections = 2
         _cg_state.current_run_state().rejections = 2
-        state = make_state(
-            [
-                HumanMessage(content="Change main.py and tell me when it is done."),
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "id": "tc_answer",
-                            "name": "request_answer_user_tool",
-                            "args": {"reason": "Task complete"},
-                        }
-                    ],
-                ),
-            ]
-        )
+        state = make_state([AIMessage(content="All done!")])
         with patch(LOOP_GUARD_PATCH) as mock_guard:
             mock_guard.return_value.recorded_calls.return_value = [
                 CallRecord(

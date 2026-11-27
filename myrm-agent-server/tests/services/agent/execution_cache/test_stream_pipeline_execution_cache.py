@@ -79,9 +79,6 @@ async def test_pooled_same_chat_builds_once_across_two_messages() -> None:
             return_value={"session_id": "sess-1", "query": "hello"},
         ),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch(
-            "app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence",
-        ),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", noop_async_context),
         patch(
             "app.services.web_fetch.binding.open_web_fetch_escalation_context",
@@ -153,9 +150,6 @@ async def test_ephemeral_same_chat_rebuilds_each_message() -> None:
             return_value={"session_id": "sess-2", "query": "hello"},
         ),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch(
-            "app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence",
-        ),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", noop_async_context),
         patch(
             "app.services.web_fetch.binding.open_web_fetch_escalation_context",
@@ -322,9 +316,6 @@ async def test_goal_provider_injection_decoupled_from_memory_manager() -> None:
             },
         ),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch(
-            "app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence",
-        ),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", noop_async_context),
         patch(
             "app.services.web_fetch.binding.open_web_fetch_escalation_context",

@@ -5,11 +5,11 @@ myrm_agent_harness.utils.db.migration_engine::StatefulMigrationEngine/MigrationS
 sqlalchemy.ext.asyncio::AsyncEngine (POS: 异步 SQLAlchemy 引擎)
 app.database.migrations._migration_statements_1..3::MIGRATION_STATEMENTS_1..3 (POS: 迁移语句清单的三段)
 app.database.migrations._index_statements_1..2::INDEX_STATEMENTS_1..2 (POS: 索引语句清单的两段)
-app.database.migrations._sql_constants::九条冻结 SQL 常量 (POS: 遗留数据修复语句，原样再导出)
+app.database.migrations._sql_constants::十二条冻结 SQL 常量 (POS: 遗留数据修复语句，原样再导出)
 app.database.repositories.conversation_recall.sql::CONVERSATION_RECALL_SCHEMA_SQL/CONVERSATION_RECALL_BOOTSTRAP_SQL/CONVERSATION_RECALL_SEGMENT_BOOTSTRAP_SQL (POS: 会话召回的表与 FTS5 DDL，ensure_raw_sql_schema 内按需导入)
 
 [OUTPUT]
-MIGRATION_STATEMENTS / INDEX_STATEMENTS（各段按顺序拼成的完整清单，版本号即下标） / run_migrations(engine) / create_indexes(engine) / has_pending_migrations(engine)（是否还有待执行的迁移，决定是否需要迁移前快照） / ensure_raw_sql_schema(engine)（保底创建不在 ORM 里的 FTS5 虚拟表、触发器与日志表） / 九条冻结 SQL 常量（定义见 _sql_constants.py，原样再导出）
+MIGRATION_STATEMENTS / INDEX_STATEMENTS（各段按顺序拼成的完整清单，版本号即下标） / run_migrations(engine) / create_indexes(engine) / has_pending_migrations(engine)（是否还有待执行的迁移，决定是否需要迁移前快照） / ensure_raw_sql_schema(engine)（保底创建不在 ORM 里的 FTS5 虚拟表、触发器与日志表） / 十二条冻结 SQL 常量（定义见 _sql_constants.py，原样再导出）
 
 [POS]
 Server 层 SQLite 有状态迁移入口，追加式维护 schema 演进。两条清单拆成按文件序号首尾相接的段，每段不超过 400 行；
@@ -37,6 +37,9 @@ from ._sql_constants import (
     PAUSE_STALLED_ONCE_CRON_JOBS_SQL,
     REARM_STALLED_CRON_JOBS_SQL,
     REJECT_LEGACY_TOOL_STUCK_APPROVALS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL,
     STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL,
     STRIP_RETIRED_RESPONSE_LOCALE_POLICY_SQL,
 )
@@ -51,6 +54,9 @@ __all__ = [
     "PAUSE_STALLED_ONCE_CRON_JOBS_SQL",
     "REARM_STALLED_CRON_JOBS_SQL",
     "REJECT_LEGACY_TOOL_STUCK_APPROVALS_SQL",
+    "STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL",
+    "STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL",
+    "STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL",
     "STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL",
     "STRIP_RETIRED_RESPONSE_LOCALE_POLICY_SQL",
     "create_indexes",

@@ -53,9 +53,8 @@ _DEEP_SEARCH_SUFFIX_EN = """
 <deep_search_mode>
 You are currently in **deep search mode** with additional deep-dive capabilities:
 - **web_fetch_tool**: Read full web pages to gather detailed information not covered in search snippets.
-- **request_answer_user_tool**: Quality self-audit checkpoint before answering to ensure precision and completeness.
 
-Workflow: Search → Filter 1-3 highest-value source pages to read deeply → Answer after passing self-audit.
+Workflow: Search → Filter 1-3 highest-value source pages to read deeply → Answer.
 Prioritize official documentation, primary reports, and authoritative sources. Avoid redundant or low-quality deep reads.
 </deep_search_mode>
 """
@@ -88,9 +87,8 @@ _DEEP_SEARCH_SUFFIX_ZH = """
 <deep_search_mode>
 你当前处于**深度搜索模式**，拥有额外的深挖能力：
 - **web_fetch_tool**：深读网页完整内容，获取搜索摘要无法覆盖的详细信息。
-- **request_answer_user_tool**：回答前的质量自审关卡，确保答案精确完整。
 
-工作流程：搜索 → 筛选 1-3 个最高价值源网页深读 → 自审通过后回答。
+工作流程：搜索 → 筛选 1-3 个最高价值源网页深读 → 回答。
 优先深挖官方文档、原始报告等权威来源。避免对重复/低质量页面做无效深读。
 </deep_search_mode>
 """

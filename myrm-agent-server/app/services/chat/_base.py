@@ -102,14 +102,6 @@ class _ChatRepositoryPort(Protocol):
 
     async def get_message_by_id(self, chat_id: str, message_id: str) -> MessageDTO | None: ...
 
-    async def cas_update_compaction(
-        self,
-        chat_id: str,
-        old_before_id: str | None,
-        new_summary: str,
-        new_before_id: str,
-    ) -> bool: ...
-
     async def deactivate_last_assistant_siblings(
         self,
         chat_id: str,

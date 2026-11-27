@@ -2,12 +2,14 @@
 
 [INPUT]
 - app.channels.types::InboundMessage, OutboundMessage (POS: Channel message types.)
+- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was written into)
 - app.channels.routing.friendly_errors::ERROR_TYPE_METADATA_KEY, friendly_error_text (POS: member-safe error wording with reference id)
 - myrm_agent_harness.toolkits.llms.errors::MyrmLLMError (POS: LLM error with diagnostics.)
 
 [OUTPUT]
 - build_config_incomplete_reply / build_llm_error_reply / build_generic_error_reply
 - build_early_failure_reply: the flagged reply of a turn that ended before the agent ran
+- in_stored_chat: a failure reply of a turn that had a stored chat, naming that chat
 
 [POS]
 Maps harness and config exceptions to channel-friendly OutboundMessage replies.
@@ -15,6 +17,7 @@ Maps harness and config exceptions to channel-friendly OutboundMessage replies.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 
 from myrm_agent_harness.api.config import ConfigIncompleteError
@@ -24,9 +27,19 @@ from myrm_agent_harness.utils.locale import is_chinese
 
 from app.channels.i18n import get_text, resolve_message_locale
 from app.channels.routing.friendly_errors import ERROR_TYPE_METADATA_KEY, friendly_error_text
-from app.channels.types import ActionButton, ComponentRow, InboundMessage, OutboundMessage
+from app.channels.types import METADATA_STORED_CHAT_KEY, ActionButton, ComponentRow, InboundMessage, OutboundMessage
 
 logger = logging.getLogger(__name__)
+
+
+def in_stored_chat(reply: OutboundMessage, chat_id: str) -> OutboundMessage:
+    """``reply`` naming ``chat_id``, the stored chat its turn ran in, so the router links that conversation from it.
+
+    A turn that failed before it had a stored chat (``chat_id`` is empty) has none to name: the reply is unchanged.
+    """
+    if not chat_id:
+        return reply
+    return dataclasses.replace(reply, metadata={**(reply.metadata or {}), METADATA_STORED_CHAT_KEY: chat_id})
 
 
 def build_early_failure_reply(msg: InboundMessage, content: str, error_type: str) -> OutboundMessage:

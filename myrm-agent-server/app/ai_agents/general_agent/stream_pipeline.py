@@ -2,7 +2,6 @@
 
 [INPUT]
 - app.core.utils.delivery_provenance::resolve_general_agent_pipeline_labels, apply_general_agent_pipeline_banner (POS: Human ingress banner (not for the browser chat) + structured log labels keyed by channel_name.)
-- app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware::reset_answer_tool_convergence (POS: 工具约束中间件的收敛状态重置)
 - app.ai_agents.general_agent.forced_delegate::stream_forced_delegate (POS: 指定外部 Agent 的直连委托：安全闸门、可用性检查、失败指引)
 
 [OUTPUT]
@@ -274,11 +273,6 @@ async def execute_stream_pipeline(
             session_id_var,
         )
 
-        from app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware import (
-            reset_answer_tool_convergence,
-        )
-
-        reset_answer_tool_convergence()
         token = session_id_var.set(str(context["session_id"]))
 
         from app.services.infra.sleep_inhibitor import SleepInhibitor

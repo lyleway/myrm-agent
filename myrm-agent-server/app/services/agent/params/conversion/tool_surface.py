@@ -13,7 +13,7 @@
 
 [POS]
 Entry-surface stage of Agent request conversion. Fast mode is the only surface without bash and file-write tools
-(it keeps a read-only file_read_tool over spill files and uploads): it forces an answer_tool-only profile, wipes
+(it keeps a read-only file_read_tool over spill files and uploads): it forces an empty builtin-tool profile, wipes
 skills / MCP / subagents / media generation and mounts no memory tools. It also decides whether web search is
 mounted, from the search configuration and the profile alone.
 """
@@ -82,12 +82,8 @@ async def resolve_tool_surface(request: AgentRequest, profile: ProfileContext, s
             if refreshed_configs is not None and refreshed_configs.search_cfg is not None:
                 sources.search_cfg = refreshed_configs.search_cfg
         # Deep vs normal differs by search_depth (sufficiency, prompt suffix, limits),
-        # not browser — deep workflow is web_search → web_fetch → answer self-review.
-        fast_builtin: list[str] = ["answer_tool"]
-        tool_flags = resolve_agent_mount(
-            ExecutionSurface.WEB_FAST,
-            resolve_builtin_tool_flags(fast_builtin, allow_answer_tool=True),
-        )
+        # not browser — deep workflow is web_search → web_fetch → answer.
+        tool_flags = resolve_agent_mount(ExecutionSurface.WEB_FAST, resolve_builtin_tool_flags([]))
         prompt_mode = "search"
         enable_web_search = sources.search_cfg is not None
         if not enable_web_search:

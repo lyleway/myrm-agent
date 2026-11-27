@@ -5,6 +5,10 @@ CodeExecutor is the single entry point for all execution operations.
 
 Lifecycle: bind_workspace(path) -> warm_up() -> execute()/execute_bash()/read_file()/... -> close()
 
+Whoever builds an executor closes it, once, at the end of its life. A run closes only an executor it created itself;
+an executor handed to an agent belongs to the caller that built it (a pooled chat's unit, a host application), and
+that caller closes it.
+
 [INPUT]
 - toolkits.code_execution.config::ExecutionConfig (POS: Code execution configuration layer. Defines execution modes, network policies, and runtime settings for the Agent-in-Sandbox architecture.)
 - toolkits.code_execution.executors.granted_roots (POS: the directories the user granted widen the workspace boundary; read-only ones refuse writes)
@@ -16,7 +20,8 @@ Lifecycle: bind_workspace(path) -> warm_up() -> execute()/execute_bash()/read_fi
 - reset_executor: Restore a previous executor binding from a ContextVar token.
 - require_executor: Return the current executor, raising if unavailable.
 - stash_executor_for_session / get_stashed_executor: Session-keyed executor lookup that survives ContextVar loss.
-- clear_stashed_executor: Drop a session's stashed executor and close it in the background.
+- clear_stashed_executor: Drop a session's stashed executor entry; the stash only looks executors up and does not own them.
+- close_executor_in_background: Close an executor on the running event loop without waiting for it.
 - clear_all_stashed_executors_for_tests: Drop every stashed executor (test isolation).
 
 [POS]
@@ -344,7 +349,8 @@ def require_executor() -> CodeExecutor:
 # ---------------------------------------------------------------------------
 # LangGraph's CompiledGraph.astream() may run tool nodes in isolated contexts
 # where ContextVars set during setup_workspace are not visible. This dict
-# provides a fallback lookup by session_id so tools can self-heal.
+# provides a fallback lookup by session_id so tools can self-heal. It is only a
+# lookup: an executor is closed by whoever built it, never through its entry here.
 
 _session_executor_stash: dict[str, CodeExecutor] = {}
 
@@ -359,20 +365,26 @@ def get_stashed_executor(session_id: str) -> CodeExecutor | None:
     return _session_executor_stash.get(session_id)
 
 
-_stashed_cleanup_tasks: set[asyncio.Task[None]] = set()
-
-
 def clear_stashed_executor(session_id: str) -> None:
-    """Remove stashed executor entry on session teardown and close it in background if loop running."""
-    executor = _session_executor_stash.pop(session_id, None)
-    if executor is not None:
-        try:
-            loop = asyncio.get_running_loop()
-            task = loop.create_task(executor.close())
-            _stashed_cleanup_tasks.add(task)
-            task.add_done_callback(_stashed_cleanup_tasks.discard)
-        except RuntimeError:
-            pass
+    """Drop the session's stashed executor entry; the executor itself stays open."""
+    _session_executor_stash.pop(session_id, None)
+
+
+_background_close_tasks: set[asyncio.Task[None]] = set()
+
+
+def close_executor_in_background(executor: CodeExecutor) -> None:
+    """Close ``executor`` on the running event loop without waiting for it; with no running loop, do nothing.
+
+    The loop keeps only weak references to its tasks, so the set holds each close task until it ends.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(executor.close())
+    _background_close_tasks.add(task)
+    task.add_done_callback(_background_close_tasks.discard)
 
 
 def clear_all_stashed_executors_for_tests() -> None:

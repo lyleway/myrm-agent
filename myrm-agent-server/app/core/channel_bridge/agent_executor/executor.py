@@ -58,6 +58,7 @@ from .execute_errors import (
     build_config_incomplete_reply,
     build_generic_error_reply,
     build_llm_error_reply,
+    in_stored_chat,
 )
 from .execute_finalize import finalize_channel_stream_reply
 from .execute_preamble import prepare_channel_execution
@@ -214,15 +215,15 @@ class ChannelAgentExecutor:
                 msg.sender_id,
                 exc.technical_details,
             )
-            yield build_config_incomplete_reply(msg, exc)
+            yield in_stored_chat(build_config_incomplete_reply(msg, exc), chat_id)
         except MyrmLLMError as exc:
             if account_guidance:
                 logger.error("ChannelAgentExecutor: agent failed for %s: %s", msg.sender_id, exc)
-                yield build_llm_error_reply(msg, exc)
+                yield in_stored_chat(build_llm_error_reply(msg, exc), chat_id)
             else:
-                yield build_generic_error_reply(msg, exc, account_guidance=False)
+                yield in_stored_chat(build_generic_error_reply(msg, exc, account_guidance=False), chat_id)
         except Exception as exc:
-            yield build_generic_error_reply(msg, exc, account_guidance=account_guidance)
+            yield in_stored_chat(build_generic_error_reply(msg, exc, account_guidance=account_guidance), chat_id)
         finally:
             if token_ctx is not None:
                 from myrm_agent_harness.agent.security import user_credentials_ctx

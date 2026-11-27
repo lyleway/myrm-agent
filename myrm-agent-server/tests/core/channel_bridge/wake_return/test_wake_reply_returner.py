@@ -53,6 +53,19 @@ async def test_the_reply_is_delivered_into_the_conversation_the_chat_was_last_ta
 
 
 @pytest.mark.asyncio
+async def test_the_reply_names_the_chat_the_wake_turn_wrote_it_into() -> None:
+    """The router links that chat from the reply, not whichever one the last message there would resolve to."""
+    origins = WakeOrigins()
+    origins.remember("chat-db-1", _MSG)
+    returner, deliver = _returner(origins)
+
+    await returner.return_reply("chat-db-1", "The research is done.")
+
+    assert deliver.await_args is not None
+    assert deliver.await_args.kwargs == {"stored_chat_id": "chat-db-1"}
+
+
+@pytest.mark.asyncio
 async def test_a_chat_that_was_not_started_from_a_channel_gets_nothing_sent() -> None:
     returner, deliver = _returner(WakeOrigins())
 

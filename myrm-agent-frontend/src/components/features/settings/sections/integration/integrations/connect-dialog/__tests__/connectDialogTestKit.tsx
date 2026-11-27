@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 
+import { findSameMcpServer } from '@/lib/utils/mcp-config/mcpServerIdentity';
 import type { MCPServiceConfig } from '@/store/config/types';
 import type { CatalogEntry } from '../../catalog-types';
 
@@ -66,7 +67,7 @@ export const securityGateMock = {
   buildLastScanSummary: () => SCAN_SUMMARY,
   gateMcpEnable: (...args: unknown[]) => mockGateMcpEnable(...args),
 };
-export const mcpConfigUtilsMock = { formatMcpGateBlockedMessage: () => 'blocked' };
+export const mcpConfigUtilsMock = { formatMcpGateBlockedMessage: () => 'blocked', findSameMcpServer };
 export const scanAckDialogMock = { MCPScanAckDialog: ScanAckDialogStub };
 export const deployModeMock = {
   isSandbox: () => mockIsSandbox(),

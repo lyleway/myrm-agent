@@ -22,7 +22,7 @@ import pytest
 from mcp.types import ToolListChangedNotification
 
 from myrm_agent_harness.toolkits.mcp import session_actor as sa
-from myrm_agent_harness.toolkits.mcp.config import sanitize_mcp_name_component
+from myrm_agent_harness.toolkits.mcp.config import mcp_tool_prefix, sanitize_mcp_name_component
 from myrm_agent_harness.toolkits.mcp.session_actor import MCPSessionActor
 from myrm_agent_harness.toolkits.mcp.session_actor_tools import (
     check_actor_stdio_security_gates,
@@ -157,6 +157,15 @@ def test_prefixed_tool_name_that_is_not_registered_resolves_to_nothing() -> None
 
     assert resolve_actor_tool(actor, "known") is actor._tools[known.name]
     assert resolve_actor_tool(actor, f"{prefix}missing") is None  # already prefixed: no second prefix attempt
+
+
+def test_a_non_ascii_server_resolves_its_bare_tool_names_through_the_shared_prefix() -> None:
+    """Actor and tool converter must derive one prefix: a hand-built copy would miss the hash suffix of ``天气``."""
+    actor = MCPSessionActor("天气", {"transport": "stdio"})
+    forecast = SimpleNamespace(name=f"{mcp_tool_prefix('天气')}forecast")
+    actor._tools = {forecast.name: forecast}  # type: ignore[dict-item]
+
+    assert resolve_actor_tool(actor, "forecast") is forecast
 
 
 @pytest.mark.asyncio

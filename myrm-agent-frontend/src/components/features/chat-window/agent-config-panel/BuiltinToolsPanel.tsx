@@ -12,7 +12,6 @@ import {
   BookMarked,
   KanbanSquare,
   Volume2,
-  MessageSquareCheck,
   AlertCircle,
   ListTodo,
   Clock,
@@ -70,7 +69,6 @@ const BUILTIN_TOOL_ICONS: Record<BuiltinToolId, React.ReactNode> = {
   tts: <Volume2 size={14} />,
   kanban: <KanbanSquare size={14} />,
   cron: <Clock size={14} />,
-  answer_tool: <MessageSquareCheck size={14} />,
   planning: <ListTodo size={14} />,
   structured_clarify: <ClipboardList size={14} />,
   external_cli: <Terminal size={14} />,
@@ -209,28 +207,26 @@ function ExternalCliConfigSection({
   const [readiness, setReadiness] = useState<ExternalCliReadiness | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const cancellation = new AbortController();
     onBackendReady?.(null);
     (async () => {
       try {
         const agents = getConfigSyncManager().get('externalAgents')?.agents ?? [];
         const statuses = await getExternalAgentAuthStatus();
         const resolved = resolveExternalCliReadiness(agents, statuses, localOnly);
-        if (!cancelled) {
+        if (!cancellation.signal.aborted) {
           setReadiness(resolved);
           onBackendReady?.(resolved !== 'not_configured');
         }
       } catch {
-        if (!cancelled) {
+        if (!cancellation.signal.aborted) {
           // Detection unavailable: claim neither state, so no misleading hint is shown.
           setReadiness(null);
           onBackendReady?.(null);
         }
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => cancellation.abort();
   }, [localOnly, onBackendReady]);
 
   return (

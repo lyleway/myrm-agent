@@ -17,7 +17,6 @@ from scripts.tool_registry_config import (
     ORPHAN_FACTORY_WHITELIST,
     PTC_RUNTIME_TOOL_NAMES,
     SCHEMA_ONLY_TOOL_NAMES,
-    SERVER_BOUND_SCHEMA_TOOL_NAMES,
 )
 
 
@@ -76,23 +75,11 @@ class ScanReport:
 
     def ghost_registrations(self) -> set[str]:
         """Tools registered in `_TOOL_LAYERS` but no source defines them."""
-        return (
-            self.registered_names
-            - self.declared_names
-            - INTERNAL_TOOL_NAMES
-            - SCHEMA_ONLY_TOOL_NAMES
-            - SERVER_BOUND_SCHEMA_TOOL_NAMES
-        )
+        return self.registered_names - self.declared_names - INTERNAL_TOOL_NAMES - SCHEMA_ONLY_TOOL_NAMES
 
     def ghost_registry_metadata_keys(self, metadata_keys: set[str]) -> set[str]:
         """Registry metadata keys (permission map, tool groups, etc.) with no tool source."""
-        allowed = (
-            self.declared_names
-            | self.registered_names
-            | INTERNAL_TOOL_NAMES
-            | SCHEMA_ONLY_TOOL_NAMES
-            | SERVER_BOUND_SCHEMA_TOOL_NAMES
-        )
+        allowed = self.declared_names | self.registered_names | INTERNAL_TOOL_NAMES | SCHEMA_ONLY_TOOL_NAMES
         return metadata_keys - allowed
 
     def orphan_factories(self) -> set[str]:

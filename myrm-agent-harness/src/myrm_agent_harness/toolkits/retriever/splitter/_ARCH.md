@@ -11,9 +11,9 @@ Detailed design: [RETRIEVER_SYSTEM.md](../RETRIEVER_SYSTEM.md)
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | `__init__.py` | Package | Public splitter exports | ✅ |
-| `chunk_processor.py` | Core | Chunk processing utilities | ✅ |
+| `chunk_processor.py` | Core | Chunk processing utilities; the quality check looks for a menu of links only in content under 100 characters, and counts list items from the indentation of their own line, so neither reads a hostile page more than once per character | ✅ |
 | `code_utils.py` | Core | Code language detection and large-block splitting | ✅ |
-| `markdown_link_handler.py` | Core | Markdown link handling during split | ✅ |
+| `markdown_link_handler.py` | Core | Markdown link handling during split (links are found with the linear scan of `utils.markdown_links`) | ✅ |
 | `overlap_processor.py` | Core | Chunk overlap processing | ✅ |
 | `recursive_character_protect_special_splitter.py` | Core | Recursive character splitter with special-block protection | ✅ |
 | `smart_markdown_header_text_splitter.py` | Core | Markdown header-aware text splitter | ✅ |

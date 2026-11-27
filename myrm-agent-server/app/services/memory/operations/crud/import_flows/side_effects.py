@@ -2,6 +2,7 @@
 
 [INPUT]
 app.services.memory.imports.import_sessions::MemoryImportSessionService (POS: 记忆导入审查会话)
+myrm_agent_harness.toolkits.mcp.config::mcp_tool_prefix (POS: the tool-name prefix every tool of one server carries)
 
 [OUTPUT]
 recheck_import_readiness: recompute a batch's readiness from live provider state.
@@ -19,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import HTTPException
+from myrm_agent_harness.toolkits.mcp.config import mcp_tool_prefix
 
 from app.database.connection import get_session
 from app.schemas.memory.archive import (
@@ -69,10 +71,12 @@ async def recheck_import_readiness(
 
 
 async def _write_migrated_mcp_configs(mcp_configs: list[dict[str, object]]) -> int:
-    """Append migrated MCP configs to ``mcpServers`` (disabled, skipping names already there); return the inserted count.
+    """Append migrated MCP configs to ``mcpServers`` (disabled); return the inserted count.
 
     The runtime and the WebUI read the list from ``{"mcpConfigs": [...]}``, so it is read from and written back into
-    that value, and the user's own entries and any other key of it are kept as they are.
+    that value, and the user's own entries and any other key of it are kept as they are. A server whose tool prefix
+    (``mcp_tool_prefix``) a stored or earlier migrated server already holds is skipped, so ``my-api`` does not join a
+    stored ``my_api``.
     """
 
     from app.services.config.service import config_service
@@ -88,15 +92,16 @@ async def _write_migrated_mcp_configs(mcp_configs: list[dict[str, object]]) -> i
     stored: dict[str, object] = record.value if record is not None else {}
     stored_configs = stored.get("mcpConfigs")
     existing = list(stored_configs) if isinstance(stored_configs, list) else []
-    taken_names = {str(cfg.get("name", "")) for cfg in existing if isinstance(cfg, dict)}
+    taken_prefixes = {mcp_tool_prefix(str(cfg.get("name", ""))) for cfg in existing if isinstance(cfg, dict)}
 
     added: list[dict[str, object]] = []
     for cfg in mcp_configs:
         name = str(cfg.get("name", "")).strip()
-        if not name or name in taken_names:
+        prefix = mcp_tool_prefix(name)
+        if not name or prefix in taken_prefixes:
             continue
         added.append({**cfg, "enabled": False})
-        taken_names.add(name)
+        taken_prefixes.add(prefix)
 
     if added:
         await config_service.set(

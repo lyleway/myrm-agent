@@ -24,7 +24,7 @@ async def _reset_execution_cache_singleton() -> None:
 
 
 def _make_unit() -> BuiltExecutionUnit:
-    skill_agent = MagicMock()
+    skill_agent = MagicMock(executor=None)
     skill_agent.close = AsyncMock()
     return BuiltExecutionUnit(skill_agent=skill_agent)
 
@@ -242,7 +242,7 @@ async def test_join_for_turn_rebuilds_the_agent_when_a_goal_starts_between_turns
     ) -> MagicMock:
         nonlocal build_count
         build_count += 1
-        skill_agent = MagicMock()
+        skill_agent = MagicMock(executor=None)
         skill_agent.close = AsyncMock()
         return skill_agent
 

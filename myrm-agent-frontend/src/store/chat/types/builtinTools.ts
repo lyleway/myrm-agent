@@ -24,7 +24,6 @@ export type BuiltinToolId =
   | 'tts'
   | 'kanban'
   | 'cron'
-  | 'answer_tool'
   | 'planning'
   | 'structured_clarify'
   | 'external_cli'
@@ -42,7 +41,6 @@ export const BUILTIN_TOOL_IDS: readonly BuiltinToolId[] = [
   'tts',
   'kanban',
   'cron',
-  'answer_tool',
   'planning',
   'structured_clarify',
   'external_cli',
@@ -70,7 +68,6 @@ export const BUILTIN_TOOL_LABELS: Record<BuiltinToolId, { en: string; zh: string
   tts: { en: 'Text to Speech', zh: '语音合成' },
   kanban: { en: 'Kanban', zh: '看板' },
   cron: { en: 'Scheduled Tasks', zh: '定时任务' },
-  answer_tool: { en: 'Answer Tool', zh: '结构化回答' },
   planning: { en: 'Planning', zh: '任务规划' },
   structured_clarify: { en: 'Structured Clarify', zh: '结构化澄清' },
   external_cli: { en: 'External CLI', zh: '外部 CLI' },

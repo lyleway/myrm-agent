@@ -1,10 +1,10 @@
 """Chrome E2E (Lane-B): the config sync layer cancels a stalled backend answer at its deadline and keeps the user's edits moving.
 
-Real frontend, real backend, real database. An in-page fetch shim (`tests/support/config_sync_fault_shim.py`) delays or
+Real frontend, real backend, real database. An in-page fetch shim (`tests/e2e/config_sync_deadline/fault_shim.py`) delays or
 withholds the answer of one `POST /config/sync` at a time, so the adapter's deadline timers, the outbox retry and the
 version-conflict settlement run for real, and records when the app aborted each request: that tells a cancelled request
 (its connection released) from one that was only abandoned. Edits are typed into the Remote Web Fetch Fallback card
-(`tests/support/web_fetch_card_e2e.py`) the way a user saves the Jina key.
+(`tests/e2e/config_sync_deadline/card_session.py`) the way a user saves the Jina key.
 
 Every claim about timing rests on where the event happened: page times recorded by the shim, and the stamp the backend
 puts on each write it applies. The test process only waits for the page to go quiet, so a slow link between the two (a
@@ -20,9 +20,9 @@ from collections.abc import Callable
 import pytest
 from cdp_chat.support import fetch_config_value, get_e2e_api_url, put_config_value, wait_e2e_provider_ready
 
+from tests.e2e.config_sync_deadline.card_session import CONFIG_KEY, SETTINGS_ROUTE, CardSession, run_marker
+from tests.e2e.config_sync_deadline.fault_shim import ConfigRequest, arm_fault, install_fault_shim
 from tests.support.chrome_mcp_e2e import open_settings_subroute, warm_ui_route
-from tests.support.config_sync_fault_shim import ConfigRequest, arm_fault, install_fault_shim
-from tests.support.web_fetch_card_e2e import CONFIG_KEY, SETTINGS_ROUTE, CardSession, run_marker
 
 _DEFAULTS: dict[str, object] = {
     "enabled": False,

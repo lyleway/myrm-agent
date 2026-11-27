@@ -48,6 +48,7 @@ from .notification import (
 )
 from .session import (
     METADATA_NEW_CONVERSATION_KEY,
+    METADATA_STORED_CHAT_KEY,
     SessionKey,
     SessionPolicy,
     SessionResetMode,
@@ -94,6 +95,7 @@ __all__ = [
     "METADATA_NEW_CONVERSATION_KEY",
     "METADATA_NOTIFY_KEY",
     "METADATA_RESUME_SESSION_KEY",
+    "METADATA_STORED_CHAT_KEY",
     "ActionButton",
     "ApprovalExpiry",
     "ButtonStyle",

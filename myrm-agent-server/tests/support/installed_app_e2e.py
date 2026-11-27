@@ -9,7 +9,7 @@
 - seeded_app: a seeded chat with its app artifact, optionally installed, removed again on exit
 - ATTACH_CHAT_JS / INSTALL_FROM_CARD_JS: open a chat and press the install button of an HTML artifact card
 - DIALOG_STATE_JS / NO_DIALOG_JS / click_dialog_button / set_switches / open_menu_item: read and answer the app's dialogs
-- run_app / wait_for_banner: make the seeded page call the bridge (one round, or a burst) and reach the review banner
+- run_app / wait_for_banner: make the seeded page call the bridge (one round, a burst, or one question to the model) and reach the review banner
 - api_data / app_detail / activity_counts / installed_ids / put_grant: the installed-app API as the host page sees it
 
 [POS]
@@ -182,32 +182,42 @@ _RUN_APP_JS = """(async () => {
     });
     window.__e2eToastObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
-  const answer = (type, predicate) => new Promise((resolve) => {
+  const answer = (type, predicate, waitMs) => new Promise((resolve) => {
     const onMessage = (event) => {
       if (event.source !== frame.contentWindow || event.data?.type !== type || !predicate(event.data)) return;
       window.removeEventListener('message', onMessage);
       resolve(event.data);
     };
     window.addEventListener('message', onMessage);
-    setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, 45000);
+    setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, waitMs);
   });
-  const ponged = answer('e2e-pong', () => true);
+  const ponged = answer('e2e-pong', () => true, 45000);
   const pinger = setInterval(() => frame.contentWindow.postMessage({ type: 'e2e-ping' }, '*'), 400);
   const pong = await ponged;
   clearInterval(pinger);
   if (!pong) return { ok: false, err: 'page-not-ready' };
-  const result = answer('e2e-result', (data) => data.round === round);
+  const result = answer('e2e-result', (data) => data.round === round, __RESULT_WAIT_MS__);
   frame.contentWindow.postMessage({ ...__MESSAGE__, round }, '*');
   const reply = await result;
   return { ok: reply !== null, outcomes: reply?.outcomes ?? null, toastSeen: window.__e2eToastSeen === true };
 })()"""
 
 
-def run_app(client: ChromeMcpClient, page: McpPage, round_number: int, *, burst: int | None = None) -> dict[str, object]:
-    """One round of the page's calls (a notification, the declared host, another host), or `burst` notifications at once."""
-    message = {"type": "e2e-run"} if burst is None else {"type": "e2e-burst", "count": burst}
-    script = _RUN_APP_JS.replace("__ROUND__", str(round_number)).replace("__MESSAGE__", json.dumps(message))
-    result = client.evaluate(page, script, timeout_sec=90.0)
+def run_app(
+    client: ChromeMcpClient, page: McpPage, round_number: int, *, burst: int | None = None, ask: bool = False
+) -> dict[str, object]:
+    """One round of the page's calls (a notification, the declared host, another host), `burst` notifications at once, or one question to the model.
+
+    A model answers in seconds, not milliseconds, so a question gets a longer wait for the page's report.
+    """
+    message = {"type": "e2e-ask"} if ask else {"type": "e2e-run"} if burst is None else {"type": "e2e-burst", "count": burst}
+    result_wait_ms = 120_000 if ask else 45_000
+    script = (
+        _RUN_APP_JS.replace("__ROUND__", str(round_number))
+        .replace("__MESSAGE__", json.dumps(message))
+        .replace("__RESULT_WAIT_MS__", str(result_wait_ms))
+    )
+    result = client.evaluate(page, script, timeout_sec=result_wait_ms / 1000 + 60.0)
     assert isinstance(result, dict) and result.get("ok") is True, result
     return result
 

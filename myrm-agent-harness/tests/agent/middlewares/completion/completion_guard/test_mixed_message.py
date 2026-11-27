@@ -11,9 +11,6 @@ from myrm_agent_harness.agent.middlewares.completion.completion_guard import (
     CompletionGuard,
     reset_completion_guard,
 )
-from myrm_agent_harness.agent.middlewares.completion.completion_guard.directive import (
-    BlockReasons,
-)
 from myrm_agent_harness.agent.security.guards.loop_guard import (
     CallRecord,
     SuccessLevel,
@@ -25,8 +22,6 @@ from myrm_agent_harness.core.security.tool_registry import (
 from tests.support.completion_guard_harness import (
     LOOP_GUARD_PATCH,
     make_state,
-    pending,
-    reasons_of,
 )
 
 
@@ -269,38 +264,6 @@ class TestMixedMessageGuard:
         )
         result = await self.guard.aafter_model(state, None)
         assert result is None
-
-    @pytest.mark.asyncio
-    async def test_finish_tools_bypass_mixed_guard(self) -> None:
-        """When tool_calls include finish tool, take completion path not mixed guard."""
-        state = make_state(
-            [
-                HumanMessage(content="Change main.py and tell me when it is done."),
-                AIMessage(
-                    content=self._long_answer(),
-                    tool_calls=[
-                        {
-                            "id": "tc1",
-                            "name": "request_answer_user_tool",
-                            "args": {"reason": "done"},
-                        },
-                    ],
-                ),
-            ]
-        )
-        with patch(LOOP_GUARD_PATCH) as mock_guard:
-            mock_guard.return_value.recorded_calls.return_value = [
-                CallRecord(
-                    tool_name="file_write_tool",
-                    args_hash="abc",
-                    args={"path": "/src/app.py"},
-                    success_level=SuccessLevel.FULL_SUCCESS,
-                )
-            ]
-            result = await self.guard.aafter_model(state, None)
-
-        assert reasons_of(result) == BlockReasons(verification=True)
-        assert pending(result).text
 
     @pytest.mark.asyncio
     async def test_bash_tool_is_mutation(self) -> None:

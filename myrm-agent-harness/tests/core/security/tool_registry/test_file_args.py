@@ -18,7 +18,9 @@ from myrm_agent_harness.core.security.tool_registry.file_args import (
     file_arg_values,
     host_file_paths,
     is_url,
+    names_host_file,
     strip_read_range,
+    typed_file_args,
 )
 
 
@@ -39,6 +41,17 @@ def test_whitespace_around_a_name_is_part_of_the_name_the_tools_open(key: str) -
     """The tools open the text as sent, so a file named ``" a.txt "`` is judged; the trimmed spelling follows."""
     assert list(file_arg_values({key: " a.txt "})) == [" a.txt ", "a.txt"]
     assert host_file_paths({key: " a.txt "}) == [" a.txt ", "a.txt"]
+
+
+@pytest.mark.parametrize("key", FILE_ARG_KEYS)
+def test_typed_arguments_are_the_text_as_sent_without_its_trimmed_twin(key: str) -> None:
+    assert list(typed_file_args({key: [" a.txt ", "b.txt"]})) == [" a.txt ", "b.txt"]
+
+
+def test_typed_arguments_skip_values_that_are_not_text_and_read_a_json_array_string() -> None:
+    args: dict[str, object] = {"paths": ["", 3, None, "ok.txt"], "path": None, "file": '["j.txt"]', "mode": "preview"}
+
+    assert list(typed_file_args(args)) == ["ok.txt", "j.txt"]
 
 
 @pytest.mark.parametrize("name", [" ", "   ", "\t", "\u00a0", "\u3000"])
@@ -94,6 +107,11 @@ def test_the_same_path_is_listed_once() -> None:
 )
 def test_urls_and_virtual_namespaces_are_not_host_files(path: str) -> None:
     assert host_file_paths({"paths": [path, "real.txt"]}) == ["real.txt"]
+    assert not names_host_file(path) and names_host_file("real.txt")
+
+
+def test_a_scheme_or_namespace_names_no_host_file_only_at_the_start_of_the_text() -> None:
+    assert names_host_file(" http://x/.env") and names_host_file(" /mcp/a.md")
 
 
 def test_is_url_matches_only_network_schemes() -> None:

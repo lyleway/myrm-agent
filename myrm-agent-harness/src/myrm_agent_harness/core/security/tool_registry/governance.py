@@ -68,7 +68,6 @@ AUTO_APPROVED_BUILTIN_TOOLS: dict[str, str] = {
     "memory_manage_tool": "user_visible",  # memory housekeeping, user-visible + audited
     "memory_save_tool": "user_visible",  # memory writes, user-visible + scan-audited
     "memory_search_tool": "read_only",
-    "request_answer_user_tool": "internal",  # answer-phase gating signal
     "skill_market_tool": "user_visible",  # skill install from market, trust-scanned + user-visible
     "skill_search_tool": "read_only",
     "skill_select_tool": "read_only",

@@ -96,7 +96,6 @@ async def test_discover_capability_e2e_real_model() -> None:
         skill_backend=_StubSkillBackend(_skills_for_search_mount(featured=_sample_skill())),
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
         system_prompt=(
             "You are a test assistant. You MUST call skill_search_tool exactly once "
             'with query "*" to list bound skills. Do NOT call skill_select_tool or any other '

@@ -169,7 +169,6 @@ async def test_build_tools_excludes_todo_when_planning_disabled() -> None:
         enable_planning=False,
         file_access_mode=FileAccessMode.NONE,
         enable_shell_tools=False,
-        enable_answer_tool=False,
     )
     agent.skill_backend = AsyncMock()
     agent.skill_backend.list_skills.return_value = [_sample_skill()]

@@ -3,6 +3,7 @@
  * - @/store/useChatStore::useChatStore (POS: Active chat state manager of the visible chat session)
  * - @/lib/api::ApiError (POS: Typed API failure carrying the HTTP status of a rejected request)
  * - @/services/chat::truncateAfterMessage (POS: Chat HTTP API, history truncation)
+ * - @/store/chat/compactionAfterHistoryChange::refreshCompactionAfterHistoryChange (POS: Re-reads the summary card the cut may have invalidated)
  * - @/services/i18nToastService::showI18nToast (POS: Translated toasts outside React components)
  * - @/lib/utils/messageUtils (POS: Message text cleanup helpers, explicit skill activation wire format)
  * - @/hooks/message-input/useInputHistory::addInputHistory (POS: Per-agent input history recalled with ArrowUp)
@@ -30,6 +31,7 @@ import {
 } from '@/lib/utils/messageUtils';
 import { truncateAfterMessage } from '@/services/chat';
 import { showI18nToast } from '@/services/i18nToastService';
+import { refreshCompactionAfterHistoryChange } from '@/store/chat/compactionAfterHistoryChange';
 import type { File as ChatFile, Message } from '@/store/chat/types';
 import useChatStore from '@/store/useChatStore';
 
@@ -147,7 +149,10 @@ const chatsWithEditInFlight = new Set<string>();
  */
 async function cutHistoryAt(chatId: string, messageId: string): Promise<boolean> {
   try {
-    await truncateAfterMessage(chatId, messageId);
+    const cut = await truncateAfterMessage(chatId, messageId);
+    if (cut.success) {
+      refreshCompactionAfterHistoryChange(chatId);
+    }
     return true;
   } catch (error) {
     if (error instanceof ApiError && error.code === 404) {

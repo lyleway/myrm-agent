@@ -211,6 +211,7 @@ export const TOOL_CATEGORY_MAP: Record<string, ToolCategory> = {
 
   // 思考分析类
   skill_select_tool: 'thinking',
+  // 已下线的回答类工具：旧会话里仍存有它们的步骤，保留映射（及 locales 里的 *_tool_tool 标签）才能正常显示
   answer_user_tool: 'thinking',
   request_answer_user_tool: 'thinking',
 

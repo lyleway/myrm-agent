@@ -18,6 +18,7 @@ def skill_agent_mock() -> MagicMock:
     skill_agent = MagicMock()
     skill_agent.config = AgentRuntimeConfig(security_config=SecurityConfig(ruleset=()))
     skill_agent.memory_manager = None
+    skill_agent.executor = None
     return skill_agent
 
 
@@ -32,7 +33,6 @@ def stubbed_pipeline_edges(*, session_id: str) -> Iterator[None]:
     with (
         patch.object(GeneralAgent, "_build_runtime_context", return_value={"session_id": session_id, "query": "hello"}),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch("app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence"),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", _noop_async_context),
         patch("app.services.web_fetch.binding.open_web_fetch_escalation_context", _noop_async_context),
     ):

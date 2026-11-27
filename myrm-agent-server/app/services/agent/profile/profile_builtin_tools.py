@@ -33,7 +33,6 @@ class BuiltinToolFlags(TypedDict):
     enable_wiki: bool
     enable_kanban: bool
     enable_cron_eager: bool
-    enable_answer_tool: bool
     enable_planning: bool
     enable_structured_clarify: bool
     enable_external_cli: bool
@@ -41,27 +40,18 @@ class BuiltinToolFlags(TypedDict):
     enable_skill_manage: bool
 
 
-def resolve_builtin_tool_flags(
-    tools: Sequence[str],
-    *,
-    allow_answer_tool: bool = False,
-) -> BuiltinToolFlags:
+def resolve_builtin_tool_flags(tools: Sequence[str]) -> BuiltinToolFlags:
     """Map enabled_builtin_tools list to GeneralAgentParams boolean flags.
 
     All entry points (Web, Channel, Cron, Kanban, Eval, Voice) must use this
     function to ensure parity. Adding a new tool flag requires only a single
     change here.
-
-    ``answer_tool`` is only mounted for Fast Search via ``allow_answer_tool=True``
-    in ``converter.py``; profile opt-in is ignored.
     """
     from app.services.agent.builtin_specs.builtin_tool_ids import (
         strip_deploy_incompatible_builtin_tools,
     )
 
     effective_tools = strip_deploy_incompatible_builtin_tools(tools)
-    if not allow_answer_tool:
-        effective_tools = [tool for tool in effective_tools if tool != "answer_tool"]
     from app.config.computer_use_deploy import is_computer_use_deploy_supported
     from app.config.external_cli_deploy import is_external_cli_deploy_supported
 
@@ -75,7 +65,6 @@ def resolve_builtin_tool_flags(
         enable_wiki="wiki" in effective_tools,
         enable_kanban="kanban" in effective_tools,
         enable_cron_eager="cron" in effective_tools,
-        enable_answer_tool="answer_tool" in effective_tools,
         enable_planning="planning" in effective_tools,
         enable_structured_clarify="structured_clarify" in effective_tools,
         enable_external_cli=("external_cli" in effective_tools and deploy_supports_external_cli),

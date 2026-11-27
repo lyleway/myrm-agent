@@ -47,7 +47,6 @@ TOGGLABLE_BUILTIN_TOOL_IDS: tuple[str, ...] = (
     "tts",
     "kanban",
     "cron",
-    "answer_tool",
     "planning",
     "structured_clarify",
     "external_cli",
@@ -71,6 +70,7 @@ LEGACY_REJECTED_BUILTIN_TOOL_IDS: frozenset[str] = frozenset(
         "task_tracking",
         "canvas",
         "web_crawl",
+        "answer_tool",
     }
 )
 
@@ -93,7 +93,6 @@ BUILTIN_TOOL_CATALOG: tuple[dict[str, str], ...] = (
         "id": "cron",
         "desc": "Create and manage scheduled tasks from agent chat",
     },
-    {"id": "answer_tool", "desc": "Structured final-answer gate for search agents"},
     {"id": "planning", "desc": "Multi-step task progress (main-agent todo_write)"},
     {
         "id": "structured_clarify",

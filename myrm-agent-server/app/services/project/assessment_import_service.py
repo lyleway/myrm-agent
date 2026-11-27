@@ -16,6 +16,7 @@ from myrm_agent_harness.toolkits.kanban.types import (
     KANBAN_SOURCE_CHAT_METADATA_KEY,
     TaskPriority,
 )
+from myrm_agent_harness.utils.markdown_links import replace_markdown_links
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -32,7 +33,6 @@ _HEADING_RE = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+)(?:\[[ xX]\]\s*)?(.+?)\s*$")
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 _INLINE_BOLD_RE = re.compile(r"\*\*([^*]+)\*\*")
-_INLINE_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 _MULTISPACE_RE = re.compile(r"\s+")
 _IMPORT_BOARD_DESCRIPTION_PREFIX = "Imported from artifact "
 _TEXT_TOKEN_RE = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
@@ -70,7 +70,7 @@ class ParsedMilestone:
 
 
 def _clean_inline_markdown(text: str) -> str:
-    normalized = _INLINE_LINK_RE.sub(r"\1", text)
+    normalized = replace_markdown_links(text, lambda label, _target, _original: label)
     normalized = _INLINE_CODE_RE.sub(r"\1", normalized)
     normalized = _INLINE_BOLD_RE.sub(r"\1", normalized)
     normalized = normalized.replace("*", " ").replace("_", " ")

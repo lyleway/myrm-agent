@@ -14,4 +14,4 @@ TTS 合成 HTTP 层，供 Web 前端消息朗读（`useTTS`）调用。上级文
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `__init__.py` | 入口 | 包入口与导出 | — |
-| `router.py` | 路由 | Text-to-Speech API | ✅ |
+| `router.py` | 路由 | Text-to-Speech API；语音设置经 `load_voice_config_only` 读取，没有默认模型（未配置任何 LLM 提供方）也能朗读 | ✅ |

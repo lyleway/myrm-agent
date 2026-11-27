@@ -15,24 +15,19 @@ may be repeated. Classification order:
 - core.security.tool_registry::resolve_safety_metadata (POS: tool safety metadata; an MCP tool always resolves as effectful, because a server's own hints are never taken as read-only)
 
 [OUTPUT]
-- FINISH_TOOL_NAMES: the tool a model calls to hand in its answer
 - INTERACTION_UI_TOOLS: tools that carry a user-visible interaction
 - is_mutating_tool(): True when the tool mutates workspace or external state
 - is_substantive_final_response(): whether a message content reads as a finished answer, not narration
 
 [POS]
-The guard's shared vocabulary about tools: which call is a completion attempt, which calls a stripped message
-must keep, and which tools are effectful.
+The guard's shared vocabulary about tools: which calls a stripped message must keep, and which tools are effectful.
 """
 
 from __future__ import annotations
 
 from myrm_agent_harness.core.security.tool_registry import resolve_safety_metadata
 
-# The tool a model calls to hand in its answer (mounted in Fast Search): a call to it is a completion attempt.
-FINISH_TOOL_NAMES: frozenset[str] = frozenset({"request_answer_user_tool"})
-
-_MUTATION_TOOLS: frozenset[str] = FINISH_TOOL_NAMES | frozenset(
+_MUTATION_TOOLS: frozenset[str] = frozenset(
     {
         # 写/执行/管理类（会改变工作区或外部状态）
         "write_file",
@@ -116,7 +111,6 @@ def is_substantive_final_response(content: str) -> bool:
 
 
 __all__ = [
-    "FINISH_TOOL_NAMES",
     "INTERACTION_UI_TOOLS",
     "is_mutating_tool",
     "is_substantive_final_response",

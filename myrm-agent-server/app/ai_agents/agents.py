@@ -144,7 +144,6 @@ class AgentFactory:
             enable_wiki=params.enable_wiki,
             enable_kanban=params.enable_kanban,
             enable_cron_eager=params.enable_cron_eager,
-            enable_answer_tool=params.enable_answer_tool,
             enable_planning=params.enable_planning,
             enable_external_cli=params.enable_external_cli,
             enable_skill_market=params.enable_skill_market,

@@ -5,6 +5,20 @@ for the next request that carries a needle: a ``POST`` whose body holds a marker
 fragment. That request is answered late, never, or with a body that never finishes, while the real backend still
 receives it (unless ``apply`` is false). Every config request is logged with the time its headers arrived and the time
 the app aborted it, so a test can tell a cancelled request from an abandoned one.
+
+[INPUT]
+- tests.support.chrome_mcp_e2e::ChromeMcpClient, McpPage (POS: Shared real-Chrome MCP helpers for formal UI E2E tests;
+  imported for type checking only)
+
+[OUTPUT]
+- install_fault_shim(client, page): wrap the page's fetch for /api/v1/config calls and pass every other call through
+- arm_fault(client, page, kind, needle, delay_ms=, apply=, method=): answer the next config request that carries the
+  needle late, never, or with a body that never ends
+- read_log(client, page): every config request since the install, with the header, body and abort moments on the page clock
+- ConfigRequest / ConfigLog / FaultKind: one logged request, the log read together with the page clock, the four fault kinds
+
+[POS]
+Fault injection layer of the config-sync deadline E2E; the only code that touches the page's fetch.
 """
 
 from __future__ import annotations

@@ -50,9 +50,6 @@ INTERNAL_TOOL_NAMES: frozenset[str] = frozenset(
 # attributes every remaining schema to a declaration.
 SCHEMA_ONLY_TOOL_NAMES: frozenset[str] = frozenset()
 
-# Built-in tools whose JSON schema is bound by the server (no @tool AST in harness).
-SERVER_BOUND_SCHEMA_TOOL_NAMES: frozenset[str] = frozenset({"request_answer_user_tool"})
-
 # `@tool(NAME)` declarations whose NAME is imported from another module and cannot be resolved by the AST scan.
 CROSS_MODULE_CONSTANTS: dict[str, str] = {}
 

@@ -16,11 +16,10 @@ class TestResolveAgentMount:
     def test_web_fast_disables_meta_file_and_shell(self) -> None:
         mounted = resolve_agent_mount(
             ExecutionSurface.WEB_FAST,
-            resolve_builtin_tool_flags(["answer_tool"], allow_answer_tool=True),
+            resolve_builtin_tool_flags([]),
         )
         assert mounted["file_access_mode"] == FileAccessMode.SPILL_AND_UPLOADS
         assert mounted["enable_shell_tools"] is False
-        assert mounted["enable_answer_tool"] is True
 
     def test_web_chat_forces_general_baseline(self) -> None:
         mounted = resolve_agent_mount(
@@ -30,16 +29,14 @@ class TestResolveAgentMount:
         assert mounted["file_access_mode"] == FileAccessMode.FULL
         assert mounted["enable_shell_tools"] is True
 
-    def test_web_fast_preserves_profile_answer_tool(self) -> None:
+    def test_web_fast_keeps_the_other_profile_flags(self) -> None:
         mounted = resolve_agent_mount(
             ExecutionSurface.WEB_FAST,
-            resolve_builtin_tool_flags(
-                ["answer_tool", "web_search"],
-                allow_answer_tool=True,
-            ),
+            resolve_builtin_tool_flags(["wiki", "planning"]),
         )
         assert mounted["file_access_mode"] == FileAccessMode.SPILL_AND_UPLOADS
-        assert mounted["enable_answer_tool"] is True
+        assert mounted["enable_wiki"] is True
+        assert mounted["enable_planning"] is True
 
     def test_cron_restricted_via_tools_policy(self) -> None:
         from app.core.cron.adapters.tools_policy import (

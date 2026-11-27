@@ -1,25 +1,30 @@
-"""Integration test: _attach_web_handoff full pipeline.
+"""Integration test: the browser button of an IM reply links the stored chat the reply was produced in.
 
-Exercises the real ChatService DB path to verify that the handoff
-button uses the database Chat UUID of the conversation the message resolves to, not the IM peer_id.
+The producer of a reply (the executor, or the router for a follow-up) names that chat in ``METADATA_STORED_CHAT_KEY``;
+``_attach_web_handoff`` builds the button from it. A turn's conversation depends on the agent an alias routed it to and
+on the session a resumed approval belongs to, so every test stores the chat the turn ran in next to the chat the message
+itself would point at.
 
-Tunnel/ingress is monkey-patched and the topic and settings stores the conversation is resolved from are stood in for,
-but ChatService and the session-key resolver hit the real SQLite DB.
+Chats go through the real ChatService over the real SQLite DB; the tunnel/ingress is monkey-patched.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 
 from app.channels.routing.pipeline import RouterExecutionMixin
-from app.channels.types import ActionButton, InboundMessage, OutboundMessage
-from app.core.channel_bridge.command_session import resolve_command_session_key
+from app.channels.types import (
+    METADATA_RESUME_SESSION_KEY,
+    METADATA_STORED_CHAT_KEY,
+    ActionButton,
+    ButtonStyle,
+    InboundMessage,
+    OutboundMessage,
+)
+from app.channels.types.topics import METADATA_ROUTE_AGENT_KEY
 from app.remote_access.tunnel_manager import TunnelManager, TunnelState
 from app.services.chat.chat_service import ChatService
 from app.services.event.app_event_bus import ServerEventBus
-from tests.core.channel_bridge.command_session_testkit import stubbed_stores, topic
 
 
 @pytest.fixture(autouse=True)
@@ -41,135 +46,100 @@ def _patch_tunnel_running(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-@pytest.fixture(autouse=True)
-def _default_conversation_stores() -> Iterator[None]:
-    """The stores a conversation is resolved from: no topic binding and the default reset policy."""
-    with stubbed_stores({}, personal=None):
-        yield
+async def _store_chat(session_key: str, channel: str = "telegram") -> str:
+    """Store the channel chat of ``session_key``; return its database id."""
+    return (await ChatService.get_or_create_channel_chat(session_key, channel)).id
 
 
-async def _store_chat_of(inbound: InboundMessage) -> str:
-    """Store the chat of the conversation ``inbound`` belongs to, under the key its turn resolves to; return its id."""
-    chat = await ChatService.get_or_create_channel_chat(await resolve_command_session_key(inbound), inbound.channel)
-    return chat.id
-
-
-async def test_attach_web_handoff_resolves_db_uuid() -> None:
-    """Full path: create channel chat → _attach_web_handoff → verify URL has DB UUID."""
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="integration-test-peer-42",
-        content="hi",
-    )
-    db_uuid = await _store_chat_of(inbound)
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="integration-test-peer-42",
+def _reply(
+    stored_chat_id: str | None, *, channel: str = "telegram", components: tuple[tuple[ActionButton, ...], ...] = ()
+) -> OutboundMessage:
+    """A reply the turn produced in the stored chat ``stored_chat_id``; ``None``: no stored chat produced it."""
+    return OutboundMessage(
+        channel=channel,
+        recipient_id="peer",
         content="Hello from agent",
         user_id="local-user",
+        metadata={METADATA_STORED_CHAT_KEY: stored_chat_id} if stored_chat_id else None,
+        components=components,
     )
 
-    patched = await RouterExecutionMixin._attach_web_handoff(
-        result,
-        inbound,
-    )
 
-    assert patched.components, "Expected handoff button to be attached"
-    last_row = patched.components[-1]
-    btn = last_row[0]
-    assert isinstance(btn, ActionButton)
-    assert btn.action_id == "web:continue_chat"
-    assert db_uuid in btn.url, f"URL must contain DB UUID {db_uuid}, got {btn.url}"
-    assert "integration-test-peer-42" not in btn.url, "URL must NOT contain IM peer_id"
-
-
-async def test_attach_web_handoff_resolves_a_topic_scoped_chat() -> None:
-    """A forum topic an agent serves has a conversation of its own; the button links it, not the peer's agent-less chat."""
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="user-1",
-        content="hi",
-        chat_id="-1007770001",
-        is_group=True,
-        thread_id="100",
-    )
-    serving_agent = {("-1007770001", "100"): topic("agent-uuid-1")}
-    with stubbed_stores(serving_agent, personal=None):
-        topic_chat_id = await _store_chat_of(inbound)
-    agentless_id = await _store_chat_of(inbound)  # the newer chat of the two, yet not the one the topic's agent serves
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="-1007770001",
-        content="Hello from the topic agent",
-        user_id="local-user",
-    )
-    with stubbed_stores(serving_agent, personal=None):
-        patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
-
-    assert topic_chat_id != agentless_id
-    assert patched.components, "a topic-scoped chat must still get the handoff button"
-    button = patched.components[-1][0]
+def _button_url(reply: OutboundMessage) -> str:
+    """The URL of the browser button the router appended to ``reply``."""
+    assert reply.components, "Expected handoff button to be attached"
+    button = reply.components[-1][0]
     assert isinstance(button, ActionButton)
-    assert topic_chat_id in button.url
-    assert agentless_id not in button.url
+    assert button.action_id == "web:continue_chat"
+    return button.url
 
 
-async def test_attach_web_handoff_ignores_a_longer_peer_with_the_same_prefix() -> None:
-    """``-1008881`` must not resolve the conversation of ``-1008880001``."""
-    from app.channels.types.session import SessionKey
-
-    other_key = SessionKey(channel="telegram", peer_kind="group", peer_id="-1008880001", thread_id="100").to_str()
-    await ChatService.get_or_create_channel_chat(other_key, "telegram")
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="-1008881",
-        content="unrelated turn",
-        user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="user-1",
-        content="hi",
-        chat_id="-1008881",
-        is_group=True,
-        thread_id="100",
-    )
-
-    patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
-
-    assert not patched.components, "a different group must not borrow another chat's handoff"
-
-
-async def test_attach_web_handoff_preserves_existing_components() -> None:
-    """Handoff button appends to, not replaces, existing components."""
-    from app.channels.types.components import ActionButton, ButtonStyle
-
-    inbound = InboundMessage(
-        channel="feishu",
-        sender_id="preserve-test-peer",
-        content="approve",
-    )
-    await _store_chat_of(inbound)
-
-    existing_btn = ActionButton(
-        label="Approve",
-        action_id="approval:approve:req-1",
-        style=ButtonStyle.PRIMARY,
-    )
-    result = OutboundMessage(
-        channel="feishu",
-        recipient_id="preserve-test-peer",
-        content="Need approval",
-        user_id="local-user",
-        components=((existing_btn,),),
-    )
+async def test_the_button_links_the_database_chat_the_reply_was_produced_in() -> None:
+    """The URL holds the chat's database id, not the IM peer id; the peer's other chat is not the one linked."""
+    peer = "integration-test-peer-42"
+    stored_id = await _store_chat("telegram:dm:somewhere-else")
+    await _store_chat(f"telegram:dm:{peer}")
 
     patched = await RouterExecutionMixin._attach_web_handoff(
-        result,
-        inbound,
+        _reply(stored_id), InboundMessage(channel="telegram", sender_id=peer, content="hi")
+    )
+
+    assert stored_id in _button_url(patched)
+    assert peer not in _button_url(patched)
+
+
+async def test_a_turn_routed_to_another_agent_links_the_chat_it_ran_in() -> None:
+    """``/claude do this`` runs the turn under another agent in a chat of its own, not in the peer's default chat."""
+    peer = "alias-peer"
+    default_id = await _store_chat(f"telegram:dm:{peer}")
+    routed_id = await _store_chat(f"telegram:dm:{peer}:agent:agent-x")
+    routed = InboundMessage(channel="telegram", sender_id=peer, content="do this", metadata={METADATA_ROUTE_AGENT_KEY: "agent-x"})
+
+    patched = await RouterExecutionMixin._attach_web_handoff(_reply(routed_id), routed)
+
+    assert routed_id in _button_url(patched)
+    assert default_id not in _button_url(patched)
+
+
+async def test_a_resumed_turn_links_the_chat_it_continued() -> None:
+    """An approval answered after the session rolled over continues the asking turn's chat, not the peer's current one."""
+    peer = "resume-peer"
+    asking_key = f"telegram:dm:{peer}:e=2020-01-01"
+    asking_id = await _store_chat(asking_key)
+    current_id = await _store_chat(f"telegram:dm:{peer}")
+    answer = InboundMessage(
+        channel="telegram", sender_id=peer, content="/approve", metadata={METADATA_RESUME_SESSION_KEY: asking_key}
+    )
+
+    patched = await RouterExecutionMixin._attach_web_handoff(_reply(asking_id), answer)
+
+    assert asking_id in _button_url(patched)
+    assert current_id not in _button_url(patched)
+
+
+@pytest.mark.parametrize("metadata", [None, {"error_type": "budget_exhausted"}], ids=["no-metadata", "no-stored-chat"])
+async def test_a_reply_no_stored_chat_produced_gets_no_button(metadata: dict[str, object] | None) -> None:
+    """A reply that came before the turn had a stored chat (an FAQ answer, a spent budget) has no conversation to link."""
+    peer = "no-chat-peer"
+    await _store_chat(f"telegram:dm:{peer}")
+    result = OutboundMessage(channel="telegram", recipient_id=peer, content="Hello", user_id="local-user", metadata=metadata)
+
+    patched = await RouterExecutionMixin._attach_web_handoff(
+        result, InboundMessage(channel="telegram", sender_id=peer, content="hi")
+    )
+
+    assert patched is result
+    assert not patched.components
+
+
+async def test_the_button_is_appended_to_the_components_the_reply_already_has() -> None:
+    """Handoff button appends to, not replaces, existing components."""
+    stored_id = await _store_chat("feishu:dm:preserve-test-peer", "feishu")
+    approve = ActionButton(label="Approve", action_id="approval:approve:req-1", style=ButtonStyle.PRIMARY)
+
+    patched = await RouterExecutionMixin._attach_web_handoff(
+        _reply(stored_id, channel="feishu", components=((approve,),)),
+        InboundMessage(channel="feishu", sender_id="preserve-test-peer", content="approve"),
     )
 
     assert len(patched.components) == 2
@@ -177,151 +147,59 @@ async def test_attach_web_handoff_preserves_existing_components() -> None:
     assert patched.components[1][0].action_id == "web:continue_chat"
 
 
-async def test_attach_web_handoff_no_chat_returns_unchanged() -> None:
-    """When no channel chat exists, original message is returned untouched."""
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="unknown-peer-999",
-        content="Hello",
-        user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="unknown-peer-999",
-        content="hi",
-    )
+async def test_the_reply_is_still_delivered_when_the_button_cannot_be_built(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failure while building the link must not block message delivery."""
 
-    patched = await RouterExecutionMixin._attach_web_handoff(
-        result,
-        inbound,
-    )
-
-    assert patched is result
-    assert not patched.components
-
-
-async def test_attach_web_handoff_graceful_on_exception(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Exception in ChatService should not block message delivery."""
-
-    async def _exploding_lookup(_key: str) -> None:
+    async def _exploding_button(_chat_id: str, *, locale: str) -> tuple[tuple[ActionButton, ...], ...]:
         raise RuntimeError("DB connection lost")
 
-    monkeypatch.setattr(
-        "app.services.chat.chat_service.ChatService.get_channel_chat_by_key",
-        staticmethod(_exploding_lookup),
-    )
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="crash-peer",
-        content="Still delivered",
-        user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="crash-peer",
-        content="hi",
-    )
+    monkeypatch.setattr("app.remote_access.mobile_deep_link.resolve_web_handoff_components", _exploding_button)
+    result = _reply(await _store_chat("telegram:dm:crash-peer"))
 
     patched = await RouterExecutionMixin._attach_web_handoff(
-        result,
-        inbound,
+        result, InboundMessage(channel="telegram", sender_id="crash-peer", content="hi")
     )
 
     assert patched is result
     assert not patched.components
 
 
-async def test_attach_web_handoff_graceful_when_the_conversation_cannot_be_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A failing topic or settings store must not block message delivery either."""
-
-    async def _exploding_resolver(_msg: InboundMessage) -> str:
-        raise RuntimeError("topic store unavailable")
-
-    monkeypatch.setattr("app.core.channel_bridge.command_session.resolve_command_session_key", _exploding_resolver)
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="unresolvable-peer",
-        content="Still delivered",
-        user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="unresolvable-peer",
-        content="hi",
-    )
-
-    patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
-
-    assert patched is result
-    assert not patched.components
-
-
-async def test_web_channel_skips_handoff() -> None:
-    """_deliver_agent_result gates on msg.channel != 'web'; verify the gate logic.
-    Web channel messages should NOT get handoff buttons (WebUI already IS the target).
-    """
-    session_key = "web:web-test-peer"
-    await ChatService.get_or_create_channel_chat(session_key, "web")
-
-    result = OutboundMessage(
-        channel="web",
-        recipient_id="web-test-peer",
-        content="Hello from WebUI",
-        user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="web",
-        sender_id="web-test-peer",
-        content="hi",
-    )
-
-    if inbound.channel != "web":
-        patched = await RouterExecutionMixin._attach_web_handoff(
-            result,
-            inbound,
-        )
-    else:
-        patched = result
-
-    assert patched is result
-    assert not patched.components
-
-
-async def test_btw_notifier_delivers_handoff_for_a_source_chat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_deliver`` attaches the handoff button for the task's originating Chat UUID."""
-    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
-
-    session_key = "telegram:btw-notify-peer-7"
-    chat = await ChatService.get_or_create_channel_chat(session_key, "telegram")
-
+@pytest.fixture
+def sent_messages(monkeypatch: pytest.MonkeyPatch) -> list[OutboundMessage]:
+    """The messages the channel bus is asked to send."""
     sent: list[OutboundMessage] = []
 
     async def _capture(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    monkeypatch.setattr(
-        "app.core.channel_bridge.channel_gateway.bus.send_now",
-        _capture,
-    )
+    monkeypatch.setattr("app.core.channel_bridge.channel_gateway.bus.send_now", _capture)
+    return sent
 
-    notifier = BtwTaskNotifier(ServerEventBus())
-    await notifier._deliver(
-        {
-            "channel": "telegram",
-            "chat_id": "btw-notify-peer-7",
-            "source_chat_id": chat.id,
-            "task_id": "task-1",
-            "status": "completed",
-            "title": "Background task",
-            "result": "done",
-            "locale": "en",
-        }
-    )
 
-    assert sent, "the notification must still be delivered"
-    components = sent[-1].components or ()
+def _task_done_event(**overrides: str) -> dict[str, object]:
+    """A finished-background-task event for an IM peer, with ``overrides`` applied."""
+    return {
+        "channel": "telegram",
+        "chat_id": "btw-notify-peer-7",
+        "task_id": "task-1",
+        "status": "completed",
+        "title": "Background task",
+        "result": "done",
+        "locale": "en",
+        **overrides,
+    }
+
+
+async def test_btw_notifier_delivers_handoff_for_a_source_chat(sent_messages: list[OutboundMessage]) -> None:
+    """``_deliver`` attaches the handoff button for the task's originating Chat UUID."""
+    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
+
+    chat = await ChatService.get_or_create_channel_chat("telegram:btw-notify-peer-7", "telegram")
+
+    await BtwTaskNotifier(ServerEventBus())._deliver(_task_done_event(source_chat_id=chat.id))
+
+    assert sent_messages, "the notification must still be delivered"
+    components = sent_messages[-1].components or ()
     assert components, "the originating chat must get the handoff button"
     btn = components[-1][0]
     assert isinstance(btn, ActionButton)
@@ -329,44 +207,28 @@ async def test_btw_notifier_delivers_handoff_for_a_source_chat(monkeypatch: pyte
     assert "btw-notify-peer-7" not in btn.url
 
 
-async def test_btw_notifier_btw_branch_skips_handoff(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_btw_notifier_btw_branch_skips_handoff(sent_messages: list[OutboundMessage]) -> None:
     """The BTW branch carries an IM peer in ``chat_id``, so there is no Chat row to link to."""
     from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
 
-    sent: list[OutboundMessage] = []
-
-    async def _capture(msg: OutboundMessage) -> None:
-        sent.append(msg)
-
-    monkeypatch.setattr("app.core.channel_bridge.channel_gateway.bus.send_now", _capture)
-
-    notifier = BtwTaskNotifier(ServerEventBus())
-    await notifier._deliver(
-        {
-            "channel": "telegram",
-            "chat_id": "im-peer-not-a-uuid",
-            "background_source": "btw",
-            "task_id": "task-2",
-            "status": "completed",
-            "title": "Background task",
-            "result": "done",
-            "locale": "en",
-        }
+    await BtwTaskNotifier(ServerEventBus())._deliver(
+        _task_done_event(chat_id="im-peer-not-a-uuid", background_source="btw", task_id="task-2")
     )
 
-    assert sent, "the notification must still be delivered"
-    assert not (sent[-1].components or ()), "an IM peer must not be resolved as a Chat UUID"
+    assert sent_messages, "the notification must still be delivered"
+    assert not (sent_messages[-1].components or ()), "an IM peer must not be resolved as a Chat UUID"
 
 
-async def test_btw_notifier_no_task_id_skips_handoff() -> None:
-    """btw_notifier only attaches handoff when task_id is present (L103)."""
-    task_id = ""
-    components: tuple[tuple[object, ...], ...] = ()
-    if task_id:
-        from app.remote_access.mobile_deep_link import resolve_web_handoff_components
+async def test_btw_notifier_without_a_task_id_skips_handoff(sent_messages: list[OutboundMessage]) -> None:
+    """A notification that names no task links no chat, even when it carries a source chat."""
+    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
 
-        components = await resolve_web_handoff_components("some-id", locale="en")
-    assert not components
+    chat = await ChatService.get_or_create_channel_chat("telegram:btw-no-task-peer", "telegram")
+
+    await BtwTaskNotifier(ServerEventBus())._deliver(_task_done_event(source_chat_id=chat.id, task_id=""))
+
+    assert sent_messages, "the notification must still be delivered"
+    assert not (sent_messages[-1].components or ())
 
 
 async def test_idempotent_get_or_create() -> None:
