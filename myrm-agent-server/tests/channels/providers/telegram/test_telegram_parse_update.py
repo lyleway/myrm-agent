@@ -1,4 +1,4 @@
-"""Inbound parsing: Pydantic update models, messages, callback queries and media-group buffering."""
+"""Inbound parsing: Pydantic update models and the messages they carry (text, media, contacts)."""
 
 from __future__ import annotations
 
@@ -8,12 +8,25 @@ from app.channels.providers.telegram.models import (
     TgMessage,
     TgUpdate,
 )
-from app.channels.types import (
-    ChannelStatus,
-    InboundMessage,
-    MediaType,
-)
+from app.channels.types import MediaType
 from tests.channels.providers.telegram.telegram_channel_factories import make_channel
+
+_ADA_VCARD = "\n".join(
+    ["BEGIN:VCARD", "VERSION:3.0", "FN:Ada Lovelace", "TEL;TYPE=CELL:+441234", "EMAIL:ada@example.com", "END:VCARD"]
+)
+
+
+def _private_update(sender: dict[str, object] | None = None, **message: object) -> dict[str, object]:
+    """A private-chat update from user 42 whose message carries ``message`` fields."""
+    return {
+        "update_id": 1,
+        "message": {
+            "message_id": 10,
+            "from": {"id": 42, **(sender or {})},
+            "chat": {"id": 42, "type": "private"},
+            **message,
+        },
+    }
 
 
 class TestTgModels:
@@ -165,6 +178,11 @@ class TestParseUpdate:
         }
         assert ch._parse_update(raw) is None
 
+    def test_message_model_without_sender_is_not_converted(self) -> None:
+        ch = make_channel()
+        msg = TgMessage.model_validate({"message_id": 12, "chat": {"id": 42, "type": "private"}, "text": "hello"})
+        assert ch._parse_message_model(msg, is_edit=False) is None
+
     def test_edited_message(self) -> None:
         ch = make_channel()
         raw = {
@@ -291,9 +309,9 @@ class TestParseUpdate:
         assert msg.metadata.get("is_forum") is True
 
     def test_invalid_payload_returns_none(self) -> None:
-        """Completely invalid payload should be handled gracefully."""
+        """A payload the update model rejects is skipped instead of raised."""
         ch = make_channel()
-        assert ch._parse_update({}) is None
+        assert ch._parse_update({"update_id": "not a number"}) is None
 
     def test_audio_message(self) -> None:
         ch = make_channel()
@@ -312,56 +330,38 @@ class TestParseUpdate:
         assert msg.media[0].media_type == MediaType.AUDIO
         assert msg.metadata.get("voice_is_voice_note") is False
 
-
-class TestBufferOrEmit:
-    @pytest.mark.asyncio
-    async def test_non_media_group_emits_directly(self) -> None:
+    def test_shared_contact_becomes_text_and_a_contact_card(self) -> None:
         ch = make_channel()
-        received: list[InboundMessage] = []
-
-        async def handler(msg: InboundMessage) -> None:
-            received.append(msg)
-
-        ch.set_inbound_handler(handler)
-        ch._status = ChannelStatus.RUNNING
-
-        raw = {
-            "update_id": 1,
-            "message": {
-                "message_id": 10,
-                "from": {"id": 42},
-                "chat": {"id": 42, "type": "private"},
-                "text": "hello",
-            },
-        }
-        msg = ch._parse_update(raw)
+        contact = {"phone_number": "+441234", "first_name": "Ada", "last_name": "Lovelace"}
+        msg = ch._parse_update(_private_update(contact=contact))
         assert msg is not None
-        await ch._buffer_or_emit(msg, raw)
-        assert len(received) == 1
+        assert msg.content == "[Shared Contact] Name: Ada Lovelace | Phone: +441234"
+        assert msg.metadata["contact_cards"] == [{"name": "Ada Lovelace", "phones": ["+441234"]}]
 
-    @pytest.mark.asyncio
-    async def test_media_group_buffers(self) -> None:
+    def test_shared_contact_with_a_vcard_carries_the_vcard_fields(self) -> None:
         ch = make_channel()
-        received: list[InboundMessage] = []
-
-        async def handler(msg: InboundMessage) -> None:
-            received.append(msg)
-
-        ch.set_inbound_handler(handler)
-        ch._status = ChannelStatus.RUNNING
-
-        raw = {
-            "update_id": 1,
-            "message": {
-                "message_id": 10,
-                "from": {"id": 42},
-                "chat": {"id": 42, "type": "private"},
-                "photo": [{"file_id": "p1"}],
-                "caption": "photo 1",
-                "media_group_id": "mg_1",
-            },
-        }
-        msg = ch._parse_update(raw)
+        contact = {"phone_number": "+441234", "first_name": "Ada", "vcard": _ADA_VCARD}
+        msg = ch._parse_update(_private_update(contact=contact))
         assert msg is not None
-        await ch._buffer_or_emit(msg, raw)
-        assert "42:mg_1" in ch._mg_buffers
+        assert msg.metadata["contact_cards"] == [{"name": "Ada Lovelace", "phones": ["+441234"], "emails": ["ada@example.com"]}]
+
+    def test_shared_contact_with_an_empty_vcard_keeps_the_contact_fields(self) -> None:
+        ch = make_channel()
+        contact = {"phone_number": "+441234", "first_name": "Ada", "last_name": "Lovelace", "vcard": "no fields"}
+        msg = ch._parse_update(_private_update(contact=contact))
+        assert msg is not None
+        assert msg.metadata["contact_cards"] == [{"name": "Ada Lovelace", "phones": ["+441234"]}]
+
+    def test_video_note_is_a_video_attachment(self) -> None:
+        ch = make_channel()
+        msg = ch._parse_update(_private_update(video_note={"file_id": "vn_1", "duration": 5}))
+        assert msg is not None
+        assert [m.media_type for m in msg.media] == [MediaType.VIDEO]
+        assert msg.metadata["video_file_id"] == "vn_1"
+        assert msg.metadata["video_is_video_note"] is True
+
+    def test_sender_language_code_is_recorded(self) -> None:
+        ch = make_channel()
+        msg = ch._parse_update(_private_update({"language_code": "de"}, text="hallo"))
+        assert msg is not None
+        assert msg.metadata["language_code"] == "de"

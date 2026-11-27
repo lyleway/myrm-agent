@@ -67,6 +67,17 @@ class TestParseUpdateCallbackQuery:
         }
         assert ch._parse_update(raw) is None
 
+    @pytest.mark.asyncio
+    async def test_callback_query_without_a_sender_is_ignored(self) -> None:
+        ch = make_channel()
+        ch._client = MagicMock()
+        ch._background_tasks = set()
+        raw = {
+            "update_id": 18,
+            "callback_query": {"id": "cbq_4", "data": "qr:hello"},
+        }
+        assert ch._parse_update(raw) is None
+
 
 def _tap(message: dict[str, object] | None) -> InboundMessage:
     """What the channel builds from a tap on ``qr:hello`` of ``message`` (a tap that names no message when ``None``)."""

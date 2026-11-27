@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.channels.i18n import get_text
 from app.channels.routing.router import AgentRouter
 from app.channels.types import InboundMessage
 from tests.support.pending_approvals import asked_in, finished_turn, inbound_message, router_with_agent, said_by
@@ -205,3 +206,20 @@ async def test_the_asker_is_read_when_the_answer_is_taken_not_when_it_arrives() 
     assert taken is not None
     assert taken.message.sender_id == "bob", "alice's answer did not take bob's request"
     router._gate.submit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_an_approval_that_ends_while_the_reason_is_screened_resumes_nothing_and_says_it_was_handled() -> None:
+    """The wait can end (timeout, ``/stop``) while the reason of ``/deny <reason>`` is screened: nothing is left to take."""
+    router, bus = _router(asked_by="alice")
+    answer = _from("alice", "/deny not now")
+
+    async def the_wait_ends(*_: object) -> bool:
+        router._pending_approvals.pop(_KEY)
+        return False
+
+    with patch("app.channels.routing.commands.router_commands.approval.hold_risky_inbound", the_wait_ends):
+        await _dispatch(router, answer)
+
+    router._gate.submit.assert_not_called()
+    assert said_by(bus) == [get_text(answer, "approval_already_handled")]

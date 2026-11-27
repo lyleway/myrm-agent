@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.channels.types import (
     METADATA_EXPLICIT_MENTION_KEY,
     MediaType,
@@ -272,3 +274,31 @@ class TestParseUpdateReplyContext:
         msg = ch._parse_update(raw)
         assert msg is not None
         assert msg.reply_to is None
+
+    @pytest.mark.parametrize(
+        ("date", "expected"),
+        [(1_700_000_000, 1_700_000_000.0), ("soon", None)],
+        ids=["unix seconds", "unreadable"],
+    )
+    def test_reply_context_carries_the_send_time_of_the_replied_to_message(self, date: int | str, expected: float | None) -> None:
+        ch = make_channel()
+        raw = {
+            "update_id": 30,
+            "message": {
+                "message_id": 43,
+                "from": {"id": 42},
+                "chat": {"id": 42, "type": "private"},
+                "text": "when was that?",
+                "reply_to_message": {
+                    "message_id": 42,
+                    "from": {"id": 99, "first_name": "Bob"},
+                    "chat": {"id": 42, "type": "private"},
+                    "text": "earlier",
+                    "date": date,
+                },
+            },
+        }
+        msg = ch._parse_update(raw)
+        assert msg is not None
+        assert msg.reply_to is not None
+        assert msg.reply_to.timestamp == expected
