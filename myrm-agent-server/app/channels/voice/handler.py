@@ -30,8 +30,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from typing import cast
 
 from app.channels.types import (
     InboundMessage,
@@ -43,6 +44,9 @@ from app.channels.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# MessageBus.get_channel: a channel by name. Channels expose their own download method, so the result is probed by name.
+type ChannelLookup = Callable[[str], object | None]
 
 _TTS_DIRECTIVE_OPEN = "[[tts:"
 _TTS_TEXT_OPEN = "[[tts:text]]"
@@ -145,7 +149,7 @@ def strip_tts_tags(text: str) -> str:
 async def transcribe_inbound(
     msg: InboundMessage,
     voice_config: VoiceConfig | None,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> InboundMessage:
     """Transcribe voice attachments and inject transcript into content.
 
@@ -182,7 +186,7 @@ async def transcribe_inbound(
 async def transcribe_video_inbound(
     msg: InboundMessage,
     voice_config: VoiceConfig | None,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> InboundMessage:
     """Transcribe audio from video attachments and inject transcript into content.
 
@@ -215,21 +219,18 @@ async def transcribe_video_inbound(
 
 async def download_inbound_video(
     msg: InboundMessage,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> Path | None:
     """Download a video attachment from the inbound message for STT."""
-    from collections.abc import Callable
-
-    assert callable(get_channel_fn)
-    get_channel: Callable[[str], object | None] = get_channel_fn  # type: ignore[assignment]
-    ch = get_channel(msg.channel)
+    ch = get_channel_fn(msg.channel)
     if not ch:
         return None
 
     if msg.channel == "telegram":
         file_id = msg.metadata.get("video_file_id")
-        if isinstance(file_id, str) and hasattr(ch, "download_video_file"):
-            return await ch.download_video_file(file_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_video_file", None)
+        if isinstance(file_id, str) and download is not None:
+            return cast("Path | None", await download(file_id))
 
     for attachment in msg.media:
         if attachment.media_type == MediaType.VIDEO:
@@ -245,29 +246,27 @@ async def download_inbound_video(
 
 async def download_inbound_audio(
     msg: InboundMessage,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> Path | None:
     """Download the voice attachment from the inbound message.
 
     Dispatches to the appropriate channel's download method.
     """
-    from collections.abc import Callable
-
-    assert callable(get_channel_fn)
-    get_channel: Callable[[str], object | None] = get_channel_fn  # type: ignore[assignment]
-    ch = get_channel(msg.channel)
+    ch = get_channel_fn(msg.channel)
     if not ch:
         return None
 
     if msg.channel == "whatsapp":
         voice_msg_id = msg.metadata.get("voice_message_id")
-        if isinstance(voice_msg_id, str) and hasattr(ch, "download_voice_message"):
-            return await ch.download_voice_message(voice_msg_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_voice_message", None)
+        if isinstance(voice_msg_id, str) and download is not None:
+            return cast("Path | None", await download(voice_msg_id))
 
     if msg.channel == "telegram":
         file_id = msg.metadata.get("voice_file_id")
-        if isinstance(file_id, str) and hasattr(ch, "download_voice_message"):
-            return await ch.download_voice_message(file_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_voice_message", None)
+        if isinstance(file_id, str) and download is not None:
+            return cast("Path | None", await download(file_id))
 
     for attachment in msg.media:
         if attachment.media_type == MediaType.AUDIO:
@@ -309,14 +308,11 @@ async def maybe_tts(
     if directives.get("off"):
         return dataclasses.replace(result, content=strip_tts_tags(content))
 
-    vc = voice_config
-    overrides: dict[str, str | int | bool] = {}
-    if "voice" in directives:
-        overrides["tts_voice"] = directives["voice"]
-    if "provider" in directives:
-        overrides["tts_provider"] = directives["provider"]
-    if overrides:
-        vc = dataclasses.replace(vc, **overrides)
+    vc = dataclasses.replace(
+        voice_config,
+        tts_voice=directives.get("voice", voice_config.tts_voice),
+        tts_provider=directives.get("provider", voice_config.tts_provider),
+    )
 
     tts_input = tts_text_block if tts_text_block else strip_tts_tags(content)
     clean_content = strip_tts_tags(content)
