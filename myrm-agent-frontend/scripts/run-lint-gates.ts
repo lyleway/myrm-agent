@@ -33,6 +33,15 @@ export function runGates(gates: readonly string[], execute: GateExecutor): strin
   return gates.filter((script) => execute(script) !== 0);
 }
 
+/**
+ * 失败门禁的错误注解。GitHub 给没登录的读者看的只有注解，作业日志要登录才能读，而 `lint` 步骤对外只会报
+ * `Process completed with exit code 1`；把门禁名写进注解，运行页上就看得出是哪几个门禁红了，
+ * 不必把整条工作流在本机重放一遍。
+ */
+export function failureAnnotation(failed: readonly string[], total: number): string {
+  return `::error title=Lint gates failed::${failed.length}/${total} failed: ${failed.join(', ')}`;
+}
+
 function main(): void {
   const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const failed = runGates(LINT_GATES, (script) => {
@@ -42,6 +51,9 @@ function main(): void {
 
   if (failed.length > 0) {
     console.error(`\n[lint-gates] ${failed.length}/${LINT_GATES.length} 个门禁失败：${failed.join(', ')}`);
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      console.log(failureAnnotation(failed, LINT_GATES.length));
+    }
     process.exit(1);
   }
   console.log(`\n[lint-gates] OK：${LINT_GATES.length} 个门禁全部通过。`);

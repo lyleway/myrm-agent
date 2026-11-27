@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { LINT_GATES, runGates } from '../run-lint-gates';
+import { failureAnnotation, LINT_GATES, runGates } from '../run-lint-gates';
 
 const packageScripts: Record<string, string> = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8'),
@@ -26,6 +26,15 @@ describe('runGates', () => {
 
   it('treats any non-zero exit code as a failure', () => {
     expect(runGates(['a'], () => 2)).toEqual(['a']);
+  });
+});
+
+describe('failureAnnotation', () => {
+  // 作业日志要登录才能读，注解是未登录的读者唯一能看到的失败信息。
+  it('names every failed gate in one error annotation', () => {
+    expect(failureAnnotation(['verify:a11y', 'lint:oxlint'], 10)).toBe(
+      '::error title=Lint gates failed::2/10 failed: verify:a11y, lint:oxlint',
+    );
   });
 });
 
