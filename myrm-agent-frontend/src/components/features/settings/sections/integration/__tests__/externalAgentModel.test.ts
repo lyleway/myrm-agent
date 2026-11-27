@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ExternalAgentConfig, ExternalAgentPermissionMode } from '@/services/config';
+import type { ExternalAgentConfig, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
 import type { ExternalAgentAuthStatus } from '@/services/external-agents';
 import {
   AGENT_PRESETS,
@@ -158,12 +158,14 @@ describe('permission and backend rules', () => {
 
   it.each([
     ['acp', 'anything', 'permissionHintAsk'],
+    ['app_server', 'anything', 'permissionHintAsk'],
     ['cli', 'claude', 'permissionHintAsk'],
     ['cli', '/opt/bin/claude', 'permissionHintAsk'],
-    ['cli', 'codex', 'permissionHintReadOnly'],
+    ['app_server', 'codex', 'permissionHintAsk'],
     ['acp', 'gemini', 'permissionHintAsk'],
     ['acp', 'qwen', 'permissionHintAsk'],
     ['cli', 'aider', 'permissionHintUnrestricted'],
+    ['cli', 'codex-wrapper', 'permissionHintUnrestricted'],
     ['cli', '', 'permissionHintUnrestricted'],
   ] as const)('explains what the safe mode means for a %s agent running %s', (type, command, hint) => {
     expect(permissionHintKey(type, command)).toBe(hint);
@@ -181,7 +183,7 @@ describe('permission and backend rules', () => {
 });
 
 describe('the transport of a known agent', () => {
-  const status = (backend: string, transport: 'cli' | 'acp'): ExternalAgentAuthStatus => ({
+  const status = (backend: string, transport: ExternalAgentType): ExternalAgentAuthStatus => ({
     backend,
     installed: true,
     path: `/usr/bin/${backend}`,
@@ -194,7 +196,12 @@ describe('the transport of a known agent', () => {
     needsCodeInput: false,
     subscriptionLoginAllowed: true,
   });
-  const statuses = [status('claude', 'cli'), status('codex', 'cli'), status('gemini', 'acp'), status('qwen', 'acp')];
+  const statuses = [
+    status('claude', 'cli'),
+    status('codex', 'app_server'),
+    status('gemini', 'acp'),
+    status('qwen', 'acp'),
+  ];
 
   it.each([
     ['gemini', 'gemini'],
@@ -216,7 +223,7 @@ describe('the transport of a known agent', () => {
     ['gemini', 'acp'],
     ['/usr/local/bin/qwen', 'acp'],
     ['claude', 'cli'],
-    ['codex.cmd', 'cli'],
+    ['codex.cmd', 'app_server'],
     ['gemini-wrapper', null],
     ['claude-code-acp', null],
     ['aider', null],
@@ -244,8 +251,9 @@ describe('the transport of a known agent', () => {
       const fixed = contractTransport(config.command, statuses);
       expect(fixed, key).toBe(config.type);
     }
-    // The agents that run over ACP need no arguments of ours.
+    // The agents that run over ACP or an app server need no arguments of ours.
     expect(presets.gemini.args).toEqual([]);
     expect(presets.qwen.args).toEqual([]);
+    expect(presets.codex.args).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@
 - toolkits.acp.runtime.acp.runtime::AcpRuntime (POS: ACP protocol runtime backend — spawns an ACP-compatible agent process and speaks JSON-RPC over stdin/stdout.) [lazy]
 
 [OUTPUT]
-- AcpRuntime: lazy-imported RuntimeBackend for ACP agents (Claude Code, Codex CLI, ...)
+- AcpRuntime: lazy-imported RuntimeBackend for ACP agents (Gemini CLI, Qwen Code, ...)
 
 [POS]
 ACP backend of the runtime layer. Facade of the ``acp`` package, whose modules are imported by their own path.

@@ -87,7 +87,7 @@ class TestAuthStatus:
 
         assert {b["backend"]: b["transport"] for b in body["backends"]} == {
             "claude": "cli",
-            "codex": "cli",
+            "codex": "app_server",
             "gemini": "acp",
             "qwen": "acp",
         }

@@ -82,8 +82,9 @@ export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
     config: {
       ...DEFAULT_AGENT,
       name: 'codex-cli',
+      type: 'app_server',
       command: 'codex',
-      args: ['exec', '--json'],
+      args: [],
       description: 'OpenAI Codex CLI coding agent (requires Responses API provider)',
     },
   },
@@ -117,26 +118,20 @@ export const PERMISSION_MODE_OPTIONS: { value: ExternalAgentPermissionMode; labe
   { value: 'safe', labelKey: 'permissionSafe' },
 ];
 
-/** CLI backends whose own permission flags can be set per mode, and whether they can ask the user (the others only read). */
+/** The command-line agents whose own permission flags can be set per mode, and that can ask the user. */
 const CLI_BACKENDS_THAT_ASK = new Set(['claude']);
-const CLI_BACKENDS_THAT_ONLY_READ = new Set(['codex']);
 
 /**
- * The hint under the permission select: what `safe` means for this agent. An agent that can ask is asked; a command-line
- * agent that cannot ask only reads; a command we do not know has no flags to set, so it keeps its own behaviour.
+ * The hint under the permission select: what `safe` means for this agent. An agent that talks to the app over ACP or its
+ * own app server asks the user; a command-line agent asks only when it is one we know; a command we do not know has no
+ * flags to set, so it keeps its own behaviour.
  */
 export function permissionHintKey(type: ExternalAgentType, command: string): string {
-  if (type === 'acp') {
+  if (type === 'acp' || type === 'app_server') {
     return 'permissionHintAsk';
   }
   const backend = backendKeyFromCommand(command);
-  if (backend !== null && CLI_BACKENDS_THAT_ASK.has(backend)) {
-    return 'permissionHintAsk';
-  }
-  if (backend !== null && CLI_BACKENDS_THAT_ONLY_READ.has(backend)) {
-    return 'permissionHintReadOnly';
-  }
-  return 'permissionHintUnrestricted';
+  return backend !== null && CLI_BACKENDS_THAT_ASK.has(backend) ? 'permissionHintAsk' : 'permissionHintUnrestricted';
 }
 
 /** Coerce a stored mode to one on offer; a name of an older vocabulary falls back to `safe` (fail-closed). */

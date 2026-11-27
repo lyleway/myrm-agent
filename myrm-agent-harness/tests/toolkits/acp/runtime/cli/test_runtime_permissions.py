@@ -123,10 +123,10 @@ class TestClaudeAsksTheHost:
         assert broker.asked == []
 
     async def test_a_cli_that_cannot_ask_is_started_the_same_with_or_without_a_broker(self, fake_cli: FakeCli) -> None:
-        runtime = make_runtime(fake_cli, "codex", args=["exec", "--json"])
+        runtime = make_runtime(fake_cli, "my-agent")
 
         await _turn(runtime, _Broker())
-        await _turn(make_runtime(fake_cli, "codex", args=["exec", "--json"]), None)
+        await _turn(make_runtime(fake_cli, "my-agent"), None)
 
         first, second = (_argv_of(call) for call in fake_cli.calls())
         assert first == second
@@ -144,7 +144,7 @@ class TestClaudeAsksTheHost:
 
     @pytest.mark.parametrize(
         ("command", "asks"),
-        [("claude", True), ("claude-code", True), ("codex", False), ("gemini", False), ("my-agent", False)],
+        [("claude", True), ("claude-code", True), ("gemini", False), ("my-agent", False)],
     )
     def test_only_claude_declares_that_it_asks_the_host(self, command: str, asks: bool) -> None:
         runtime = CliRuntime("t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws")

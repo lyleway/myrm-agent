@@ -1,13 +1,13 @@
 """Failure classification — what went wrong in a finished CLI attempt, from the CLI's own words.
 
-A CLI reports failure in three ways: its final ``result`` line (Claude), a ``turn.failed`` event (Codex, surfaced
-by the parser as it streams) and, last, a non-zero exit code. The first is the most specific, so it names the
-error code and supplies the message; the exit code alone is only a crash, explained by the CLI's last ``error``
-line when it printed one and by the tail of its stderr otherwise. A turn this runtime ended itself because the CLI
-kept retrying a request the API answers 401 for is an authentication failure, not a cancellation.
+A CLI reports failure in two ways: its final ``result`` line (Claude) and, last, a non-zero exit code. The first is
+the most specific, so it names the error code and supplies the message; the exit code alone is only a crash, explained
+by the CLI's last ``error`` line when it printed one and by the tail of its stderr otherwise. A turn this runtime
+ended itself because the CLI kept retrying a request the API answers 401 for is an authentication failure, not a
+cancellation.
 
 [INPUT]
-- toolkits.acp.runtime.cli.parser::condense_failure_text (POS: Shared event builders of the CLI runtime's output parsing)
+- toolkits.acp.runtime.event_text::condense_failure_text (POS: Text shaping of the events every runtime emits)
 - toolkits.acp.runtime.cli.turn_parser::CliResult (POS: the CLI's own verdict on a finished turn)
 - toolkits.acp.types::AcpError, AcpErrorCode (POS: ACP runtime type definitions layer.)
 
@@ -20,8 +20,8 @@ Error vocabulary of CliRuntime. Messages are the CLI's own text, never advice ab
 
 from __future__ import annotations
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.parser import condense_failure_text
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult
+from myrm_agent_harness.toolkits.acp.runtime.event_text import condense_failure_text
 from myrm_agent_harness.toolkits.acp.types import AcpError, AcpErrorCode
 
 # Claude's own category for a login that is missing or was rejected.

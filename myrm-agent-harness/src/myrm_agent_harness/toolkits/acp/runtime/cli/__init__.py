@@ -4,7 +4,7 @@
 - toolkits.acp.runtime.cli.runtime::CliRuntime (POS: CLI runtime backend — spawns a CLI agent process and parses NDJSON output.) [lazy]
 
 [OUTPUT]
-- CliRuntime: lazy-imported RuntimeBackend for CLI agents (Claude Code, Codex, ...)
+- CliRuntime: lazy-imported RuntimeBackend for CLI agents (Claude Code, ...)
 
 [POS]
 CLI backend of the ACP runtime. Facade of the ``cli`` package, whose modules are imported by their own path.

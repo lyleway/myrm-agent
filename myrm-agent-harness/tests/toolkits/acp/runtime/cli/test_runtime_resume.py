@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, CliSessionRecord
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, errors_of, make_runtime, run_turn, statuses_of, text_of, types_of
+from ._fakes import FakeCli, errors_of, make_runtime, run_turn, statuses_of, text_of, types_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 
@@ -244,58 +244,6 @@ class TestStaleSession:
         assert statuses_of(events) == ["starting"]
         assert fake_cli.resume_args() == [None]
         assert store.records["s1"].cli_session_id == text_of(events)
-
-
-class TestCodexConversation:
-    @staticmethod
-    def _runtime(fake_cli: FakeCli, work: Path, store: RecordingStore | None = None) -> CliRuntime:
-        return make_runtime(fake_cli, "codex", store=store, workspace=str(work), args=["exec", "--json"])
-
-    @pytest.mark.asyncio
-    async def test_the_thread_codex_announces_is_continued_with_exec_resume(
-        self, fake_cli: FakeCli, work: Path
-    ) -> None:
-        store = RecordingStore()
-        runtime = self._runtime(fake_cli, work, store)
-
-        first = await run_turn(runtime, "one")
-        second = await run_turn(runtime, "two")
-
-        thread = text_of(first)
-        assert text_of(second) == thread
-        assert store.records == {"s1": CliSessionRecord(thread, str(work))}
-        argv = fake_cli.calls("codex")[1]["argv"]
-        assert isinstance(argv, list)
-        assert argv[argv.index("exec") + 1] == "resume"
-        assert argv[-2:] == [thread, "two"]
-        assert argv.index("--sandbox") < argv.index("exec")
-
-    @pytest.mark.asyncio
-    async def test_a_thread_codex_no_longer_has_is_restarted_in_the_same_turn(
-        self, fake_cli: FakeCli, work: Path
-    ) -> None:
-        store = RecordingStore()
-        store.records["s1"] = CliSessionRecord(_DEAD, str(work))
-
-        events = await run_turn(self._runtime(fake_cli, work, store))
-
-        fresh = text_of(events)
-        assert fresh != _DEAD
-        assert statuses_of(events) == ["starting", "session_expired"]
-        assert fake_cli.resume_args("codex") == [_DEAD, None]
-        assert store.records["s1"] == CliSessionRecord(fresh, str(work))
-
-    @pytest.mark.asyncio
-    async def test_a_malformed_thread_id_is_not_resumed_because_codex_would_silently_start_a_new_thread(
-        self, fake_cli: FakeCli, work: Path
-    ) -> None:
-        store = RecordingStore()
-        store.records["s1"] = CliSessionRecord("thread-1", str(work))
-
-        events = await run_turn(self._runtime(fake_cli, work, store))
-
-        assert statuses_of(events) == ["starting"]
-        assert fake_cli.resume_args("codex") == [None]
 
 
 class TestStore:

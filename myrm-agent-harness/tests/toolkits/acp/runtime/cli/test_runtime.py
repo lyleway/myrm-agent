@@ -16,8 +16,9 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeConfig,
     RuntimeEventType,
 )
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, errors_of, make_runtime, run_turn, text_of, types_of
+from ._fakes import FakeCli, errors_of, make_runtime, run_turn, text_of, types_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 
@@ -31,16 +32,15 @@ def _argv(fake_cli: FakeCli, index: int = 0) -> list[str]:
 
 
 class TestProperties:
-    def test_claude_and_codex_resume_conversations_and_other_clis_do_not(self) -> None:
+    def test_claude_resumes_conversations_and_other_clis_do_not(self) -> None:
         def capabilities(command: str):
             return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws").capabilities
 
-        for command in ("claude", "codex"):
-            caps = capabilities(command)
-            assert caps.supports_resume is True
-            assert caps.supports_streaming is True
-            assert caps.supports_mcp is False
-            assert caps.supports_tools is False
+        caps = capabilities("claude")
+        assert caps.supports_resume is True
+        assert caps.supports_streaming is True
+        assert caps.supports_mcp is False
+        assert caps.supports_tools is False
         assert capabilities("my-agent").supports_resume is False
         assert capabilities("/opt/custom/agent").supports_resume is False
 
@@ -188,19 +188,6 @@ class TestFailures:
         assert errors[0].data["error"].message == "Reached maximum number of turns (3)"
         assert text_of(events) == "got this far"
 
-    @pytest.mark.asyncio
-    async def test_a_failure_the_cli_streamed_is_not_reported_a_second_time_for_its_exit_code(
-        self, fake_cli: FakeCli
-    ) -> None:
-        fake_cli.set_scenario({"fail": "turn_failed"})
-
-        events = await run_turn(make_runtime(fake_cli, "codex"))
-
-        errors = errors_of(events)
-        assert [e.data["error"].message for e in errors] == ["stream disconnected"]
-        assert types_of(events)[-1] is RuntimeEventType.ERROR
-        assert RuntimeEventType.DONE not in types_of(events)
-
 
 class TestLaunchArgs:
     @pytest.mark.asyncio
@@ -216,20 +203,9 @@ class TestLaunchArgs:
     @pytest.mark.asyncio
     async def test_no_turn_limit_flag_when_unlimited_or_for_clis_without_one(self, fake_cli: FakeCli) -> None:
         await run_turn(make_runtime(fake_cli, max_turns=0))
-        await run_turn(make_runtime(fake_cli, "codex", args=["exec", "--json"], max_turns=10))
         await run_turn(make_runtime(fake_cli, "my-agent", max_turns=10))
 
         assert all("--max-turns" not in call["argv"] for call in fake_cli.calls())
-
-    @pytest.mark.asyncio
-    async def test_codex_runs_exec_in_a_directory_that_is_not_a_git_repository(self, fake_cli: FakeCli) -> None:
-        runtime = make_runtime(fake_cli, "codex", args=["exec", "--json"], permission_mode="allow_all")
-
-        await run_turn(runtime)
-
-        argv = _argv(fake_cli)
-        assert argv[argv.index("exec") + 1 :][:2] == ["--json", "--skip-git-repo-check"]
-        assert argv.index("--sandbox") < argv.index("exec")
 
     @pytest.mark.asyncio
     async def test_permission_mode_args_are_resolved_per_backend(self, fake_cli: FakeCli) -> None:
@@ -247,13 +223,9 @@ class TestLaunchArgs:
         assert claude_safe[claude_safe.index("--permission-mode") + 1] == "default"
         assert "--dangerously-skip-permissions" not in claude_safe
 
-        codex_safe = await launched("codex", args=["exec", "--json"], permission_mode="safe")
-        assert codex_safe[codex_safe.index("--sandbox") + 1] == "read-only"
-        assert "--full-auto" not in codex_safe
-
-        codex_dup = await launched("codex", args=["exec", "--json", "-s", "read-only"], permission_mode="allow_all")
-        assert codex_dup.count("--sandbox") == 1
-        assert codex_dup[codex_dup.index("--sandbox") + 1] == "workspace-write"
+        claude_stale = await launched("claude", args=["-p", "--permission-mode", "plan"], permission_mode="allow_all")
+        assert claude_stale.count("--permission-mode") == 1
+        assert claude_stale[claude_stale.index("--permission-mode") + 1] == "bypassPermissions"
 
         custom = await launched("my-agent", args=["-s", "--silent"], permission_mode="safe")
         assert custom == ["-s", "--silent", "test prompt"]

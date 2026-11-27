@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
-from myrm_agent_harness.toolkits.acp.runtime.cli.parser import FAILURE_TEXT_CHARS
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult
+from myrm_agent_harness.toolkits.acp.runtime.event_text import FAILURE_TEXT_CHARS
 from myrm_agent_harness.toolkits.acp.types import AcpErrorCode
 
 

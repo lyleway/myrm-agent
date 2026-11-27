@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import type { ExternalAgentType } from '@/services/config';
+
 const stableT = (key: string) => key;
 
 const mocks = vi.hoisted(() => ({
@@ -211,7 +213,7 @@ describe('ExternalAgentsConfig auth mode', () => {
 });
 
 describe('ExternalAgentsConfig transport', () => {
-  const status = (backend: string, transport: 'cli' | 'acp') => ({
+  const status = (backend: string, transport: ExternalAgentType) => ({
     backend,
     installed: true,
     path: `/usr/bin/${backend}`,
@@ -229,7 +231,7 @@ describe('ExternalAgentsConfig transport', () => {
 
   beforeEach(() => {
     mocks.set.mockClear();
-    mocks.statuses = [status('claude', 'cli'), status('gemini', 'acp')];
+    mocks.statuses = [status('claude', 'cli'), status('gemini', 'acp'), status('codex', 'app_server')];
   });
 
   it('shows a known agent under the transport the app fixes for it and stores that one', async () => {
@@ -255,6 +257,30 @@ describe('ExternalAgentsConfig transport', () => {
     await userEvent.click(screen.getByRole('button', { name: 'save' }));
 
     expect(savedAgent()).toMatchObject({ name: 'gemini-cli', command: 'gemini', type: 'acp', args: [] });
+  });
+
+  it('adds Codex from its preset as the agent it is, with no arguments of ours', async () => {
+    mocks.saved = { agents: [] };
+    render(<ExternalAgentsConfig />);
+    await userEvent.click(await screen.findByRole('button', { name: 'add' }));
+    await userEvent.click(screen.getByRole('button', { name: 'preset_codex' }));
+
+    await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
+    expect(typeSelect()).toHaveTextContent('typeAppServer');
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent()).toMatchObject({ name: 'codex-cli', command: 'codex', type: 'app_server', args: [] });
+  });
+
+  it('shows a Codex agent stored as a command-line agent under its app server and stores that one', async () => {
+    mocks.saved = { agents: [agent({ name: 'codex-cli', command: 'codex', type: 'cli', args: ['exec', '--json'] })] };
+    await openEditor();
+
+    await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
+    expect(typeSelect()).toHaveTextContent('typeAppServer');
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent().type).toBe('app_server');
   });
 
   it('leaves the type to the user for a command that only carries the name of a known agent', async () => {

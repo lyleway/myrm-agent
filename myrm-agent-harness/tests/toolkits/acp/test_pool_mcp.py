@@ -24,10 +24,10 @@ _WORKSPACE = "/tmp/ws"
 async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
     pool = RuntimePool(max_concurrent=1)
     pool.register(
-        "codex",
+        "my-agent",
         RuntimeConfig(
             backend_type="cli",
-            command="codex",
+            command="my-agent",
             mcp_servers=[McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])],
         ),
     )
@@ -52,7 +52,7 @@ async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
     pool.get = MagicMock(return_value=backend)
 
     events = [
-        event async for event in pool.run_turn("codex", "hello", session_id="codex-default", workspace=_WORKSPACE)
+        event async for event in pool.run_turn("my-agent", "hello", session_id="my-agent-default", workspace=_WORKSPACE)
     ]
     assert events[-1].type == RuntimeEventType.DONE
 
@@ -144,7 +144,7 @@ async def test_run_turn_allows_parallel_different_backends() -> None:
     """
     pool = RuntimePool(max_concurrent=2)
     pool.register("claude", RuntimeConfig(backend_type="cli", command="claude"))
-    pool.register("codex", RuntimeConfig(backend_type="cli", command="codex"))
+    pool.register("my-agent", RuntimeConfig(backend_type="cli", command="my-agent"))
 
     backend_a = MagicMock()
     backend_b = MagicMock()
@@ -172,14 +172,14 @@ async def test_run_turn_allows_parallel_different_backends() -> None:
     backend_a.run_turn = _make_fake_run_turn()  # type: ignore[method-assign]
     backend_b.run_turn = _make_fake_run_turn()  # type: ignore[method-assign]
     pool.get = MagicMock(  # type: ignore[method-assign]
-        side_effect=lambda name, workspace: {"claude": backend_a, "codex": backend_b}[name]
+        side_effect=lambda name, workspace: {"claude": backend_a, "my-agent": backend_b}[name]
     )
 
     async def consume(name: str) -> None:
         async for _ in pool.run_turn(name, "hello", session_id=f"s-{name}", workspace=_WORKSPACE):
             pass
 
-    await asyncio.gather(consume("claude"), consume("codex"))
+    await asyncio.gather(consume("claude"), consume("my-agent"))
     assert peak_active == 2, "different-backend turns must run in parallel"
 
 
@@ -187,11 +187,11 @@ async def test_run_turn_allows_parallel_different_backends() -> None:
 async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
     """MCP servers must not reach a backend whose capabilities declare no MCP support."""
     pool = RuntimePool(max_concurrent=1)
-    pool.register("codex", RuntimeConfig(backend_type="cli", command="codex"))
-    config = pool.get_config("codex")
+    pool.register("my-agent", RuntimeConfig(backend_type="cli", command="my-agent"))
+    config = pool.get_config("my-agent")
     assert config is not None
 
-    rt = CliRuntime("codex", config, workspace=_WORKSPACE)
+    rt = CliRuntime("my-agent", config, workspace=_WORKSPACE)
     captured: list[list[McpServerConfig] | None] = []
 
     async def fake_run_turn(
@@ -210,9 +210,9 @@ async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
 
     override = [McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])]
     async for _ in pool.run_turn(
-        "codex",
+        "my-agent",
         "hello",
-        session_id="codex-default",
+        session_id="my-agent-default",
         mcp_servers=override,
         workspace=_WORKSPACE,
     ):
@@ -226,17 +226,17 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
     """Config-level mcp_servers are also dropped for unsupported backends."""
     pool = RuntimePool(max_concurrent=1)
     pool.register(
-        "codex",
+        "my-agent",
         RuntimeConfig(
             backend_type="cli",
-            command="codex",
+            command="my-agent",
             mcp_servers=[McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])],
         ),
     )
-    config = pool.get_config("codex")
+    config = pool.get_config("my-agent")
     assert config is not None
 
-    rt = CliRuntime("codex", config, workspace=_WORKSPACE)
+    rt = CliRuntime("my-agent", config, workspace=_WORKSPACE)
     captured: list[list[McpServerConfig] | None] = []
 
     async def fake_run_turn(
@@ -253,7 +253,7 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
     rt.run_turn = fake_run_turn  # type: ignore[method-assign]
     pool.get = MagicMock(return_value=rt)
 
-    async for _ in pool.run_turn("codex", "hello", session_id="codex-default", workspace=_WORKSPACE):
+    async for _ in pool.run_turn("my-agent", "hello", session_id="my-agent-default", workspace=_WORKSPACE):
         pass
 
     assert captured == [None], "unsupported backend must not receive config mcp_servers"

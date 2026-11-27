@@ -17,8 +17,9 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, CliSessionStore, RuntimeConfig, RuntimeEvent
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, errors_of, statuses_of, text_of
+from ._fakes import FakeCli, errors_of, statuses_of, text_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 

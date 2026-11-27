@@ -94,7 +94,9 @@ def test_the_configured_list_is_not_modified() -> None:
         ("/usr/local/bin/qwen", "cli", "acp"),
         ("gemini.cmd", "cli", "acp"),
         ("claude", "acp", "cli"),
-        ("/opt/bin/codex", "acp", "cli"),
+        ("/opt/bin/codex", "acp", "app_server"),
+        ("codex.cmd", "cli", "app_server"),
+        ("codex-wrapper", "cli", "cli"),
         ("gemini-wrapper", "cli", "cli"),
         ("claude-code-acp", "acp", "acp"),
         ("my-agent", "acp", "acp"),
@@ -109,16 +111,16 @@ def test_a_known_agent_runs_over_its_contract_transport(command: str | None, con
     assert effective_transport(command, configured) == expected
 
 
-@pytest.mark.parametrize("command", [*_ACP_AGENTS, "gemini-wrapper"])
-def test_the_cli_channel_does_not_own_an_acp_agent(command: str) -> None:
+@pytest.mark.parametrize("command", [*_ACP_AGENTS, "codex", "gemini-wrapper"])
+def test_the_cli_channel_does_not_own_an_agent_driven_another_way(command: str) -> None:
     configured = ["--foo", "bar"]
 
     assert resolve_cli_args(command, configured, "safe") == configured
     assert cli_launch_args(command) == []
 
 
-def test_the_cli_channel_still_owns_the_sandbox_of_a_cli_agent() -> None:
-    resolved = resolve_cli_args("codex", ["--sandbox", "danger-full-access"], "safe")
+def test_the_cli_channel_still_owns_the_permission_mode_of_a_cli_agent() -> None:
+    resolved = resolve_cli_args("claude", ["--permission-mode", "bypassPermissions"], "safe")
 
-    assert "danger-full-access" not in resolved
-    assert resolved.count("--sandbox") == 1
+    assert "bypassPermissions" not in resolved
+    assert resolved.count("--permission-mode") == 1

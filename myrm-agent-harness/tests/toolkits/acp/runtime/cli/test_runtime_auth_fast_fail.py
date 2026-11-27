@@ -1,8 +1,8 @@
 """A login the API keeps rejecting fails the turn within seconds, not after the minutes the CLI itself retries.
 
-Both CLIs answer a 401 by retrying the same request for minutes (measured: claude 183 s, codex 30-58 s) before they
-report the failure. The runtime stops the process once the retries show it is hopeless and reports the login problem
-with the CLI's own words; a turn that only hit a passing 401 goes on.
+Claude answers a 401 by retrying the same request for minutes (measured: 183 s) before it reports the failure. The
+runtime stops the process once the retries show it is hopeless and reports the login problem with the CLI's own words;
+a turn that only hit a passing 401 goes on.
 """
 
 from __future__ import annotations
@@ -38,21 +38,6 @@ class TestRejectedLogin:
         assert errors[0].data["error"].message == "API request rejected with HTTP 401 (authentication_failed)"
         assert errors[0].data["error"].retryable is False
         assert types_of(events)[-1] is RuntimeEventType.ERROR
-        assert RuntimeEventType.DONE not in types_of(events)
-        assert not runtime.is_alive
-
-    @pytest.mark.asyncio
-    async def test_codex_that_reconnects_after_a_401_three_times_is_stopped_with_an_auth_error(
-        self, fake_cli: FakeCli
-    ) -> None:
-        fake_cli.set_scenario({"unauthorized_notices": 3, "hang_after_retries": True})
-        runtime = make_runtime(fake_cli, "codex")
-
-        events = await asyncio.wait_for(run_turn(runtime), timeout=_FAST)
-
-        errors = errors_of(events)
-        assert [e.data["error"].code for e in errors] == [AcpErrorCode.AUTH_FAILED]
-        assert errors[0].data["error"].message.startswith("Reconnecting... 4/5 (unexpected status 401 Unauthorized")
         assert RuntimeEventType.DONE not in types_of(events)
         assert not runtime.is_alive
 
@@ -96,13 +81,3 @@ class TestPassingRejection:
 
         assert not errors_of(events)
         assert text_of(events) == "recovered"
-
-    @pytest.mark.asyncio
-    async def test_codex_that_gets_through_after_two_401_reconnects_finishes_the_turn(self, fake_cli: FakeCli) -> None:
-        fake_cli.set_scenario({"unauthorized_notices": 2, "text": "recovered"})
-
-        events = await run_turn(make_runtime(fake_cli, "codex"))
-
-        assert not errors_of(events)
-        assert text_of(events) == "recovered"
-        assert types_of(events)[-1] is RuntimeEventType.DONE

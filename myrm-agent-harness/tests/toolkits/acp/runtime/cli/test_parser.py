@@ -8,28 +8,6 @@ from myrm_agent_harness.toolkits.acp.types import RuntimeEventType
 class TestParserMissingBranches:
     """Tests for parser branches the main parser tests do not reach."""
 
-    def test_parse_codex_item_reasoning_empty(self) -> None:
-        from myrm_agent_harness.toolkits.acp.runtime.cli.parser import (
-            parse_codex_item_event,
-        )
-
-        event = parse_codex_item_event(
-            {"type": "item.completed", "item": {"type": "reasoning", "text": ""}},
-            "s1",
-        )
-        assert event is None
-
-    def test_parse_codex_item_unknown_type(self) -> None:
-        from myrm_agent_harness.toolkits.acp.runtime.cli.parser import (
-            parse_codex_item_event,
-        )
-
-        event = parse_codex_item_event(
-            {"type": "item.completed", "item": {"type": "annotation", "text": "foo"}},
-            "s1",
-        )
-        assert event is None
-
     def test_parse_thinking_empty(self) -> None:
         from myrm_agent_harness.toolkits.acp.runtime.cli.parser import parse_thinking
 

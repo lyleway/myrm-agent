@@ -1,4 +1,4 @@
-"""Test doubles shared by the CLI runtime tests: an in-memory session store and a scripted stand-in for the CLIs."""
+"""Test doubles shared by the CLI runtime tests: a scripted stand-in for the CLIs."""
 
 from __future__ import annotations
 
@@ -12,41 +12,18 @@ from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
-    CliSessionRecord,
     CliSessionStore,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
 )
 
-
-class RecordingStore:
-    """In-memory ``CliSessionStore`` that logs every operation and can be told to fail one."""
-
-    def __init__(self) -> None:
-        self.records: dict[str, CliSessionRecord] = {}
-        self.ops: list[tuple[str, str]] = []
-        self.failing: set[str] = set()
-
-    async def load(self, session_id: str) -> CliSessionRecord | None:
-        self._enter("load", session_id)
-        return self.records.get(session_id)
-
-    async def save(self, session_id: str, record: CliSessionRecord) -> None:
-        self._enter("save", session_id)
-        self.records[session_id] = record
-
-    def _enter(self, op: str, session_id: str) -> None:
-        self.ops.append((op, session_id))
-        if op in self.failing:
-            raise RuntimeError(f"{op} failed")
-
-
-# A POSIX script standing in for the CLI agents. It behaves as the real binaries do (verified against claude 2.1.x
-# and codex 0.164): a new conversation announces its id first (Claude ``system/init``, Codex ``thread.started``) and
-# is only found again from the directory that created it; resuming an unknown id fails fast without announcing
-# anything; one failing turn can end in a max-turns / API-error ``result`` line. Which command it plays is decided by
-# its own file name; scenario.json next to it picks what a turn does (one dict for every call, or a list by call index).
+# A POSIX script standing in for the CLI agents. It behaves as the real binary does (verified against claude 2.1.x):
+# a new conversation announces its id first (``system/init``) and is only found again from the directory that created
+# it; resuming an unknown id fails fast without announcing anything; one failing turn can end in a max-turns /
+# API-error ``result`` line. Which command it plays is decided by its own file name (``claude``, or any other name
+# for a CLI that prints plain events); scenario.json next to it picks what a turn does (one dict for every call, or a
+# list by call index).
 # ``stall_before_stdin`` makes it start reading its stdin only after that many seconds, like a CLI still running its start hooks.
 # ``asks`` (Claude only) is a list of ``{"tool_name", "input"}``: given ``--permission-prompt-tool``, the stand-in puts each
 # to the MCP tool named by ``--mcp-config`` over HTTP, as Claude Code does, and reports the answers in its text.
@@ -200,44 +177,14 @@ if name == "claude":
           "terminal_reason": "completed", "session_id": session_id})
     finish(0)
 
-elif name == "codex":
-    resuming = "exec" in argv and "resume" in argv[argv.index("exec") + 1 :]
-    thread = argv[-2] if resuming else str(uuid.uuid4())
-    if resuming and {"id": thread, "cwd": "*"} not in known:
-        sys.stderr.write("Error: thread/resume: no rollout found for thread id " + thread + "\\n")
-        sys.exit(1)
-    if not resuming:
-        register({"id": thread, "cwd": "*"})
-    emit({"type": "thread.started", "thread_id": thread})
-    emit({"type": "turn.started"})
-    hang_if("hang_after_init")
-    for number in range(scenario.get("retry_notices", 0)):
-        # Codex reports every retry of a request as an error line; the turn can still succeed afterwards.
-        emit({"type": "error", "message": "Reconnecting... %d/5 (stream disconnected)" % (number + 1)})
-    for number in range(scenario.get("unauthorized_notices", 0)):
-        denied = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"
-        emit({"type": "error", "message": "Reconnecting... %d/5 (%s)" % (number + 2, denied)})
-    hang_if("hang_after_retries")
-    fail = scenario.get("fail")
-    if fail == "auth":
-        denied = "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"
-        emit({"type": "error", "message": "Reconnecting... 1/5 (" + denied + ")"})
-        emit({"type": "error", "message": denied})
-        emit({"type": "turn.failed", "error": {"message": denied}})
-        finish(1)
-    if fail == "error_line_only":
-        emit({"type": "error", "message": "model not supported"})
-        finish(1)
-    if fail == "turn_failed":
-        emit({"type": "turn.failed", "error": {"message": "stream disconnected"}})
-        finish(1)
-    text = scenario.get("text", thread)
-    emit({"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": text}})
-    emit({"type": "turn.completed", "usage": {"input_tokens": 7, "output_tokens": 3}})
-    finish(0)
-
 else:
     hang_if("hang_after_init")
+    for number in range(scenario.get("error_notices", 0)):
+        # A CLI can report every retry of a request as an error line; the turn can still succeed afterwards.
+        emit({"type": "error", "message": "Request failed, retrying (%d/5)" % (number + 1)})
+    if scenario.get("fail") == "error_line_only":
+        emit({"type": "error", "message": "model not supported"})
+        finish(1)
     emit({"type": "assistant", "content": scenario.get("text", "ok")})
     finish(0)
 """
@@ -278,12 +225,7 @@ class FakeCli:
         for call in self.calls(name):
             argv = call["argv"]
             assert isinstance(argv, list)
-            if name == "claude":
-                resumed.append(argv[argv.index("--resume") + 1] if "--resume" in argv else None)
-            else:
-                exec_index = argv.index("exec") if "exec" in argv else -1
-                is_resume = exec_index >= 0 and "resume" in argv[exec_index + 1 :]
-                resumed.append(argv[-2] if is_resume else None)
+            resumed.append(argv[argv.index("--resume") + 1] if "--resume" in argv else None)
         return resumed
 
 

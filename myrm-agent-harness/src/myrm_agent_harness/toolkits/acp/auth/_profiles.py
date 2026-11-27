@@ -10,13 +10,13 @@ no — leaf module, standard library only
 
 [OUTPUT]
 - LoginStrategy: How a CLI performs interactive login.
-- Transport: How a known agent is driven: as a CLI process or over ACP.
+- Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
 - AuthProfile: Per-backend contract: login state, launch, transport.
 - profile_for: Resolve an AuthProfile from a backend name or command (a name that merely contains a backend's counts).
 - command_profile: Resolve the AuthProfile of a command that is exactly a known agent's executable.
 - effective_transport: The transport an agent really runs over: a known agent's contract wins over a stored choice.
 - all_profiles, known_backends: Every registered profile, and their names.
-- cli_launch_args: Baseline non-interactive launch args for a CLI backend.
+- cli_launch_args: Baseline non-interactive launch args for a backend driven as a CLI process.
 
 [POS]
 The contract of every known agent: where its login lives, how to log in, how it is launched and over which transport.
@@ -33,8 +33,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
-# How an agent is driven: as a CLI process whose output is parsed, or over the Agent Client Protocol.
-Transport = Literal["cli", "acp"]
+# How an agent is driven: as a CLI process whose output is parsed, over the Agent Client Protocol, or over the JSON-RPC
+# app server of Codex.
+Transport = Literal["cli", "acp", "app_server"]
 
 
 class LoginStrategy(StrEnum):
@@ -64,13 +65,12 @@ class AuthProfile:
     logout_args: tuple[str, ...] | None
     needs_code_input: bool  # whether login expects the user to paste a code back via stdin
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
-    # The transport the agent's own contract calls for. A CLI agent is run headless with ``cli_launch_args``; an ACP
-    # agent is started with ``acp_launch_args`` and put to the host's permission policy.
+    # The transport the agent's own contract calls for, and the args that start it that way (never permission flags,
+    # except the one an ACP agent needs to ask at all): a CLI agent's baseline headless invocation; the flag that puts
+    # an ACP agent in ACP mode, then the one that makes it ask the host before it acts (its own settings may default
+    # to a mode that never asks); the subcommand that starts an app server.
     transport: Transport = "cli"
-    cli_launch_args: tuple[str, ...] = ()  # baseline non-interactive invocation args (never permission flags)
-    # Entry args of an ACP agent: the flag that puts it in ACP mode, then the one that makes it ask the host before it
-    # acts (its own settings may default to a mode that never asks).
-    acp_launch_args: tuple[str, ...] = ()
+    launch_args: tuple[str, ...] = ()
     # The session mode an ACP agent reports once it asks the host; anything else in ``safe`` mode is not left standing.
     acp_ask_mode: str | None = None
     login_probe: tuple[
@@ -112,7 +112,7 @@ _PROFILES: dict[str, AuthProfile] = {
         needs_code_input=True,
         api_key_env=("ANTHROPIC_API_KEY",),
         login_probe=("auth", "status"),
-        cli_launch_args=("-p", "--output-format", "stream-json", "--verbose"),
+        launch_args=("-p", "--output-format", "stream-json", "--verbose"),
     ),
     "codex": AuthProfile(
         backend="codex",
@@ -123,11 +123,12 @@ _PROFILES: dict[str, AuthProfile] = {
         login_args=("login",),
         logout_args=("logout",),
         needs_code_input=False,
-        api_key_env=("OPENAI_API_KEY",),
+        # The app server reads no key from its environment; the runtime hands the first of these the host injected to
+        # the server as a login that is never written to disk.
+        api_key_env=("OPENAI_API_KEY", "CODEX_API_KEY"),
         login_probe=("login", "status"),
-        # A delegated workspace is not necessarily a git repository, and `exec` refuses to start outside one
-        # unless told otherwise. The sandbox the permission mode selects is unaffected by the flag.
-        cli_launch_args=("exec", "--json", "--skip-git-repo-check"),
+        transport="app_server",
+        launch_args=("app-server",),
     ),
     "gemini": AuthProfile(
         backend="gemini",
@@ -140,7 +141,7 @@ _PROFILES: dict[str, AuthProfile] = {
         needs_code_input=False,
         api_key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         transport="acp",
-        acp_launch_args=("--acp", "--approval-mode", "default"),
+        launch_args=("--acp", "--approval-mode", "default"),
         acp_ask_mode="default",
     ),
     "qwen": AuthProfile(
@@ -154,7 +155,7 @@ _PROFILES: dict[str, AuthProfile] = {
         needs_code_input=False,
         api_key_env=("DASHSCOPE_API_KEY", "QWEN_API_KEY"),
         transport="acp",
-        acp_launch_args=("--acp", "--approval-mode", "default"),
+        launch_args=("--acp", "--approval-mode", "default"),
         acp_ask_mode="default",
     ),
 }
@@ -218,10 +219,11 @@ def known_backends() -> tuple[str, ...]:
 
 
 def cli_launch_args(backend_or_command: str) -> list[str]:
-    """Baseline non-interactive launch args for a CLI backend, or an empty list.
+    """Baseline non-interactive launch args of a backend driven as a CLI process, or an empty list.
 
     Business layers call this instead of hard-coding per-CLI arguments, so all CLI
-    invocation knowledge stays in this registry and cannot drift across layers.
+    invocation knowledge stays in this registry and cannot drift across layers. An agent driven over ACP or an app
+    server has no baseline to store: its launch args are resolved when it starts.
     """
     profile = profile_for(backend_or_command)
-    return list(profile.cli_launch_args) if profile else []
+    return list(profile.launch_args) if profile is not None and profile.transport == "cli" else []

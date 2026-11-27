@@ -15,7 +15,7 @@ def _parse(line: str, session_id: str = "s1") -> RuntimeEvent | None:
 
 
 class TestClaudeAndGenericFormats:
-    """One line in, at most one event out, for the Claude / generic / Codex legacy formats."""
+    """One line in, at most one event out, for the Claude and generic formats."""
 
     def test_text_event(self) -> None:
         event = _parse(
@@ -112,253 +112,16 @@ class TestClaudeAndGenericFormats:
         )
         assert event is None
 
-    def test_codex_agent_message(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "id": "0",
-                    "msg": {"type": "agent_message", "message": "hello from codex"},
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TEXT_DELTA
-        assert event.data["content"] == "hello from codex"
-
-    def test_codex_task_started_ignored(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "id": "0",
-                    "msg": {"type": "task_started", "model_context_window": None},
-                }
-            ),
-            "s1",
-        )
-        assert event is None
-
-    def test_codex_token_count(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "id": "0",
-                    "msg": {"type": "token_count", "info": None, "rate_limits": None},
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.USAGE_UPDATE
-
-    def test_codex_init_line_ignored(self) -> None:
+    def test_a_line_that_names_no_event_type_is_ignored(self) -> None:
         event = _parse(
             json.dumps({"provider": "aliyun", "model": "MiniMax-M2.5", "sandbox": "read-only"}),
             "s1",
         )
         assert event is None
 
-    def test_codex_prompt_line_ignored(self) -> None:
+    def test_a_prompt_echo_is_ignored(self) -> None:
         event = _parse(
             json.dumps({"prompt": "hello"}),
-            "s1",
-        )
-        assert event is None
-
-
-class TestCodexItemFormat:
-    """Tests for Codex new format (item.* / turn.* events)."""
-
-    def test_item_completed_agent_message(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {"id": "item_3", "type": "agent_message", "text": "Done."},
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TEXT_DELTA
-        assert event.data["content"] == "Done."
-
-    def test_item_completed_reasoning(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_0",
-                        "type": "reasoning",
-                        "text": "Scanning docs...",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.REASONING_DELTA
-        assert event.data["content"] == "Scanning docs..."
-
-    def test_item_started_command_execution(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.started",
-                    "item": {
-                        "id": "item_1",
-                        "type": "command_execution",
-                        "command": "bash -lc ls",
-                        "aggregated_output": "",
-                        "exit_code": None,
-                        "status": "in_progress",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TOOL_START
-        assert event.data["tool_name"] == "command_execution"
-        assert event.data["tool_input"]["command"] == "bash -lc ls"
-        assert event.data["tool_call_id"] == "item_1"
-
-    def test_item_completed_command_execution_success(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_1",
-                        "type": "command_execution",
-                        "command": "bash -lc ls",
-                        "aggregated_output": "docs\nsrc\n",
-                        "exit_code": 0,
-                        "status": "completed",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TOOL_RESULT
-        assert event.data["output"] == "docs\nsrc\n"
-        assert event.data["is_error"] is False
-
-    def test_item_completed_command_execution_failed(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_2",
-                        "type": "command_execution",
-                        "command": "bash -lc false",
-                        "aggregated_output": "",
-                        "exit_code": 1,
-                        "status": "failed",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TOOL_RESULT
-        assert event.data["is_error"] is True
-
-    def test_item_completed_file_change(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_4",
-                        "type": "file_change",
-                        "changes": [
-                            {"path": "docs/new.md", "kind": "add"},
-                            {"path": "docs/old.md", "kind": "update"},
-                        ],
-                        "status": "completed",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.TOOL_RESULT
-        assert "add docs/new.md" in event.data["output"]
-        assert "update docs/old.md" in event.data["output"]
-        assert event.data["is_error"] is False
-
-    def test_item_completed_error(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {
-                        "id": "item_9",
-                        "type": "error",
-                        "message": "command output truncated",
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.STATUS_UPDATE
-        assert event.data["status"] == "warning"
-        assert event.data["message"] == "command output truncated"
-
-    def test_turn_completed_with_usage(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "turn.completed",
-                    "usage": {
-                        "input_tokens": 24763,
-                        "cached_input_tokens": 24448,
-                        "output_tokens": 122,
-                    },
-                }
-            ),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.USAGE_UPDATE
-        assert event.data["input_tokens"] == 24763
-        assert event.data["output_tokens"] == 122
-        assert event.data["cache_read"] == 24448
-
-    def test_thread_started_ignored(self) -> None:
-        event = _parse(
-            json.dumps({"type": "thread.started", "thread_id": "abc-123"}),
-            "s1",
-        )
-        assert event is None
-
-    def test_turn_started_ignored(self) -> None:
-        event = _parse(
-            json.dumps({"type": "turn.started"}),
-            "s1",
-        )
-        assert event is None
-
-    def test_item_completed_empty_agent_message(self) -> None:
-        event = _parse(
-            json.dumps(
-                {
-                    "type": "item.completed",
-                    "item": {"id": "item_3", "type": "agent_message", "text": ""},
-                }
-            ),
-            "s1",
-        )
-        assert event is None
-
-    def test_item_no_item_field(self) -> None:
-        event = _parse(
-            json.dumps({"type": "item.completed"}),
             "s1",
         )
         assert event is None
@@ -367,22 +130,14 @@ class TestCodexItemFormat:
 class TestEdgeCases:
     """Additional NDJSON parsing edge cases."""
 
-    def test_usage_event_with_info_field(self) -> None:
-        event = _parse(
-            json.dumps({"type": "usage", "info": {"input_tokens": 500, "output_tokens": 200}}),
-            "s1",
-        )
-        assert event is not None
-        assert event.type == RuntimeEventType.USAGE_UPDATE
-        assert event.data["input_tokens"] == 500
-
-    def test_usage_event_without_info(self) -> None:
+    def test_usage_event_carries_the_token_counts(self) -> None:
         event = _parse(
             json.dumps({"type": "usage", "input_tokens": 100, "output_tokens": 50}),
             "s1",
         )
         assert event is not None
         assert event.type == RuntimeEventType.USAGE_UPDATE
+        assert (event.data["input_tokens"], event.data["output_tokens"]) == (100, 50)
 
     def test_text_event_type(self) -> None:
         event = _parse(
@@ -404,20 +159,6 @@ class TestEdgeCases:
         )
         assert event is not None
         assert event.type == RuntimeEventType.USAGE_UPDATE
-
-    def test_turn_completed_without_usage(self) -> None:
-        event = _parse(
-            json.dumps({"type": "turn.completed"}),
-            "s1",
-        )
-        assert event is None
-
-    def test_agent_message_empty(self) -> None:
-        event = _parse(
-            json.dumps({"type": "agent_message", "message": ""}),
-            "s1",
-        )
-        assert event is None
 
     def test_thinking_event(self) -> None:
         event = _parse(

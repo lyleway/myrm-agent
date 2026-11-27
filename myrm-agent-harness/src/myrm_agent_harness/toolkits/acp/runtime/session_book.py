@@ -1,10 +1,10 @@
-"""CLI session records — which CLI-native conversation a harness session resumes, across turns and restarts.
+"""CLI session records — which agent-native conversation a harness session resumes, across turns and restarts.
 
-A CLI backend spawns one process per turn, so context only continues through the CLI's own session id
-(``claude --resume <id>``, ``codex exec resume <id>``). ``CliSessionBook`` keeps those ids in memory and, when the
-host supplies a ``CliSessionStore``, writes them through so a new process resumes the same conversation.
-Persistence is the host's concern (the harness stays storage-agnostic) and strictly best-effort: a store that
-fails costs the conversation its continuity, never the turn.
+A CLI backend spawns one process per turn and a Codex app server can be released and started again, so context only
+continues through the agent's own session id (``claude --resume <id>``, a Codex thread id). ``CliSessionBook`` keeps
+those ids in memory and, when the host supplies a ``CliSessionStore``, writes them through so a new process resumes
+the same conversation. Persistence is the host's concern (the harness stays storage-agnostic) and strictly
+best-effort: a store that fails costs the conversation its continuity, never the turn.
 
 [INPUT]
 - toolkits.acp.types::CliSessionRecord, CliSessionStore (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
@@ -13,8 +13,8 @@ fails costs the conversation its continuity, never the turn.
 - CliSessionBook: memory-first record keeping with best-effort write-through to an optional store
 
 [POS]
-Session continuity state of CliRuntime. Owns the bounded in-memory record cache and every store interaction
-so the runtime only decides when to remember and persist.
+Session continuity state of CliRuntime and CodexRuntime. Owns the bounded in-memory record cache and every store
+interaction so the runtime only decides when to remember and persist.
 """
 
 from __future__ import annotations

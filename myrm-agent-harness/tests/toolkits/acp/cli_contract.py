@@ -37,7 +37,7 @@ _PLAIN_CHOICES = re.compile(r"possible values:\s*([^\]]+)\]")
 _YARGS_VALUE_TYPE = re.compile(r"\[(?:string|number|array)\]")
 
 # The subcommands whose own options the runtime uses, by CLI. A word after these names opens their help scope.
-SUBCOMMANDS: Mapping[str, frozenset[str]] = {"codex": frozenset({"exec", "resume"})}
+SUBCOMMANDS: Mapping[str, frozenset[str]] = {"codex": frozenset({"app-server"})}
 
 
 @dataclass(frozen=True, slots=True)

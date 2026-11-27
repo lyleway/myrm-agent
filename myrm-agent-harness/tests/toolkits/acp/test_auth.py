@@ -35,12 +35,15 @@ class TestProfiles:
         assert set(known_backends()) == {"codex", "claude", "gemini", "qwen"}
 
     def test_permission_tables_cover_the_agents_that_need_them(self) -> None:
-        """Every agent has a strip table and exactly the CLI agents have a mode mapping."""
+        """Every agent the host launches by flags has a strip table, and exactly the CLI agents have a mode mapping.
+
+        The app-server agent (codex) has neither: its approval policy and sandbox are set with every turn.
+        """
         from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
         _launch_args._check_tables()
-        assert set(_launch_args._PERMISSION_FLAGS_BY_BACKEND) == set(known_backends())
-        assert set(_launch_args._PERMISSION_MODE_ARGS) == {"codex", "claude"}
+        assert set(_launch_args._PERMISSION_FLAGS_BY_BACKEND) == set(known_backends()) - {"codex"}
+        assert set(_launch_args._PERMISSION_MODE_ARGS) == {"claude"}
 
     def test_permission_table_drift_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A half-configured backend must raise with diagnostics instead of mis-resolving."""
@@ -57,10 +60,10 @@ class TestProfiles:
         monkeypatch.setattr(
             _launch_args,
             "_PERMISSION_MODE_ARGS",
-            {k: v for k, v in _launch_args._PERMISSION_MODE_ARGS.items() if k != "codex"},
+            {k: v for k, v in _launch_args._PERMISSION_MODE_ARGS.items() if k != "claude"},
         )
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
-            _launch_args.resolve_cli_args("codex", ["--json"], "safe")
+            _launch_args.resolve_cli_args("claude", ["-p"], "safe")
 
     def test_a_mode_mapping_on_an_acp_agent_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An ACP agent asks the host; a mode mapping for it would never be read, so it is a mistake."""
@@ -70,19 +73,19 @@ class TestProfiles:
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
             _launch_args.resolve_acp_args("qwen", [])
 
-    def test_cli_launch_args_unknown_backend_is_empty(self) -> None:
+    def test_cli_launch_args_only_exist_for_an_agent_driven_as_a_cli_process(self) -> None:
         from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args
 
         assert cli_launch_args("no-such-cli") == []
-        assert cli_launch_args("codex") == ["exec", "--json", "--skip-git-repo-check"]
+        assert cli_launch_args("claude") == ["-p", "--output-format", "stream-json", "--verbose"]
+        for backend in ("gemini", "qwen", "codex"):
+            assert cli_launch_args(backend) == []
 
-    @pytest.mark.parametrize("backend", ["codex", "claude"])
     @pytest.mark.parametrize("mode", ["safe", "allow_all"])
-    def test_every_cli_backend_and_mode_resolves_arguments(self, backend: str, mode: str) -> None:
+    def test_the_cli_backend_resolves_arguments_in_every_mode(self, mode: str) -> None:
         from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
-        resolved = resolve_cli_args(backend, [], mode)
-        assert resolved, f"{backend}/{mode} resolved to no arguments"
+        assert resolve_cli_args("claude", [], mode), f"claude/{mode} resolved to no arguments"
 
     @pytest.mark.parametrize("backend", ["gemini", "qwen"])
     def test_every_acp_backend_resolves_arguments(self, backend: str) -> None:
@@ -94,20 +97,17 @@ class TestProfiles:
         """Stored configs carrying an old permission flag must not override the mode."""
         from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
-        # codex's `--yolo` is an alias of the bypass flag and conflicts with --sandbox.
-        assert "--yolo" not in resolve_cli_args("codex", ["--yolo"], "safe")
-        # A stored bypass flag must be replaced by the selected mode's own sandbox choice.
-        stale_bypass = resolve_cli_args("codex", ["--dangerously-bypass-approvals-and-sandbox"], "safe")
-        assert "--dangerously-bypass-approvals-and-sandbox" not in stale_bypass
-        assert stale_bypass[stale_bypass.index("--sandbox") + 1] == "read-only"
+        # A stored bypass flag must be replaced by the selected mode's own permission choice.
+        stale_bypass = resolve_cli_args("claude", ["--dangerously-skip-permissions"], "safe")
+        assert "--dangerously-skip-permissions" not in stale_bypass
+        assert stale_bypass[stale_bypass.index("--permission-mode") + 1] == "default"
         # The `--flag=value` spelling escapes a plain name lookup and must be stripped.
-        codex_eq = resolve_cli_args("codex", ["--sandbox=read-only"], "allow_all")
-        assert codex_eq.count("--sandbox") == 1
-        assert "--sandbox=read-only" not in codex_eq
-        # A hook-trust switch has no substitute in the mapping, so it must not be dropped.
-        assert "--dangerously-bypass-hook-trust" in resolve_cli_args(
-            "codex", ["--dangerously-bypass-hook-trust"], "safe"
-        )
+        claude_eq = resolve_cli_args("claude", ["--permission-mode=plan"], "allow_all")
+        assert claude_eq.count("--permission-mode") == 1
+        assert "--permission-mode=plan" not in claude_eq
+        # A tool allowlist has no substitute in the mapping, so it must not be dropped.
+        kept = resolve_cli_args("claude", ["--allowedTools", "Bash(git:*)"], "safe")
+        assert kept[-2:] == ["--allowedTools", "Bash(git:*)"]
 
     @pytest.mark.parametrize(
         ("token", "expected"),

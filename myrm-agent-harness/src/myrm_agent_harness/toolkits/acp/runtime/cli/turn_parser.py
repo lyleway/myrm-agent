@@ -1,15 +1,17 @@
 """Turn parser — the NDJSON lines of one CLI turn in, RuntimeEvents and the turn's own verdict out.
 
-Claude (``stream-json``), Codex (``item.*`` events and the legacy envelope) and plain-text CLIs share one parser.
+Claude (``stream-json``), CLIs that print one generic event per line and plain-text CLIs share one parser.
 It is stateful because four things only exist across lines: the session the CLI announces first, the final
-``result`` line that says whether the turn failed, the ``error`` lines printed on the way (Codex reports every
-retry of a request that way, so they say nothing about the turn until it ends without a verdict), and which
-messages already went out as streamed text deltas (``--include-partial-messages`` repeats each message in full
-afterwards). Retries are also where a hopeless turn shows early: both CLIs keep retrying a request the API
-answers 401 for minutes, and an unbroken run of those retries is reported as ``auth_rejection``.
+``result`` line that says whether the turn failed, the ``error`` lines printed on the way (they say nothing about
+the turn until it ends without a verdict), and which messages already went out as streamed text deltas
+(``--include-partial-messages`` repeats each message in full afterwards). Retries are also where a hopeless turn
+shows early: Claude keeps retrying a request the API answers 401 for minutes, and an unbroken run of those retries
+is reported as ``auth_rejection``.
 
 [INPUT]
+- toolkits.acp.runtime._base::UNAUTHORIZED_RETRIES_LIMIT (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.cli.parser::event builders (POS: Shared event builders of the CLI runtime's output parsing)
+- toolkits.acp.runtime.event_text::condense_failure_text (POS: Text shaping of the events every runtime emits)
 - toolkits.acp.types::RuntimeEvent (POS: ACP runtime type definitions layer.)
 - utils.text_utils::strip_ansi (POS: Text helpers) [lazy]
 
@@ -25,25 +27,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from myrm_agent_harness.toolkits.acp.runtime._base import UNAUTHORIZED_RETRIES_LIMIT
 from myrm_agent_harness.toolkits.acp.runtime.cli.parser import (
-    condense_failure_text,
     error_text,
     extract_text_from_event,
-    is_http_401,
-    parse_codex_item_event,
     parse_json_line,
     parse_thinking,
     parse_tool_result,
     parse_tool_use,
-    parse_turn_failed,
     parse_usage,
-    unwrap_codex_envelope,
 )
+from myrm_agent_harness.toolkits.acp.runtime.event_text import condense_failure_text
 from myrm_agent_harness.toolkits.acp.types import RuntimeEvent, RuntimeEventType, create_event
 
-# Consecutive retries of a request answered 401 after which the turn is given up: a rejected login does not heal by
-# retrying, while a token the CLI refreshes on its own needs one retry.
-_UNAUTHORIZED_RETRIES_LIMIT = 3
 _UNAUTHORIZED = 401
 
 
@@ -103,7 +99,7 @@ class TurnParser:
         self._unauthorized_retries = 0
 
     def take_announced(self) -> str | None:
-        """The CLI session id announced since the last call (Claude ``system/init``, Codex ``thread.started``)."""
+        """The CLI session id announced since the last call (Claude ``system/init``)."""
         announced, self._announced = self._announced, None
         return announced
 
@@ -120,7 +116,6 @@ class TurnParser:
         if data is None:
             return self._plain_text(line)
 
-        data = unwrap_codex_envelope(data)
         kind = data.get("type", "")
         if kind == "system":
             subtype = data.get("subtype")
@@ -128,9 +123,6 @@ class TurnParser:
                 self._announce(data.get("session_id"))
             elif subtype == "api_retry":
                 self._api_retry(data)
-            return []
-        if kind == "thread.started":
-            self._announce(data.get("thread_id"))
             return []
         if kind == "stream_event":
             return self._stream_event(data)
@@ -159,7 +151,7 @@ class TurnParser:
 
     def _unauthorized_retry(self, said: str) -> None:
         self._unauthorized_retries += 1
-        if self._unauthorized_retries >= _UNAUTHORIZED_RETRIES_LIMIT and not self.auth_rejection:
+        if self._unauthorized_retries >= UNAUTHORIZED_RETRIES_LIMIT and not self.auth_rejection:
             self.auth_rejection = condense_failure_text(said)
 
     def _text_event(self, text: str) -> RuntimeEvent:
@@ -249,25 +241,11 @@ class TurnParser:
         return [parse_usage(usage, self._session_id)] if isinstance(usage, dict) else []
 
     def _generic_event(self, kind: str, data: dict[str, object]) -> RuntimeEvent | None:
-        """The formats that carry one event per line: Codex ``item.*`` / ``turn.*``, legacy and generic events."""
+        """The generic format that carries one event per line."""
         session_id = self._session_id
-        if kind in ("item.started", "item.updated", "item.completed"):
-            return parse_codex_item_event(data, session_id)
-
-        if kind == "turn.completed":
-            usage = data.get("usage")
-            return parse_usage(usage, session_id) if isinstance(usage, dict) else None
-
-        if kind == "turn.failed":
-            return parse_turn_failed(data, session_id)
-
         if kind == "text":
             text = extract_text_from_event(data)
             return self._text_event(text) if text else None
-
-        if kind == "agent_message":
-            message = data.get("message")
-            return self._text_event(message) if isinstance(message, str) and message else None
 
         if kind == "thinking":
             return parse_thinking(data, session_id)
@@ -278,15 +256,9 @@ class TurnParser:
         if kind == "tool_result":
             return parse_tool_result(data, session_id)
 
-        if kind in ("usage", "token_count"):
-            info = data.get("info")
-            return parse_usage(info if isinstance(info, dict) else data, session_id)
+        if kind == "usage":
+            return parse_usage(data, session_id)
 
-        if kind in ("error", "stream_error"):
-            said = error_text(data)
-            self.notice = condense_failure_text(said) or "Unknown error"
-            if is_http_401(said):
-                self._unauthorized_retry(said)
-            else:
-                self._unauthorized_retries = 0
+        if kind == "error":
+            self.notice = condense_failure_text(error_text(data)) or "Unknown error"
         return None

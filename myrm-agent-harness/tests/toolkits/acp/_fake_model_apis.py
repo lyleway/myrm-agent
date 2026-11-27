@@ -1,7 +1,8 @@
-"""Scripted model APIs on a loopback port, so a real Gemini or Qwen binary can be driven without a login or a model.
+"""Scripted model APIs on a loopback port, so a real Gemini, Qwen or Codex binary can be driven without a login or a model.
 
-``qwen`` talks to the OpenAI-compatible endpoint ``OPENAI_BASE_URL`` names and ``gemini`` to the one
-``GOOGLE_GEMINI_BASE_URL`` names. The scripted model asks for its tool calls one after another, each as soon as the
+``qwen`` talks to the OpenAI-compatible endpoint ``OPENAI_BASE_URL`` names, ``gemini`` to the one
+``GOOGLE_GEMINI_BASE_URL`` names and ``codex`` to the Responses endpoint of the provider its config names. The scripted
+model asks for its tool calls one after another, each as soon as the
 result of the one before it is back and only if the agent offers a tool of that name, and then says ``final_text``:
 the shortest conversation that makes an agent ask for permission and then act on the answer. Every request body is
 kept, so a test can read what the model was told about each call.
@@ -12,10 +13,11 @@ the prompt or the result of the call before is answered with plain text, so thos
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from aiohttp import web
 
@@ -28,6 +30,8 @@ class ToolCall:
 
     name: str
     arguments: Mapping[str, object]
+    # The namespace a Responses API tool lives in (Codex puts the tools of an MCP server in one).
+    namespace: str = ""
 
 
 @dataclass
@@ -201,3 +205,125 @@ class FakeGeminiApi(ScriptedModelApi):
     async def _count_tokens(self, request: web.Request) -> web.Response:
         self.requests.append(await request.json())
         return web.json_response({"totalTokens": 1})
+
+
+_RESULT_TYPES = ("function_call_output", "custom_tool_call_output")
+
+
+@dataclass
+class FakeResponsesApi(ScriptedModelApi):
+    """The OpenAI Responses wire format (``POST /v1/responses`` answered as typed SSE events), which Codex speaks.
+
+    ``fail_status`` answers every request with that HTTP status and an OpenAI-style error body; ``hang`` opens the
+    stream and says nothing until ``release`` is called (a model that is slow, for a turn that is stopped meanwhile).
+    A tool the request offers as ``custom`` (Codex's ``apply_patch``) is called with ``arguments["input"]`` as its text.
+    """
+
+    fail_status: int | None = None
+    hang: bool = False
+    input_tokens: int = 10
+    output_tokens: int = 5
+    authorizations: list[str] = field(default_factory=list, init=False)
+    _released: asyncio.Event = field(default_factory=asyncio.Event, init=False, repr=False)
+
+    def release(self) -> None:
+        self._released.set()
+
+    def _register(self, app: web.Application) -> None:
+        app.router.add_post("/v1/responses", self._responses)
+
+    def _input(self, body: dict[str, object]) -> list[dict[str, object]]:
+        return _as_dicts(body.get("input"))
+
+    def _results_in(self, body: dict[str, object]) -> list[str]:
+        return [str(item.get("output")) for item in self._input(body) if item.get("type") in _RESULT_TYPES]
+
+    def _offered_tools(self, body: dict[str, object]) -> set[str]:
+        tools = _as_dicts(body.get("tools"))
+        nested = (child for tool in tools for child in _as_dicts(tool.get("tools")))
+        return {str(tool["name"]) for tool in (*tools, *nested) if "name" in tool}
+
+    def _last_is_a_result(self, body: dict[str, object]) -> bool:
+        items = self._input(body)
+        return bool(items) and items[-1].get("type") in _RESULT_TYPES
+
+    def _tool_item(self, call: ToolCall, body: dict[str, object], call_id: str) -> dict[str, object]:
+        custom = any(
+            tool.get("type") == "custom" and tool.get("name") == call.name for tool in _as_dicts(body.get("tools"))
+        )
+        if custom:
+            return {
+                "type": "custom_tool_call",
+                "call_id": call_id,
+                "name": call.name,
+                "input": str(call.arguments.get("input", "")),
+            }
+        item: dict[str, object] = {
+            "type": "function_call",
+            "call_id": call_id,
+            "name": call.name,
+            "arguments": json.dumps(dict(call.arguments)),
+        }
+        if call.namespace:
+            item["namespace"] = call.namespace
+        return item
+
+    def _usage(self) -> dict[str, object]:
+        return {
+            "input_tokens": self.input_tokens,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": self.output_tokens,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": self.input_tokens + self.output_tokens,
+        }
+
+    @staticmethod
+    def _sse(events: Sequence[Mapping[str, object]]) -> bytes:
+        return "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events).encode()
+
+    async def _responses(self, request: web.Request) -> web.StreamResponse:
+        body: dict[str, object] = await request.json()
+        self.requests.append(body)
+        self.authorizations.append(request.headers.get("Authorization", ""))
+        if self.fail_status is not None:
+            error = {"message": f"stub failure {self.fail_status}", "type": "stub", "code": "stub"}
+            return web.json_response({"error": error}, status=self.fail_status)
+        response_id = f"resp_{len(self.requests)}"
+        events: list[Mapping[str, object]] = [{"type": "response.created", "response": {"id": response_id}}]
+        response = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
+        await response.prepare(request)
+        if self.hang:
+            await response.write(self._sse(events))
+            await self._released.wait()
+            return response
+        call = self._next_call(body)
+        if call is not None:
+            events.append(
+                {
+                    "type": "response.output_item.done",
+                    "item": self._tool_item(call, body, f"call_{len(self._results_in(body))}"),
+                }
+            )
+        else:
+            message: dict[str, object] = {
+                "type": "message",
+                "role": "assistant",
+                "id": f"msg_{len(self.requests)}",
+                "content": [{"type": "output_text", "text": self.final_text}],
+            }
+            half = len(self.final_text) // 2
+            events.append({"type": "response.output_item.added", "item": {**message, "content": []}})
+            for delta in (self.final_text[:half], self.final_text[half:]):
+                events.append(
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": message["id"],
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": delta,
+                    }
+                )
+            events.append({"type": "response.output_item.done", "item": message})
+        events.append({"type": "response.completed", "response": {"id": response_id, "usage": self._usage()}})
+        await response.write(self._sse(events))
+        return response
