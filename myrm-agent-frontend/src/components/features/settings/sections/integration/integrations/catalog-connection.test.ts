@@ -50,6 +50,14 @@ describe('resolveCatalogConnectionState', () => {
     expect(resolveCatalogConnectionState(entry, [makeConfig('notion', false)])).toBe('disabled');
   });
 
+  it('counts a saved service whose name differs from the template only in symbols or spaces', () => {
+    const dashed = makeEntry({ name: 'brave-search', type: 'stdio' });
+
+    expect(resolveCatalogConnectionState(dashed, [makeConfig('brave search')])).toBe('connected');
+    expect(resolveCatalogConnectionState(dashed, [makeConfig('brave_search', false)])).toBe('disabled');
+    expect(resolveCatalogConnectionState(dashed, [makeConfig('Brave-Search')])).toBe('available');
+  });
+
   it('stays available for entries without a usable connection template', () => {
     const saved = [makeConfig('notion')];
     expect(resolveCatalogConnectionState(makeEntry(null), saved)).toBe('available');

@@ -37,8 +37,9 @@ vi.mock('@/hooks/settings/useMcpSecurityGate', () => ({
   gateMcpEnable: (...args: unknown[]) => mockGateMcpEnable(...args),
 }));
 
-vi.mock('@/lib/utils/mcp-config', () => ({
+vi.mock('@/lib/utils/mcp-config', async () => ({
   formatMcpGateBlockedMessage: () => 'blocked',
+  findSameMcpServer: (await import('@/lib/utils/mcp-config/mcpServerIdentity')).findSameMcpServer,
 }));
 
 vi.mock('@/components/features/settings/mcp/MCPScanAckDialog', () => ({
