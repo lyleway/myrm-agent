@@ -4,8 +4,8 @@ Serves two link families:
 1. **Mobile status** — `/mobile/status/{chatId}?pair=` with signed pairing token
    for HITL approval on mobile.
 2. **Web chat** — `/{chatId}` pointing to the full WebUI conversation page,
-   attached as a SECONDARY button on every IM reply so users can seamlessly
-   continue in the browser.
+   attached as a SECONDARY button on every IM reply produced in a stored chat so
+   users can seamlessly continue in the browser.
 
 [INPUT]
 - app.remote_access.pairing::create_pairing_token (POS: Signed short-lived mobile deep link tokens)
