@@ -4,8 +4,9 @@
 - myrm_agent_harness.toolkits.llms.image.models::ImageGenerationConfig (POS: shared engine config)
 - myrm_agent_harness.toolkits.llms.media_inputs::resolve_media_inputs (POS: the single reference resolver)
 - myrm_agent_harness.utils.mime_types::sniff_image_mime (POS: image container detection)
-- app.ai_agents.media_tools.input_policy::build_media_input_policy (POS: reference-resolution policy)
+- app.ai_agents.media_tools.input_policy::build_media_input_policy, keep_image_size (POS: reference-resolution policy and its size-keeping variant)
 - app.ai_agents.media_tools.task_results (POS: shared error, started-tasks and status results)
+- app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 - app.tasks.task_payload_crypto::seal_task_payload_secrets (POS: payload secret sealing)
 
 [OUTPUT]
@@ -16,6 +17,8 @@ LangChain adapter of the image engines. ``generate`` enqueues one background tas
 with the task list; ``edit`` answers in the call; ``status`` (optionally waiting for a running task) and ``list`` read
 the queue and the model catalog. Every failure is an explicit error result, and a parameter that belongs to another
 action is refused instead of dropped.
+A finished image is also copied into the agent's workspace; the ``status`` and ``edit`` results name the copy in
+``workspace_files``. The source of an edit with a mask keeps its resolution, as the mask does.
 ``quality`` is sent on the OpenAI-compatible wire only (``openai_chat``, ``azure_openai``), for generation and edit
 alike; Gemini, Stability and MiniMax requests do not carry it.
 """
@@ -36,7 +39,7 @@ from myrm_agent_harness.toolkits.llms.media_task_types import TASK_TYPE_IMAGE_GE
 from myrm_agent_harness.utils.mime_types import sniff_image_mime
 from pydantic import BaseModel, Field
 
-from app.ai_agents.media_tools.input_policy import build_media_input_policy
+from app.ai_agents.media_tools.input_policy import build_media_input_policy, keep_image_size
 from app.ai_agents.media_tools.task_results import (
     MAX_WAIT_SECONDS,
     WAIT_SECONDS_DESCRIPTION,
@@ -45,6 +48,7 @@ from app.ai_agents.media_tools.task_results import (
     started_tasks_result,
     tool_error,
 )
+from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
 from app.tasks.task_payload_crypto import seal_task_payload_secrets
 
 logger = logging.getLogger(__name__)
@@ -57,7 +61,9 @@ _TOOL_DESCRIPTION = (
     "model that edits images. "
     "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier image; "
     "wait_seconds waits for a task that is still running. "
-    "action='list': the available models and what they support."
+    "action='list': the available models and what they support. "
+    "A finished image is also copied into the workspace for bash and file tools: `workspace_files` (in the `result` of "
+    "status, or in the edit answer) lists its path; without that field there is no copy."
 )
 
 
@@ -149,10 +155,12 @@ def create_image_generation_tool(
 ) -> BaseTool:
     """Build ``image_tool`` for the image model in ``config``.
 
-    ``allowed_roots`` are the workspace folders the agent's file references may point into.
+    ``allowed_roots`` are the workspace folders the agent's file references may point into; the first one also receives
+    the copies of the finished images.
     """
     editor = ImageGenerationTools(config)
     policy = build_media_input_policy(allowed_roots)
+    exporter = WorkspaceExporter.for_workspace(allowed_roots, user_id=task_user_id, chat_id=chat_id)
 
     async def _generate(
         prompt: str,
@@ -206,15 +214,18 @@ def create_image_generation_tool(
             return tool_error("prompt is required when action=edit")
         if n > 1:
             return tool_error("edit returns one image per call; call it again for another variation, or use action=generate")
+        mask_ref = (mask_url or "").strip()
         try:
-            (image,) = await resolve_media_inputs([image_url], "image", policy, field_name="image_url")
+            # A mask fits only an image of its own size, so the source of a masked edit is not downsized.
+            source_policy = keep_image_size(policy) if mask_ref else policy
+            (image,) = await resolve_media_inputs([image_url], "image", source_policy, field_name="image_url")
             mask: bytes | None = None
-            if mask_url and mask_url.strip():
+            if mask_ref:
                 # A mask carries its meaning in its transparency, which the downsizing hook would flatten.
-                (mask,) = await resolve_media_inputs([mask_url], "image", replace(policy, image_hook=None), field_name="mask_url")
+                (mask,) = await resolve_media_inputs([mask_ref], "image", replace(policy, image_hook=None), field_name="mask_url")
         except MediaInputError as exc:
             return tool_error(str(exc))
-        return await editor.edit_image(
+        answer = await editor.edit_image(
             image,
             prompt,
             mask=mask,
@@ -223,6 +234,7 @@ def create_image_generation_tool(
             image_mime=sniff_image_mime(image),
             image_size_bytes=len(image),
         )
+        return await exporter.complete_json(answer) if exporter is not None else answer
 
     @tool("image_tool", args_schema=ImageToolInput)
     async def image_tool(
@@ -241,7 +253,7 @@ def create_image_generation_tool(
         if action == "list":
             return editor.list_models()
         if action == "status":
-            return await media_task_status_result(task_id, wait_seconds)
+            return await media_task_status_result(task_id, wait_seconds, exporter=exporter)
         foreign = _foreign_parameter(
             action,
             reference_image_urls=reference_image_urls,

@@ -171,17 +171,17 @@ For each shot, call `video_tool(action="generate")` with:
 
 ### Step 5 — Concatenate with FFmpeg
 
-After all clips are generated, use `bash_code_execute_tool` to concatenate them losslessly:
+Once the clips have finished, call `video_tool(action="status", task_id=...)` for each shot. The `result` of a finished clip lists its file in the workspace under `workspace_files` (for example `_generated/media_xxx.mp4`). Use `bash_code_execute_tool` to concatenate the clips losslessly:
 
 ```bash
 ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4
 ```
 
-Where `list.txt` contains one `file '/path/to/shotN.mp4'` entry per clip in sequence order.
+Write `list.txt` in the workspace root, with one `file '<path from workspace_files>'` line per clip in sequence order. Use only paths that `workspace_files` returned. If a clip has no `workspace_files`, tell the user this machine cannot assemble the video locally; do not guess a path.
 
 ### Step 6 — Add soundtrack
 
-If background music or voiceover is needed, overlay it on the concatenated video:
+If background music or voiceover is needed, overlay it on the concatenated video. The result of `tts_generate` lists the voiceover file under `workspace_files`; use that path as the audio input (`bgm.mp3` below):
 
 ```bash
 ffmpeg -i output.mp4 -i bgm.mp3 -filter_complex "[1:a]afade=t=in:d=1,afade=t=out:st=<END-1>:d=1[a]" -map 0:v -map "[a]" -shortest final.mp4
@@ -189,4 +189,4 @@ ffmpeg -i output.mp4 -i bgm.mp3 -filter_complex "[1:a]afade=t=in:d=1,afade=t=out
 
 ### Step 7 — Verify keyframe quality
 
-Before delivering, spot-check generated clips for artifacts. If the scene is complex (many characters, fine text, intricate backgrounds), verify that keyframes are clean — no watermarks, garbled text, or visual glitches. Use vision tools to inspect extracted frames when in doubt. If a clip fails quality check, regenerate that single shot with a simplified prompt.
+Before delivering, spot-check generated clips for artifacts. If the scene is complex (many characters, fine text, intricate backgrounds), verify that keyframes are clean — no watermarks, garbled text, or visual glitches. Extract frames from the same `workspace_files` clips and use vision tools to inspect them when in doubt. If a clip fails quality check, regenerate that single shot with a simplified prompt.
