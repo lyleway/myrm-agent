@@ -7,10 +7,11 @@
 - tests.support.context_compaction_ui (POS: the compress control of the strategy panel, the compact requests the page sends)
 
 [OUTPUT]
-- compress_in_chat(): opens a dormant chat, compresses it from the strategy panel with the real model, returns what the server and the page then hold
+- compress_in_chat() / compress_open_chat() / compact_open_chat_by_command(): opens a dormant chat (or takes the open one) and compresses it from the strategy panel, or by typing `/compact`, with the real model; returns what the server and the page then hold
+- reload_chat(): the page reloaded on the chat, with its summary shown
 - listed_messages() / stored_ids(): the messages the page lists (it loads only the newest part of a long chat) and the ids the server holds, oldest first
 - refresh_nonce() / history_settled_js(): the page's count of summary re-reads and the state that says a history change has been absorbed
-- rewind_to_user_message() / edit_user_message() / regenerate_latest_answer(): the three ways a user rewrites the history, driven through the page
+- rewind_to_user_message() / edit_user_message() / regenerate_latest_answer() / switch_to_previous_version(): the four ways a user rewrites the history, driven through the page
 
 [POS]
 Every one of these changes the stored history, and the server decides in the same transaction whether the summary it
@@ -27,7 +28,7 @@ from typing import Literal
 import pytest
 from cdp_chat.support import fetch_chat_messages
 
-from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, wait_for_state
+from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, reload_mcp_page, wait_for_state
 from tests.support.context_compaction_e2e import (
     PROJECT_CODENAME,
     SHORT_CHAT_ROUNDS,
@@ -38,13 +39,18 @@ from tests.support.context_compaction_e2e import (
     read_compaction_state,
 )
 from tests.support.context_compaction_ui import (
+    forget_compact_reminder,
     outcome_js,
     panel_ready_js,
     press_compress_js,
+    press_enter,
     read_compact_requests,
     rearm_compress_js,
     record_compact_requests,
+    type_in_composer,
     wait_for_compact_answers,
+    wait_for_composer,
+    wait_for_palette_choice,
 )
 
 # The usage the last reply recorded; the panel offers "compress" from 30 %.
@@ -116,35 +122,82 @@ def _press_until_summarized(client: ChromeMcpClient, page: McpPage, page_url: st
     its inactivity limit, which happens while other sessions load the same gateway; the user presses again, so does this.
     Any other decline is a failure.
     """
+    sent_before = len(read_compact_requests(client, page))
     for attempt in range(1, _MAX_COMPRESS_ATTEMPTS + 1):
+        client.evaluate(page, rearm_compress_js(), timeout_sec=15.0)
         wait_for_state(client, page, press_compress_js("en"), timeout_sec=30.0, page_url=page_url)
-        wait_for_compact_answers(client, page, page_url, attempt, timeout_sec=COMPACTION_TIMEOUT_SEC)
+        wait_for_compact_answers(client, page, page_url, sent_before + attempt, timeout_sec=COMPACTION_TIMEOUT_SEC)
         answer = read_compact_requests(client, page)[-1]
         if answer.compacted:
             return
         assert answer.status == 200 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
-        client.evaluate(page, rearm_compress_js(), timeout_sec=15.0)
         wait_for_state(client, page, panel_ready_js("en"), timeout_sec=60.0, page_url=page_url)
     pytest.fail(f"the model stalled on all {_MAX_COMPRESS_ATTEMPTS} compression attempts: {answer}")
 
 
 def compress_in_chat(client: ChromeMcpClient, page: McpPage, page_url: str, api_url: str, chat_id: str) -> CompactedChat:
-    """Create a dormant six-round chat, press "compress" in its strategy panel and wait for the real model's summary."""
+    """Create a dormant six-round chat, open it and compress it from its strategy panel with the real model."""
     create_dormant_chat(api_url, chat_id, context_usage_percent=RECORDED_USAGE_PERCENT, rounds=SHORT_CHAT_ROUNDS)
     assert read_compaction_state(api_url, chat_id)["summary_persisted"] is False
     ensure_locale(client, page, "en", page_url=page_url)
     open_chat(client, page, chat_id, page_url)
+    return compress_open_chat(client, page, page_url, api_url, chat_id)
+
+
+def compress_open_chat(client: ChromeMcpClient, page: McpPage, page_url: str, api_url: str, chat_id: str) -> CompactedChat:
+    """Press "compress" in the strategy panel of the open chat and wait for the real model's summary to be stored and shown."""
     wait_for_state(client, page, panel_ready_js("en"), timeout_sec=90.0, page_url=page_url)
     record_compact_requests(client, page)
     _press_until_summarized(client, page, page_url)
     head, tail = locale_text("en", "chat", "contextUsage", "strategy", "compressSuccess").split(_TOKENS_PLACEHOLDER)
     wait_for_state(client, page, outcome_js(head=head, tail=tail), timeout_sec=COMPACTION_TIMEOUT_SEC, page_url=page_url)
 
+    return _stored_compaction(client, page, page_url, api_url, chat_id)
+
+
+def _stored_compaction(client: ChromeMcpClient, page: McpPage, page_url: str, api_url: str, chat_id: str) -> CompactedChat:
+    """What the server stored for the compaction that just ended, and the summary the page now shows."""
     state = read_compaction_state(api_url, chat_id)
     assert state["summary_persisted"] is True, state
     assert PROJECT_CODENAME in str(state["summary"]), f"codename lost from summary: {str(state['summary'])[:600]}"
     in_page = wait_for_state(client, page, _SUMMARY_IN_PAGE_JS, timeout_sec=60.0, page_url=page_url)
     return CompactedChat(chat_id=chat_id, state=state, summary_chars=int(str(in_page["length"])))
+
+
+def compact_open_chat_by_command(
+    client: ChromeMcpClient, page: McpPage, page_url: str, api_url: str, chat_id: str
+) -> CompactedChat:
+    """Type ``/compact`` in the open chat and press Enter on the highlighted command; the real model writes the summary.
+
+    The strategy panel offers "compress" only from 30 % of the window, and a chat that has just been answered afresh
+    is below it, while the typed command is not gated by usage.
+    """
+    forget_compact_reminder(client, page)
+    record_compact_requests(client, page)
+    sent_before = len(read_compact_requests(client, page))
+    for attempt in range(1, _MAX_COMPRESS_ATTEMPTS + 1):
+        type_in_composer(client, page, page_url, "/compact")
+        wait_for_palette_choice(client, page, page_url, "/compact")
+        press_enter(client, page)
+        wait_for_compact_answers(client, page, page_url, sent_before + attempt, timeout_sec=COMPACTION_TIMEOUT_SEC)
+        wait_for_composer(client, page, page_url, "")
+        answer = read_compact_requests(client, page)[-1]
+        if answer.compacted:
+            break
+        assert answer.status == 200 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
+    else:
+        pytest.fail(f"the model stalled on all {_MAX_COMPRESS_ATTEMPTS} compression attempts: {answer}")
+    return _stored_compaction(client, page, page_url, api_url, chat_id)
+
+
+def reload_chat(client: ChromeMcpClient, page: McpPage, page_url: str, chat_id: str) -> None:
+    """Reload the page on the chat, as a user does to see what the server holds; ready once the chat and its summary are shown.
+
+    A freshly regenerated answer offers its version switcher only after the chat is loaded from the server.
+    """
+    reload_mcp_page(client, page, target_url=page_url, timeout_ms=90_000)
+    open_chat(client, page, chat_id, page_url)
+    wait_for_state(client, page, _SUMMARY_IN_PAGE_JS, timeout_sec=60.0, page_url=page_url)
 
 
 def listed_messages(client: ChromeMcpClient, page: McpPage, page_url: str) -> list[PageMessage]:
@@ -288,3 +341,21 @@ _REGENERATE_JS = """(() => {
 def regenerate_latest_answer(client: ChromeMcpClient, page: McpPage, page_url: str) -> None:
     """Press "regenerate" under the latest answer (the only one that offers it)."""
     wait_for_state(client, page, _REGENERATE_JS, timeout_sec=60.0, page_url=page_url)
+
+
+def _previous_version_js(label: str) -> str:
+    return f"""(() => {{
+  const buttons = Array.from(document.querySelectorAll('button[aria-label={json.dumps(label)}]')).filter((b) => !b.disabled);
+  if (buttons.length === 1 && !window.__e2eSiblingSwitched) {{
+    window.__e2eSiblingSwitched = true;
+    buttons[0].click();
+  }}
+  return {{ ready: window.__e2eSiblingSwitched === true, buttons: buttons.length }};
+}})()"""
+
+
+def switch_to_previous_version(client: ChromeMcpClient, page: McpPage, page_url: str) -> None:
+    """Press the left arrow of the version switcher a regenerated answer shows ("1/2" becomes the earlier version)."""
+    wait_for_state(
+        client, page, _previous_version_js(locale_text("en", "common", "previous")), timeout_sec=60.0, page_url=page_url
+    )

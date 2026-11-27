@@ -16,14 +16,17 @@ from cdp_chat.support import fetch_chat_messages, get_e2e_api_url, get_e2e_ui_ur
 from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, wait_for_state
 from tests.support.context_compaction_e2e import PROJECT_CODENAME, chat_page, prepare_live_model, read_compaction_state
 from tests.support.context_compaction_history import (
+    compact_open_chat_by_command,
     compress_in_chat,
     edit_user_message,
     history_settled_js,
     listed_messages,
     refresh_nonce,
     regenerate_latest_answer,
+    reload_chat,
     rewind_to_user_message,
     stored_ids,
+    switch_to_previous_version,
 )
 from tests.support.context_compaction_turn import ask_in_chat, completed_replies, record_compaction_phases, wait_new_reply_stored
 
@@ -212,4 +215,54 @@ def test_editing_and_resending_an_earlier_message_of_a_compacted_chat_drops_the_
     )
     print(
         f"E2E_COMPACTION_EDIT chat={chat_id} edited={edited_id} rows_kept={len(kept)} rows_now={len(rows)} reply={str(answer['content'])[:80]!r}"
+    )
+
+
+@pytest.mark.chrome_e2e(
+    execution_mode="PRIVATE",
+    access_scope="NAMESPACE_WRITE",
+    workload="LIVE",
+    private_reason="live_shpoib",
+)
+@pytest.mark.integration
+@pytest.mark.timeout(600)
+def test_switching_to_an_earlier_version_of_an_answer_drops_a_summary_written_after_it() -> None:
+    """Regenerate, compact again with ``/compact``, step back to the earlier version of the answer: that summary is gone too."""
+    api_url = get_e2e_api_url()
+    ui_url = get_e2e_ui_url()
+    prepare_live_model(api_url)
+
+    chat_id = _chat_id()
+    with chat_page(ui_url, chat_id) as (client, page, page_url):
+        compress_in_chat(client, page, page_url, api_url, chat_id)
+        original = stored_ids(chat_id, api_url)
+        completed_before = completed_replies(chat_id, api_url)
+        nonce = refresh_nonce(client, page, page_url)
+        regenerate_latest_answer(client, page, page_url)
+        _wait_summary_dropped(client, page, page_url, nonce, timeout_sec=90.0)
+        wait_new_reply_stored(chat_id, api_url, completed_before=completed_before)
+        _wait_summary_dropped(client, page, page_url, nonce, timeout_sec=120.0)
+        regenerated = stored_ids(chat_id, api_url)
+        assert regenerated[:-1] == original[:-1] and regenerated[-1] != original[-1], f"{original} then {regenerated}"
+
+        recompressed = compact_open_chat_by_command(client, page, page_url, api_url, chat_id)
+        reload_chat(client, page, page_url, chat_id)
+        # The switch re-loads the chat, which is how the page learns the summary is gone: no re-read is counted.
+        switch_to_previous_version(client, page, page_url)
+        wait_for_state(
+            client,
+            page,
+            history_settled_js(refresh_after=-1, summary="gone", dialog_closed=False),
+            timeout_sec=90.0,
+            page_url=page_url,
+        )
+
+    after = read_compaction_state(api_url, chat_id)
+    assert after["summary_persisted"] is False and after["summary"] == "", f"the switched chat kept its summary: {after}"
+    assert after["tokens_saved"] == recompressed.tokens_saved, f"the running total of saved tokens changed: {after}"
+    switched = stored_ids(chat_id, api_url)
+    assert switched == original, f"the earlier version is not the active one again: {switched}, expected {original}"
+    print(
+        f"E2E_COMPACTION_SWITCH chat={chat_id} regenerated={regenerated[-1]} back_to={switched[-1]} "
+        f"summary_chars_before_switch={recompressed.summary_chars} tokens_saved={after['tokens_saved']}"
     )
