@@ -19,8 +19,9 @@ receiver the guard lets through and is covered over real HTTP deliveries in test
   ``degraded``, a streak of one and the category ``network_unreachable``
 - In both app languages the job's settings page shows the status word, an age that fits the attempt, and in the popover
   the category and its hint, the streak, the time of the last failure and the note that only real deliveries change the status
-- Opened on a phone-width viewport, for each of the two failures, the pill shows that status, the pill and its popover fit
-  the screen, the page does not scroll sideways, and all of their text keeps a contrast of at least 4.5 in both themes
+- Opened on a phone-width viewport, for each of the two failures, the pill shows that status's word in the page's language,
+  the pill and its popover fit the screen, the page does not scroll sideways, and all of their text keeps a contrast of at
+  least 4.5 in both themes
 
 [POS]
 Executor -> run record -> verdict route -> settings page, with nothing mocked. The reminder runner needs no model, so

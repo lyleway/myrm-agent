@@ -9,7 +9,8 @@
   pill is missing, the end of the page text
 - OPEN_POPOVER / POPOVER_TEXT / AGE: scroll the pill into view and open its popover, check the copy in it, check the age the
   pill shows
-- FRAME_PILL / FRAME_MEASURE: create the phone-width frame and wait for the pill in it; measure fit and text contrast in a theme
+- FRAME_PILL / FRAME_MEASURE: create the phone-width frame and wait for the pill in it; in a theme, measure fit and text
+  contrast and report the page language and the status word the pill shows (which status's tone was measured)
 - probe: fill a script's ``__NAME__`` placeholders and wrap it into an expression
 
 [POS]
