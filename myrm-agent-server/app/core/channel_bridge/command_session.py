@@ -1,4 +1,4 @@
-"""The conversation an IM command acts on, and the opening of a new one.
+"""The conversation an IM command acts on and a reply's browser button links, and the opening of a new one.
 
 [INPUT]
 - app.channels.routing.topic_binding::resolve_bound_topic (POS: The one cascade that picks the binding serving a message)
@@ -15,12 +15,12 @@
 - start_conversation: open a new conversation for the chat a message came from
 
 [POS]
-/undo, /retry, /compact, /handoff and /goal act on the conversation of the chat they are sent from, and /new opens
-the next one. The agent that serves the message and the reset policy that applies decide which conversation that is, so
-this resolves both the way the turn executor does (the serving binding's ``effective_agent_id``; the agent's own
-policy, else the person's). A command that resolved either differently would act on another conversation than the one
-the user is talking in. A conversation opened here is stored before the reply, so the next turn and every command
-after it resolve to it through the same resolver.
+/undo, /retry, /compact, /handoff and /goal act on the conversation of the chat they are sent from, the browser button
+of a reply links it, and /new opens the next one. The agent that serves the message and the reset policy that applies
+decide which conversation that is, so this resolves both the way the turn executor does (the serving binding's
+``effective_agent_id``; the agent's own policy, else the person's). A command or button that resolved either differently
+would act on, or link, another conversation than the one the user is talking in. A conversation opened here is stored
+before the reply, so the next turn, every command and the button after it resolve to it through the same resolver.
 """
 
 from __future__ import annotations

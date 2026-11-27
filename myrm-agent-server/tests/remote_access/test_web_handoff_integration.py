@@ -1,20 +1,25 @@
 """Integration test: _attach_web_handoff full pipeline.
 
 Exercises the real ChatService DB path to verify that the handoff
-button uses the database Chat UUID, not the IM peer_id.
+button uses the database Chat UUID of the conversation the message resolves to, not the IM peer_id.
 
-Tunnel/ingress is monkey-patched but ChatService hits the real SQLite DB.
+Tunnel/ingress is monkey-patched and the topic and settings stores the conversation is resolved from are stood in for,
+but ChatService and the session-key resolver hit the real SQLite DB.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterator
 
 import pytest
 
 from app.channels.routing.pipeline import RouterExecutionMixin
 from app.channels.types import ActionButton, InboundMessage, OutboundMessage
+from app.core.channel_bridge.command_session import resolve_command_session_key
 from app.remote_access.tunnel_manager import TunnelManager, TunnelState
 from app.services.chat.chat_service import ChatService
 from app.services.event.app_event_bus import ServerEventBus
+from tests.core.channel_bridge.command_session_testkit import stubbed_stores, topic
 
 
 @pytest.fixture(autouse=True)
@@ -36,22 +41,33 @@ def _patch_tunnel_running(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _default_conversation_stores() -> Iterator[None]:
+    """The stores a conversation is resolved from: no topic binding and the default reset policy."""
+    with stubbed_stores({}, personal=None):
+        yield
+
+
+async def _store_chat_of(inbound: InboundMessage) -> str:
+    """Store the chat of the conversation ``inbound`` belongs to, under the key its turn resolves to; return its id."""
+    chat = await ChatService.get_or_create_channel_chat(await resolve_command_session_key(inbound), inbound.channel)
+    return chat.id
+
+
 async def test_attach_web_handoff_resolves_db_uuid() -> None:
     """Full path: create channel chat → _attach_web_handoff → verify URL has DB UUID."""
-    session_key = "telegram:integration-test-peer-42"
-    chat = await ChatService.get_or_create_channel_chat(session_key, "telegram")
-    db_uuid = chat.id
+    inbound = InboundMessage(
+        channel="telegram",
+        sender_id="integration-test-peer-42",
+        content="hi",
+    )
+    db_uuid = await _store_chat_of(inbound)
 
     result = OutboundMessage(
         channel="telegram",
         recipient_id="integration-test-peer-42",
         content="Hello from agent",
         user_id="local-user",
-    )
-    inbound = InboundMessage(
-        channel="telegram",
-        sender_id="integration-test-peer-42",
-        content="hi",
     )
 
     patched = await RouterExecutionMixin._attach_web_handoff(
@@ -69,28 +85,7 @@ async def test_attach_web_handoff_resolves_db_uuid() -> None:
 
 
 async def test_attach_web_handoff_resolves_a_topic_scoped_chat() -> None:
-    """A forum-topic conversation stores channel + peer + topic + agent; the lookup must match it.
-
-    The other cases here use a bare ``channel:peer`` key, which the stored key also starts with —
-    that is why they passed while the lookup dropped every topic-scoped chat.
-    """
-    from app.channels.types.session import SessionKey
-
-    session_key = SessionKey(
-        channel="telegram",
-        peer_kind="group",
-        peer_id="-1007770001",
-        thread_id="100",
-        agent_id="agent-uuid-1",
-    ).to_str()
-    chat = await ChatService.get_or_create_channel_chat(session_key, "telegram")
-
-    result = OutboundMessage(
-        channel="telegram",
-        recipient_id="-1007770001",
-        content="Hello from the topic agent",
-        user_id="local-user",
-    )
+    """A forum topic an agent serves has a conversation of its own; the button links it, not the peer's agent-less chat."""
     inbound = InboundMessage(
         channel="telegram",
         sender_id="user-1",
@@ -99,13 +94,26 @@ async def test_attach_web_handoff_resolves_a_topic_scoped_chat() -> None:
         is_group=True,
         thread_id="100",
     )
+    serving_agent = {("-1007770001", "100"): topic("agent-uuid-1")}
+    with stubbed_stores(serving_agent, personal=None):
+        topic_chat_id = await _store_chat_of(inbound)
+    agentless_id = await _store_chat_of(inbound)  # the newer chat of the two, yet not the one the topic's agent serves
 
-    patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
+    result = OutboundMessage(
+        channel="telegram",
+        recipient_id="-1007770001",
+        content="Hello from the topic agent",
+        user_id="local-user",
+    )
+    with stubbed_stores(serving_agent, personal=None):
+        patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
 
+    assert topic_chat_id != agentless_id
     assert patched.components, "a topic-scoped chat must still get the handoff button"
     button = patched.components[-1][0]
     assert isinstance(button, ActionButton)
-    assert chat.id in button.url
+    assert topic_chat_id in button.url
+    assert agentless_id not in button.url
 
 
 async def test_attach_web_handoff_ignores_a_longer_peer_with_the_same_prefix() -> None:
@@ -139,8 +147,12 @@ async def test_attach_web_handoff_preserves_existing_components() -> None:
     """Handoff button appends to, not replaces, existing components."""
     from app.channels.types.components import ActionButton, ButtonStyle
 
-    session_key = "feishu:preserve-test-peer"
-    await ChatService.get_or_create_channel_chat(session_key, "feishu")
+    inbound = InboundMessage(
+        channel="feishu",
+        sender_id="preserve-test-peer",
+        content="approve",
+    )
+    await _store_chat_of(inbound)
 
     existing_btn = ActionButton(
         label="Approve",
@@ -153,11 +165,6 @@ async def test_attach_web_handoff_preserves_existing_components() -> None:
         content="Need approval",
         user_id="local-user",
         components=((existing_btn,),),
-    )
-    inbound = InboundMessage(
-        channel="feishu",
-        sender_id="preserve-test-peer",
-        content="approve",
     )
 
     patched = await RouterExecutionMixin._attach_web_handoff(
@@ -220,6 +227,32 @@ async def test_attach_web_handoff_graceful_on_exception(monkeypatch: pytest.Monk
         result,
         inbound,
     )
+
+    assert patched is result
+    assert not patched.components
+
+
+async def test_attach_web_handoff_graceful_when_the_conversation_cannot_be_resolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failing topic or settings store must not block message delivery either."""
+
+    async def _exploding_resolver(_msg: InboundMessage) -> str:
+        raise RuntimeError("topic store unavailable")
+
+    monkeypatch.setattr("app.core.channel_bridge.command_session.resolve_command_session_key", _exploding_resolver)
+
+    result = OutboundMessage(
+        channel="telegram",
+        recipient_id="unresolvable-peer",
+        content="Still delivered",
+        user_id="local-user",
+    )
+    inbound = InboundMessage(
+        channel="telegram",
+        sender_id="unresolvable-peer",
+        content="hi",
+    )
+
+    patched = await RouterExecutionMixin._attach_web_handoff(result, inbound)
 
     assert patched is result
     assert not patched.components

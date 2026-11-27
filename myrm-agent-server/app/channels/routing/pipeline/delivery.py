@@ -9,6 +9,9 @@
 - channels.voice.handler::maybe_tts (POS: spoken reply when the inbound message was a voice message)
 - channels.types.notification::with_final_notify (POS: final-reply notification flag)
 - channels.i18n::channel_t, get_text, resolve_message_locale (POS: localized channel copy)
+- core.channel_bridge.command_session::resolve_command_session_key (POS: the conversation of the chat a message came from, as commands and turns resolve it)
+- remote_access.mobile_deep_link::resolve_web_handoff_components (POS: channel-to-frontend deep links; the browser handoff button row of a chat)
+- services.chat.chat_service::ChatService (POS: chat business facade; channel chat lookup by session key)
 
 [OUTPUT]
 - RouterDeliveryMixin: ``_setup_message_effects`` (deferred placeholder, typing, cleanup registration), ``_deliver_agent_result`` (silent filter, web handoff button, TTS, draft review hold, placeholder edit or new message, data-plane record), ``_create_outbound_draft`` (held reply as an approval), ``_cleanup_effects``, ``_register_cleanup`` (TTL janitor closure), ``_resolve_live_placeholder_id`` and ``_attach_web_handoff``
@@ -302,31 +305,17 @@ class RouterDeliveryMixin:
     ) -> OutboundMessage:
         """Append a SECONDARY "Continue in browser" button for IM channel replies.
 
-        The Chat row is resolved from ``msg`` (channel, peer and forum topic), so the deep link
-        points to a valid ``/{chatUUID}`` frontend route. Failures are swallowed so the main
-        reply is never blocked.
+        The button links the conversation ``msg`` belongs to, resolved the way the turn and every command resolve it
+        (serving agent, reset policy, a conversation opened with ``/new``), so the deep link points to the chat the user
+        is talking in through a valid ``/{chatUUID}`` frontend route. A conversation that is not stored gets no button.
+        Failures are swallowed so the main reply is never blocked.
         """
         try:
-            from app.core.channel_bridge.agent_executor.session import (
-                build_channel_session_key,
-            )
-            from app.remote_access.mobile_deep_link import (
-                resolve_web_handoff_components,
-            )
+            from app.core.channel_bridge.command_session import resolve_command_session_key
+            from app.remote_access.mobile_deep_link import resolve_web_handoff_components
             from app.services.chat.chat_service import ChatService
 
-            # ``Chat.channel_session_key`` is channel + peer_kind + peer + topic (+ agent) plus a
-            # reset epoch. Resolve the key the agent executor stored; older rows written before
-            # peer_kind entered the format still answer to the bare channel:peer key.
-            session_key = build_channel_session_key(msg)
-            chat = await ChatService.get_channel_chat_by_key(session_key)
-            if chat is None:
-                # The stored key appends the bound agent and a reset epoch.
-                chat = await ChatService.get_newest_channel_chat_under(session_key)
-            if chat is None:
-                # Rows written with only channel + peer (no peer_kind segment) answer here.
-                bare_key = f"{msg.channel}:{msg.chat_id if msg.is_group and msg.chat_id else msg.sender_id}"
-                chat = await ChatService.get_newest_channel_chat_under(bare_key)
+            chat = await ChatService.get_channel_chat_by_key(await resolve_command_session_key(msg))
             if not chat:
                 return result
             locale = resolve_message_locale(msg)
