@@ -51,14 +51,25 @@ async def _stream(event: object) -> tuple[list[dict[str, object]], AsyncMock]:
     return events, create_approval
 
 
-class _EventObject:
-    """A gateway event that is an object rather than a dict; only ``to_dict`` gives a copy that can carry the link."""
+class _BareEvent:
+    """A gateway event that is an object rather than a dict: it does not support item assignment."""
 
     def __init__(self, event_type: str, data: dict[str, object]) -> None:
         self.type = event_type
         self.data = data
 
+
+class _EventObject(_BareEvent):
+    """Only ``to_dict`` gives a copy that can carry the link."""
+
     def to_dict(self) -> dict[str, object]:
+        return {"type": self.type, "data": dict(self.data)}
+
+
+class _ModelEvent(_BareEvent):
+    """Only ``model_dump`` gives a copy that can carry the id, as a Pydantic model does."""
+
+    def model_dump(self) -> dict[str, object]:
         return {"type": self.type, "data": dict(self.data)}
 
 
@@ -94,13 +105,16 @@ async def test_an_approval_that_is_an_object_event_reaches_the_client_with_the_i
 
 
 @pytest.mark.asyncio
-async def test_an_approval_still_gets_the_id_of_its_record_when_the_takeover_link_cannot_be_signed() -> None:
+@pytest.mark.parametrize("event_class", [_EventObject, _ModelEvent], ids=["to_dict", "model_dump"])
+async def test_an_approval_still_gets_the_id_of_its_record_when_the_takeover_link_cannot_be_signed(
+    event_class: type[_BareEvent],
+) -> None:
     with patch(
         "app.services.agent.streaming.inject_takeover_live_assist_url",
         new_callable=AsyncMock,
         side_effect=RuntimeError("pairing service down"),
     ):
-        events, create_approval = await _stream(_EventObject("approval_required", _approval_data()))
+        events, create_approval = await _stream(event_class("approval_required", _approval_data()))
 
     create_approval.assert_awaited_once()
     data = _of_type(events, "approval_required")["data"]

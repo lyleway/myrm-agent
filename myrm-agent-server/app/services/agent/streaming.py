@@ -282,7 +282,10 @@ async def _ai_agent_service_stream_inner(
                         # AgentStreamEvent objects do not support item assignment, so enrich their dict form
                         if params.message_id:
                             approval_data["messageId"] = params.message_id
-                        if hasattr(event, "to_dict"):
+                        if isinstance(event, dict):
+                            approval_data["approval_id"] = record.id
+                            event["data"] = approval_data
+                        elif hasattr(event, "to_dict"):
                             event_dict = event.to_dict()
                             event_dict["data"]["approval_id"] = record.id
                             if params.message_id:
@@ -294,9 +297,6 @@ async def _ai_agent_service_stream_inner(
                             if params.message_id:
                                 event_dict["data"]["messageId"] = params.message_id
                             event = event_dict
-                        elif isinstance(event, dict):
-                            approval_data["approval_id"] = record.id
-                            event["data"] = approval_data
                     except Exception as e:
                         logger.error("Failed to persist approval: %s", e)
 
