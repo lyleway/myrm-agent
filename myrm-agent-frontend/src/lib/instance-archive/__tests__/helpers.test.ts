@@ -47,6 +47,7 @@ describe('reentryGroups', () => {
   it('files each sign-in folder under the account or secret it belongs to', () => {
     expect(reentryGroups(['path:whatsapp_auth', 'path:matrix'])).toEqual(['connectedAccounts']);
     expect(reentryGroups(['path:session_vault'])).toEqual(['savedSecrets']);
+    expect(reentryGroups(['path:external-agents'])).toEqual(['connectedAccounts']);
   });
 });
 

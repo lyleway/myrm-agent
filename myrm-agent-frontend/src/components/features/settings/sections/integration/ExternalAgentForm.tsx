@@ -11,10 +11,13 @@ import { Switch } from '@/components/primitives/switch';
 import { Textarea } from '@/components/primitives/textarea';
 import { isLocalMode } from '@/lib/deploy-mode';
 import type { ExternalAgentAuthMode, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
+import type { ExternalAgentAccount } from '@/services/external-agents';
+import ExternalAgentAccountField from './ExternalAgentAccountField';
 import ExternalAgentEnvEditor from './ExternalAgentEnvEditor';
 import {
   AGENT_PRESETS,
   PERMISSION_MODE_OPTIONS,
+  accountBackend,
   effectiveAuthMode,
   normalizePermissionMode,
   permissionHintKey,
@@ -31,6 +34,10 @@ interface ExternalAgentFormProps {
   isTesting: boolean;
   /** False in a hosted deployment: agents run on an API key there, so the form offers nothing else. */
   subscriptionLoginAllowed: boolean;
+  /** The named accounts the server holds, for choosing the login the agent runs as. */
+  accounts: readonly ExternalAgentAccount[];
+  onAccountCreated: () => void;
+  onAccountDeleted: (backend: string, name: string) => void;
   onChange: (next: ExternalAgentDraft) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -44,6 +51,9 @@ const ExternalAgentForm = memo(
     isNew,
     isTesting,
     subscriptionLoginAllowed,
+    accounts,
+    onAccountCreated,
+    onAccountDeleted,
     onChange,
     onSave,
     onCancel,
@@ -52,6 +62,7 @@ const ExternalAgentForm = memo(
     const t = useTranslations('settings.developer.externalAgents');
     const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
     const type = fixedTransport ?? draft.type;
+    const accountOf = accountBackend(draft.command, draft.authMode, subscriptionLoginAllowed);
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -183,6 +194,17 @@ const ExternalAgentForm = memo(
             {t(subscriptionLoginAllowed ? 'authModeHint' : 'authModeHostedHint')}
           </p>
         </div>
+
+        {accountOf !== null && (
+          <ExternalAgentAccountField
+            backend={accountOf}
+            value={draft.account}
+            accounts={accounts}
+            onChange={(account) => onChange({ ...draft, account })}
+            onCreated={onAccountCreated}
+            onDeleted={onAccountDeleted}
+          />
+        )}
 
         <ExternalAgentEnvEditor
           rows={draft.envRows}

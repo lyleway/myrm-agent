@@ -9,10 +9,18 @@
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `__init__.py` | 入口 | 包导出 Registry / Facade | — |
+| `accounts.py` | 核心 | 命名账号的位置与 Agent 跑在哪个 home：`account_store()`（状态根 `resolve_workspace_state_dir()` 下的 `external-agents/accounts`，每次现建、根跟随 `MYRM_DATA_DIR` 且总是绝对路径）与 `agent_home(command, account)`（托管部署 → 稳定的 api_key 目录；否则该 Agent 指名的账号目录，不存在就创建；没有指名 → `None` = CLI 自己的 home；自定义命令不是已知 Agent，无法被重定向，忽略 `account` 并记 WARNING）。harness 只管怎么把 CLI 搬进一个 home，这里决定搬进哪个 | ✅ |
 | `cli_session_store.py` | 核心 | `ChatCliSessionStore`：harness `CliSessionStore` 协议的 chat 行实现。`load` / `save` 经 `ChatCliSessionRepository` 读写 `chats.external_cli_sessions`（`save` 在 SQLite 写锁内读后写，并发的两个后端各自写自己的 session 名互不覆盖；不触碰 `updated_at`；不存在的 chat 与无痕 chat 不落库）；损坏的条目按“无会话”读出。异常原样上抛，由 harness 降级为新会话 | ✅ |
 | `permission_broker.py` | 核心 | `ChatPermissionBroker`（harness `PermissionBroker` 的聊天实现，冻结 dataclass：`agent_id` / `chat_id` / `workspace` / `ttl_seconds`）：外部 Agent 回合里每一次权限请求变成该聊天的一条 `external_agent_permission` 审批（severity：`execute` / `delete` / `move` 为 `high`，其余 `warning`；`reason` 是「Agent 名: 标题」；`expires_at` = 现在 + 600 s），回合在 `PendingPermissionAnswers` 的 future 上等人决定。**所有展示给人的内容先脱敏再截断**（`permission_payload`：在 20 000 字符窗口上脱敏、不可见字符转成可见转义，再截到 2 000 字符；路径最多 20 条、每条 500 字符；`command` 提到载荷顶层供批量风控与卡片读取）。四种结局：批准 / 拒绝（拒绝带人写的理由）→ 注册表 `resolve_approval` 经 `settle` 唤醒；无人应答 → 600 s 后以 `NO_ANSWER_MESSAGE` 拒绝并 `withdraw`（`TIMEOUT`）；回合先结束（停止、整体超时）→ 取消 `decide` 时 `withdraw`（`CANCELLED`，shield 内完成，卡片在所有设备上关闭）；创建审批本身失败 → 异常上抛，harness 按拒绝处理（fail-closed）。登记等待前的一次读回处理「公告期间已被决定」的竞态。回合自己的超时在等人期间由 harness 暂停，等多久是这里的规则 | ✅ |
 | `delegation/` | 核心 | 直连委托（`force_external_agent`）的业务层子包：用户回合 → 外部 CLI 的提示词、CLI 的回合 → 前端 SSE 事件、失败 → 用户能处置的指引。外部只从子包门面导入。见 [delegation/_ARCH.md](delegation/_ARCH.md) | ✅ |
 | `runtime_pool_registry.py` | 核心 | `ChatRuntimePoolRegistry` + `ChatScopedRuntimePoolFacade`（只暴露 harness `DelegationPool` 协议的 4 个成员，不做 `__getattr__` 透传：`prompt` / `get` 一旦透传就会让 registry 看不到在途 turn；`run_turn` 以 `aclosing` 包住池的回合，把回合的 `permissions`（权限裁决者）原样交给池，关闭 facade 的生成器会先关掉池的回合再结束在途计数）+ `close_external_agent_pool_for_chat`：acquire/release、per-chat 在途 turn 计数（`track_turn`；不做串行，串行由池按后端负责，cancel 不计入）、fingerprint 变更 defer、idle 回收（只释放常驻 ACP 进程，池与 CLI `--resume` 会话 id 保留；有在途委托的 chat 不回收，`track_turn` 退出重置 idle 计时）、`ensure_tracked`（facade 每个委托 turn 先确认自己的池仍登记在册，被 close 摘出则重新登记）、删 chat 即时 close、服务关闭 `close_all`；所有 pool 关闭 / 释放带上限（带上限、不抛，`close_all` / idle 回收并发执行） | ✅ |
+
+## 账号与 api_key 通道
+
+- **账号 = 目录**：同一个 CLI 的多个订阅登录（工作号、个人号）各占一个独立目录 `<状态根>/external-agents/accounts/<后端>/<账号名>`，目录树本身就是登记表，没有第二份要保持同步的记录；状态根取 `resolve_workspace_state_dir()`（云沙箱跟随工作区卷）。CLI 被重定向进该目录（`RuntimeConfig.account_home`，harness 按各 CLI 的契约设置对应变量），登录、设置与历史都只落在账号里；用户自己 home 里的登录既不被碰也不会被读到。
+- **Agent 配置的 `account`**：`external_agents` 配置条目里的可选字段，空表示 CLI 自己的 home（用户在本机已有的登录）。`external_agents_runtime_config` 归一化时校验名字（不合法的名字让该 Agent 被丢弃并记 WARNING，名字不会走到路径上）、把它纳入池指纹（换账号即换池）、注册时经 `agent_home` 取家目录；家目录建不出来（磁盘权限、同名文件挡路）只丢该 Agent，其余 Agent 照常注册。
+- **托管通道**（`allows_subscription_login` 为假）：每个已知 Agent 跑在稳定的 api_key 目录 `<根>/_api_key/<后端>` 里。该目录从不被登录、不是账号、不会被列出，磁盘上遗留的订阅登录因此不会被一次按 key 计费的运行读到；该部署下 `account` 配置被忽略。本机的 api_key 模式不隔离（那是用户自己的机器与自己的选择）。
+- **换账号**：账号隔离的也是 CLI 的会话历史，同一聊天里把 Agent 换到另一个账号后，先前记下的 CLI 会话 id 在新账号里不存在，走既有的“会话失效”重试路径（改开新会话并给出一条提示），不需要另存会话与账号的绑定。
 
 ## 删 chat 接线
 

@@ -17,7 +17,7 @@ no - Base type definition module
 - StopReason: how an agent ended a turn (the ``stop_reason`` of ``done``), in the vocabulary of ACP, and the notice each unfinished ending earns
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
 - BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
-- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace)
+- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace; the home of a named account is)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
 - delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
 - CliSessionRecord: an agent-native session id bound to the working directory that created it
@@ -227,6 +227,10 @@ class RuntimeConfig:
     max_response_chars: int = 50_000
     max_turns: int = 25
     description: str = ""
+    # The directory of a named account (``auth.AccountStore``) the agent's CLI keeps its state and its login in,
+    # absolute, for a known agent only. The CLI is relocated into it whatever ``env`` says; ``None``: the CLI's
+    # own default home.
+    account_home: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

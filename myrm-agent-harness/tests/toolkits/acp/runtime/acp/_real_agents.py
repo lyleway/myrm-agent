@@ -45,8 +45,12 @@ def scripted_pool(
     mode: PermissionMode = "safe",
     *,
     session_store: CliSessionStore | None = None,
+    account_home: Path | None = None,
 ) -> RuntimePool:
-    """A pool with the agent registered the way every config stored before the move to ACP says: as a CLI."""
+    """A pool with the agent registered the way every config stored before the move to ACP says: as a CLI.
+
+    ``account_home`` runs it as the account whose home that is; ``home`` stays what the process calls its own.
+    """
     pool = RuntimePool(max_concurrent=1, cli_session_store=session_store)
     pool.register(
         name,
@@ -57,6 +61,7 @@ def scripted_pool(
             env={**SCRIPTED_AGENTS[name].env(api.base_url), "HOME": str(home)},
             timeout_seconds=TURN_SECONDS,
             permission_mode=mode,
+            account_home=None if account_home is None else str(account_home),
         ),
     )
     return pool

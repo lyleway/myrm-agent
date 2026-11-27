@@ -37,6 +37,7 @@ from uuid import uuid4
 
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._profiles import effective_transport
+from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env
 from myrm_agent_harness.toolkits.acp.types import (
     RESIDENT_BACKEND_TYPES,
     CliSessionStore,
@@ -127,7 +128,12 @@ class RuntimePool:
 
         A known agent is driven over the transport its contract names, whatever ``config`` says: a config cannot make
         an agent speak a protocol it does not. Any other command keeps the transport it was configured with.
+
+        Raises:
+            ValueError: ``config.account_home`` is not an absolute path or the command is not a known agent, so the
+                runtime could not be launched in that home.
         """
+        account_env(config.command, config.account_home)
         transport = effective_transport(config.command, config.backend_type)
         if transport != config.backend_type:
             logger.info(

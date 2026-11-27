@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ExternalAgentAuthStatus } from '@/services/external-agents';
+import type { ExternalAgentAccount, ExternalAgentAuthStatus } from '@/services/external-agents';
 
 const stableT = (key: string) => key;
 
@@ -20,7 +20,8 @@ vi.mock('../ExternalAgentInstallDialog', () => ({
     open ? <div>install-dialog:{backend}</div> : null,
 }));
 vi.mock('../ExternalAgentLoginDialog', () => ({
-  default: ({ open, command }: { open: boolean; command: string }) => (open ? <div>login-dialog:{command}</div> : null),
+  default: ({ open, command, account }: { open: boolean; command: string; account?: string }) =>
+    open ? <div>{account ? `login-dialog:${command}:${account}` : `login-dialog:${command}`}</div> : null,
 }));
 
 import ExternalAgentAuthControls from '../ExternalAgentAuthControls';
@@ -97,7 +98,7 @@ describe('ExternalAgentAuthControls', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'logout' }));
 
-    expect(mocks.logout).toHaveBeenCalledWith('codex');
+    expect(mocks.logout).toHaveBeenCalledWith('codex', undefined);
     expect(mocks.toast.success).toHaveBeenCalledWith('logoutSuccess');
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
@@ -162,8 +163,72 @@ describe('ExternalAgentAuthControls', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'logout' }));
 
-      expect(mocks.logout).toHaveBeenCalledWith('codex');
+      expect(mocks.logout).toHaveBeenCalledWith('codex', undefined);
       expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('for an agent that runs as a named account', () => {
+    const accountState = (authenticated: boolean): ExternalAgentAccount => ({
+      backend: 'codex',
+      name: 'work',
+      authenticated,
+      authStatus: authenticated ? 'authenticated' : 'not_authenticated',
+    });
+
+    it('names the account and keys the badge on that account, not on the login of this machine', async () => {
+      render(
+        <ExternalAgentAuthControls
+          command="codex"
+          status={status({ authenticated: true, authStatus: 'authenticated' })}
+          account="work"
+          accountState={accountState(false)}
+          onChanged={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('work')).toBeInTheDocument();
+      expect(screen.getByText('badgeLoggedOut')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'logout' })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'login' }));
+
+      expect(screen.getByText('login-dialog:codex:work')).toBeInTheDocument();
+    });
+
+    it('shows the account as logged in on its own login and logs out of that account only', async () => {
+      const onChanged = vi.fn();
+      mocks.logout.mockResolvedValue({ backend: 'codex', authenticated: false, authStatus: 'not_authenticated' });
+      render(
+        <ExternalAgentAuthControls
+          command="codex"
+          status={status()}
+          account="work"
+          accountState={accountState(true)}
+          onChanged={onChanged}
+        />,
+      );
+
+      expect(screen.getByText('badgeLoggedIn')).toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'logout' }));
+
+      expect(mocks.logout).toHaveBeenCalledWith('codex', 'work');
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('counts the account as logged out until the server has reported on it', () => {
+      render(
+        <ExternalAgentAuthControls
+          command="codex"
+          status={status({ authenticated: true, authStatus: 'authenticated' })}
+          account="work"
+          onChanged={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('badgeLoggedOut')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'login' })).toBeInTheDocument();
     });
   });
 

@@ -21,7 +21,10 @@ vi.mock('next-intl', () => ({
 vi.mock('@/services/config', () => ({
   getConfigSyncManager: () => ({ get: () => mocks.saved, set: mocks.set }),
 }));
-vi.mock('@/services/external-agents', () => ({ getExternalAgentAuthStatus: async () => mocks.statuses }));
+vi.mock('@/services/external-agents', () => ({
+  getExternalAgentAuthStatus: async () => mocks.statuses,
+  listExternalAgentAccounts: async () => [],
+}));
 vi.mock('@/lib/api', () => ({ apiRequest: vi.fn() }));
 vi.mock('@/lib/deploy-mode', () => ({ isLocalMode: () => false }));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
