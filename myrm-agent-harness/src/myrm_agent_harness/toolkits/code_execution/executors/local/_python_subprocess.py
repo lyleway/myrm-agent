@@ -150,7 +150,7 @@ async def run_python_subprocess(
         else:
             process_env.pop("PYTHONPATH", None)
 
-        # Post-override scrubbing guarantee: strip any non-inheritable host secrets (Codex #38941)
+        # Whatever the base and the user's variables carry, no non-inheritable host secret reaches the interpreter.
         # Verified PTC orchestration sessions carry their stub dir on PYTHONPATH
         # (allowed by sanitize_env); the scrub below must not remove it, or
         # `import myrm_tools` fails inside orchestration scripts. Same marker
