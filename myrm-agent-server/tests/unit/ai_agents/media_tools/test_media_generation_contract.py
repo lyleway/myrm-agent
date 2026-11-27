@@ -108,7 +108,7 @@ def test_every_example_conforms_to_its_shape() -> None:
         ("image_result", lambda v: {**v, "images": []}),
         ("image_result", lambda v: {k: x for k, x in v.items() if k != "model"}),
         ("image_result", lambda v: {**v, "latency_ms": "8200"}),
-        ("image_result", lambda v: {**v, "workspace_files": "_generated/media_img_1.png"}),
+        ("image_result", lambda v: {**v, "workspace_files": "./_generated/media_img_1.png"}),
         ("image_result", lambda v: {**v, "workspace_files": []}),
         ("video_result", lambda v: {k: x for k, x in v.items() if k != "video_urls"}),
         ("video_result", lambda v: {**v, "video_urls": ["https://cdn.example/a.mp4"]}),

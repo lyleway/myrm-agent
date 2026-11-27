@@ -7,8 +7,8 @@
 
 [OUTPUT]
 - WORKSPACE_MEDIA_DIR: the folder of the copies inside the workspace
-- WorkspaceExporter: completes a result with ``workspace_files`` (workspace paths of the copies) and
-  ``workspace_files_error`` (why a copy is missing)
+- WorkspaceExporter: completes a result with ``workspace_files`` (``./_generated/<id>.<ext>``: the paths of the copies,
+  relative to the workspace root) and ``workspace_files_error`` (why a copy is missing)
 
 [POS]
 The output counterpart of ``_uploaded/``: inputs reach the workspace as files, generated media would otherwise exist only
@@ -169,7 +169,7 @@ class WorkspaceExporter:
         return task.user_id == self._user_id and task.payload.get("chat_id") == self._chat_id
 
     async def _export(self, reference: str) -> str:
-        """The workspace path of the copy of ``reference``, which is made now unless it exists."""
+        """The path of the copy of ``reference``, relative to the workspace root; the copy is made now unless it exists."""
         media_id = parse_media_reference(reference)
         if media_id is None or not _MEDIA_ID.fullmatch(media_id):
             raise _ExportError("not a media library reference")
@@ -192,4 +192,6 @@ class WorkspaceExporter:
             raise _ExportError(f"the copy could not be written ({exc.strerror or type(exc).__name__})") from None
         if size is not None:
             logger.info("Copied generated media %s into the workspace (%d bytes)", media_id, size)
-        return f"{WORKSPACE_MEDIA_DIR}/{file_name}"
+        # The credential redaction of the agent stack masks random-looking tokens in tool results. It takes the bare
+        # ``_generated/media_<random id>.png`` for one in most results, but strips ``./_generated/...`` as a path first.
+        return f"./{WORKSPACE_MEDIA_DIR}/{file_name}"

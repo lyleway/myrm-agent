@@ -62,7 +62,7 @@ class TestTheCopy:
 
         answer = await _exporter(workspace).complete(_image_result(record.id))
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
         assert "workspace_files_error" not in answer
         assert (workspace / WORKSPACE_MEDIA_DIR / f"{record.id}.png").read_bytes() == _PNG
 
@@ -100,7 +100,7 @@ class TestTheCopy:
 
         answer = await _exporter(workspace).complete(result)
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.{extension}"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{extension}"]
 
     async def test_a_repeat_neither_rewrites_nor_clobbers_it(self, library: MediaLibraryEnv, workspace: Path) -> None:
         record = await library.store(_PNG)
@@ -111,7 +111,7 @@ class TestTheCopy:
 
         again = await exporter.complete(_image_result(record.id))
 
-        assert again["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+        assert again["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
         assert copy.read_bytes() == b"the user edited it"
 
     async def test_concurrent_calls_end_with_one_complete_file_and_no_temporary_one(
@@ -140,9 +140,9 @@ class TestTheCopy:
         answer = await _exporter(workspace).complete(result)
 
         assert answer["workspace_files"] == [
-            f"{WORKSPACE_MEDIA_DIR}/{video.id}.mp4",
-            f"{WORKSPACE_MEDIA_DIR}/{image.id}.png",
-            f"{WORKSPACE_MEDIA_DIR}/{audio.id}.mp3",
+            f"./{WORKSPACE_MEDIA_DIR}/{video.id}.mp4",
+            f"./{WORKSPACE_MEDIA_DIR}/{image.id}.png",
+            f"./{WORKSPACE_MEDIA_DIR}/{audio.id}.mp3",
         ]
         assert "workspace_files_error" not in answer
 
@@ -191,7 +191,7 @@ class TestTheFolder:
 
         answer = await _exporter(workspace).complete(_image_result(record.id))
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
         assert (folder / "notes.txt").read_bytes() == b"mine"
         assert not (folder / ".gitignore").exists()
 
@@ -319,7 +319,7 @@ class TestWhatCannotBeCopied:
 
         answer = await _exporter(workspace).complete({"video_urls": [media_reference(record.id), "media://media_gone"]})
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.mp4"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.mp4"]
         assert answer["workspace_files_error"] == "media://media_gone: it is no longer in the media library"
 
     async def test_a_failure_nobody_foresaw_is_reported_and_logged_without_failing_the_call(
@@ -336,7 +336,7 @@ class TestWhatCannotBeCopied:
         with patch(f"{_LOGGER}.local_media_file", locate), caplog.at_level(logging.WARNING, logger=_LOGGER):
             answer = await _exporter(workspace).complete({"video_urls": [media_reference(broken.id), media_reference(good.id)]})
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{good.id}.mp4"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{good.id}.mp4"]
         assert answer["workspace_files_error"] == f"media://{broken.id}: the copy failed unexpectedly"
         assert [entry for entry in caplog.records if entry.exc_info and broken.id in entry.getMessage()]
 
@@ -355,7 +355,7 @@ class TestAJsonAnswer:
 
         completed = json.loads(await _exporter(workspace).complete_json(answer))
 
-        assert completed["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+        assert completed["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
         assert completed["model"] == "m"
 
     @pytest.mark.parametrize("answer", ['{"error": "image_url is required"}', "not json at all", "[1, 2]", '"text"'])

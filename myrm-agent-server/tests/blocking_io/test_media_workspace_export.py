@@ -40,7 +40,7 @@ async def test_exporting_media_never_blocks_the_event_loop(tmp_path: Path, monke
         repeat = await exporter.complete(result)
         gone = await exporter.complete({"images": [{"url": media_reference("media_missing")}]})
 
-    expected = [f"{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+    expected = [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
     assert first["workspace_files"] == expected
     assert repeat["workspace_files"] == expected
     assert "no longer in the media library" in str(gone["workspace_files_error"])
