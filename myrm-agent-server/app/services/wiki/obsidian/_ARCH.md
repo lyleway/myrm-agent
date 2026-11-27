@@ -13,7 +13,7 @@ Obsidian 集成域子包 — 导入适配与导出 presets。
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `__init__.py` | 门面 | 聚合导出 adapter/export 公开符号 | ✅ |
-| `adapter.py` | 适配器 | Obsidian Vault 导入：`prepare_obsidian_file()` 转换 frontmatter/inline tags/images，`.canvas` 白板经 harness `extract_canvas_text_nodes` 转成 Markdown，笔记文本经 harness `read_text_file` 解码（编码无法可靠识别的笔记返回 None），生产 import 经 `router` → harness `publish_raw`；`adapt_obsidian_file()` 为其直写 raw 目录的薄封装，仅测试调用 | ✅ |
+| `adapter.py` | 适配器 | Obsidian Vault 导入：`prepare_obsidian_file()` 转换 frontmatter/inline tags/images，`.canvas` 白板经 harness `extract_canvas_text_nodes` 转成 Markdown，笔记文本经 harness `read_text_file` 解码（编码无法可靠识别的笔记返回 None），生产 import 经 `router` → harness `publish_raw`；`adapt_obsidian_file()` 为其直写 raw 目录的薄封装，仅测试调用；图片嵌入 `![[x.png]]` 由 `_image_embeds` 按位置线性扫描，未闭合的 `![[` 不会拖慢整份笔记 | ✅ |
 | `binding.py` | 状态 | Vault 路径绑定与 mtime 水位差量扫描（`ObsidianVaultBinding` / `scan_vault_mtime_watermark`） | ✅ |
 | `export.py` | 适配器 | `.obsidian/graph.json` + README for Settings download | ✅ |
 
