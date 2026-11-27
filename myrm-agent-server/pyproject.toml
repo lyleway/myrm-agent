@@ -234,6 +234,12 @@ ignore_missing_imports = true
 module = "app.database.models.*"
 follow_imports = "silent"
 
+# harness 的 dynamic_workflow 包在 __init__ 里从子模块导入公共名字且没有 __all__；
+# strict 的 no_implicit_reexport 会把它们判为未导出，服务端按包路径导入时报 attr-defined。
+[[tool.mypy.overrides]]
+module = "myrm_agent_harness.agent.dynamic_workflow"
+implicit_reexport = true
+
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "basic"
