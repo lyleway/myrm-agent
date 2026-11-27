@@ -91,7 +91,7 @@ CI 架构门禁：层边界、分形文档、PyPI wheel 打包不变量、tool r
 | `test_file_tools_take_no_command_parameters.py` | Gate | 三个文件工具（read / write / edit）的参数 schema（含嵌套对象与 `$defs`）里不得出现名字以 `command` / `cmd` / `script` 收尾的参数：权限引擎按工具类别评级而不读参数，文件工具若带一个命令参数，shell 文本就会在文件工具的评级下绕过 bash 工具的审批、代码执行策略与预检；文件工具需要执行的命令走 bash 工具；按名字拦截，是绊线而不是证明；自带检测器正反例 | — |
 | `test_framework_public_surface.py` | Gate | AST：`src/` 只经框架公开的面接触 LangChain / LangGraph——① 禁止就地改写框架对象（在非自有对象上替换框架方法、改写框架类的属性、重赋 `__class__`），须改用中间件钩子或 `request.override(...)`；② 导入的名字须列在其模块的 `__all__` 里，无 `__all__` 的模块须登记在 `ACCEPTED_MODULES_WITHOUT_ALL`（登记项无人导入或模块已有 `__all__` 即报错）；③ 禁止读 `__pregel*` / `__langgraph*` 私有配置键，暂无公开替代者登记在 `KNOWN_PRIVATE_KEYS`（读取消失而条目仍在即报错）；不覆盖框架递给我们的对象上的属性访问与运行时拼出的键；自带三类检测器正反例，防退化为 no-op | — |
 | `test_framework_dependency_bounds.py` | Gate | `pyproject.toml` 里每个 LangChain / LangGraph 系依赖须同时声明 `>=` 下限与 `<` 上限（每周金丝雀安装的正是这些声明）；自带规则正反例 | — |
-| `test_unicode_normalize_guard.py` | Gate | AST：`src/` 内除 `utils/unicode_normalize.py` 外不得使用 `unicodedata.normalize`（含模块别名与按名导入）——它对一长串连续的组合符号做二次方的排序，几万个叠加符号就能让解释器停几秒；一律改走 `normalize`（先把文本转成 Stream-Safe 格式再规整）；自带检测器正反例 | — |
+| `test_unicode_normalize_guard.py` | Gate | AST：`src/` 内除 `utils/unicode_normalize.py` 外不得使用 `unicodedata.normalize`（含模块别名与按名导入）——它在 CPython 3.11.15 与 3.13.13 上对一长串连续的组合符号做二次方的排序，几万个叠加符号就能让解释器停几秒（3.13.15 不会）；一律改走 `normalize`（先把文本转成 Stream-Safe 格式再规整）；自带检测器正反例 | — |
 
 ## 运行
 

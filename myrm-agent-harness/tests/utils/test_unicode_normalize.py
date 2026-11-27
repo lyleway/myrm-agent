@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import random
 import sys
-import time
 import unicodedata
-from collections.abc import Callable
 from functools import cache, partial
 
 import pytest
@@ -233,20 +231,3 @@ class TestNormalize:
 
         assert len(longest) == 1
         assert longest[0] <= _LIMIT
-
-    def test_hostile_marks_cost_a_fraction_of_the_plain_normalization(self) -> None:
-        text = "a" + "\u0301\u0316" * 10_000
-
-        def cpu(function: Callable[[], str]) -> float:
-            best = float("inf")
-            for _ in range(3):
-                started = time.process_time()
-                function()
-                best = min(best, time.process_time() - started)
-            return best
-
-        plain = cpu(lambda: unicodedata.normalize("NFKC", text))
-        guarded = cpu(lambda: normalize("NFKC", text))
-
-        # Measured 109 ms against 2.8 ms; a guard that does nothing leaves the ratio at 1.
-        assert guarded < plain / 10

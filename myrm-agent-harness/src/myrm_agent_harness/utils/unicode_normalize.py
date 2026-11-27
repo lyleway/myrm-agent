@@ -10,10 +10,11 @@
 
 [POS]
 The one entry to Unicode normalization for text that can come from a remote page, a file, a model or a user.
-``unicodedata.normalize`` sorts every run of combining marks by combining class with a quadratic sort: 20,000 marks in
-alternating classes cost about 0.1 s and 40,000 about 0.4 s of CPU with the interpreter lock held. UAX #15 section 13
-answers that with the Stream-Safe Text Format, at most 30 consecutive non-starters in the NFKD, and ``stream_safe``
-produces it. Natural text never comes near that limit, so it passes through unchanged; only text built to exceed it
+``unicodedata.normalize`` of CPython 3.11.15 and 3.13.13 sorts every run of combining marks by combining class with a
+quadratic sort: 20,000 marks in alternating classes cost about 0.1 s and 40,000 about 0.4 s of CPU with the interpreter
+lock held (3.13.15 sorts the 20,000 in 0.5 ms). UAX #15 section 13 answers that with the Stream-Safe Text Format, at
+most 30 consecutive non-starters in the NFKD, and ``stream_safe`` produces it, so the cost is linear on every
+interpreter. Natural text never comes near that limit, so it passes through unchanged; only text built to exceed it
 differs.
 """
 
