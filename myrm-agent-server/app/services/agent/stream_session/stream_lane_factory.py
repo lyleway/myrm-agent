@@ -7,7 +7,7 @@
 - myrm_agent_harness.utils.runtime.cancellation::CancellationToken (POS: request-level cancellation)
 
 [OUTPUT]
-- create_dynamic_workflow_stream: Dynamic Workflow SSE lane; closes the agent it built (executor and shell included) when the stream ends
+- create_dynamic_workflow_stream: Dynamic Workflow SSE lane; closes the agent it built (executor and shell included) on every exit after the build
 - create_fast_lane_stream: Fast Search SSE lane
 - archive_restore_error_response: 422 response for an invalid archive restore request
 - _inject_wu_consumed: platform work-unit accounting on MESSAGE_END
@@ -75,7 +75,8 @@ async def create_dynamic_workflow_stream(
     Creates a full GeneralAgent (same as the normal agent path) so that
     sub-agents spawned by the DW engine inherit the complete tool registry,
     catalog, budget, and security policies. The agent serves this one message,
-    so the stream's end closes it, however the stream ends.
+    so every exit after it is built closes it: the stream's end, a failure while
+    the run is prepared, a consumer that stops, a cancelled task.
     """
     from myrm_agent_harness.agent.dynamic_workflow import (
         WorkflowPlanReview,
@@ -139,92 +140,92 @@ async def create_dynamic_workflow_stream(
     from app.ai_agents.general_agent.factory import build_general_agent
 
     agent_wrapper = AgentFactory.create_general_agent(params)
-    effective_chat_id = params.chat_id or agent_wrapper.chat_id or "default"
-    base_agent = await build_general_agent(agent_wrapper, effective_chat_id)
-
-    history = await convert_chat_history(params.chat_history) if params.chat_history else []
-
-    catalog = DatabaseSubagentCatalog(
-        bound_agent_ids=list(params.subagent_ids or []),
-        incognito_mode=params.incognito_mode,
-    )
-
-    raw_q = params.query
-    if isinstance(raw_q, str):
-        text_query = raw_q
-    elif isinstance(raw_q, list):
-        text_query = _extract_text_from_query(cast(MultimodalQuery, raw_q))
-    else:
-        text_query = str(raw_q)
-
-    init_token_tracker()
-
-    async def _dw_approval_gate(review: WorkflowPlanReview) -> bool:
-        from app.services.agent.streaming import PhaseWaiter
-
-        plan_key = f"plan:{message_id}"
-        waiter = PhaseWaiter.register(plan_key)
-        logger.info(
-            "Dynamic Workflow plan confirmation waiting: message_id=%s spawn_count=%s",
-            message_id,
-            review.spawn_count,
-        )
-        answer = await waiter.wait_for_answer()
-        if answer is False:
-            return False
-        if answer is None:
-            return False
-        return True
-
-    async def _auto_approve_gate(_review: WorkflowPlanReview) -> bool:
-        return True
-
-    approval_gate = _auto_approve_gate if unattended else _dw_approval_gate
-
-    async def _dw_ask_gate(
-        question: str,
-        options: list[str],
-        timeout_seconds: int,
-        default_action: str,
-    ) -> str | None:
-        from app.services.agent.streaming import PhaseWaiter
-
-        if cancel_token is not None and cancel_token.is_cancelled:
-            logger.info(
-                "Dynamic Workflow human_ask cancelled before wait: message_id=%s",
-                message_id,
-            )
-            return default_action or None
-
-        ask_key = f"human_gate:{message_id}"
-        waiter = PhaseWaiter.register(ask_key)
-        logger.info(
-            "Dynamic Workflow mid-run human_ask waiting: message_id=%s question=%s",
-            message_id,
-            question[:60],
-        )
-        raw_answer = await waiter.wait_for_answer()
-        if raw_answer is None:
-            return default_action or None
-        if isinstance(raw_answer, str):
-            return raw_answer
-        return str(raw_answer)
-
-    async def _auto_ask_gate(
-        _question: str,
-        _options: list[str],
-        _timeout_seconds: int,
-        default_action: str,
-    ) -> str | None:
-        return default_action or None
-
-    ask_gate = _auto_ask_gate if unattended else _dw_ask_gate
-
-    from app.services.context.context_assembly import ContextAssemblyService
-
-    harness_root = ContextAssemblyService.build_facade(ensure_layout=False).harness_path()
-
     try:
+        effective_chat_id = params.chat_id or agent_wrapper.chat_id or "default"
+        base_agent = await build_general_agent(agent_wrapper, effective_chat_id)
+
+        history = await convert_chat_history(params.chat_history) if params.chat_history else []
+
+        catalog = DatabaseSubagentCatalog(
+            bound_agent_ids=list(params.subagent_ids or []),
+            incognito_mode=params.incognito_mode,
+        )
+
+        raw_q = params.query
+        if isinstance(raw_q, str):
+            text_query = raw_q
+        elif isinstance(raw_q, list):
+            text_query = _extract_text_from_query(cast(MultimodalQuery, raw_q))
+        else:
+            text_query = str(raw_q)
+
+        init_token_tracker()
+
+        async def _dw_approval_gate(review: WorkflowPlanReview) -> bool:
+            from app.services.agent.streaming import PhaseWaiter
+
+            plan_key = f"plan:{message_id}"
+            waiter = PhaseWaiter.register(plan_key)
+            logger.info(
+                "Dynamic Workflow plan confirmation waiting: message_id=%s spawn_count=%s",
+                message_id,
+                review.spawn_count,
+            )
+            answer = await waiter.wait_for_answer()
+            if answer is False:
+                return False
+            if answer is None:
+                return False
+            return True
+
+        async def _auto_approve_gate(_review: WorkflowPlanReview) -> bool:
+            return True
+
+        approval_gate = _auto_approve_gate if unattended else _dw_approval_gate
+
+        async def _dw_ask_gate(
+            question: str,
+            options: list[str],
+            timeout_seconds: int,
+            default_action: str,
+        ) -> str | None:
+            from app.services.agent.streaming import PhaseWaiter
+
+            if cancel_token is not None and cancel_token.is_cancelled:
+                logger.info(
+                    "Dynamic Workflow human_ask cancelled before wait: message_id=%s",
+                    message_id,
+                )
+                return default_action or None
+
+            ask_key = f"human_gate:{message_id}"
+            waiter = PhaseWaiter.register(ask_key)
+            logger.info(
+                "Dynamic Workflow mid-run human_ask waiting: message_id=%s question=%s",
+                message_id,
+                question[:60],
+            )
+            raw_answer = await waiter.wait_for_answer()
+            if raw_answer is None:
+                return default_action or None
+            if isinstance(raw_answer, str):
+                return raw_answer
+            return str(raw_answer)
+
+        async def _auto_ask_gate(
+            _question: str,
+            _options: list[str],
+            _timeout_seconds: int,
+            default_action: str,
+        ) -> str | None:
+            return default_action or None
+
+        ask_gate = _auto_ask_gate if unattended else _dw_ask_gate
+
+        from app.services.context.context_assembly import ContextAssemblyService
+
+        harness_root = ContextAssemblyService.build_facade(ensure_layout=False).harness_path()
+
         async for chunk in run_dynamic_workflow_stream(
             parent_agent=base_agent,
             query=text_query,

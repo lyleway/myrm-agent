@@ -1,4 +1,4 @@
-"""The Dynamic Workflow lane closes the agent it built when its stream ends, however it ends.
+"""The Dynamic Workflow lane closes the agent it built on every exit after the factory returned it.
 
 The lane builds a full GeneralAgent for one message and hands its harness agent to the workflow as the parent of the
 sub-agents it spawns. The sub-agents share that agent's executor, and the lane never puts the agent in a pool, so the
@@ -46,12 +46,18 @@ async def _two_status_chunks(**_kwargs: object) -> Chunks:
 
 
 @contextmanager
-def _lane(workflow: Callable[..., Chunks], *, closing: AsyncMock | None = None) -> Iterator[MagicMock]:
+def _lane(
+    workflow: Callable[..., Chunks],
+    *,
+    closing: AsyncMock | None = None,
+    build: AsyncMock | None = None,
+    harness_error: Exception | None = None,
+) -> Iterator[MagicMock]:
     """The lane with its collaborators replaced; yields the agent wrapper whose close the lane must call."""
     wrapper = MagicMock(chat_id="chat-dw", close=closing or AsyncMock())
     with (
         patch(f"{_LANE}.AgentFactory") as factory,
-        patch("app.ai_agents.general_agent.factory.build_general_agent", new=AsyncMock(return_value=object())),
+        patch("app.ai_agents.general_agent.factory.build_general_agent", new=build or AsyncMock(return_value=object())),
         patch("app.ai_agents.subagent_catalog.DatabaseSubagentCatalog"),
         patch("app.services.budget.enforcer.should_block_execution", new=AsyncMock(return_value=False)),
         patch("app.services.budget.enforcer.reset_session_budget"),
@@ -60,6 +66,8 @@ def _lane(workflow: Callable[..., Chunks], *, closing: AsyncMock | None = None) 
     ):
         factory.create_general_agent.return_value = wrapper
         assembly.build_facade.return_value.harness_path.return_value = Path("harness")
+        if harness_error is not None:
+            assembly.build_facade.side_effect = harness_error
         yield wrapper
 
 
@@ -80,6 +88,29 @@ async def test_the_lane_closes_its_agent_when_the_workflow_fails() -> None:
         raise RuntimeError("workflow broke")
 
     with _lane(failing) as wrapper, pytest.raises(RuntimeError, match="workflow broke"):
+        async for _ in create_dynamic_workflow_stream(_params(), None):
+            pass
+
+    wrapper.close.assert_awaited_once()
+
+
+async def test_the_lane_closes_its_agent_when_building_its_runtime_fails() -> None:
+    """The agent exists as soon as the factory returns it, so a failure before the stream starts still closes it."""
+    build = AsyncMock(side_effect=RuntimeError("runtime broke"))
+
+    with _lane(_two_status_chunks, build=build) as wrapper, pytest.raises(RuntimeError, match="runtime broke"):
+        async for _ in create_dynamic_workflow_stream(_params(), None):
+            pass
+
+    wrapper.close.assert_awaited_once()
+
+
+async def test_the_lane_closes_its_agent_when_the_last_preparation_step_fails() -> None:
+    """The last step before the workflow starts sits furthest from the agent's creation: it is covered too."""
+    with (
+        _lane(_two_status_chunks, harness_error=OSError("no harness directory")) as wrapper,
+        pytest.raises(OSError, match="no harness directory"),
+    ):
         async for _ in create_dynamic_workflow_stream(_params(), None):
             pass
 
