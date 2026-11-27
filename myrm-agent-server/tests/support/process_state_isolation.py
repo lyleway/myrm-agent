@@ -7,6 +7,7 @@ the suite has imported the singleton's module.
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Iterator
 from unittest.mock import patch
@@ -103,3 +104,36 @@ def _isolate_settings_singleton() -> Iterator[None]:
     module.get_settings.cache_clear()
     with patch.object(module, "AppSettings", return_value=module.settings):
         module.get_settings()
+
+
+def forget_background_job_store() -> None:
+    """Unbind the process-wide background job ledger, so the next ask binds it again from the run it comes from."""
+    module = sys.modules.get("myrm_agent_harness.agent.meta_tools.bash._background.job_store")
+    if module is not None:
+        module.reset_background_job_store_for_tests()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_background_job_store() -> Iterator[None]:
+    """The first ask for the job ledger binds it, for the rest of the process, to the workspace of the run that asked,
+    and the jobs that run started stay in it: a later test that lists the jobs of its own registry then reads the
+    rows of tests that ran before it."""
+    yield
+    forget_background_job_store()
+
+
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_uvicorn_loggers() -> Iterator[None]:
+    """``uvicorn.Config`` installs uvicorn's own logging config unless it is given ``log_config=None``: handlers that
+    print to stderr without the redaction of the root handler, and ``propagate = False``. A test that starts uvicorn
+    would leave that for the rest of the process, and a line any later test logs through uvicorn would skip the
+    application's logging setup."""
+    saved = [(logger, logger.handlers[:], logger.level, logger.propagate) for logger in map(logging.getLogger, _UVICORN_LOGGERS)]
+    yield
+    for logger, handlers, level, propagate in saved:
+        logger.handlers[:] = handlers
+        logger.setLevel(level)
+        logger.propagate = propagate
