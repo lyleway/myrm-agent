@@ -155,10 +155,12 @@ async def test_reading_the_unfinished_line_while_the_reader_writes_never_returns
     pipe = FakeOutputPipe(hold_open=True)
     await rig.start(72009, pipe)
     done = threading.Event()
+    polling = threading.Event()
     seen: set[str] = set()
     failures: list[BaseException] = []
 
     def _poll() -> None:
+        polling.set()
         while not done.is_set():
             try:
                 text = rig.registry.get_partial_line(72009)
@@ -169,10 +171,14 @@ async def test_reading_the_unfinished_line_while_the_reader_writes_never_returns
                 seen.add(text)
 
     poller = asyncio.get_running_loop().run_in_executor(None, _poll)
+    # A busy runner starts the thread late: the 3000 writes would be over before the first read, and the test would
+    # then check nothing. The writes begin once the thread polls, and end once it has read a line.
+    await wait_until(polling.is_set, timeout_seconds=30, what="the polling thread to start")
     for number in range(3000):
         pipe.feed(f"{number:06d}\r".encode())
         if number % 20 == 0:
             await asyncio.sleep(0)
+    await wait_until(lambda: bool(seen or failures), timeout_seconds=30, what="the polling thread to read a line")
     done.set()
     await poller
 
