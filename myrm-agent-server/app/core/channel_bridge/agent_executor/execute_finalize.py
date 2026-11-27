@@ -2,7 +2,7 @@
 
 [INPUT]
 - app.channels.types::InboundMessage, MediaAttachment, OutboundMessage, SessionPolicy (POS: Channel message types.)
-- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was written into)
+- app.channels.types::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was produced in)
 - app.core.channel_bridge.executor_helpers::StreamAccumulator, persist_assistant_message (POS: Stream accumulation for channel turns.)
 - agent_executor.deliverable::build_artifact_deep_links (POS: Artifact delivery helpers for ChannelAgentExecutor.)
 - agent_executor.deliverable::append_deliverable_notes, collect_deliverable_paths_from_text, resolve_chat_workspace_root (POS: Channel deliverable attachment mode. Complements artifact event collection in deliverable.deep_links.collect_channel_artifacts.)
