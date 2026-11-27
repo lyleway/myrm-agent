@@ -46,6 +46,7 @@ the rule lists have exactly one home.
 - `container_relative`, the alias reading itself: `CodeExecutor.resolve_path` in `toolkits/code_execution/executors/base.py`, `WorkspacePathResolver.to_local_path` / `is_container_path`, `toolkits/code_execution/saved_script.py`, and the observers `file_ops/observers/format_observer.py` and `artifact_observer.py`
 - `core/security/types/paths.py` (`PathPolicy`), `core/security/privacy/ladder.py`, `core/security/guards/privacy_ladder.py`
 - `toolkits/browser/session/download/storage.py` — `open_directory_beneath` for every file a browser download keeps in the workspace
+- `myrm-agent-server/app/ai_agents/media_tools/workspace_export.py` — `open_directory_beneath` for the folder that holds the workspace copies of generated media; its `.gitignore` and temporary files are created through the opened folder
 - `toolkits/` — `code_execution/`, `storage/`, `filesystem_suggest/`, `wiki/`, `acp/`
 
 Both protection layers resolve patterns through `pattern.py`, so the pre-write guard and

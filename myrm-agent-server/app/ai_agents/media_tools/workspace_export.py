@@ -15,8 +15,11 @@
 The output counterpart of ``_uploaded/``: inputs reach the workspace as files, generated media would otherwise exist only
 as ``media://`` references that code tools cannot open. A copy (never a link) is made on demand, so editing it in place
 cannot reach the media library's original, and a ``.gitignore`` keeps the copies out of the user's repository. The
-server writes into a folder the agent's sandbox can also write, so the folder is opened once without following a link
-and every write goes through that open folder: swapping its name for a link afterwards redirects nothing.
+server writes into a folder the agent's sandbox can also write, so the folder is opened once without following a link,
+and the folder's ``.gitignore`` and every temporary file are created through that open folder: swapping its name for a
+link afterwards redirects none of them. Names are looked up again only to see whether a copy exists, to publish a copy
+by rename and to remove a folder left empty after a failure; a swapped folder holds no temporary file for the rename,
+so nothing is published.
 """
 
 from __future__ import annotations
@@ -59,22 +62,41 @@ def _open_folder(workspace_root: Path) -> ConfinedDirectory:
     """Open the folder of the copies, creating it with its git-ignore rule when it is absent; the caller closes it.
 
     A link in place of the folder is refused. A folder that exists is left alone, and one that could not be given
-    its ignore rule is not left behind.
+    its ignore rule is removed again unless something else lives in it.
     """
     try:
         return open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,), create=False)
     except FileNotFoundError:
-        pass  # absent: this call is its creator
+        pass  # absent: created below, unless a concurrent call gets there first
     folder = open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,))
     try:
-        # ``FileExistsError``: a concurrent call created the folder and its rule first.
-        with contextlib.suppress(FileExistsError), os.fdopen(folder.create_new(_GITIGNORE), "wb") as rule:
-            rule.write(_IGNORE_EVERYTHING)
+        _write_ignore_rule(folder)
     except OSError:
         folder.close()
-        shutil.rmtree(folder.path, ignore_errors=True)
+        # Not recursive: opening the folder cannot tell whether this call created it, and a concurrent call may have
+        # put its copies there already.
+        with contextlib.suppress(OSError):
+            os.rmdir(folder.path)
         raise
     return folder
+
+
+def _write_ignore_rule(folder: ConfinedDirectory) -> None:
+    """Give ``folder`` its ``.gitignore``.
+
+    A rule that a concurrent call wrote first stays. One that this call created and could not finish is removed.
+    """
+    try:
+        descriptor = folder.create_new(_GITIGNORE)
+    except FileExistsError:
+        return
+    try:
+        with os.fdopen(descriptor, "wb") as rule:
+            rule.write(_IGNORE_EVERYTHING)
+    except OSError:
+        with contextlib.suppress(OSError):
+            folder.unlink(_GITIGNORE)
+        raise
 
 
 def _copy_into_workspace(source: Path, workspace_root: Path, file_name: str) -> int | None:

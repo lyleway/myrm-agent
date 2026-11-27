@@ -207,6 +207,44 @@ class TestTheFolder:
         assert "No space left on device" in str(answer["workspace_files_error"])
         assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
 
+    async def test_a_rule_it_could_not_finish_is_removed_with_its_folder(self, library: MediaLibraryEnv, workspace: Path) -> None:
+        record = await library.store(_PNG)
+        create_new = ConfinedDirectory.create_new
+
+        def create_a_rule_that_refuses_writes(folder: ConfinedDirectory, name: str) -> int:
+            if name != ".gitignore":
+                return create_new(folder, name)
+            os.close(create_new(folder, name))  # the rule exists now, but the descriptor this call is handed cannot write
+            return os.open(folder.path / name, os.O_RDONLY)
+
+        with patch.object(ConfinedDirectory, "create_new", create_a_rule_that_refuses_writes):
+            answer = await _exporter(workspace).complete(_image_result(record.id))
+
+        assert "workspace_files" not in answer
+        assert "the copy could not be written" in str(answer["workspace_files_error"])
+        assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
+
+    async def test_what_a_concurrent_call_left_in_the_folder_stays_when_the_rule_cannot_be_written(
+        self, library: MediaLibraryEnv, workspace: Path
+    ) -> None:
+        record = await library.store(_PNG)
+        create_new = ConfinedDirectory.create_new
+
+        def run_out_of_descriptors_after_the_other_call_finished(folder: ConfinedDirectory, name: str) -> int:
+            if name != ".gitignore":
+                return create_new(folder, name)
+            (folder.path / name).write_bytes(b"*\n")  # the other call created the folder and its rule ...
+            (folder.path / "media_other.png").write_bytes(_PNG)  # ... and has finished its copy
+            raise OSError(errno.EMFILE, "Too many open files")
+
+        with patch.object(ConfinedDirectory, "create_new", run_out_of_descriptors_after_the_other_call_finished):
+            answer = await _exporter(workspace).complete(_image_result(record.id))
+
+        assert "Too many open files" in str(answer["workspace_files_error"])
+        folder = workspace / WORKSPACE_MEDIA_DIR
+        assert sorted(entry.name for entry in folder.iterdir()) == [".gitignore", "media_other.png"]
+        assert (folder / "media_other.png").read_bytes() == _PNG
+
     async def test_a_rule_that_a_concurrent_call_wrote_first_is_kept(self, library: MediaLibraryEnv, workspace: Path) -> None:
         record = await library.store(_PNG)
         create_new = ConfinedDirectory.create_new
