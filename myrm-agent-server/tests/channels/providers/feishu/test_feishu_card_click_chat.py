@@ -1,7 +1,7 @@
 """A Feishu card click carries the kind of the chat it happened in, taken from what the chat's typed messages reported.
 
 The card callback names its chat (``open_chat_id``) but not whether it is a group, so the channel remembers the group
-chats its typed messages came from. A chat it has not seen a message from is reported as a direct chat.
+chats its typed messages came from. A chat the memory does not hold (never seen, or evicted) is reported as a direct chat.
 """
 
 from __future__ import annotations

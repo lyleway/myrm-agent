@@ -49,13 +49,13 @@ button click — so the three cannot disagree. It judges the answer against the 
 The chat counts as a group when the request or the answer says so, because a flag is only evidence when it says
 group. A channel that cannot tell reports a direct chat, so the message that answers a request asked in a group
 must not turn that group into a DM. A button click's chat kind depends on the channel: Telegram takes it from the
-chat of the message the button sits on; a Feishu card callback, which names its chat but not its kind, takes it
-from the group chats that chat's typed messages were seen in (`providers/feishu/group_chats.py`; a chat none has
-been seen in counts as direct); Slack always says group; LINE reports `is_group` but is not a mention; Teams names
-no kind and counts as direct. A click reported as a group is a group message like a typed one, sharing the group's
-session and admission policy and, except LINE's, counting as addressing the bot (`mentioned`), so a request it
-started is a group request that another member's click cannot take. The answer is not judged against the chat's
-registry entry (`_ActiveTask.requester_id`): a delegated run asks while another member's turn can hold it.
+chat of the message the button sits on; a Feishu card callback, which names its chat but not its kind, takes it from
+the group chats that chat's typed messages were seen in (`providers/feishu/group_chats.py`, a bounded memory; a chat it
+does not hold, never seen or evicted, counts as direct); Slack always says group; LINE reports `is_group` but is not a
+mention; Teams names no kind and counts as direct. A click reported as a group is a group message like a typed one,
+sharing the group's session and admission policy and, except LINE's, counting as addressing the bot (`mentioned`), so a
+request it started is a group request that another member's click cannot take. The answer is not judged against the
+chat's registry entry (`_ActiveTask.requester_id`): a delegated run asks while another member's turn can hold it.
 
 The question is asked at the moment the request is taken. `_handle_approval_command` asks it after the last
 `await` of the handler (the risk screening of a `/deny <reason>`) and directly before `PendingApprovals.pop`.
