@@ -20,7 +20,12 @@ import { AgentEventType } from '../../types/agentStream/part1';
 import type { StatusStreamEvent } from '../../types/agentStream/part2';
 import * as H from './handlerDeps';
 import { LOOP_GUARD_BREAK_TOAST_KEY, isLoopGuardStep, loopGuardProgressStepKey } from './loopGuardStepKey';
-import { formatCompactionItemText, formatMoaSkipReason, formatMoaTriggerReason } from './statusStreamItemText';
+import {
+  formatCompactionItemText,
+  formatMoaSkipReason,
+  formatMoaTriggerReason,
+  formatTokensSaved,
+} from './statusStreamItemText';
 
 function requireStatusStreamEvent(event: StreamCtx['data']): StatusStreamEvent {
   if (event.type !== AgentEventType.STATUS) {
@@ -91,7 +96,10 @@ export function isStatusProgressStep(stepKey: string | undefined): boolean {
   return stepKey !== undefined && PROGRESS_STEP_KEYS.has(stepKey);
 }
 
-/** Recovery STATUS can arrive before the first MESSAGE chunk; ensure a placeholder exists. */
+/**
+ * Recovery STATUS can arrive before the first MESSAGE chunk; ensure a placeholder exists. `context_compaction` is one of
+ * them: the pre-reply gate compacts a long-quiet chat before the turn sends anything else, so no reply exists yet.
+ */
 function isEarlyRecoveryProgressStep(stepKey: string): boolean {
   return (
     stepKey === 'model_failover' ||
@@ -102,6 +110,7 @@ function isEarlyRecoveryProgressStep(stepKey: string): boolean {
     stepKey === 'empty_response_recovery' ||
     stepKey === 'tool_call_retry' ||
     stepKey === 'vision_fallback_recovery' ||
+    stepKey === 'context_compaction' ||
     stepKey === 'context_preflight_compact' ||
     stepKey === 'context_preflight_truncation' ||
     stepKey === 'context_presumed_overflow' ||
@@ -150,7 +159,7 @@ export async function applyStatusProgressStep(ctx: StreamCtx, stepKey: string): 
       : stepKey === 'context_compaction' && data.data?.phase
         ? formatCompactionItemText(data.data as Record<string, unknown>)
         : (stepKey === 'memory_archived' || stepKey === 'context_pruned') && data.tokens_saved
-          ? `(Tokens saved: ${data.tokens_saved})`
+          ? formatTokensSaved(data.tokens_saved)
           : (stepKey === 'context_preflight_compact' ||
                 stepKey === 'context_preflight_truncation' ||
                 stepKey === 'context_presumed_overflow') &&

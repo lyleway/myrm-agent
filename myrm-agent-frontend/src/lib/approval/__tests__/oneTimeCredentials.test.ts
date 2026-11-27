@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe('BLOCKED_CREDENTIAL_KEYS', () => {
-  it('lists every name the server refuses (harness validate_credential_key)', () => {
+  it('pins the system names the card pre-checks (the server refuses a longer list and stays the authority)', () => {
     expect([...BLOCKED_CREDENTIAL_KEYS].sort()).toEqual(
       [
         'BASH_ENV',

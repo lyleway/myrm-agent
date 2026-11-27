@@ -27,11 +27,12 @@ Protocol (JSON text frames + binary audio frames):
 
 [INPUT]
 - app.api.stt.ws_stream: Deepgram proxy pattern (reused)
+- app.api.voice.ws_frames::parse_session_frame (POS: validated config / control frames from the browser)
 - app.api.voice.agent_bridge::VoiceAgentBridge (POS: Agent execution bridge for voice)
 - app.core.infra.ws_origin_guard::verify_ws_origin (POS: WebSocket Origin guard)
 - app.core.channel_bridge.config_loader (POS: user config loader)
 - app.channels.voice.tts::synthesize_stream (POS: streaming TTS)
-- app.channels.voice.stt::transcribe (POS: batch STT fallback)
+- app.channels.voice.stt::transcribe / deepgram_stream_url (POS: batch STT fallback; Deepgram stream URL)
 - app.core.utils.session_id::is_safe_session_id (POS: safe chat_id whitelist guard)
 
 [OUTPUT]
@@ -48,15 +49,17 @@ import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.api.dependencies import verify_voice_enabled
+from app.api.voice.ws_frames import parse_session_frame
 from app.core.infra.ws_origin_guard import verify_ws_origin
 from app.core.utils.session_id import is_safe_session_id
 
 if TYPE_CHECKING:
+    from websockets import ClientConnection
+
     from app.api.voice.agent_bridge import VoiceAgentBridge
     from app.channels.types import VoiceConfig
 
@@ -64,7 +67,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(verify_voice_enabled)])
 
-_DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
 _STREAMING_PROVIDERS = frozenset({"deepgram"})
 
 _WS_CLOSE_NORMAL = 1000
@@ -81,13 +83,14 @@ async def ws_voice_session(ws: WebSocket) -> None:
     await ws.accept()
 
     try:
-        config_msg = await asyncio.wait_for(ws.receive_text(), timeout=10.0)
-        client_config = json.loads(config_msg)
-    except (asyncio.TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+        config = parse_session_frame(await asyncio.wait_for(ws.receive_text(), timeout=10.0))
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        config = None
+    if config is None:
         await _close_ws(ws, _WS_CLOSE_ERROR, "Invalid config")
         return
 
-    if client_config.get("type") != "config":
+    if config.type != "config":
         await _close_ws(ws, _WS_CLOSE_ERROR, "First message must be type:config")
         return
 
@@ -95,37 +98,30 @@ async def ws_voice_session(ws: WebSocket) -> None:
     if not voice_config:
         return
 
-    mode = client_config.get("mode", "audio_only")
-
-    chat_id = client_config.get("chat_id")
-    if chat_id and not is_safe_session_id(chat_id):
+    if config.chat_id and not is_safe_session_id(config.chat_id):
         await _close_ws(ws, _WS_CLOSE_ERROR, "Invalid chat_id")
         return
 
-    if mode == "agent_bridge":
+    if config.mode == "agent_bridge":
         from app.api.voice.agent_bridge import VoiceAgentBridge
 
         ws_send_lock = asyncio.Lock()
         bridge = VoiceAgentBridge(
             _ws=ws,
             _voice_config=voice_config,
-            _agent_id=client_config.get("agent_id"),
-            _chat_id=client_config.get("chat_id"),
+            _agent_id=config.agent_id,
+            _chat_id=config.chat_id,
             _ws_send_lock=ws_send_lock,
         )
         session = _VoiceSession(
             ws=ws,
             voice_config=voice_config,
-            keyterms=client_config.get("keyterms", []),
+            keyterms=config.keyterms,
             agent_bridge=bridge,
             ws_send_lock=ws_send_lock,
         )
     else:
-        session = _VoiceSession(
-            ws=ws,
-            voice_config=voice_config,
-            keyterms=client_config.get("keyterms", []),
-        )
+        session = _VoiceSession(ws=ws, voice_config=voice_config, keyterms=config.keyterms)
 
     await session.run()
 
@@ -184,23 +180,9 @@ class _VoiceSession:
     # ── STT: Streaming via Deepgram ──────────────────────────────────────
 
     async def _run_streaming_stt(self) -> None:
-        params = [
-            ("model", self._voice_config.stt_model or "nova-3"),
-            ("smart_format", "true"),
-            ("interim_results", "true"),
-            ("endpointing", "300"),
-            ("encoding", "opus"),
-            ("sample_rate", "48000"),
-        ]
-        if self._voice_config.stt_language:
-            params.append(("language", self._voice_config.stt_language))
-        for term in self._keyterms:
-            stripped = term.strip()
-            if stripped:
-                params.append(("keywords", f"{stripped}:2"))
+        from app.channels.voice.stt import deepgram_stream_url
 
-        query = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in params)
-        dg_url = f"{_DEEPGRAM_WS_URL}?{query}"
+        dg_url = deepgram_stream_url(self._voice_config.stt_model, self._voice_config.stt_language, self._keyterms)
 
         try:
             import websockets
@@ -232,7 +214,7 @@ class _VoiceSession:
             logger.exception("Deepgram WebSocket connection failed")
             await self._send_json({"type": "error", "message": "STT connection failed"})
 
-    async def _relay_client_audio(self, dg_ws: object) -> None:
+    async def _relay_client_audio(self, dg_ws: ClientConnection) -> None:
         """Forward audio from browser to Deepgram, handle control messages."""
         try:
             while not self._closed:
@@ -262,28 +244,24 @@ class _VoiceSession:
                 pass
 
     def _handle_text_message(self, text: str) -> None:
-        """Parse and dispatch incoming JSON control messages."""
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
+        """Dispatch an incoming control message; a message that is not a valid frame is ignored."""
+        frame = parse_session_frame(text)
+        if frame is None:
             return
 
-        msg_type = parsed.get("type", "")
-
-        if msg_type == "close":
+        if frame.type == "close":
             self._closed = True
 
-        elif msg_type == "tts":
-            tts_text = parsed.get("text", "").strip()
-            if tts_text:
+        elif frame.type == "tts":
+            if tts_text := frame.text.strip():
                 self._tts_queue.put_nowait(tts_text)
 
-        elif msg_type == "tts_cancel":
+        elif frame.type == "tts_cancel":
             self._tts_cancel_event.set()
             if self._agent_bridge:
                 self._agent_bridge.cancel_tts()
 
-    async def _relay_deepgram_transcripts(self, dg_ws: object) -> None:
+    async def _relay_deepgram_transcripts(self, dg_ws: ClientConnection) -> None:
         """Relay Deepgram transcription results to the browser."""
         try:
             async for raw in dg_ws:
@@ -396,12 +374,9 @@ class _VoiceSession:
                         self._handle_text_message(msg["text"])
                         if self._closed:
                             return
-                        try:
-                            parsed = json.loads(msg["text"])
-                            if parsed.get("type") == "end_utterance":
-                                break
-                        except json.JSONDecodeError:
-                            pass
+                        frame = parse_session_frame(msg["text"])
+                        if frame is not None and frame.type == "end_utterance":
+                            break
 
                 if not chunks:
                     continue

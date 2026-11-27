@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(verify_voice_enabled)])
 
 _MAX_TEXT_LENGTH = 10000
-_VALID_PROVIDERS = frozenset({"openai", "elevenlabs", "fish_audio", "minimax", "edge"})
+_VALID_PROVIDERS = frozenset({"elevenlabs", "fish_audio", "minimax", "edge"})
 
 
 class TTSRequest(BaseModel):

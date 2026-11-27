@@ -2,17 +2,20 @@
 
 [INPUT]
 - app.core.web_push.vapid_keys::load_vapid_keys
+- pywebpush::Vapid, WebPushException, webpush (POS: VAPID signing and the encrypted push request)
 - app.database.models::WebPushSubscription
 - app.database.connection::get_session
 - app.core.brand::NOREPLY_EMAIL (POS: the VAPID contact address)
 
 [OUTPUT]
 - WebPushService: subscribe/unsubscribe/broadcast
+- BroadcastResult: what one broadcast reached, with a reason for every subscription it missed
 - get_web_push_service(): singleton accessor
 
 [POS]
 Core Web Push business logic. Decoupled from API layer and event dispatch.
 Uses pywebpush for VAPID-signed push, SQLAlchemy for subscription persistence.
+A push that fails never raises: it comes back as a reason, so callers can tell the user why.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +35,40 @@ from app.core.brand import NOREPLY_EMAIL
 logger = logging.getLogger(__name__)
 
 _GONE_STATUS_CODES = frozenset({404, 410})
+
+# requests treats timeout=None as "wait forever", which would pin an executor thread on a stalled push service.
+_PUSH_REQUEST_TIMEOUT_SECONDS = 10
+
+
+@dataclass(frozen=True, slots=True)
+class BroadcastResult:
+    """What one broadcast reached: ``failures`` holds the reason for each registered subscription it missed."""
+
+    subscriptions: int
+    failures: tuple[str, ...] = ()
+
+    @property
+    def delivered(self) -> int:
+        return self.subscriptions - len(self.failures)
+
+    @property
+    def reasons(self) -> tuple[str, ...]:
+        """The distinct failure reasons, in the order they first occurred."""
+        return tuple(dict.fromkeys(self.failures))
+
+
+def _failure_reason(exc: Exception) -> str:
+    """Why a push failed, worded so it can be shown: the push service's HTTP reply, else the type of the error.
+
+    The error message is left out on purpose: requests puts the whole request URL into it, and a push endpoint URL
+    identifies the subscriber's device.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if not isinstance(status, int):
+        return type(exc).__name__
+    phrase = getattr(response, "reason", None)
+    return f"HTTP {status} {phrase}" if isinstance(phrase, str) and phrase else f"HTTP {status}"
 
 
 class WebPushService:
@@ -121,11 +159,8 @@ class WebPushService:
             logger.info("Web Push subscription removed: %s", endpoint_hash)
         return deleted
 
-    async def broadcast(self, title: str, body: str, url: str = "/") -> int:
-        """Send a push notification to all registered subscriptions.
-
-        Returns the number of successfully delivered pushes.
-        """
+    async def broadcast(self, title: str, body: str, url: str = "/") -> BroadcastResult:
+        """Send a push notification to all registered subscriptions and report what reached them."""
         from app.database.connection import get_session
         from app.database.models import WebPushSubscription
 
@@ -134,7 +169,7 @@ class WebPushService:
             subscriptions = result.scalars().all()
 
         if not subscriptions:
-            return 0
+            return BroadcastResult(subscriptions=0)
 
         payload = json.dumps(
             {"title": title, "body": body, "url": url},
@@ -152,15 +187,19 @@ class WebPushService:
             for sub in subscriptions
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        delivered = sum(1 for r in results if r is True)
+        # Every send settles into None (delivered) or a reason, so gather never has an exception to hand back.
+        send_reasons = await asyncio.gather(*tasks)
+        broadcast_result = BroadcastResult(
+            subscriptions=len(subscriptions),
+            failures=tuple(reason for reason in send_reasons if reason is not None),
+        )
         logger.info(
             "Web Push broadcast: %d/%d delivered (title=%s)",
-            delivered,
-            len(subscriptions),
+            broadcast_result.delivered,
+            broadcast_result.subscriptions,
             title[:50],
         )
-        return delivered
+        return broadcast_result
 
     async def _send_one(
         self,
@@ -169,10 +208,11 @@ class WebPushService:
         auth: str,
         payload: str,
         endpoint_hash: str,
-    ) -> bool:
-        """Send to a single subscription. Auto-cleans gone subscriptions."""
-        private_pem, _ = self._ensure_keys()
+    ) -> str | None:
+        """Send to a single subscription. Auto-cleans gone subscriptions.
 
+        Returns None once the push service accepted the push, otherwise the reason it did not (see ``_failure_reason``).
+        """
         subscription_info: dict[str, Any] = {
             "endpoint": endpoint,
             "keys": {"p256dh": p256dh, "auth": auth},
@@ -182,17 +222,20 @@ class WebPushService:
             "sub": f"mailto:{NOREPLY_EMAIL}",
         }
 
-        from pywebpush import WebPushException, webpush
+        from pywebpush import Vapid, WebPushException, webpush
 
         try:
+            private_pem, _ = self._ensure_keys()
             await asyncio.to_thread(
                 webpush,
                 subscription_info=subscription_info,
                 data=payload,
-                vapid_private_key=private_pem,
+                # pywebpush takes a Vapid object, a key file path or a raw base64 key, but not PEM text.
+                vapid_private_key=Vapid.from_pem(private_pem.encode()),
                 vapid_claims=vapid_claims,
+                timeout=_PUSH_REQUEST_TIMEOUT_SECONDS,
             )
-            return True
+            return None
         except WebPushException as exc:
             resp = getattr(exc, "response", None)
             if resp is not None:
@@ -204,12 +247,12 @@ class WebPushService:
                         endpoint_hash,
                         sc,
                     )
-                    return False
+                    return f"{_failure_reason(exc)} (subscription removed)"
             logger.warning("Web Push failed for %s: %s", endpoint_hash, exc)
-            return False
+            return _failure_reason(exc)
         except Exception as exc:
             logger.warning("Web Push failed for %s: %s", endpoint_hash, exc)
-            return False
+            return _failure_reason(exc)
 
     async def _remove_subscription(self, endpoint_hash: str) -> None:
         """Remove a subscription by its hash (internal cleanup)."""

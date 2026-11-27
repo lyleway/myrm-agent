@@ -8,10 +8,6 @@ that chat to the wrong agent.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Iterator
-from contextlib import asynccontextmanager
-from unittest.mock import patch
-
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,18 +25,11 @@ _NEIGHBOUR_KEYS = {
 }
 
 
+pytestmark = pytest.mark.usefixtures("session_key_reads_db_session")
+
+
 def _message(sender_id: str = "u1") -> InboundMessage:
     return InboundMessage(channel="telegram", sender_id=sender_id, content="hi")
-
-
-@pytest.fixture(autouse=True)
-def _database(db_session: AsyncSession) -> Iterator[None]:
-    @asynccontextmanager
-    async def session() -> AsyncGenerator[AsyncSession, None]:
-        yield db_session
-
-    with patch("app.database.connection.get_session", session):
-        yield
 
 
 @pytest.mark.asyncio

@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { IntentDispatcher } from '@/lib/intent-dispatcher';
 
-const mocks = vi.hoisted(() => ({ toastError: vi.fn() }));
+const mocks = vi.hoisted(() => ({ toastError: vi.fn(), openAppWindow: vi.fn<(id: string, title: string) => Promise<boolean>>() }));
 
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError, success: vi.fn() } }));
+vi.mock('@/lib/desktop/appWindow', () => ({ openAppWindow: mocks.openAppWindow }));
 
 const messages = {
   invalidLink: 'invalid',
@@ -63,6 +64,49 @@ describe('dispatcher navigation intents', () => {
       true,
     );
     expect(pushed).toEqual(['/settings/skills?action=install&url=https%3A%2F%2Fexample.com%2Fskill.json']);
+  });
+
+  describe('opening an installed app', () => {
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    });
+
+    it('opens the app in its own desktop window and leaves the main window alone', async () => {
+      (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+      mocks.openAppWindow.mockResolvedValue(true);
+
+      expect(await dispatcher.dispatch('myrmagent://app/art-1')).toBe(true);
+
+      expect(mocks.openAppWindow).toHaveBeenCalledWith('art-1', '');
+      expect(pushed).toEqual([]);
+    });
+
+    it('falls back to the app page in the main window when the desktop window cannot be opened', async () => {
+      (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+      mocks.openAppWindow.mockResolvedValue(false);
+
+      expect(await dispatcher.dispatch('myrmagent://app/art-1')).toBe(true);
+
+      expect(pushed).toEqual(['/apps/art-1']);
+    });
+
+    it('opens the app page on the web, where there is no desktop window', async () => {
+      mocks.openAppWindow.mockClear();
+
+      expect(await dispatcher.dispatch('https://app.example.com/intent/app/art-1')).toBe(true);
+
+      expect(mocks.openAppWindow).not.toHaveBeenCalled();
+      expect(pushed).toEqual(['/apps/art-1']);
+    });
+
+    it.each(['myrmagent://app/', 'myrmagent://app/..%2Fsettings', 'myrmagent://app/a%20b', `myrmagent://app/${'x'.repeat(65)}`])(
+      'refuses %s instead of building a route from it',
+      async (link) => {
+        expect(await dispatcher.dispatch(link)).toBe(false);
+        expect(pushed).toEqual([]);
+        expect(mocks.toastError).toHaveBeenCalledWith('invalid');
+      },
+    );
   });
 
   it('rejects an unknown link with a toast and no navigation', async () => {

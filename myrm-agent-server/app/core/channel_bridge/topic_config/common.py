@@ -11,6 +11,8 @@ Shared primitives of the channel topic-config domain.
 from __future__ import annotations
 
 import logging
+from enum import Enum
+from typing import Final
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,13 @@ SEARCH_AGENT_CHANNEL_BIND_MSG = "Search agents cannot be bound to channels; choo
 _TOPIC_WORKSPACE_MUTUAL_EXCLUSIVE_MSG = "projectId and authorizedPath are mutually exclusive for topic workspace binding."
 
 
-_UNSET: object = object()
+class _Unset(Enum):
+    """The type of ``_UNSET``: a single member, so a type checker can tell "left out" from an explicit ``None``."""
+
+    TOKEN = 0
+
+
+_UNSET: Final = _Unset.TOKEN
 
 
 def is_search_agent_channel_bind_error(exc: BaseException) -> bool:

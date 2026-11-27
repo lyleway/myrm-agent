@@ -1,12 +1,15 @@
 """Automatic detection of CLI agent backends.
 
-Discovers installed CLI tools (claude, codex, gemini) by searching PATH,
+Discovers the installed agents of the auth contract (claude, codex, gemini, qwen) by searching PATH,
 common installation paths, and npm global. Maintains process-wide caches
 for versioned and non-versioned detection results to avoid repeated scans.
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.toolchains::TOOLCHAIN_BASE_DIR (POS: Isolated toolchain manager for external CLI agents — keeps tool installations out of the global OS environment)
 - myrm_agent_harness.toolkits.acp.auth.credential_store::CredentialState (POS: Credential persistence and detection layer for the ACP auth subsystem) [TYPE_CHECKING]
+- myrm_agent_harness.toolkits.acp.auth._profiles::known_backends (POS: Authentication profile registry; the agents that have a contract)
+- myrm_agent_harness.toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
+- myrm_agent_harness.toolkits.acp.core.probe::run_probe (POS: Process primitive of the detection and login-state checks)
 
 [OUTPUT]
 - DetectedBackend: A detected CLI backend with its path and version.
@@ -28,6 +31,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
+from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends
+from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
+from myrm_agent_harness.toolkits.acp.core.probe import run_probe
 from myrm_agent_harness.toolkits.acp.toolchains import TOOLCHAIN_BASE_DIR
 
 if TYPE_CHECKING:
@@ -36,8 +42,6 @@ if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.auth.credential_store import CredentialState
 
 logger = logging.getLogger(__name__)
-
-_KNOWN_BACKENDS = ("claude", "codex", "gemini", "qwen")
 
 _COMMON_PATHS = (
     TOOLCHAIN_BASE_DIR / "bin",  # Check isolated toolchain first
@@ -101,18 +105,14 @@ class BackendDetector:
                     self._set_cache(include_version=False, value=stripped)
                     return stripped
 
-        results: list[DetectedBackend] = []
-        for name in _KNOWN_BACKENDS:
-            path = self._find_executable(name)
-            if path is None:
-                continue
-
-            version = None
-            if include_version:
-                version = await self._get_version(path)
-
-            results.append(DetectedBackend(name=name, path=path, version=version))
-            logger.info("backend_detected name=%s path=%s version=%s", name, path, version)
+        located = [(name, path) for name in known_backends() if (path := self._find_executable(name)) is not None]
+        versions = await self._versions([path for _, path in located]) if include_version else [None] * len(located)
+        results = [
+            DetectedBackend(name=name, path=path, version=version)
+            for (name, path), version in zip(located, versions, strict=True)
+        ]
+        for found in results:
+            logger.info("backend_detected name=%s path=%s version=%s", found.name, found.path, found.version)
 
         if include_version:
             self._set_cache(include_version=False, value=self._strip_versions(results))
@@ -128,15 +128,23 @@ class BackendDetector:
     ) -> list[tuple[DetectedBackend, CredentialState]]:
         """Detect installed backends and pair each with its current auth state.
 
-        Installation detection is cached (it is effectively static for a process),
-        but auth state is resolved fresh on every call because the user can sign in
-        or out at any time. Powers the settings page's "installed + logged-in" view.
+        Installation detection is cached (it is effectively static for a process), but the login state is resolved
+        fresh on every call because the user can sign in or out at any time: a CLI that can report its own state is
+        asked, the others are judged by their credential file. Powers the settings page's "installed + logged-in" view.
         """
         from myrm_agent_harness.toolkits.acp.auth import CredentialStore
+        from myrm_agent_harness.toolkits.acp.auth.login_state import resolve_login_state
 
+        source = os.environ if env is None else env
         store = CredentialStore(env)
         detected = await self.detect(include_version=include_version, refresh=refresh)
-        return [(backend, store.state(backend.name)) for backend in detected]
+        states = await asyncio.gather(
+            *(
+                resolve_login_state(store, found.name, executable=found.path, env=cli_base_env(found.path, source))
+                for found in detected
+            )
+        )
+        return list(zip(detected, states, strict=True))
 
     def invalidate_cache(self) -> None:
         """Force process-wide re-detection on next call."""
@@ -171,17 +179,15 @@ class BackendDetector:
         cls._cache_without_version_at = captured_at
 
     async def _hydrate_versions(self, backends: list[DetectedBackend]) -> list[DetectedBackend]:
-        hydrated: list[DetectedBackend] = []
-        for backend in backends:
-            version = await self._get_version(backend.path)
-            hydrated.append(
-                DetectedBackend(
-                    name=backend.name,
-                    path=backend.path,
-                    version=version,
-                )
-            )
-        return hydrated
+        versions = await self._versions([backend.path for backend in backends])
+        return [
+            DetectedBackend(name=backend.name, path=backend.path, version=version)
+            for backend, version in zip(backends, versions, strict=True)
+        ]
+
+    async def _versions(self, paths: list[str]) -> list[str | None]:
+        """The version of every executable, asked at once: one slow CLI does not hold up the rest."""
+        return list(await asyncio.gather(*(self._get_version(path) for path in paths)))
 
     @staticmethod
     def _strip_versions(backends: list[DetectedBackend]) -> list[DetectedBackend]:
@@ -217,20 +223,11 @@ class BackendDetector:
 
     async def _get_version(self, path: str) -> str | None:
         """Run ``<path> --version`` and extract version string."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                path,
-                "--version",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-            output = stdout.decode("utf-8", errors="replace").strip()
-            if output:
-                return output.split("\n")[0].strip()
-        except (TimeoutError, OSError, FileNotFoundError):
-            logger.debug("version_check_failed path=%s", path, exc_info=True)
-        return None
+        result = await run_probe([path, "--version"], env=cli_base_env(path, os.environ), timeout_seconds=10.0)
+        if result is None or result.returncode != 0:
+            return None
+        lines = result.stdout.splitlines()
+        return lines[0].strip() if lines else None
 
 
 def _is_executable(path: Path) -> bool:

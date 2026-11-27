@@ -16,6 +16,6 @@
 | `github_supplement.py` | 核心 | 多仓库 Dependabot PR / SBOM 拉取 | ✅ |
 | `github_full.py` | 核心 | Local 全量 GitHub 仪表盘（支持多仓 PR 补充） | ✅ |
 | `dashboard_settings.py` | 核心 | Omni-Config `securityDashboardSettings` 读取 | ✅ |
-| `profile_manager.py` | 核心 | Security Profile CRUD；builtin seed 与 SSOT 同步（Read Only 内置档的权限键取自框架层 `read_only_permissions()`，与聊天里的 explore 预设同源）；save/read API 路径均 fan-out 旧 `delegate_agent` 键 | ✅ |
+| `profile_manager.py` | 核心 | Security Profile CRUD；builtin seed 与 SSOT 同步（Read Only 内置档的权限键取自框架层 `read_only_permissions()`，与聊天里的 explore 预设同源）；列出档案只在内置档缺失或与定义不一致时才写库（读路径上的写会让并发的激活以 `database is locked` 失败）；save/read API 路径均 fan-out 旧 `delegate_agent` 键 | ✅ |
 | `workspace_trust_store.py` | 核心 | UserConfig 持久化 workspace trust registry（含 TRUSTED 时用户看过的 repo 命令前缀 `disclosed_command_prefixes`；旧条目无此字段 → 一次性重新确认）；启动时注入 harness `WorkspaceTrustLookup` | ✅ |
 | `tenant_guardrail.py` | 核心 | SaaS tenant guardrail hook（预留；subagent 消费由 WU budget 门禁） | ✅ |

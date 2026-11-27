@@ -1,25 +1,30 @@
 """[INPUT]
 - myrm_agent_harness.toolkits.llms.tts.generator::AsyncTTSEngine (POS: TTS synthesis engine)
 - myrm_agent_harness.toolkits.llms.tts.models::TTSConfig (POS: TTS engine config)
+- app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 
 [OUTPUT]
 - create_tts_tool(): LangChain BaseTool adapter for text-to-speech
 
 [POS]
 LangChain adapter for harness AsyncTTSEngine (product layer). The engine stores the audio before it answers, and the
-result carries the audio's ``media://`` reference: the call reports success only with a stored reference.
+result carries the audio's ``media://`` reference: the call reports success only with a stored reference. The audio is
+also copied into the agent's workspace and the result names the copy in ``workspace_files``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.tools import BaseTool
 from myrm_agent_harness.toolkits.llms.tts.generator import AsyncTTSEngine
 from myrm_agent_harness.toolkits.llms.tts.models import TTSConfig
 from pydantic import BaseModel, Field, PrivateAttr
+
+from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +60,20 @@ class TTSTool(BaseTool):
     description: str = (
         "Generate natural spoken speech (audio) from text. "
         "Use this when the user asks to read something out loud, synthesize voice narration, or generate a voice message. "
-        "The audio appears in the chat by itself, so never repeat its media:// address in your reply."
+        "The audio appears in the chat by itself, so never repeat its media:// address in your reply. "
+        "The audio is also copied into the workspace for bash and file tools: `workspace_files` in the result lists its "
+        "path; without that field there is no copy."
     )
     args_schema: type[BaseModel] = TTSInput
 
     config: TTSConfig = Field(exclude=True)
     _engine: AsyncTTSEngine = PrivateAttr()
+    _exporter: WorkspaceExporter | None = PrivateAttr(default=None)
 
-    def __init__(self, config: TTSConfig) -> None:
+    def __init__(self, config: TTSConfig, exporter: WorkspaceExporter | None = None) -> None:
         super().__init__(config=config)
         self._engine = AsyncTTSEngine(config)
+        self._exporter = exporter
 
     def _run(
         self,
@@ -112,9 +121,14 @@ class TTSTool(BaseTool):
         }
         if result.duration_seconds is not None:
             out["duration_seconds"] = round(result.duration_seconds, 1)
+        if self._exporter is not None:
+            out = await self._exporter.complete(out)
         return json.dumps(out, ensure_ascii=False)
 
 
-def create_tts_tool(config: TTSConfig) -> TTSTool:
-    """Wrap an AsyncTTSEngine config as a LangChain tool named ``tts_generate``."""
-    return TTSTool(config)
+def create_tts_tool(config: TTSConfig, *, allowed_roots: Sequence[str] = ()) -> TTSTool:
+    """Wrap an AsyncTTSEngine config as a LangChain tool named ``tts_generate``.
+
+    The first of ``allowed_roots`` is the workspace that receives the copy of the audio.
+    """
+    return TTSTool(config, WorkspaceExporter.for_workspace(allowed_roots))

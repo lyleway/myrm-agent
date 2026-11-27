@@ -38,7 +38,7 @@ class VoiceConfig:
     stt_enabled: bool = False
     stt_provider: str = "openai"
     stt_api_key: str = ""
-    stt_model: str = "whisper-1"
+    stt_model: str = ""
     stt_language: str | None = None
 
     stt_local_model: str = "base"

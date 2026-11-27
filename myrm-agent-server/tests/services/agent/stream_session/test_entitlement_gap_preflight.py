@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import time
-from types import SimpleNamespace
 
 import pytest
-from myrm_agent_harness.agent.meta_tools.mount_policy import FileAccessMode
 
-from app.ai_agents.general_agent.active_tool_groups import (
-    derive_active_tool_groups_from_params,
-)
 from app.services.agent.stream_session.entitlement_gap_preflight import (
     CapabilityGapEmissionTracker,
     build_web_search_config_gap_sse_event,
@@ -18,39 +13,8 @@ from app.services.agent.stream_session.entitlement_gap_preflight import (
 )
 
 
-def _params(**overrides: object) -> SimpleNamespace:
-    base = dict(
-        enable_web_search=True,
-        enable_browser=False,
-        file_access_mode=FileAccessMode.FULL,
-        enable_shell_tools=True,
-        enable_computer_use=False,
-        enable_memory=True,
-        incognito_mode=False,
-        enable_conversation_search=False,
-        enable_kanban=False,
-        enable_wiki=False,
-        enable_answer_tool=False,
-        enable_structured_clarify=True,
-        enable_cron_eager=False,
-        enable_planning=False,
-        image_generation=None,
-        video_generation=None,
-        tts=None,
-    )
-    base.update(overrides)
-    return SimpleNamespace(**base)
-
-
 def setup_function() -> None:
     reset_capability_gap_emission_tracker()
-
-
-def test_derive_active_tool_groups_from_params_maps_media_fields() -> None:
-    groups = derive_active_tool_groups_from_params(
-        _params(image_generation=object()),
-    )
-    assert "image_generation" in groups
 
 
 def test_capability_gap_emission_tracker_re_emits_after_cooldown(

@@ -12,7 +12,7 @@
 - generate_cancellable_stream: 可取消的 SSE chunk 异步生成器
 
 [POS]
-Agent 流式 SSE chunk 编排：凭据注入、config / migration readiness / entitlement 三轨 gap 预检、Vision fallback，委托 loop/finalize。
+Agent 流式 SSE chunk 编排：凭据注入、web_search 配置 / migration readiness 两轨 gap 预检、Vision fallback，委托 loop/finalize。
 """
 
 from __future__ import annotations

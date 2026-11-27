@@ -12,8 +12,9 @@
 - router: APIRouter with HEAD and GET /{chat_id}/export-pack endpoints
 
 [POS]
-- app.api.chats.chat.export_pack: Session export stream pack delivering
-  verbatim event logs, subagent logs, and artifacts in a self-contained ZIP.
+- app.api.chats.chat.export_pack: Session export pack delivering event logs
+  (credentials masked by default), subagent logs, and artifacts as stored in a
+  self-contained ZIP with a SHA-256 manifest.
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ router = APIRouter()
 
 
 class _ZipStreamBuffer:
-    """In-memory chunk buffer for incremental ZIP streaming with O(1) memory."""
+    """Buffer that receives the ZIP writer's output so each piece can be sent as soon as it is written."""
 
     def __init__(self) -> None:
         self._buf = bytearray()
@@ -110,7 +111,7 @@ async def _generate_zip_stream(
     include_artifacts: bool,
     include_subagents: bool,
 ) -> AsyncIterator[bytes]:
-    """Generate chunked ZIP stream yielding bytes incrementally with bounded memory."""
+    """Generate the ZIP as chunked output; every log and artifact is read into memory first, so memory grows with the pack's total size."""
     buf = _ZipStreamBuffer()
     manifest_files: list[dict[str, object]] = []
 

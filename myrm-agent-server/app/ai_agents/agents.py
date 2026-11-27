@@ -177,7 +177,6 @@ class AgentFactory:
             declared_capabilities=params.declared_capabilities,
             declared_allowed_roots=params.declared_allowed_roots,
             external_agents_config=params.external_agents_config,
-            force_external_agent=params.force_external_agent,
             image_generation_params=params.image_generation,
             video_generation_params=params.video_generation,
             tts_params=params.tts,

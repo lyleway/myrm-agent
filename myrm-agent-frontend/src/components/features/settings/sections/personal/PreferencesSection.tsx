@@ -23,7 +23,6 @@ import type { WebTtsProvider } from '@/services/config/types';
 
 const WEB_TTS_OPTIONS: Array<{ value: WebTtsProvider; labelKey: string; descKey: string }> = [
   { value: 'browser', labelKey: 'webTts.browser', descKey: 'webTts.browserDesc' },
-  { value: 'openai', labelKey: 'webTts.openai', descKey: 'webTts.openaiDesc' },
   { value: 'elevenlabs', labelKey: 'webTts.elevenlabs', descKey: 'webTts.elevenlabsDesc' },
   { value: 'fish_audio', labelKey: 'webTts.fishAudio', descKey: 'webTts.fishAudioDesc' },
   { value: 'minimax', labelKey: 'webTts.minimax', descKey: 'webTts.minimaxDesc' },

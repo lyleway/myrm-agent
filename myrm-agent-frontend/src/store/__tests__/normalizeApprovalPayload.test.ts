@@ -156,4 +156,49 @@ describe('normalizeApprovalPayload', () => {
     expect(normalized.payload?.screenshot_size).toBeUndefined();
     expect(normalized.payload?.highlight_coordinate).toBeUndefined();
   });
+
+  describe('an external agent permission request', () => {
+    const request = {
+      approval_id: 'appr-perm-1',
+      user_id: 'user-1',
+      action_type: 'external_agent_permission',
+      status: 'PENDING',
+      severity: 'high',
+      chat_id: 'chat-1',
+      payload: {
+        agent: 'claude-code',
+        tool_name: 'Bash',
+        kind: 'execute',
+        title: 'Bash',
+        command: 'rm -rf build',
+        tool_input: { command: 'rm -rf build' },
+        paths: ['/work/build', '', 7, '/work/dist'],
+        workspace: '/work',
+      },
+    };
+
+    it('keeps what the person is asked to allow, for the card and for the batch risk check', () => {
+      const normalized = normalizeApprovalPayload(request);
+
+      expect(normalized.payload).toMatchObject({
+        agent: 'claude-code',
+        tool_name: 'Bash',
+        kind: 'execute',
+        title: 'Bash',
+        command: 'rm -rf build',
+        tool_input: { command: 'rm -rf build' },
+        workspace: '/work',
+      });
+    });
+
+    it('keeps only the paths that are text', () => {
+      expect(normalizeApprovalPayload(request).payload?.paths).toEqual(['/work/build', '/work/dist']);
+    });
+
+    it('leaves out a path list that names nothing', () => {
+      const normalized = normalizeApprovalPayload({ ...request, payload: { ...request.payload, paths: [] } });
+
+      expect(normalized.payload?.paths).toBeUndefined();
+    });
+  });
 });

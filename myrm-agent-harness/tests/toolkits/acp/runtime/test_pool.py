@@ -7,17 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     BackendCapabilities,
     BackendInfo,
+    PermissionRequest,
+    PermissionVerdict,
     RuntimeConfig,
     RuntimeEventType,
     create_event,
 )
 
 _POOL_FACTORY = "myrm_agent_harness.toolkits.acp.runtime.pool._create_runtime"
+_WORKSPACE = "/tmp/ws"
 
 
 class TestRuntimePool:
@@ -38,7 +40,7 @@ class TestRuntimePool:
         def is_alive(self) -> bool:
             return not self.closed
 
-        async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None):
+        async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None):
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting")
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content=prompt)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
@@ -64,19 +66,19 @@ class TestRuntimePool:
     def test_get_known_backend(self) -> None:
         pool = RuntimePool()
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
-        backend = pool.get("claude")
+        backend = pool.get("claude", _WORKSPACE)
         assert backend.name == "claude"
 
     def test_get_unknown_backend_raises(self) -> None:
         pool = RuntimePool()
         with pytest.raises(KeyError, match="Unknown backend"):
-            pool.get("nonexistent")
+            pool.get("nonexistent", _WORKSPACE)
 
     def test_get_returns_same_instance(self) -> None:
         pool = RuntimePool()
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
-        b1 = pool.get("claude")
-        b2 = pool.get("claude")
+        b1 = pool.get("claude", _WORKSPACE)
+        b2 = pool.get("claude", _WORKSPACE)
         assert b1 is b2
 
     @pytest.mark.asyncio
@@ -86,7 +88,7 @@ class TestRuntimePool:
         backend = self._DummyRuntimeBackend("claude")
 
         with patch.object(pool, "get", return_value=backend):
-            result = await pool.prompt("claude", "task", mode="persistent")
+            result = await pool.prompt("claude", "task", workspace=_WORKSPACE, mode="persistent")
 
         assert result == "task"
         assert not backend.closed
@@ -98,7 +100,7 @@ class TestRuntimePool:
         backend = self._DummyRuntimeBackend("claude")
 
         with patch(_POOL_FACTORY, return_value=backend):
-            result = await pool.prompt("claude", "task", mode="oneshot")
+            result = await pool.prompt("claude", "task", workspace=_WORKSPACE, mode="oneshot")
 
         assert result == "task"
         assert backend.closed
@@ -109,7 +111,7 @@ class TestRuntimePool:
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
 
         with pytest.raises(ValueError, match="Invalid mode"):
-            await pool.prompt("claude", "task", mode="invalid")
+            await pool.prompt("claude", "task", workspace=_WORKSPACE, mode="invalid")
 
     @pytest.mark.asyncio
     async def test_run_turn_oneshot_closes_its_own_backend(self) -> None:
@@ -118,33 +120,20 @@ class TestRuntimePool:
         backend = self._DummyRuntimeBackend("claude")
 
         with patch(_POOL_FACTORY, return_value=backend):
-            events = [e async for e in pool.run_turn("claude", "task", session_id="s-1", mode="oneshot")]
+            events = [
+                e async for e in pool.run_turn("claude", "task", session_id="s-1", workspace=_WORKSPACE, mode="oneshot")
+            ]
 
         assert len(events) == 3
         assert backend.closed
-        assert pool._oneshot_backends == {}
+        assert pool._running == {}
 
     @pytest.mark.asyncio
     async def test_run_turn_invalid_mode_raises(self) -> None:
         pool = RuntimePool()
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
         with pytest.raises(ValueError, match="Invalid mode"):
-            [e async for e in pool.run_turn("claude", "task", "s-1", mode="bad")]
-
-    @pytest.mark.asyncio
-    async def test_event_bus_emits_events(self) -> None:
-        bus = EventBus()
-        recorded = []
-        bus.subscribe(callback=lambda e: recorded.append(e))
-
-        pool = RuntimePool(event_bus=bus)
-        pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
-        backend = self._DummyRuntimeBackend("claude")
-
-        with patch.object(pool, "get", return_value=backend):
-            events = [e async for e in pool.run_turn("claude", "task", "s-1")]
-
-        assert recorded == events
+            [e async for e in pool.run_turn("claude", "task", "s-1", workspace=_WORKSPACE, mode="bad")]
 
 
 class TestRuntimePoolCloseAll:
@@ -154,9 +143,23 @@ class TestRuntimePoolCloseAll:
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
         backend = MagicMock()
         backend.close = AsyncMock(side_effect=RuntimeError("close failed"))
-        pool._backends["claude"] = backend
+        pool._backends[("claude", _WORKSPACE)] = backend
         await pool.close_all()
         assert pool._backends == {}
+
+    @pytest.mark.asyncio
+    async def test_close_all_closes_the_backend_of_every_workspace(self) -> None:
+        pool = RuntimePool()
+        pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
+        in_a, in_b = MagicMock(), MagicMock()
+        in_a.close, in_b.close = AsyncMock(), AsyncMock()
+        pool._backends[("claude", "/work/a")] = in_a
+        pool._backends[("claude", "/work/b")] = in_b
+
+        await pool.close_all()
+
+        in_a.close.assert_awaited_once()
+        in_b.close.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_close_all_empty(self) -> None:
@@ -187,7 +190,7 @@ class TestRuntimePoolConcurrency:
         def is_alive(self) -> bool:
             return True
 
-        async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None):
+        async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None):
             self.concurrent_count += 1
             self.max_concurrent = max(self.max_concurrent, self.concurrent_count)
             await asyncio.sleep(self._delay)
@@ -214,10 +217,40 @@ class TestRuntimePoolConcurrency:
         backend = self._SlowBackend("a", delay=0.05)
 
         with patch.object(pool, "get", return_value=backend):
-            tasks = [asyncio.create_task(pool.prompt("a", f"task-{i}")) for i in range(4)]
+            tasks = [asyncio.create_task(pool.prompt("a", f"task-{i}", workspace=_WORKSPACE)) for i in range(4)]
             await asyncio.gather(*tasks)
 
         assert backend.max_concurrent <= 2
+
+    @pytest.mark.asyncio
+    async def test_a_turn_closed_early_has_stopped_its_backend_before_the_next_turn_starts(self) -> None:
+        """The backend stays held until its external process has stopped, so the next turn never overlaps it."""
+        pool = RuntimePool()
+        pool.register("a", RuntimeConfig(backend_type="cli", command="a"))
+        order: list[str] = []
+
+        class _Backend(self._SlowBackend):
+            async def run_turn(self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None):
+                order.append(f"{prompt} started")
+                try:
+                    while prompt == "first":  # the first turn never ends by itself
+                        yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="x")
+                    yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+                finally:
+                    await asyncio.sleep(0.01)  # stopping the external process takes a moment
+                    order.append(f"{prompt} stopped")
+
+        with patch.object(pool, "get", return_value=_Backend("a")):
+            first = pool.run_turn("a", "first", session_id="s1", workspace=_WORKSPACE)
+            await anext(first)
+            second = asyncio.create_task(pool.prompt("a", "second", workspace=_WORKSPACE))
+            await asyncio.sleep(0.02)
+            assert order == ["first started"]
+
+            await first.aclose()
+            await asyncio.wait_for(second, timeout=1.0)
+
+        assert order == ["first started", "first stopped", "second started", "second stopped"]
 
 
 class TestRuntimePoolCancel:
@@ -227,9 +260,20 @@ class TestRuntimePoolCancel:
         pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
         mock_backend = MagicMock()
         mock_backend.cancel = AsyncMock()
-        pool._backends["claude"] = mock_backend
+        pool._running[("claude", "sess-1")] = mock_backend
         await pool.cancel("claude", "sess-1")
         mock_backend.cancel.assert_awaited_once_with("sess-1")
+
+    @pytest.mark.asyncio
+    async def test_cancel_noop_for_an_idle_backend(self) -> None:
+        # A backend that holds a session but runs no turn has nothing to stop.
+        pool = RuntimePool()
+        pool.register("claude", RuntimeConfig(backend_type="acp", command="claude"))
+        mock_backend = MagicMock()
+        mock_backend.cancel = AsyncMock()
+        pool._backends[("claude", _WORKSPACE)] = mock_backend
+        await pool.cancel("claude", "sess-1")
+        mock_backend.cancel.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_cancel_noop_for_uninstantiated(self) -> None:
@@ -264,7 +308,7 @@ class TestRuntimePoolFactory:
         from myrm_agent_harness.toolkits.acp.runtime.pool import _create_runtime
 
         cfg = RuntimeConfig(backend_type="acp", command="claude")
-        rt = _create_runtime("test", cfg)
+        rt = _create_runtime("test", cfg, workspace=_WORKSPACE)
         assert rt.name == "test"
         assert rt.capabilities.supports_resume is True
 
@@ -272,7 +316,7 @@ class TestRuntimePoolFactory:
         from myrm_agent_harness.toolkits.acp.runtime.pool import _create_runtime
 
         cfg = RuntimeConfig(backend_type="cli", command="claude")
-        rt = _create_runtime("test", cfg)
+        rt = _create_runtime("test", cfg, workspace=_WORKSPACE)
         assert rt.name == "test"
         assert rt.capabilities.supports_resume is True
 
@@ -280,7 +324,7 @@ class TestRuntimePoolFactory:
         from myrm_agent_harness.toolkits.acp.runtime.pool import _create_runtime
 
         cfg = RuntimeConfig(backend_type="cli", command="gemini")
-        rt = _create_runtime("test", cfg)
+        rt = _create_runtime("test", cfg, workspace=_WORKSPACE)
         assert rt.name == "test"
         assert rt.capabilities.supports_resume is False
 
@@ -290,14 +334,14 @@ class TestRuntimePoolFactory:
         cfg = RuntimeConfig(backend_type="acp", command="test")  # type: ignore[arg-type]
         object.__setattr__(cfg, "backend_type", "unknown_type")
         with pytest.raises(ValueError, match="Unknown backend_type"):
-            _create_runtime("test", cfg)
+            _create_runtime("test", cfg, workspace=_WORKSPACE)
 
 
-class TestRuntimePoolRunTurnWithoutBus:
-    """Tests for RuntimePool run_turn without event bus."""
+class TestRuntimePoolRunTurnStream:
+    """What a caller of RuntimePool.run_turn gets back and what the backend is handed."""
 
     @pytest.mark.asyncio
-    async def test_run_turn_no_bus_still_yields_events(self) -> None:
+    async def test_run_turn_yields_the_backends_events(self) -> None:
         pool = RuntimePool()
         pool.register("test", RuntimeConfig(backend_type="cli", command="echo"))
 
@@ -314,7 +358,7 @@ class TestRuntimePoolRunTurnWithoutBus:
             def is_alive(self) -> bool:
                 return True
 
-            async def run_turn(self, prompt, session_id, *, mcp_servers=None, images=None):
+            async def run_turn(self, prompt, session_id, *, mcp_servers=None, images=None, permissions=None):
                 yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="hi")
                 yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
@@ -330,6 +374,32 @@ class TestRuntimePoolRunTurnWithoutBus:
             async def close(self) -> None:
                 pass
 
-        pool._backends["test"] = _SimpleBackend()
-        events = [e async for e in pool.run_turn("test", "task", "s-1")]
+        pool._backends[("test", _WORKSPACE)] = _SimpleBackend()
+        events = [e async for e in pool.run_turn("test", "task", "s-1", workspace=_WORKSPACE)]
         assert len(events) == 2
+
+    @pytest.mark.asyncio
+    async def test_run_turn_hands_the_turns_permission_broker_to_the_backend(self) -> None:
+        pool = RuntimePool()
+        pool.register("test", RuntimeConfig(backend_type="cli", command="echo"))
+        received: list[object] = []
+
+        class _Broker:
+            async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+                return PermissionVerdict(allowed=True)
+
+        class _RecordingBackend:
+            capabilities = BackendCapabilities()
+            is_alive = True
+
+            async def run_turn(self, prompt, session_id, *, mcp_servers=None, images=None, permissions=None):
+                received.append(permissions)
+                yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+
+        pool._backends[("test", _WORKSPACE)] = _RecordingBackend()
+        broker = _Broker()
+
+        _ = [e async for e in pool.run_turn("test", "task", "s-1", workspace=_WORKSPACE, permissions=broker)]
+        _ = [e async for e in pool.run_turn("test", "task", "s-2", workspace=_WORKSPACE)]
+
+        assert received == [broker, None]

@@ -68,6 +68,45 @@ class TestMCPScanEndpoint:
         assert data["maxSeverity"] == "critical"
         assert any(f["threatType"] == "hardcoded_secret" for f in data["findings"])
 
+    @pytest.mark.parametrize(
+        "env_name",
+        ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_GLOBAL", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES"],
+    )
+    def test_code_injection_env_name_blocks_save(self, client: TestClient, env_name: str) -> None:
+        """Names that steer the dynamic loader or git's configuration are refused before the server is saved."""
+        response = client.post(
+            "/api/v1/integrations/mcp/scan",
+            json={
+                "name": "probe",
+                "type": "stdio",
+                "command": "node",
+                "args": ["server.js"],
+                "extraParams": {"env": {env_name: "1"}},
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["allowSave"] is False
+        assert data["maxSeverity"] == "critical"
+        injected = [f["field"] for f in data["findings"] if f["threatType"] == "dangerous_env_injection"]
+        assert injected == [f"extra_params.env.{env_name}"]
+
+    def test_ordinary_env_name_is_not_flagged_as_injection(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/integrations/mcp/scan",
+            json={
+                "name": "probe",
+                "type": "stdio",
+                "command": "node",
+                "args": ["server.js"],
+                "extraParams": {"env": {"LOG_LEVEL": "debug", "GIT_AUTHOR_NAME": "synthetic"}},
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["allowSave"] is True
+        assert not [f for f in data["findings"] if f["threatType"] == "dangerous_env_injection"]
+
     def test_risky_profile_flags_high(self, client: TestClient) -> None:
         response = client.post(
             "/api/v1/integrations/mcp/scan",
@@ -112,6 +151,39 @@ class TestMCPScanEndpoint:
         assert len(results) == 2
         assert results[0]["allowSave"] is True
         assert results[1]["allowSave"] is False
+
+    def test_scan_batch_refuses_only_the_server_that_carries_an_injection_env_name(self, client: TestClient) -> None:
+        """An import scans every server in one request: the refused one must not taint its ordinary neighbour."""
+        response = client.post(
+            "/api/v1/integrations/mcp/scan-batch",
+            json={
+                "configs": [
+                    {
+                        "name": "ordinary",
+                        "type": "stdio",
+                        "command": "node",
+                        "args": ["server.js"],
+                        "extraParams": {"env": {"LOG_LEVEL": "debug"}},
+                    },
+                    {
+                        "name": "injected",
+                        "type": "stdio",
+                        "command": "node",
+                        "args": ["server.js"],
+                        "extraParams": {"env": {"GIT_CONFIG_COUNT": "1"}},
+                    },
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        ordinary, injected = response.json()["data"]["results"]
+        assert (ordinary["serverName"], ordinary["allowSave"]) == ("ordinary", True)
+        assert (injected["serverName"], injected["allowSave"]) == ("injected", False)
+        assert not [f for f in ordinary["findings"] if f["threatType"] == "dangerous_env_injection"]
+        assert [f["field"] for f in injected["findings"] if f["threatType"] == "dangerous_env_injection"] == [
+            "extra_params.env.GIT_CONFIG_COUNT"
+        ]
 
     def test_high_risk_requires_acknowledgement_flag(self, client: TestClient) -> None:
         response = client.post(

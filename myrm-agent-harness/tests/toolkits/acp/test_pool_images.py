@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,11 +17,11 @@ from myrm_agent_harness.toolkits.acp.types import (
     create_event,
 )
 
+_WORKSPACE = "/tmp/ws"
 
-def _pool_with_backend(
-    supports_images: bool, captured: list[list[str] | None], *, event_bus: MagicMock | None = None
-) -> RuntimePool:
-    pool = RuntimePool(max_concurrent=1, event_bus=event_bus)
+
+def _pool_with_backend(supports_images: bool, captured: list[list[str] | None]) -> RuntimePool:
+    pool = RuntimePool(max_concurrent=1)
     pool.register("claude", RuntimeConfig(backend_type="cli", command="claude"))
     backend = MagicMock()
     backend.capabilities = BackendCapabilities(supports_images=supports_images)
@@ -32,6 +32,7 @@ def _pool_with_backend(
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: object | None = None,
     ):
         captured.append(images)
         yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
@@ -42,7 +43,9 @@ def _pool_with_backend(
 
 
 async def _events(pool: RuntimePool, *, images: list[str] | None) -> list[RuntimeEvent]:
-    return [event async for event in pool.run_turn("claude", "look", session_id="s1", images=images)]
+    return [
+        event async for event in pool.run_turn("claude", "look", session_id="s1", images=images, workspace=_WORKSPACE)
+    ]
 
 
 @pytest.mark.asyncio
@@ -85,15 +88,3 @@ async def test_a_turn_without_images_passes_none_and_logs_nothing(caplog: pytest
     assert captured == [None, None]
     assert [event.type for event in without + empty] == [RuntimeEventType.DONE, RuntimeEventType.DONE]
     assert not any("pool_images_skipped" in r.message for r in caplog.records)
-
-
-@pytest.mark.asyncio
-async def test_the_notice_reaches_the_event_bus_before_the_events_of_the_turn() -> None:
-    bus = MagicMock()
-    bus.emit = AsyncMock()
-    pool = _pool_with_backend(False, [], event_bus=bus)
-
-    events = await _events(pool, images=["/img/a.png"])
-
-    assert [call.args[0] for call in bus.emit.await_args_list] == events
-    assert events[0].data.get("status") == IMAGES_NOT_SENT_STATUS

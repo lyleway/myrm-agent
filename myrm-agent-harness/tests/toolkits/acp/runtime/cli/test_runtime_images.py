@@ -1,4 +1,4 @@
-"""Image files reach a CLI the way its dialect wants: Claude base64 blocks on stdin, Codex ``--image=`` files."""
+"""Image files reach a CLI the way it wants them: Claude takes base64 blocks on stdin."""
 
 from __future__ import annotations
 
@@ -11,8 +11,9 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, RuntimeConfig, RuntimeEvent, RuntimeEventType
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, make_runtime, statuses_of, types_of
+from ._fakes import FakeCli, make_runtime, statuses_of, types_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 
@@ -47,12 +48,13 @@ async def _turn(runtime: CliRuntime, prompt: str, images: list[str] | None = Non
 
 
 class TestCapability:
-    def test_claude_and_codex_take_images_and_other_clis_do_not(self) -> None:
+    def test_claude_takes_images_and_other_clis_do_not(self) -> None:
         def supports(command: str) -> bool:
-            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command)).capabilities.supports_images
+            return CliRuntime(
+                "t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws"
+            ).capabilities.supports_images
 
         assert supports("claude") is True
-        assert supports("/usr/local/bin/codex") is True
         assert supports("gemini") is False
         assert supports("/opt/custom/agent") is False
 
@@ -102,7 +104,7 @@ class TestClaude:
         image = _png(tmp_path / "a.png")
         store = RecordingStore()
         store.records["s1"] = CliSessionRecord(dead, str(work))
-        runtime = make_runtime(fake_cli, "claude", store=store, cwd=str(work))
+        runtime = make_runtime(fake_cli, "claude", store=store, workspace=str(work))
 
         events = await _turn(runtime, "look", [str(image)])
 
@@ -135,39 +137,6 @@ class TestClaude:
         assert "--input-format" not in _argv(fake_cli, "claude")
         assert RuntimeEventType.DONE in types_of(events)
         assert len(caplog.records) == 2
-
-
-class TestCodex:
-    @pytest.mark.asyncio
-    async def test_each_image_is_an_image_flag_and_the_prompt_stays_last(self, fake_cli: FakeCli) -> None:
-        runtime = make_runtime(fake_cli, "codex")
-
-        await _turn(runtime, "what is wrong here?", ["/img/a b.png", "/img/c.png"])
-
-        argv = _argv(fake_cli, "codex")
-        assert argv[-1] == "what is wrong here?"
-        assert argv[-3:-1] == ["--image=/img/a b.png", "--image=/img/c.png"]
-        assert "-i" not in argv
-
-    @pytest.mark.asyncio
-    async def test_a_resumed_turn_still_puts_the_images_before_the_session_id(self, fake_cli: FakeCli) -> None:
-        runtime = make_runtime(fake_cli, "codex")
-
-        await _turn(runtime, "first")
-        events = await _turn(runtime, "second", ["/img/a.png"])
-
-        argv = _argv(fake_cli, "codex", 1)
-        thread = fake_cli.resume_args("codex")[1]
-        assert thread is not None
-        assert argv[argv.index("exec") + 1] == "resume"
-        assert argv[-3:] == ["--image=/img/a.png", thread, "second"]
-        assert RuntimeEventType.DONE in types_of(events)
-
-    @pytest.mark.asyncio
-    async def test_a_turn_without_images_has_no_image_flag(self, fake_cli: FakeCli) -> None:
-        await _turn(make_runtime(fake_cli, "codex"), "plain")
-
-        assert not any(a.startswith("--image") for a in _argv(fake_cli, "codex"))
 
 
 class TestUnsupportedCli:

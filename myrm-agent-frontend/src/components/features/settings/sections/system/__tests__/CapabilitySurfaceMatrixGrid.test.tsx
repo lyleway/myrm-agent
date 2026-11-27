@@ -109,4 +109,22 @@ describe('securityPolicyUtils capability surface helpers', () => {
     // 不相关的 shell_exec 应该保留
     expect(updated.find((r) => r.permission === 'shell_exec')).toBeDefined();
   });
+
+  it('the Remote Tools card names exactly what it governs: MCP tools and external agents', () => {
+    const remote = CAPABILITY_SURFACES.find((surface) => surface.key === 'remote_tools');
+    expect(remote?.tools).toEqual(['mcp_invoke', 'invoke_external_agent']);
+  });
+
+  it('switching Remote Tools replaces the explicit rules of external agents as well as of MCP tools', () => {
+    const rules = [
+      { permission: 'invoke_external_agent', pattern: '*', action: 'allow' as const },
+      { permission: 'mcp_invoke', pattern: '*', action: 'allow' as const },
+      { permission: 'shell_exec', pattern: '*', action: 'ask' as const },
+    ];
+
+    expect(syncCapabilityActionToRules(rules, 'remote_tools', 'deny')).toEqual([
+      { permission: 'shell_exec', pattern: '*', action: 'ask' },
+      { permission: 'remote_tools', pattern: '*', action: 'deny' },
+    ]);
+  });
 });

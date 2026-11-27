@@ -135,6 +135,15 @@ async def _phase_1a_sequential() -> None:
     except Exception as e:
         logger.warning("[Startup] Retired provider OAuth credential purge failed (non-critical): %s", e)
 
+    try:
+        from app.services.config.retired_audio_settings import migrate_retired_audio_settings
+
+        rewritten = await migrate_retired_audio_settings()
+        if rewritten:
+            logger.info("[Startup] Retired audio settings migration rewrote %d row(s)", rewritten)
+    except Exception as e:
+        logger.warning("[Startup] Retired audio settings migration failed (non-critical): %s", e)
+
     # Subscription access tokens are short-lived, so a model instance that outlives one renews it per request.
     try:
         from myrm_agent_harness.api.hooks import set_api_key_refresher

@@ -37,10 +37,10 @@ describe('useTTS', () => {
     });
 
     it('exposes the API engine in api mode and hands it the provider', () => {
-      const { result } = renderHook(() => useTTS({ mode: 'api', provider: 'openai' }));
+      const { result } = renderHook(() => useTTS({ mode: 'api', provider: 'elevenlabs' }));
 
       expect(result.current.speak).toBe(api.speak);
-      expect(mocks.useApiTTS).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai' }));
+      expect(mocks.useApiTTS).toHaveBeenCalledWith(expect.objectContaining({ provider: 'elevenlabs' }));
     });
 
     it('keeps running both engines whichever one is exposed', () => {

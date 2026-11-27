@@ -37,7 +37,7 @@ def test_ws_stream_returns_error_when_local_stt_unavailable(ws_client: TestClien
             new_callable=AsyncMock,
             return_value=_local_voice(),
         ),
-        patch("app.channels.voice.stt.is_local_available", return_value=False),
+        patch("app.channels.voice.stt.local.is_local_available", return_value=False),
     ):
         with ws_client.websocket_connect("/ws/stt/stream") as ws:
             ws.send_json({"keyterms": []})

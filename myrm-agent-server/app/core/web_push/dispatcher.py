@@ -8,12 +8,14 @@ scenarios (approvals, goal completions, health alerts, etc.).
 - app.services.event.app_event_bus::ServerEventBus, AppEvent, AppEventType
 - app.core.web_push.push_deep_links::resolve_push_url
 - app.core.web_push.service::get_web_push_service
+- app.core.web_push.delivery_alert::DeliveryAlert (POS: one HEALTH_ALERT per streak of broadcasts that reached no device)
 
 [OUTPUT]
 - WebPushDispatcher: start()/stop() lifecycle
 
 [POS]
 Independent ServerEventBus subscriber. Does NOT modify dispatcher.py or btw_notifier.py.
+Hands every broadcast result to the DeliveryAlert, so a push that stops getting through is reported, not just logged.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import asyncio
 import logging
 
 from app.core.infra.background_task import spawn_observed_task
+from app.core.web_push.delivery_alert import DeliveryAlert
 from app.services.event.app_event_bus import AppEvent, AppEventType, ServerEventBus
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,7 @@ class WebPushDispatcher:
         self._bus = event_bus
         self._queue: asyncio.Queue[AppEvent] | None = None
         self._task: asyncio.Task[None] | None = None
+        self._delivery_alert = DeliveryAlert(event_bus)
 
     async def start(self) -> None:
         self._queue = self._bus.subscribe()
@@ -170,4 +174,5 @@ class WebPushDispatcher:
         from app.core.web_push.service import get_web_push_service
 
         service = get_web_push_service()
-        await service.broadcast(title=title, body=body, url=resolve_push_url(event))
+        result = await service.broadcast(title=title, body=body, url=resolve_push_url(event))
+        self._delivery_alert.observe(result)

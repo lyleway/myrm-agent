@@ -353,7 +353,14 @@ class BaseAgent(BaseAgentModesMixin, BaseAgentChildrenMixin):
         steering_token: SteeringToken | None = None,
         timezone: str | None = None,
     ) -> AsyncGenerator[dict[str, object]]:
-        """Stream agent events. Supports normal query and Command(resume=...) modes."""
+        """Stream agent events. Supports normal query and Command(resume=...) modes.
+
+        The run keeps its state (security config, executor, workspace trust, event logger, usage ledger) in
+        ``ContextVar`` values it binds while the stream is advanced, so the host must advance the whole stream in
+        one context. A plain ``async for`` does; a host that steps the stream in tasks of its own has to give every
+        step the same context (as the server's ``merge_stream_with_emitter`` does), otherwise the tools of the run
+        no longer see that state.
+        """
         from myrm_agent_harness.agent.errors.agent_errors import AgentBusyError
 
         if self._is_running:

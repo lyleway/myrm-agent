@@ -16,6 +16,7 @@ Mirrors `src/myrm_agent_harness/toolkits/<name>/` — one subdirectory per shipp
 |------|---------|-------|
 | `browser/` | `toolkits/browser/` | Real Chromium tests need `integration` / `e2e` markers |
 | `code_execution/` | `toolkits/code_execution/` | Sandbox / security |
+| `computer_use/` | `toolkits/computer_use/` | Live tests that reach the real desktop stack stay out of the default run (`integration` marker or an opt-in env var) |
 | `mcp/` | `toolkits/mcp/` | MCP client pool；真实 loopback 服务器覆盖 TLS/mTLS、重定向防护、连接池熔断/单飞、工具枚举与会话重连 |
 | `memory/` | `toolkits/memory/` | Memory manager |
 | `openapi_bridge/` | `toolkits/openapi_bridge/` | Spec parsing / tool generation / HTTP executor |

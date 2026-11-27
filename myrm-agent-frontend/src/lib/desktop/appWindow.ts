@@ -6,6 +6,7 @@
  * - openAppWindow: opens an installed app in its own desktop window (or brings the open one forward).
  * - closeAppWindow: closes the window this page runs in.
  * - setAppWindowAlwaysOnTop: keeps the app window above others, or stops doing so.
+ * - setAppWindowTitle: names the window after the app.
  *
  * [POS]
  * Desktop-only window control for installed apps. Each call reports success as a boolean so callers fall back to the
@@ -33,4 +34,8 @@ export function closeAppWindow(): Promise<boolean> {
 
 export function setAppWindowAlwaysOnTop(alwaysOnTop: boolean): Promise<boolean> {
   return call('set_app_window_always_on_top', { alwaysOnTop });
+}
+
+export function setAppWindowTitle(title: string): Promise<boolean> {
+  return call('set_app_window_title', { title });
 }

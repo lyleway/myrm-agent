@@ -10,14 +10,18 @@ no — leaf module, standard library only
 
 [OUTPUT]
 - LoginStrategy: How a CLI performs interactive login.
-- AuthProfile: Per-backend authentication characteristics.
-- profile_for: Resolve an AuthProfile from a backend name or command.
-- cli_launch_args: Baseline non-interactive launch args for a backend.
-- resolve_cli_args: Merge launch args with config args and permission-mode args.
+- Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
+- AuthProfile: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
+- profile_for: Resolve an AuthProfile from a backend name or command (a name that merely contains a backend's counts).
+- command_profile: Resolve the AuthProfile of a command that is exactly a known agent's executable.
+- effective_transport: The transport an agent really runs over: a known agent's contract wins over a stored choice.
+- all_profiles, known_backends: Every registered profile, and their names.
+- cli_launch_args: Baseline non-interactive launch args for a backend driven as a CLI process.
 
 [POS]
-Authentication profile registry for the ACP auth subsystem. Sole owner of per-CLI
-launch and permission arguments, so no business-layer caller hard-codes CLI flags.
+The contract of every known agent: where its login lives, how to log in, how it is launched and over which transport.
+Business and control-plane layers read it instead of hard-coding agent specifics; the launch and permission arguments
+derived from it are resolved in ``_launch_args``.
 """
 
 from __future__ import annotations
@@ -27,14 +31,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
+
+# How an agent is driven: as a CLI process whose output is parsed, over the Agent Client Protocol, or over the JSON-RPC
+# app server of Codex.
+Transport = Literal["cli", "acp", "app_server"]
 
 
 class LoginStrategy(StrEnum):
     """How a CLI backend performs an interactive subscription login."""
 
-    DEVICE_CODE = "device_code"  # CLI prints a URL/code; user authorizes in a browser, CLI polls
     BROWSER_OAUTH = "browser_oauth"  # CLI opens a browser and runs a local loopback callback
-    SETUP_TOKEN = "setup_token"  # CLI prints a URL; user pastes the returned auth code back via stdin
+    PASTE_CODE = "paste_code"  # CLI prints a URL; the page it leads to shows a code the user pastes back via stdin
     MANUAL_IMPORT = "manual_import"  # no scriptable login on this host; only credential import works
 
 
@@ -48,29 +56,67 @@ class AuthProfile:
     """
 
     backend: str
-    home_env: str | None  # env var that overrides the CLI home dir, if the CLI honours one
+    home_env: str  # env var that relocates the CLI home dir
     home_dir: str  # default home subdir under $HOME (e.g. ".codex")
     credential_files: tuple[str, ...]  # candidate credential filenames within the home dir
     login_strategy: LoginStrategy
-    login_args: tuple[str, ...]  # args appended to the command to start login ("" → not scriptable)
-    logout_args: tuple[str, ...] | None
-    needs_code_input: bool  # whether login expects the user to paste a code back via stdin
+    login_args: tuple[str, ...]  # args appended to the command to start login; empty: not scriptable
+    logout_args: tuple[str, ...] | None  # args that make the CLI remove its own login, wherever it keeps it
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
-    cli_launch_args: tuple[str, ...] = ()  # baseline non-interactive invocation args (never permission flags)
+    # The transport the agent's own contract calls for, and the args that start it that way (never permission flags,
+    # except the one an ACP agent needs to ask at all): a CLI agent's baseline headless invocation; the flag that puts
+    # an ACP agent in ACP mode, then the one that makes it ask the host before it acts (its own settings may default
+    # to a mode that never asks); the subcommand that starts an app server.
+    transport: Transport = "cli"
+    launch_args: tuple[str, ...] = ()
+    # The session mode an ACP agent reports once it asks the host; anything else in ``safe`` mode is not left standing.
+    acp_ask_mode: str | None = None
+    # The args that make the CLI report its own login state; empty: it has no such command.
+    login_probe: tuple[str, ...] = ()
+    # The login for a browser on another machine than the CLI: a loopback callback cannot reach it from there, so the
+    # CLI is asked for the flow that works from anywhere. Empty: ``login_args`` already works from anywhere.
+    remote_login_args: tuple[str, ...] = ()
+    # The text of the CLI's own prompt for the code the user pastes back through stdin; empty: the login asks for none.
+    # The CLI prints it again after a rejected code, so it is never the reason a login failed.
+    code_prompt: str = ""
+    # What a home of its own needs beyond ``home_env``. ``home_env_is_base``: the variable stands in for ``$HOME``, so
+    # the CLI's state lives in ``<value>/<home_dir>`` rather than in the value itself. ``isolation_env``: variables that
+    # keep the login inside the home; a CLI that keeps it in the operating system's keychain unless told otherwise
+    # shares one login between every home.
+    home_env_is_base: bool = False
+    isolation_env: tuple[tuple[str, str], ...] = ()
 
     def resolve_home(self, env: Mapping[str, str]) -> Path:
-        """Resolve the CLI home directory, honouring an override env var if set."""
-        if self.home_env:
-            override = env.get(self.home_env)
-            if override:
-                return Path(override).expanduser()
+        """Resolve the CLI home directory, honouring the relocation variable if set."""
+        override = env.get(self.home_env)
+        if override:
+            base = Path(override).expanduser()
+            return base / self.home_dir if self.home_env_is_base else base
         home = env.get("HOME") or os.path.expanduser("~")
         return Path(home) / self.home_dir
+
+    @property
+    def relocation_vars(self) -> tuple[str, ...]:
+        """The variables that relocate this CLI's home and keep its login inside it."""
+        return (self.home_env, *(name for name, _ in self.isolation_env))
+
+    def isolated_env(self, root: Path) -> dict[str, str]:
+        """The environment that makes this CLI keep all its state and its login under ``root``."""
+        return {self.home_env: str(root), **dict(self.isolation_env)}
 
     def resolve_credential_paths(self, env: Mapping[str, str]) -> list[Path]:
         """Candidate credential file paths in priority order."""
         base = self.resolve_home(env)
         return [base / name for name in self.credential_files]
+
+    def login_command(self, *, remote: bool) -> tuple[str, ...]:
+        """The args that start the login, for a browser on another machine than the CLI when ``remote``."""
+        return self.remote_login_args if remote and self.remote_login_args else self.login_args
+
+    @property
+    def needs_code_input(self) -> bool:
+        """Whether the login asks the user to paste a code back through stdin."""
+        return bool(self.code_prompt)
 
     @property
     def scriptable_login(self) -> bool:
@@ -78,59 +124,67 @@ class AuthProfile:
         return bool(self.login_args) and self.login_strategy is not LoginStrategy.MANUAL_IMPORT
 
 
-# Per-backend profiles. Credential locations and home-override vars below reflect
-# each CLI's documented behaviour; the manual-import fallback (credential_store)
-# guarantees a working path even where scripted login is unavailable.
+# Per-backend profiles, in the order agents are detected and listed. Credential locations and home-override vars
+# below reflect each CLI's documented behaviour; the manual-import fallback (credential_store) guarantees a
+# working path even where scripted login is unavailable.
 _PROFILES: dict[str, AuthProfile] = {
-    "codex": AuthProfile(
-        backend="codex",
-        home_env="CODEX_HOME",
-        home_dir=".codex",
-        credential_files=("auth.json",),
-        login_strategy=LoginStrategy.DEVICE_CODE,
-        login_args=("login",),
-        logout_args=("logout",),
-        needs_code_input=False,
-        api_key_env=("OPENAI_API_KEY",),
-        # A delegated workspace is not necessarily a git repository, and `exec` refuses to start outside one
-        # unless told otherwise. The sandbox the permission mode selects is unaffected by the flag.
-        cli_launch_args=("exec", "--json", "--skip-git-repo-check"),
-    ),
     "claude": AuthProfile(
         backend="claude",
         home_env="CLAUDE_CONFIG_DIR",
         home_dir=".claude",
         credential_files=(".credentials.json",),
-        login_strategy=LoginStrategy.SETUP_TOKEN,
-        login_args=("setup-token",),
-        logout_args=None,
-        needs_code_input=True,
+        login_strategy=LoginStrategy.PASTE_CODE,
+        login_args=("auth", "login", "--claudeai"),
+        logout_args=("auth", "logout"),
+        code_prompt="Paste code here",
         api_key_env=("ANTHROPIC_API_KEY",),
-        cli_launch_args=("-p", "--output-format", "stream-json", "--verbose"),
+        login_probe=("auth", "status"),
+        launch_args=("-p", "--output-format", "stream-json", "--verbose"),
+    ),
+    "codex": AuthProfile(
+        backend="codex",
+        home_env="CODEX_HOME",
+        home_dir=".codex",
+        credential_files=("auth.json",),
+        login_strategy=LoginStrategy.BROWSER_OAUTH,
+        login_args=("login",),
+        remote_login_args=("login", "--device-auth"),
+        logout_args=("logout",),
+        # The app server reads no key from its environment; the runtime hands the first of these the host injected to
+        # the server as a login that is never written to disk.
+        api_key_env=("OPENAI_API_KEY", "CODEX_API_KEY"),
+        login_probe=("login", "status"),
+        transport="app_server",
+        launch_args=("app-server",),
     ),
     "gemini": AuthProfile(
         backend="gemini",
-        home_env=None,
+        home_env="GEMINI_CLI_HOME",
         home_dir=".gemini",
-        credential_files=("oauth_creds.json",),
+        # The legacy file, and the encrypted file the CLI moves it into when it is told to keep its login in a file.
+        credential_files=("oauth_creds.json", "gemini-credentials.json"),
         login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=(),
         logout_args=None,
-        needs_code_input=False,
         api_key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        cli_launch_args=("--output-format", "stream-json"),
+        transport="acp",
+        launch_args=("--acp", "--approval-mode", "default"),
+        acp_ask_mode="default",
+        home_env_is_base=True,
+        isolation_env=(("GEMINI_FORCE_FILE_STORAGE", "true"),),
     ),
     "qwen": AuthProfile(
         backend="qwen",
-        home_env=None,
+        home_env="QWEN_HOME",
         home_dir=".qwen",
         credential_files=("oauth_creds.json",),
         login_strategy=LoginStrategy.BROWSER_OAUTH,
         login_args=(),
         logout_args=None,
-        needs_code_input=False,
         api_key_env=("DASHSCOPE_API_KEY", "QWEN_API_KEY"),
-        cli_launch_args=("--output-format", "stream-json"),
+        transport="acp",
+        launch_args=("--acp", "--approval-mode", "default"),
+        acp_ask_mode="default",
     ),
 }
 
@@ -160,198 +214,44 @@ def profile_for(backend_or_command: str) -> AuthProfile | None:
     return None
 
 
+def command_profile(command: str | None) -> AuthProfile | None:
+    """The profile of a command that is exactly a known agent's executable (``/usr/bin/gemini``, ``gemini.cmd``).
+
+    ``profile_for`` also accepts a name that merely contains a backend's (``claude-code``), which suits resolving the
+    login of an agent by its configured name. How an agent is started and driven is decided only for the real
+    executable: an adapter or wrapper that happens to carry an agent's name is a command of its own.
+    """
+    if not command:
+        return None
+    return _PROFILES.get(_normalize(command))
+
+
+def effective_transport[Configured: str](command: str | None, configured: Configured) -> Configured | Transport:
+    """The transport ``command`` really runs over: a known agent's contract wins over the choice stored for it.
+
+    Any other command keeps ``configured`` as it is, a value this module does not recognise included, so the layer that
+    stored it can still report it.
+    """
+    profile = command_profile(command)
+    return profile.transport if profile is not None else configured
+
+
+def all_profiles() -> tuple[AuthProfile, ...]:
+    """Every registered profile."""
+    return tuple(_PROFILES.values())
+
+
 def known_backends() -> tuple[str, ...]:
     """Names of all backends with a registered auth profile."""
     return tuple(_PROFILES)
 
 
 def cli_launch_args(backend_or_command: str) -> list[str]:
-    """Baseline non-interactive launch args for a CLI backend, or an empty list.
+    """Baseline non-interactive launch args of a backend driven as a CLI process, or an empty list.
 
     Business layers call this instead of hard-coding per-CLI arguments, so all CLI
-    invocation knowledge stays in this registry and cannot drift across layers.
+    invocation knowledge stays in this registry and cannot drift across layers. An agent driven over ACP or an app
+    server has no baseline to store: its launch args are resolved when it starts.
     """
     profile = profile_for(backend_or_command)
-    return list(profile.cli_launch_args) if profile else []
-
-
-# Permission-mode args per backend. Index 0 is the flag name, the remainder is its
-# value; both are emitted as separate argv entries so `--flag=value` and `--flag value`
-# conventions are avoided on CLIs whose parsers only accept spaced values.
-#
-# Every value below is taken from the CLI's own documentation:
-# - claude: `--permission-mode` accepts default / acceptEdits / plan / auto / dontAsk /
-#   bypassPermissions. `acceptEdits` is the non-interactive step that approves edit-class
-#   operations, so it is the closest CLI-side match for "approve each step".
-# - codex: the `exec` entry point already hardcodes approval-policy `never` (headless
-#   never prompts) and does not accept `--ask-for-approval`, so `-s/--sandbox` is the
-#   only lever. `--dangerously-bypass-approvals-and-sandbox` is the sandbox escape hatch
-#   (it implies full access) and therefore replaces the selector instead of joining it.
-# - gemini: `--approval-mode` validates the value with yargs against default / auto_edit /
-#   yolo / plan, where plan is read-only.
-# - qwen: forked from gemini but validates plan / default / auto-edit / yolo, so the edit
-#   mode is spelled with a hyphen here rather than gemini's underscore.
-_PERMISSION_MODE_ARGS: dict[str, dict[str, tuple[str, ...]]] = {
-    "claude": {
-        "safe": ("--permission-mode", "default"),
-        "ask": ("--permission-mode", "acceptEdits"),
-        "allow_all": ("--permission-mode", "bypassPermissions"),
-        "bypass": ("--permission-mode", "bypassPermissions"),
-    },
-    "codex": {
-        "safe": ("--sandbox", "read-only"),
-        "ask": ("--sandbox", "workspace-write"),
-        "allow_all": ("--sandbox", "workspace-write"),
-        "bypass": ("--dangerously-bypass-approvals-and-sandbox",),
-    },
-    "gemini": {
-        "safe": ("--approval-mode", "plan"),
-        "ask": ("--approval-mode", "auto_edit"),
-        "allow_all": ("--approval-mode", "yolo"),
-        "bypass": ("--approval-mode", "yolo"),
-    },
-    "qwen": {
-        "safe": ("--approval-mode", "plan"),
-        "ask": ("--approval-mode", "auto-edit"),
-        "allow_all": ("--approval-mode", "yolo"),
-        "bypass": ("--approval-mode", "yolo"),
-    },
-}
-
-# Permission flags a mapping owns, keyed by backend. Stripping is deliberately
-# per-backend: `-s` is codex's sandbox *mode* (`-s read-only`) but gemini's boolean
-# sandbox *toggle*, so a global strip would silently disable sandboxing the user asked
-# for. Each entry holds the exact flag names, the names whose value is a separate argv
-# element, and the per-backend `--flag=value` prefixes — gemini's `--sandbox=true` is the
-# user's own toggle and must survive, while codex's `--sandbox=read-only` is the mode this
-# mapping owns.
-_PERMISSION_FLAGS_BY_BACKEND: dict[str, tuple[frozenset[str], frozenset[str], tuple[str, ...]]] = {
-    "claude": (
-        frozenset({"--permission-mode", "--dangerously-skip-permissions", "--full-auto"}),
-        frozenset({"--permission-mode"}),
-        ("--permission-mode=",),
-    ),
-    "codex": (
-        # Only flags this mapping replaces belong here. Hook trust is a separate concern
-        # the mapping has no substitute for, so `--dangerously-bypass-hook-trust` is left
-        # alone rather than silently dropped.
-        frozenset(
-            {
-                "-s",
-                "--sandbox",
-                "--full-auto",
-                "--approve-for-me",
-                "--yolo",
-                "--dangerously-bypass-approvals-and-sandbox",
-            }
-        ),
-        frozenset({"-s", "--sandbox"}),
-        ("--sandbox=",),
-    ),
-    "gemini": (
-        frozenset({"-y", "--yolo", "--approval-mode"}),
-        frozenset({"--approval-mode"}),
-        ("--approval-mode=",),
-    ),
-    "qwen": (
-        frozenset({"-y", "--yolo", "--approval-mode"}),
-        frozenset({"--approval-mode"}),
-        ("--approval-mode=",),
-    ),
-}
-
-
-def _permission_backends() -> frozenset[str]:
-    """Backends that have both a permission mapping and a strip table.
-
-    The two tables must cover exactly the same backends: a mode mapping without a
-    strip table would resolve to a duplicated flag (a parser error or a silent
-    last-wins override), and a strip table without a mapping would leave the user in
-    an unspecified mode. Evaluated on each resolve so a half-added backend fails loudly
-    at first invocation instead of silently mis-resolving arguments.
-    """
-    backends = frozenset(_PERMISSION_MODE_ARGS) & frozenset(_PERMISSION_FLAGS_BY_BACKEND)
-    if backends != frozenset(profile.backend for profile in _PROFILES.values()):
-        msg = (
-            "Permission tables are out of sync with _PROFILES: "
-            f"profiles={sorted(p.backend for p in _PROFILES.values())}, "
-            f"mode_args={sorted(_PERMISSION_MODE_ARGS)}, "
-            f"strip_flags={sorted(_PERMISSION_FLAGS_BY_BACKEND)}"
-        )
-        raise ValueError(msg)
-    return backends
-
-
-def _strip_permission_flags(backend: str, args: list[str]) -> list[str]:
-    """Drop the permission flags this backend's mapping owns, plus their values."""
-    flag_lookup, value_flags, prefix_flags = _PERMISSION_FLAGS_BY_BACKEND[backend]
-    kept: list[str] = []
-    skip_value = False
-    for arg in args:
-        if skip_value:
-            skip_value = False
-            continue
-        if arg in flag_lookup or arg.startswith(prefix_flags):
-            skip_value = arg in value_flags
-            continue
-        kept.append(arg)
-    return kept
-
-
-def resolve_cli_args(
-    backend_or_command: str,
-    configured_args: list[str],
-    permission_mode: str,
-) -> list[str]:
-    """Merge baseline launch args with config args and the permission-mode args.
-
-    Deterministic order: permission args, then baseline args, then configured args
-    minus anything the permission mapping owns or the baseline already says. The mapping
-    is the sole owner of the permission flags, so a config carrying an explicit (often
-    stale) flag can never contradict the mode the user selected. A config that restates a
-    baseline option (a preset's ``exec --json``) adds nothing; the config's own repeated
-    options all stay, since ``-c a=1 -c b=2`` is two settings and not a duplicate.
-    """
-    profile = profile_for(backend_or_command)
-    if profile is None:
-        # Unknown CLI: we own no permission contract for it, so args pass through
-        # untouched rather than stripping flags that may mean something else entirely.
-        return list(configured_args)
-
-    # Every registered profile must carry permission tables; the assertion fails loudly
-    # otherwise, so a half-added backend can never reach the merge below undefined.
-    _permission_backends()
-
-    merged: list[str] = []
-    merged.extend(_PERMISSION_MODE_ARGS[profile.backend].get(permission_mode, ()))
-    merged.extend(profile.cli_launch_args)
-    owned = _strip_permission_flags(profile.backend, configured_args)
-    merged.extend(_without_restated(owned, profile.cli_launch_args))
-    return merged
-
-
-def _option_units(args: tuple[str, ...]) -> list[tuple[str, ...]]:
-    """Split launch args into options: a flag with the values that follow it, or a lone leading word (a subcommand)."""
-    units: list[list[str]] = []
-    for arg in args:
-        if arg.startswith("-") or not units:
-            units.append([arg])
-        else:
-            units[-1].append(arg)
-    return [tuple(unit) for unit in units]
-
-
-def _without_restated(args: list[str], baseline: tuple[str, ...]) -> list[str]:
-    """``args`` minus every baseline option it restates (the flag together with its value, wherever it stands)."""
-    kept = list(args)
-    for unit in _option_units(baseline):
-        remaining: list[str] = []
-        index = 0
-        while index < len(kept):
-            if tuple(kept[index : index + len(unit)]) == unit:
-                index += len(unit)
-            else:
-                remaining.append(kept[index])
-                index += 1
-        kept = remaining
-    return kept
+    return list(profile.launch_args) if profile is not None and profile.transport == "cli" else []

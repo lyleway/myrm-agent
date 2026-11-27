@@ -16,7 +16,6 @@ from app.api.files.artifact_api import router as artifact_router
 from app.api.files.artifact_share_api import public_router
 from app.api.files.artifact_share_api import router as share_router
 from app.api.files.hosting_api import router as hosting_router
-from app.api.files.provenance_api import router as provenance_router
 from app.database.connection import get_db
 from app.database.models import Base
 from app.database.models.artifact import Artifact, ArtifactVersion
@@ -92,7 +91,6 @@ def share_client(
 @pytest.fixture
 def client(db_session: AsyncSession) -> TestClient:
     test_app = FastAPI()
-    test_app.include_router(provenance_router, prefix="/api/v1/files/artifacts")
     test_app.include_router(artifact_router, prefix="/api/v1/files/artifacts")
 
     async def override_get_db():

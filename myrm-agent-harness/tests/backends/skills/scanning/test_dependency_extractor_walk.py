@@ -4,9 +4,10 @@
 - backends.skills.scanning.dependency_extractor::extract_skill_dependencies, extract_dependencies_from_files (POS: the extractor under test)
 
 [OUTPUT]
-- Fails when a dependency file is skipped for its depth or folder (node_modules apart), when a symbolic link is followed,
-  when a file over the size limit is read or skipped without a warning, when a part of the tree the walk could not list
-  goes unlogged, or when the disk scan and the archive scan pick different files.
+- Fails when a dependency file is skipped for its depth or folder (node_modules apart), when a symbolic link is followed
+  or a link out of the skill goes unlogged (or is logged as a warning), when a file over the size limit is read or skipped
+  without a warning, when a part of the tree the walk could not list goes unlogged, or when the disk scan and the archive
+  scan pick different files.
 
 [POS]
 The extractor feeds the advisory scanners, so a dependency it never sees is one they never check; this pins that it
@@ -29,6 +30,7 @@ from myrm_agent_harness.backends.skills.scanning.dependency_extractor import (
     extract_dependencies_from_files,
     extract_skill_dependencies,
 )
+from tests.support.symlinks import make_symlink
 
 _LOGGER = "myrm_agent_harness.backends.skills.scanning.dependency_extractor"
 _LIMIT = 16 * 1024 * 1024
@@ -58,13 +60,28 @@ def test_a_symlinked_dependency_file_is_not_followed(tmp_path: Path) -> None:
     _write(outside, "requirements.txt", "leaked==1.0\n")
     skill = tmp_path / "skill"
     skill.mkdir()
-    try:
-        (skill / "requirements.txt").symlink_to(outside / "requirements.txt")
-        (skill / "linked-folder").symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("symbolic links are not available")
+    make_symlink(skill / "requirements.txt", outside / "requirements.txt")
+    make_symlink(skill / "linked-folder", outside)
 
     assert extract_skill_dependencies(skill) == []
+
+
+def test_a_symlink_out_of_the_skill_is_noted_at_info_level_not_as_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    outside = tmp_path / "outside"
+    _write(outside, "requirements.txt", "leaked==1.0\n")
+    skill = tmp_path / "skill"
+    _write(skill, "requirements.txt", _NUMPY)
+    make_symlink(skill / "linked-folder", outside)
+
+    with caplog.at_level(logging.INFO, logger=_LOGGER):
+        deps = extract_skill_dependencies(skill)
+
+    assert [d.name for d in deps] == ["numpy"]
+    (record,) = [r for r in caplog.records if r.name == _LOGGER]
+    assert record.levelno == logging.INFO
+    assert "skips 'linked-folder', a link out of the skill folder" in record.getMessage()
 
 
 def test_a_file_over_the_size_limit_is_skipped_with_a_warning(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

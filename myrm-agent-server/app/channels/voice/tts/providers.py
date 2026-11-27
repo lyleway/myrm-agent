@@ -3,14 +3,12 @@
 - app.channels.voice.tts.common::_DEFAULT_VOICES / _PIPER_INSTALL_HINT / _STREAM_CHUNK_SIZE / _TTS_TIMEOUT / _import_edge_tts / _resolve_base_url / _write_temp / is_piper_available (POS: voice tts 子包的一部分；由 __init__.py 聚合导出。)
 
 [OUTPUT]
-- _openai_request: _openai_request
 - _elevenlabs_request: _elevenlabs_request
 - _fish_audio_request: _fish_audio_request
 - _minimax_request: _minimax_request
 - _synthesize_api: Unified non-streaming synthesis for API-based providers.
 - _synthesize_piper: Synthesize text using local Piper TTS.
 - _synthesize_edge: _synthesize_edge
-- _stream_openai: _stream_openai
 - _stream_elevenlabs: _stream_elevenlabs
 - _stream_fish_audio: _stream_fish_audio
 - _stream_minimax: MiniMax streaming returns SSE with hex-encoded audio in each event.
@@ -48,25 +46,16 @@ from .common import (
 logger = logging.getLogger(__name__)
 
 
-def _openai_request(config: VoiceConfig, text: str, fmt: str):
-    voice = config.tts_voice or _DEFAULT_VOICES["openai"]
-    base = _resolve_base_url(config, "openai")
-    url = f"{base}/audio/speech"
-    headers = {"Authorization": f"Bearer {config.tts_api_key}", "Content-Type": "application/json"}
-    body: dict[str, object] = {"model": "gpt-4o-mini-tts", "input": text, "voice": voice, "response_format": fmt}
-    if config.tts_speed != 1.0:
-        body["speed"] = config.tts_speed
-    return url, headers, body
-
-
-def _elevenlabs_request(config: VoiceConfig, text: str, stream: bool):
+def _elevenlabs_request(
+    config: VoiceConfig, text: str, stream: bool
+) -> tuple[str, dict[str, str], dict[str, str], dict[str, object]]:
     voice_id = config.tts_voice or _DEFAULT_VOICES["elevenlabs"]
     base_url = _resolve_base_url(config, "elevenlabs")
     endpoint = f"{base_url}/v1/text-to-speech/{voice_id}"
     url = f"{endpoint}/stream" if stream else endpoint
     headers = {"xi-api-key": config.tts_api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"}
     params = {"output_format": "mp3_44100_128"}
-    body = {
+    body: dict[str, object] = {
         "text": text,
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True},
@@ -74,16 +63,16 @@ def _elevenlabs_request(config: VoiceConfig, text: str, stream: bool):
     return url, headers, params, body
 
 
-def _fish_audio_request(config: VoiceConfig, text: str, fmt: str):
+def _fish_audio_request(config: VoiceConfig, text: str, fmt: str) -> tuple[str, dict[str, str], dict[str, object]]:
     voice_id = config.tts_voice or _DEFAULT_VOICES["fish_audio"]
     base = _resolve_base_url(config, "fish_audio")
     url = f"{base}/tts"
     headers = {"Authorization": f"Bearer {config.tts_api_key}", "model": "s1"}
-    body = {"text": text, "reference_id": voice_id, "format": fmt, "latency": "normal"}
+    body: dict[str, object] = {"text": text, "reference_id": voice_id, "format": fmt, "latency": "normal"}
     return url, headers, body
 
 
-def _minimax_request(config: VoiceConfig, text: str, *, stream: bool):
+def _minimax_request(config: VoiceConfig, text: str, *, stream: bool) -> tuple[str, dict[str, str], dict[str, object]]:
     voice_id = config.tts_voice or _DEFAULT_VOICES["minimax"]
     base = _resolve_base_url(config, "minimax")
     url = f"{base}/t2a_v2"
@@ -107,13 +96,6 @@ def _minimax_request(config: VoiceConfig, text: str, *, stream: bool):
 async def _synthesize_api(text: str, config: VoiceConfig, provider: str, output_format: str) -> Path:
     """Unified non-streaming synthesis for API-based providers."""
     fmt = "opus" if output_format == "opus" else "mp3"
-
-    if provider == "openai":
-        url, headers, body = _openai_request(config, text, fmt)
-        async with httpx.AsyncClient(timeout=_TTS_TIMEOUT) as client:
-            resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            return _write_temp(resp.content, f".{fmt}")
 
     if provider == "elevenlabs":
         url, headers, params, body = _elevenlabs_request(config, text, stream=False)
@@ -216,15 +198,6 @@ async def _synthesize_edge(text: str, config: VoiceConfig) -> Path:
 # ---------------------------------------------------------------------------
 
 
-async def _stream_openai(text: str, config: VoiceConfig) -> AsyncGenerator[bytes]:
-    url, headers, body = _openai_request(config, text, "mp3")
-    async with httpx.AsyncClient(timeout=_TTS_TIMEOUT) as client:
-        async with client.stream("POST", url, headers=headers, json=body) as resp:
-            resp.raise_for_status()
-            async for chunk in resp.aiter_bytes(_STREAM_CHUNK_SIZE):
-                yield chunk
-
-
 async def _stream_elevenlabs(text: str, config: VoiceConfig) -> AsyncGenerator[bytes]:
     url, headers, params, body = _elevenlabs_request(config, text, stream=True)
     async with httpx.AsyncClient(timeout=_TTS_TIMEOUT) as client:
@@ -310,7 +283,6 @@ async def _stream_piper(text: str, config: VoiceConfig) -> AsyncGenerator[bytes]
 
 
 _STREAM_PROVIDERS = {
-    "openai": _stream_openai,
     "elevenlabs": _stream_elevenlabs,
     "fish_audio": _stream_fish_audio,
     "minimax": _stream_minimax,

@@ -143,7 +143,7 @@ def _extract_text_from_query(query: object) -> str | None:
 
 
 def parse_learn_slash_args(query: object) -> str | None:
-    """Return /learn trailing args when *query* is a raw slash message; else None."""
+    """Return the trailing args of a raw ``/learn`` message (``""`` when it has none); None for any other message."""
     text = _extract_text_from_query(query)
     if text is None:
         return None
@@ -151,8 +151,6 @@ def parse_learn_slash_args(query: object) -> str | None:
     if not stripped.startswith("/"):
         return None
     body = stripped[1:]
-    if not body:
-        return ""
     space_idx = body.find(" ")
     cmd_name = body[:space_idx].lower() if space_idx > 0 else body.lower()
     if cmd_name != _LEARN_SLASH_COMMAND:

@@ -75,6 +75,18 @@ def test_identity_fields_reach_the_output_through_the_escaping_handlers() -> Non
     assert "my foregroundLine(appName, winTitle, bundleId)" in _AX_FOREGROUND_META_SCRIPT
 
 
+def test_element_text_reaches_the_output_only_through_the_escaping_handler() -> None:
+    """A name and a value are read from the screen, so a row may carry them only after ``escapeText``."""
+    assert "set safeName to my escapeText(elemName)" in _AX_SNAPSHOT_SCRIPT
+    assert "set safeValue to my escapeText(elemValue)" in _AX_SNAPSHOT_SCRIPT
+    rows = [line for line in _AX_SNAPSHOT_SCRIPT.splitlines() if "set end of outputLines to ((i as text)" in line]
+    assert len(rows) == 1
+    assert "& safeName &" in rows[0]
+    assert "& safeValue &" in rows[0]
+    assert "elemName" not in rows[0]
+    assert "elemValue" not in rows[0]
+
+
 def test_applescript_literal_escapes_the_backslash_before_the_quote() -> None:
     assert _applescript_literal('a"b\\c\\"') == '"a\\"b\\\\c\\\\\\""'
 

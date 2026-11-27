@@ -155,7 +155,6 @@ class RouterCommandsHost(Protocol):
     _retry_handler: RetryHandler | None
     _undo_handler: UndoHandler | None
     _resolver: PolicyResolver
-    _new_session_peers: dict[str, float]
     _topic_resolver: TopicManager | None
     _session_yolo: dict[str, tuple[float, int | None]]
     _session_personality: dict[str, str]

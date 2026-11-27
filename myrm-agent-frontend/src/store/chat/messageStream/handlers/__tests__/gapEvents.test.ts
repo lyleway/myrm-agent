@@ -191,7 +191,7 @@ describe('gapEvents', () => {
     expect(toastInfo).not.toHaveBeenCalled();
   });
 
-  it('ignores skill_gap events (bind-and-resend removed)', async () => {
+  it('ignores skill_gap events', async () => {
     const result = await gapEvents(createCtx(AgentEventType.SKILL_GAP, { skill_id: 'github_pr_skill' }));
     expect(result).toBeNull();
     expect(toastInfo).not.toHaveBeenCalled();

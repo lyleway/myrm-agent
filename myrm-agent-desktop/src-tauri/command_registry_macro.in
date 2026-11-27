@@ -81,6 +81,29 @@ macro_rules! tauri_command_registry {
                 "set_app_window_always_on_top",
                 crate::commands::app_window::set_app_window_always_on_top
             ),
+            (
+                "set_app_window_title",
+                crate::commands::app_surface::set_app_window_title
+            ),
+            ("set_app_tray", crate::commands::app_surface::set_app_tray),
+            ("clear_app_tray", crate::commands::app_surface::clear_app_tray),
+            (
+                "register_app_shortcut",
+                crate::commands::app_surface::register_app_shortcut
+            ),
+            (
+                "unregister_app_shortcut",
+                crate::commands::app_surface::unregister_app_shortcut
+            ),
+            ("has_app_launcher", crate::commands::app_launcher::has_app_launcher),
+            (
+                "create_app_launcher",
+                crate::commands::app_launcher::create_app_launcher
+            ),
+            (
+                "remove_app_launcher",
+                crate::commands::app_launcher::remove_app_launcher
+            ),
             ("force_appshot_capture", crate::commands::config::force_appshot_capture),
             ("migrate_data_dir", crate::commands::config::migrate_data_dir),
             ("export_local_sqlite", crate::commands::recovery::export_local_sqlite),

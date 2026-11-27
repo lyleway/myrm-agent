@@ -3,7 +3,8 @@
 The parallel sub-agents of a run share its shell. These tests drive the registry the local executor keeps, with real
 shells: commands that arrive together start one shell, a caller that checks a shell another command is running
 gets it at once, neither waiting for that command nor restarting its shell, and a shell the registry drops is closed,
-so a command that waited on it runs once, on the shell that replaced it.
+so a command that waited on it runs once, on the shell that replaced it. A request stopped while its first shell
+starts leaves no shell behind: the registry keeps a session only once it has started, so nothing else would close it.
 """
 
 from __future__ import annotations
@@ -125,6 +126,27 @@ async def test_a_shell_that_is_no_longer_alive_is_closed_when_its_replacement_is
         await dead.close()
 
 
+async def test_a_shell_that_fails_its_health_check_is_closed_when_its_replacement_is_started(
+    executor: LocalExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context, env = _context("sick"), executor._build_bash_env(None)
+    sick = await executor._get_or_create_bash_session(context, env)
+
+    async def failing_probe() -> bool:
+        return False
+
+    monkeypatch.setattr(sick, "check_health", failing_probe)
+    try:
+        replacement = await executor._get_or_create_bash_session(context, env)
+
+        assert replacement is not sick
+        assert len(executor._bash_sessions) == 1
+        refused = await sick.execute("echo orphan")
+        assert refused.error == SESSION_CLOSED_BEFORE_START, "the dropped shell was not closed, so a command revived it"
+    finally:
+        await sick.close()
+
+
 async def test_a_command_queued_on_a_shell_that_was_replaced_runs_on_the_shell_that_replaced_it(
     executor: LocalExecutor, tmp_path: Path, outside_tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -188,3 +210,39 @@ async def test_a_command_the_registry_hands_a_closed_shell_twice_comes_back_as_t
         assert len(asked) == 2, "the command is handed to the registry once more, not again and again"
     finally:
         await closed.close()
+
+
+async def test_a_request_stopped_while_its_first_shell_starts_leaves_no_shell(
+    executor: LocalExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawned: list[asyncio.subprocess.Process] = []
+    initializing = asyncio.Event()
+    create_process = LocalPersistentSession._create_process
+
+    async def recording(self: LocalPersistentSession) -> asyncio.subprocess.Process:
+        process = await create_process(self)
+        spawned.append(process)
+        return process
+
+    async def stalled(self: LocalPersistentSession) -> None:
+        initializing.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(LocalPersistentSession, "_create_process", recording)
+    monkeypatch.setattr(LocalPersistentSession, "_initialize_shell", stalled)
+
+    env = executor._build_bash_env(None)
+    starting = asyncio.create_task(executor._get_or_create_bash_session(_context("stopped"), env))
+    await asyncio.wait_for(initializing.wait(), _SETTLE_S)
+    starting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await starting
+
+    assert not executor._bash_sessions, "a session whose shell never finished starting was registered"
+    (shell,) = spawned
+    try:
+        async with asyncio.timeout(_SETTLE_S):
+            await shell.wait()
+    except TimeoutError:
+        shell.kill()
+        pytest.fail("the stopped request left its shell running, and no session of the registry would ever close it")

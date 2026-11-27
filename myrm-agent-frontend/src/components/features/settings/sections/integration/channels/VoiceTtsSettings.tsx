@@ -14,7 +14,6 @@ const TTS_PROVIDERS = [
   { value: 'edge', label: 'Edge TTS (Free)' },
   { value: 'piper', label: 'Piper TTS (Local Offline)' },
   { value: 'voicebox', label: 'Voicebox (Loopback)' },
-  { value: 'openai', label: 'OpenAI TTS' },
   { value: 'elevenlabs', label: 'ElevenLabs' },
   { value: 'fish_audio', label: 'Fish Audio' },
   { value: 'minimax', label: 'MiniMax' },
@@ -79,11 +78,11 @@ export function VoiceTtsSettings({ form, update, needsTtsApiKey }: VoiceTtsSetti
                 </VoiceFieldRow>
               )}
 
-              {(form.ttsProvider === 'openai' || form.ttsProvider === 'voicebox') && (
+              {form.ttsProvider === 'voicebox' && (
                 <VoiceFieldRow label={t('ttsBaseUrl')} htmlFor="voice-tts-base-url">
                   <Input
                     id="voice-tts-base-url"
-                    placeholder={form.ttsProvider === 'voicebox' ? 'http://127.0.0.1:8000' : t('ttsBaseUrlPlaceholder')}
+                    placeholder="http://127.0.0.1:8000"
                     value={form.ttsBaseUrl}
                     onChange={(e) => update({ ttsBaseUrl: e.target.value })}
                   />

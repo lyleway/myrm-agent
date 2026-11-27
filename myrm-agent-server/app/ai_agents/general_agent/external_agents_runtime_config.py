@@ -2,15 +2,19 @@
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
-- myrm_agent_harness.toolkits.acp.types::RuntimeConfig (POS: ACP runtime config contract)
+- myrm_agent_harness.toolkits.acp.auth::effective_transport, cli_launch_args (POS: The transport and baseline launch args a known agent's contract names; a stored choice cannot override the transport)
+- myrm_agent_harness.toolkits.acp.types::RuntimeConfig, BackendType (POS: ACP runtime config contract and the kinds of backend the harness can run)
+- myrm_agent_harness.toolkits.acp.auth::is_valid_account_name (POS: Whether a name is one an account can have)
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
+- app.services.external_agents.accounts::agent_home (POS: The home an external agent's CLI is run in)
+- app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
 - app.config.settings::settings (POS: Gateway wall-clock ceiling that bounds a delegated turn)
 
 [OUTPUT]
-- _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
-- _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields
+- _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
+- _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields (the account an agent runs as included)
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
-- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (each with the fixed directory delegated images are staged in)
+- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted; an agent runs in the home of its account, or in the one a deployment without subscription logins gives every agent)
 
 [POS]
 GeneralAgent 外部 Agent 配置归一化与探测装配层。确保 RuntimePool 指纹与注册字段同源，
@@ -23,11 +27,13 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
+
+from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import AuthMode, PermissionMode
+    from myrm_agent_harness.toolkits.acp.types import AuthMode, BackendType, PermissionMode
 
 logger = logging.getLogger(__name__)
 
@@ -37,35 +43,25 @@ _DEFAULT_TURN_TIMEOUT_SECONDS = 1800
 _CEILING_MARGIN_SECONDS = 60
 
 
-def _default_cli_args(agent_name: str) -> list[str]:
-    """Return sensible default CLI args for a known agent, empty list otherwise.
-
-    Single source of truth lives in the harness auth-profile registry; this
-    shim keeps the server-local call sites stable.
-    """
-    from myrm_agent_harness.toolkits.acp.auth import cli_launch_args
-
-    return cli_launch_args(agent_name)
-
-
 def _auth_mode(cfg: dict[str, object]) -> AuthMode:
-    """Resolve the configured auth mode, defaulting to subscription (use login state)."""
+    """Resolve the configured auth mode, defaulting to subscription (use login state).
+
+    A deployment that does not allow subscription login runs every delegated CLI on an API key whatever the stored
+    config says, so a login left on the host cannot carry delegated work onto someone's subscription.
+    """
+    if not get_deployment_capabilities().allows_subscription_login:
+        return "api_key"
     return "api_key" if cfg.get("authMode") == "api_key" else "subscription"
 
 
 def _permission_mode(cfg: dict[str, object]) -> PermissionMode:
     """Resolve the configured permission mode; a missing or unknown value fails closed to ``safe``.
 
-    The harness adds no CLI flag for a mode name it does not know, which would leave the CLI on its
-    own default (possibly permissive), so the name is validated here instead.
+    The harness refuses to launch under a mode name it does not know, so the name is validated here instead.
     """
     match cfg.get("permissionMode"):
-        case "ask":
-            return "ask"
         case "allow_all":
             return "allow_all"
-        case "bypass":
-            return "bypass"
         case "safe" | None:
             return "safe"
         case other:
@@ -118,12 +114,17 @@ def _normalized_env(cfg: dict[str, object]) -> dict[str, str] | None:
     return {key: normalized[key] for key in sorted(normalized)}
 
 
-def _normalized_cwd(cfg: dict[str, object]) -> str | None:
-    """Return cwd normalized exactly as RuntimeConfig input semantics."""
-    raw_cwd = cfg.get("cwd")
-    if not raw_cwd:
+def _account(cfg: dict[str, object]) -> str | None:
+    """The account the agent runs as, or ``None`` for the CLI's own login; a name no account can have raises ``ValueError``."""
+    from myrm_agent_harness.toolkits.acp.auth import is_valid_account_name
+
+    raw = cfg.get("account")
+    if raw is None or raw == "":
         return None
-    return str(raw_cwd)
+    if isinstance(raw, str) and is_valid_account_name(raw):
+        return raw
+    msg = f"invalid account name {raw!r}"
+    raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +134,7 @@ class _NormalizedRuntimeCfg:
     command: str
     args: list[str]
     env: dict[str, str] | None
-    cwd: str | None
+    account: str | None
     timeout_seconds: int
     max_response_chars: int
     permission_mode: PermissionMode
@@ -144,6 +145,8 @@ class _NormalizedRuntimeCfg:
 
 def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | None:
     """Normalize one external-agent entry so fingerprint and RuntimeConfig stay aligned."""
+    from myrm_agent_harness.toolkits.acp.auth import effective_transport
+
     name = cfg.get("name")
     command = cfg.get("command")
     if not name or not command:
@@ -154,13 +157,20 @@ def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | No
     if isinstance(args_raw, (list, tuple)):
         args = [a if isinstance(a, str) else str(a) for a in args_raw]
 
+    try:
+        account = _account(cfg)
+    except ValueError as exc:
+        logger.warning("Skipping external agent '%s': %s", name, exc)
+        return None
+
     return _NormalizedRuntimeCfg(
         name=str(name),
-        backend_type=str(cfg.get("type", "cli")),
+        # A known agent runs over the transport its contract names, whatever was stored for it.
+        backend_type=effective_transport(str(command), str(cfg.get("type", "cli"))),
         command=str(command),
         args=args,
         env=_normalized_env(cfg),
-        cwd=_normalized_cwd(cfg),
+        account=account,
         timeout_seconds=_turn_timeout(cfg),
         max_response_chars=_cfg_int(cfg, "maxResponseChars", 50_000),
         permission_mode=_permission_mode(cfg),
@@ -187,7 +197,7 @@ def _config_fingerprint(agent_cfgs: list[dict[str, object]]) -> str:
                 "args": runtime_cfg.args,
                 "authMode": runtime_cfg.auth_mode,
                 "env": runtime_cfg.env,
-                "cwd": runtime_cfg.cwd,
+                "account": runtime_cfg.account,
                 "timeout": runtime_cfg.timeout_seconds,
                 "maxResponseChars": runtime_cfg.max_response_chars,
                 "permissionMode": runtime_cfg.permission_mode,
@@ -220,7 +230,7 @@ async def _resolve_external_agent_cfgs(
         return None
 
     try:
-        from myrm_agent_harness.toolkits.acp.auth import cli_launch_args
+        from myrm_agent_harness.toolkits.acp.auth import cli_launch_args, effective_transport
         from myrm_agent_harness.toolkits.acp.core.backend_detector import (
             BackendDetector,
         )
@@ -232,7 +242,7 @@ async def _resolve_external_agent_cfgs(
         agent_cfgs = [
             {
                 "name": d.name,
-                "type": "cli",
+                "type": effective_transport(d.path, "cli"),
                 "command": d.path,
                 # Auto-detected backends inherit the fail-closed default so discovery
                 # never silently grants more autonomy than the user granted explicitly.
@@ -249,8 +259,17 @@ async def _resolve_external_agent_cfgs(
         return None
 
 
+def _backend_type(value: str) -> BackendType | None:
+    """The kind of backend ``value`` names, if the harness runs it: the harness owns the list, so a new kind needs no edit here."""
+    from myrm_agent_harness.toolkits.acp.types import BackendType
+
+    return next((kind for kind in get_args(BackendType) if kind == value), None)
+
+
 def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, object]]) -> None:
     from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
+
+    from app.services.external_agents.accounts import agent_home
 
     for cfg in agent_cfgs:
         if not cfg.get("enabled", True):
@@ -261,13 +280,19 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             logger.warning("Skipping external agent with missing name or command: %s", cfg)
             continue
 
-        backend_type = normalized_cfg.backend_type
-        if backend_type not in ("cli", "acp"):
+        backend_type = _backend_type(normalized_cfg.backend_type)
+        if backend_type is None:
             logger.warning(
                 "Skipping external agent '%s': invalid type '%s'",
                 normalized_cfg.name,
-                backend_type,
+                normalized_cfg.backend_type,
             )
+            continue
+
+        try:
+            account_home = agent_home(normalized_cfg.command, normalized_cfg.account)
+        except (OSError, ValueError) as exc:
+            logger.warning("Skipping external agent '%s': its account home is unusable: %s", normalized_cfg.name, exc)
             continue
 
         runtime_cfg = RuntimeConfig(
@@ -275,7 +300,7 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             command=normalized_cfg.command,
             args=normalized_cfg.args,
             env=normalized_cfg.env,
-            cwd=normalized_cfg.cwd,
+            account_home=account_home,
             timeout_seconds=normalized_cfg.timeout_seconds,
             max_response_chars=normalized_cfg.max_response_chars,
             permission_mode=normalized_cfg.permission_mode,

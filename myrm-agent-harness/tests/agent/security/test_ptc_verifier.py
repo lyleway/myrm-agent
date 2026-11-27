@@ -1,7 +1,6 @@
 from myrm_agent_harness.agent.security.ptc_verifier import extract_ptc_intent
 from myrm_agent_harness.agent.security.tool_registry import (
-    _PTC_SAFETY_METADATA,
-    _PTC_TOOL_FLAT_INDEX,
+    _PTC_TOOL_SAFETY,
     MCPAnnotations,
     SafetyMetadata,
     get_ptc_safety_metadata,
@@ -242,48 +241,34 @@ rf(path='/workspace/alias_path')
 class TestPTCSafetyMetadataRegistry:
     """Tests for register_ptc_safety_metadata and get_ptc_safety_metadata."""
 
-    def setup_method(self) -> None:
-        self._backup = dict(_PTC_SAFETY_METADATA)
-        self._flat_backup = dict(_PTC_TOOL_FLAT_INDEX)
-
-    def teardown_method(self) -> None:
-        _PTC_SAFETY_METADATA.clear()
-        _PTC_SAFETY_METADATA.update(self._backup)
-        _PTC_TOOL_FLAT_INDEX.clear()
-        _PTC_TOOL_FLAT_INDEX.update(self._flat_backup)
-
     def test_register_and_get(self):
         meta = SafetyMetadata(is_destructive=True)
         annotations: MCPAnnotations = {"destructiveHint": True, "openWorldHint": True}
-        register_ptc_safety_metadata("my_skill", "delete_file", meta, annotations)
+        register_ptc_safety_metadata("delete_file", meta, annotations)
 
-        result = get_ptc_safety_metadata("my_skill", "delete_file")
+        result = get_ptc_safety_metadata("delete_file")
         assert result is not None
         assert result[0] == meta
         assert result[1] == annotations
 
-    def test_register_new_skill_creates_dict(self):
-        register_ptc_safety_metadata(
-            "brand_new_skill",
-            "action",
-            SafetyMetadata(),
-            {},
-        )
-        assert "brand_new_skill" in _PTC_SAFETY_METADATA
-        assert "action" in _PTC_SAFETY_METADATA["brand_new_skill"]
-
     def test_get_nonexistent_returns_none(self):
-        assert get_ptc_safety_metadata("nonexistent_skill", "no_tool") is None
+        assert get_ptc_safety_metadata("no_tool") is None
 
-    def test_register_populates_flat_index(self):
+    def test_register_keys_the_table_by_tool_name(self):
         meta = SafetyMetadata(is_destructive=True)
-        register_ptc_safety_metadata("my_skill", "mcp_delete_tool", meta, {"destructiveHint": True})
-        assert _PTC_TOOL_FLAT_INDEX["mcp_delete_tool"] is meta
+        register_ptc_safety_metadata("mcp_delete_tool", meta, {"destructiveHint": True})
+        assert _PTC_TOOL_SAFETY["mcp_delete_tool"] == (meta, {"destructiveHint": True})
 
-    def test_resolve_safety_metadata_falls_back_to_flat_index(self):
+    def test_registering_a_name_again_replaces_its_record(self):
+        register_ptc_safety_metadata("mcp__demo__act", SafetyMetadata(is_destructive=True), {"destructiveHint": True})
+        register_ptc_safety_metadata("mcp__demo__act", SafetyMetadata(), {})
+
+        assert get_ptc_safety_metadata("mcp__demo__act") == (SafetyMetadata(), {})
+
+    def test_resolve_safety_metadata_reads_the_registered_record(self):
         # What `judge` registers for a tool its server declares read-only: parallel-safe, never read-only itself.
         meta = SafetyMetadata(is_concurrent_safe=True)
-        register_ptc_safety_metadata("my_skill", "mcp_list_items", meta, {})
+        register_ptc_safety_metadata("mcp_list_items", meta, {})
         resolved = resolve_safety_metadata("mcp_list_items")
         assert resolved.is_concurrent_safe is True
         assert resolved.is_read_only is False
@@ -291,7 +276,6 @@ class TestPTCSafetyMetadataRegistry:
     def test_resolve_safety_metadata_builtin_takes_priority(self):
         """Built-in TOOL_SAFETY_METADATA entries always override MCP dynamic entries."""
         register_ptc_safety_metadata(
-            "my_skill",
             "file_read_tool",
             SafetyMetadata(is_destructive=True),
             {"destructiveHint": True},

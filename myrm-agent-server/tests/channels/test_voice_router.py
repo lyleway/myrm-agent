@@ -353,12 +353,12 @@ class TestParseTTSDirectives:
         assert directives == {"voice": "nova"}
 
     def test_provider_directive(self) -> None:
-        directives, _ = _parse_tts_directives("Hello [[tts:provider=openai]] world")
-        assert directives == {"provider": "openai"}
+        directives, _ = _parse_tts_directives("Hello [[tts:provider=elevenlabs]] world")
+        assert directives == {"provider": "elevenlabs"}
 
     def test_multiple_directives(self) -> None:
-        directives, _ = _parse_tts_directives("Hello [[tts:voice=nova]] [[tts:provider=openai]] world")
-        assert directives == {"voice": "nova", "provider": "openai"}
+        directives, _ = _parse_tts_directives("Hello [[tts:voice=nova]] [[tts:provider=elevenlabs]] world")
+        assert directives == {"voice": "nova", "provider": "elevenlabs"}
 
     def test_text_block(self) -> None:
         _, text_block = _parse_tts_directives("Full reply. [[tts:text]]Short summary.[[/tts:text]]")

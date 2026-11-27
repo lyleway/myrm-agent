@@ -195,11 +195,11 @@ class TestResumeMessage:
 
     def test_session_state_of_the_asking_turn_does_not_outlive_it(self) -> None:
         pending = asked_in()
-        pending.message.metadata.update({"yolo_state": (0.0, 60), "personality_style": "terse", "force_new_epoch": True})
+        pending.message.metadata.update({"yolo_state": (0.0, 60), "personality_style": "terse"})
 
         resume = pending.resume_message(_TIMED_OUT)
 
-        assert {"yolo_state", "personality_style", "force_new_epoch"}.isdisjoint(resume.metadata)
+        assert {"yolo_state", "personality_style"}.isdisjoint(resume.metadata)
         assert "yolo_state" in pending.message.metadata  # the asking message itself is left as it was
 
     def test_the_timer_key_is_the_chat_wide_key_even_inside_a_topic(self) -> None:

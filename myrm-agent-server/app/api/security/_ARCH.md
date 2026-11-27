@@ -12,7 +12,7 @@ Security Center 与 Agent 工具安全策略的 HTTP 层：供应链仪表盘、
 | `router.py` | 路由 | 仪表盘、setup-hints、rate-limits、alerts、audit、dependabot-prs | ✅ |
 | `estop.py` | 路由 | `POST/GET /security/estop`：全局工具冻结 + activate 时 `CancellationRegistry.cancel_all`；状态 `<状态根>/.estop_state.json` | ✅ |
 | `generate.py` | 路由 | `POST /security/generate-policy`：NL → SecurityConfig | ✅ |
-| `profiles.py` | 路由 | `/security/profiles` CRUD、clone、activate | ✅ |
+| `profiles.py` | 路由 | `/security/profiles` CRUD、clone、activate（激活不存在的 key 返回 404，当前激活档案不变） | ✅ |
 | `schemas.py` | 模块 | Profile API schema | — |
 | `allowlist.py` | 路由 | `/security/allowlist` 工具 allowlist 查询与删除；`command_pattern` / `expires_at` 字段与 harness 四层匹配及时效自动撤销对齐 | ✅ |
 | `allowlist_granularity.py` | 模块 | allowlist REST 粒度映射与 DB 空串归一化 | — |

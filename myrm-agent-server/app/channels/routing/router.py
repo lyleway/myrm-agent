@@ -257,7 +257,6 @@ class AgentRouter(
         self._approval_co_approvers: frozenset[str] = approval_co_approvers or frozenset()
         self._janitor_task: asyncio.Task[None] | None = None
         self._seen_messages: dict[str, float] = {}
-        self._new_session_peers: dict[str, float] = {}
         self._session_yolo: dict[str, tuple[float, int | None]] = {}
         self._session_personality: dict[str, str] = {}
         self._personality_provider = personality_provider

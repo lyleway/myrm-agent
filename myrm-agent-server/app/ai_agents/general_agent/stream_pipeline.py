@@ -74,7 +74,6 @@ async def execute_stream_pipeline(
                 query,
                 force_external_agent,
                 cancel_token=cancel_token,
-                chat_id=chat_id,
             )
         ) as forced_events:
             async for event in forced_events:
@@ -210,17 +209,10 @@ async def execute_stream_pipeline(
 
         from app.ai_agents.extensions.security_policy_extension import (
             refresh_wrapper_security_config,
-            sync_wrapper_security_from_store,
+            sync_wrapper_security_inputs,
         )
 
-        if agent_wrapper.agent_id:
-            from app.services.agent.profile.profile_resolver import get_agent_profile_resolver
-
-            resolved_profile = await get_agent_profile_resolver().resolve(agent_wrapper.agent_id)
-            if resolved_profile is not None and resolved_profile.security_overrides:
-                agent_wrapper.agent_security_raw = dict(resolved_profile.security_overrides)
-
-        await sync_wrapper_security_from_store(agent_wrapper)
+        await sync_wrapper_security_inputs(agent_wrapper)
         refresh_wrapper_security_config(agent_wrapper)
         runtime_sec = agent_wrapper.agent.config.security_config
         if runtime_sec is None:

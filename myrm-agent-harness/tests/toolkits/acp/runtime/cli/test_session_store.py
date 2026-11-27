@@ -17,8 +17,9 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, CliSessionStore, RuntimeConfig, RuntimeEvent
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, errors_of, statuses_of, text_of
+from ._fakes import FakeCli, errors_of, statuses_of, text_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 
@@ -40,7 +41,7 @@ async def pools() -> AsyncIterator[list[RuntimePool]]:
         await pool.close_all()
 
 
-def _make_pool(pools: list[RuntimePool], fake_cli: FakeCli, cwd: Path, store: CliSessionStore | None) -> RuntimePool:
+def _make_pool(pools: list[RuntimePool], fake_cli: FakeCli, store: CliSessionStore | None) -> RuntimePool:
     pool = RuntimePool(max_concurrent=2, cli_session_store=store)
     pool.register(
         "claude",
@@ -49,7 +50,6 @@ def _make_pool(pools: list[RuntimePool], fake_cli: FakeCli, cwd: Path, store: Cl
             command=str(fake_cli.command("claude")),
             args=["-p", "--output-format", "stream-json"],
             permission_mode="safe",
-            cwd=str(cwd),
             timeout_seconds=20,
         ),
     )
@@ -57,8 +57,12 @@ def _make_pool(pools: list[RuntimePool], fake_cli: FakeCli, cwd: Path, store: Cl
     return pool
 
 
-async def _run_turn(pool: RuntimePool, *, mode: str = "persistent", session_id: str = "chat-1") -> list[RuntimeEvent]:
-    return [e async for e in pool.run_turn("claude", "prompt", session_id=session_id, mode=mode)]
+async def _run_turn(
+    pool: RuntimePool, workspace: Path, *, mode: str = "persistent", session_id: str = "chat-1"
+) -> list[RuntimeEvent]:
+    return [
+        e async for e in pool.run_turn("claude", "prompt", session_id=session_id, workspace=str(workspace), mode=mode)
+    ]
 
 
 @pytest.mark.asyncio
@@ -67,11 +71,11 @@ async def test_a_new_pool_resumes_the_session_a_previous_pool_stored(
 ) -> None:
     """A server restart builds a new pool; the chat must still pick up where it left off."""
     store = RecordingStore()
-    first_pool = _make_pool(pools, fake_cli, work, store)
-    first = await _run_turn(first_pool)
+    first_pool = _make_pool(pools, fake_cli, store)
+    first = await _run_turn(first_pool, work)
     await first_pool.close_all()
 
-    second = await _run_turn(_make_pool(pools, fake_cli, work, store))
+    second = await _run_turn(_make_pool(pools, fake_cli, store), work)
 
     assert not errors_of(first)
     assert not errors_of(second)
@@ -84,11 +88,11 @@ async def test_a_new_pool_resumes_the_session_a_previous_pool_stored(
 async def test_without_a_store_a_new_pool_starts_a_fresh_session(
     fake_cli: FakeCli, pools: list[RuntimePool], work: Path
 ) -> None:
-    first_pool = _make_pool(pools, fake_cli, work, None)
-    first = text_of(await _run_turn(first_pool))
+    first_pool = _make_pool(pools, fake_cli, None)
+    first = text_of(await _run_turn(first_pool, work))
     await first_pool.close_all()
 
-    second = text_of(await _run_turn(_make_pool(pools, fake_cli, work, None)))
+    second = text_of(await _run_turn(_make_pool(pools, fake_cli, None), work))
 
     assert second != first
     assert fake_cli.resume_args() == [None, None]
@@ -98,10 +102,10 @@ async def test_without_a_store_a_new_pool_starts_a_fresh_session(
 async def test_oneshot_turns_never_touch_the_store(fake_cli: FakeCli, pools: list[RuntimePool], work: Path) -> None:
     """A oneshot review is a throwaway fresh session: it must neither read nor overwrite the chat's stored one."""
     store = RecordingStore()
-    pool = _make_pool(pools, fake_cli, work, store)
-    first = text_of(await _run_turn(pool))
-    oneshot = text_of(await _run_turn(pool, mode="oneshot", session_id="claude-oneshot-1"))
-    third = text_of(await _run_turn(pool))
+    pool = _make_pool(pools, fake_cli, store)
+    first = text_of(await _run_turn(pool, work))
+    oneshot = text_of(await _run_turn(pool, work, mode="oneshot", session_id="claude-oneshot-1"))
+    third = text_of(await _run_turn(pool, work))
 
     assert oneshot != first
     assert third == first
@@ -116,10 +120,10 @@ async def test_a_stale_stored_session_is_restarted_in_the_same_turn_and_replaced
     """The CLI forgot the conversation: the user's turn still runs, and the record never fails a turn again."""
     store = RecordingStore()
     store.records["chat-1"] = CliSessionRecord(_DEAD, str(work))
-    pool = _make_pool(pools, fake_cli, work, store)
+    pool = _make_pool(pools, fake_cli, store)
 
-    stale = await _run_turn(pool)
-    next_turn = await _run_turn(pool)
+    stale = await _run_turn(pool, work)
+    next_turn = await _run_turn(pool, work)
 
     assert not errors_of(stale)
     assert statuses_of(stale) == ["starting", "session_expired"]

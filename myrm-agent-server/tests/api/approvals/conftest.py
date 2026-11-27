@@ -50,6 +50,7 @@ async def setup_test_database():
         restore_leaked_session_mocks(mock_get_session, mock_get_session_factory),
         patch("app.database.connection.get_session", mock_get_session),
         patch("app.services.approvals.registry.get_session", mock_get_session),
+        patch("app.services.approvals.chat_peer_card.get_session", mock_get_session),
         patch("app.platform_utils.get_session_factory", mock_get_session_factory),
         patch("app.database.repositories.uow.get_session_factory", mock_get_session_factory),
         patch("app.database.connection.get_session_factory", mock_get_session_factory),

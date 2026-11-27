@@ -3,13 +3,14 @@
 [INPUT]
 - myrm_agent_harness.toolkits.acp (POS: 外部 Agent 委托协议框架)
 - app.config.deploy_mode (POS: 部署模式检测)
+- app.platform_utils.workspace_root::get_workspace_root (POS: 进程默认工作区，聊天没有声明工作区时的落点) [lazy]
 - .external_agents_runtime_config (POS: 外部 Agent 配置归一化层)
 - app.services.external_agents.cli_session_store::ChatCliSessionStore (POS: chat 行持久化的外部 CLI 会话 id，服务重启后续接同一外部对话) [lazy]
 - app.services.external_agents.delegation::delegation_prompt, stage_images, stream_direct_delegate (POS: 外部 Agent 直连委托：用户回合 → CLI 提示词与图片文件、CLI 回合 → 前端 SSE 事件流) [lazy]
 
 [OUTPUT]
-- ExternalAgentsMixin: 外部 Agent 初始化与直接委托流式执行的 Mixin
-- should_mount_invoke_acp_agent_tool(): direct-only 路径是否跳过 invoke_acp_agent_tool 挂载
+- ExternalAgentsMixin: 外部 Agent 初始化与直接委托流式执行的 Mixin；两个入口（模型发起的工具、用户直连）共用同一个委派工作区（`_delegation_workspace`），回合启动目录只来自它
+- should_mount_invoke_acp_agent_tool(): CLI Visual 内置 Agent 直接驱动外部 CLI，不给模型挂 invoke_acp_agent_tool
 - needs_runtime_pool(): factory 是否 eager 初始化 RuntimePool（与 stream lazy path 对齐）
 - BUILTIN_CLI_VISUAL_AGENT_ID: CLI Visual 内置 Agent 标识
 - chat scope 路径：ChatRuntimePoolRegistry + ChatScopedRuntimePoolFacade 接线；池带 ChatCliSessionStore，CLI 会话 id 随 chat 落库
@@ -20,7 +21,7 @@
 以及绕过 LangChain 直接向前端流式转发外部 Agent 事件。
 Settings auth/status 仅报告安装/登录态。
 有 chat scope 时经 ChatRuntimePoolRegistry 跨消息复用 pool（CLI --resume，会话 id 落在 chat 行，服务重启后仍续接），
-ChatScopedRuntimePoolFacade 对 run_turn 做 per-chat single-flight 串行化。
+ChatScopedRuntimePoolFacade 让 registry 知道哪些委托 turn 在途（同一后端的 turn 由 RuntimePool 串行，不同 agent 并行）。
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker
     from myrm_agent_harness.utils import CancellationToken
 
 logger = logging.getLogger(__name__)
@@ -49,27 +50,14 @@ _resolve_external_agent_cfgs = _runtime_cfg_helpers._resolve_external_agent_cfgs
 _register_backends_on_pool = _runtime_cfg_helpers._register_backends_on_pool
 
 
-def should_mount_invoke_acp_agent_tool(*, agent_id: str | None, force_external_agent: str | None) -> bool:
-    """Return False when direct-delegate routing makes the LLM tool redundant."""
-    if force_external_agent:
-        return False
-    if agent_id == BUILTIN_CLI_VISUAL_AGENT_ID:
-        return False
-    return True
+def should_mount_invoke_acp_agent_tool(*, agent_id: str | None) -> bool:
+    """Return False for the agent that drives its external CLI directly, so the model has no tool for it."""
+    return agent_id != BUILTIN_CLI_VISUAL_AGENT_ID
 
 
-def needs_runtime_pool(
-    *,
-    enable_external_cli: bool,
-    agent_id: str | None,
-    force_external_agent: str | None,
-) -> bool:
+def needs_runtime_pool(*, enable_external_cli: bool, agent_id: str | None) -> bool:
     """Return True when factory should eagerly init RuntimePool (not lazy stream path)."""
-    if force_external_agent:
-        return True
-    if agent_id == BUILTIN_CLI_VISUAL_AGENT_ID:
-        return True
-    return enable_external_cli
+    return enable_external_cli or agent_id == BUILTIN_CLI_VISUAL_AGENT_ID
 
 
 def _runtime_pool_scope_id(agent: object) -> str | None:
@@ -98,9 +86,9 @@ class ExternalAgentsMixin:
         _runtime_pool_scope_id: str | None
         _runtime_pool_from_registry: bool
         _owned_runtime_pool: RuntimePool | None
+        declared_allowed_roots: tuple[str, ...]
         chat_id: str | None
         agent_id: str | None
-        force_external_agent: str | None
         locale: str | None
         quote: str | None
 
@@ -109,7 +97,6 @@ class ExternalAgentsMixin:
         tools: list[object],
         *,
         mount_invoke_acp_agent_tool: bool | None = None,
-        external_agent_workdir: str | None = None,
     ) -> None:
         """Set up external agent delegation via RuntimePool.
 
@@ -121,16 +108,9 @@ class ExternalAgentsMixin:
         Failures are caught and logged — they never block Agent initialization.
         """
         if mount_invoke_acp_agent_tool is None:
-            mount_invoke_acp_agent_tool = should_mount_invoke_acp_agent_tool(
-                agent_id=getattr(self, "agent_id", None),
-                force_external_agent=getattr(self, "force_external_agent", None),
-            )
+            mount_invoke_acp_agent_tool = should_mount_invoke_acp_agent_tool(agent_id=getattr(self, "agent_id", None))
         try:
-            await self._do_setup_external_agents(
-                tools,
-                mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool,
-                external_agent_workdir=external_agent_workdir,
-            )
+            await self._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=mount_invoke_acp_agent_tool)
         except Exception as e:
             logger.warning("External agent setup failed (degraded): %s", e)
 
@@ -139,7 +119,6 @@ class ExternalAgentsMixin:
         tools: list[object],
         *,
         mount_invoke_acp_agent_tool: bool = True,
-        external_agent_workdir: str | None = None,
     ) -> None:
         agent_cfgs = await _resolve_external_agent_cfgs(self.external_agents_config)
         if not agent_cfgs:
@@ -189,8 +168,9 @@ class ExternalAgentsMixin:
                 chat_scope = _runtime_pool_scope_id(self)
                 delegate_tool = create_invoke_acp_agent_tool(
                     pool,
-                    cwd=external_agent_workdir,
+                    workspace=self._delegation_workspace(),
                     session_scope=chat_scope,
+                    permissions=self._permission_broker(),
                 )
                 tools.append(delegate_tool)
                 logger.info(
@@ -202,6 +182,28 @@ class ExternalAgentsMixin:
                     "RuntimePool ready (%d backends), delegate tool skipped [direct-only]",
                     len(pool.available_backends),
                 )
+
+    def _delegation_workspace(self) -> str:
+        """The directory every delegated turn of this agent starts in, whichever entry started it.
+
+        The chat's declared workspace root (project binding, the chat's own choice or its default sandbox); a run
+        with none declared works in the process workspace, as the agent's other tools do.
+        """
+        if self.declared_allowed_roots:
+            return str(self.declared_allowed_roots[0])
+        from app.platform_utils.workspace_root import get_workspace_root
+
+        return str(get_workspace_root())
+
+    def _permission_broker(self) -> PermissionBroker:
+        """Who decides when a delegated agent asks to do something: the person in this chat, through its approvals."""
+        from app.services.external_agents.permission_broker import ChatPermissionBroker
+
+        return ChatPermissionBroker(
+            agent_id=getattr(self, "agent_id", None) or "default",
+            chat_id=getattr(self, "chat_id", None),
+            workspace=self._delegation_workspace(),
+        )
 
     async def _ensure_runtime_pool(self) -> None:
         """Initialize RuntimePool without creating the full LangChain Agent.
@@ -223,13 +225,15 @@ class ExternalAgentsMixin:
         query: object,
         *,
         cancel_token: CancellationToken | None = None,
-        chat_id: str | None = None,
     ) -> AsyncGenerator[dict[str, object]]:
         """Stream one turn of an external agent straight to the frontend, bypassing the LangChain Agent.
 
-        The turn's images are staged as files the CLI can read for the length of the turn; they are removed once
-        the turn stream is closed, which has stopped the external process by then.
+        The turn continues the agent's session of this chat, the one the delegate tool names for the same agent
+        and chat. The turn's images are staged as files the CLI can read for the length of the turn; they are
+        removed once the turn stream is closed, which has stopped the external process by then.
         """
+        from myrm_agent_harness.toolkits.acp.types import delegation_session_id
+
         from app.services.external_agents.delegation import delegation_prompt, stage_images, stream_direct_delegate
 
         assert self._runtime_pool is not None
@@ -238,8 +242,10 @@ class ExternalAgentsMixin:
                 self._runtime_pool,
                 agent_name,
                 delegation_prompt(staged.query, self.quote),
-                session_id=f"{agent_name}-{chat_id}" if chat_id else f"{agent_name}-default",
+                session_id=delegation_session_id(agent_name, _runtime_pool_scope_id(self)),
+                workspace=self._delegation_workspace(),
                 images=staged.paths,
+                permissions=self._permission_broker(),
                 cancel_token=cancel_token,
                 locale=self.locale or "en",
             )

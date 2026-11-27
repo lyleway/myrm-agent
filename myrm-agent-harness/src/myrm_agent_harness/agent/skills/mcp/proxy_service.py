@@ -107,16 +107,9 @@ class MCPSkillProxyService:
 
     def _canonical_cache_tool_name(self, skill_name: str, tool_name: str) -> str:
         """Resolve caller tool name to the MCP catalog name for cache keys."""
-        from myrm_agent_harness.agent.skills.mcp.tool_name_utils import (
-            resolve_mcp_tool_name,
-        )
-        from myrm_agent_harness.agent.skills.runtime.registry import skill_registry
+        from myrm_agent_harness.agent.skills.mcp.script_tool import resolve_script_tool
 
-        skill_meta = skill_registry.get_mcp_skill_for_ipc(skill_name)
-        if skill_meta is None or skill_meta.mcp is None:
-            return tool_name
-        matched = resolve_mcp_tool_name(tool_name, skill_meta.mcp.tools)
-        return matched or tool_name
+        return resolve_script_tool(skill_name, tool_name) or tool_name
 
     async def invoke_tool(
         self,

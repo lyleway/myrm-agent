@@ -26,6 +26,7 @@ const providerWithKey = (id: string, overrides: Partial<ProviderConfig> = {}): P
 });
 
 const openaiProvider = providerWithKey('openai');
+const elevenlabsProvider = providerWithKey('elevenlabs');
 const disabledProvider = providerWithKey('openai', { isEnabled: false });
 
 const imageConfig: ImageGenerationConfig = {
@@ -65,11 +66,11 @@ const ttsConfig: VoiceConfigValue = {
   sttLocalComputeType: '',
   sttBaseUrl: '',
   ttsMode: '',
-  ttsProvider: 'openai',
-  ttsModel: 'tts-1',
+  ttsProvider: 'elevenlabs',
+  ttsModel: 'eleven_flash_v2_5',
   ttsApiKey: '',
   ttsBaseUrl: '',
-  ttsVoice: 'alloy',
+  ttsVoice: '21m00Tcm4TlvDq8ikWAM',
   ttsMaxLength: 4000,
   ttsSummaryEnabled: false,
   ttsSummaryThreshold: 0,
@@ -89,7 +90,7 @@ describe('imageToolSetup', () => {
     expect(imageToolSetup([openaiProvider], undefined)).toBe('notSelected');
   });
 
-  it.each(['dall-e-3', 'gpt-image-1', ''])('is notSelected for %j, a model the engine no longer offers', (model) => {
+  it.each(['dall-e-3', 'gpt-image-1', ''])('is notSelected for %j, a model the engine does not offer', (model) => {
     expect(imageToolSetup([openaiProvider], { ...imageConfig, model })).toBe('notSelected');
   });
 
@@ -107,7 +108,7 @@ describe('videoToolSetup', () => {
     expect(videoToolSetup([], { ...videoConfig, model: '' }, {})).toBe('notSelected');
   });
 
-  it('is notSelected for a stored provider the server no longer lists', () => {
+  it('is notSelected for a stored provider the server does not list', () => {
     const stale = { ...videoConfig, provider: 'openai' as VideoGenerationConfig['provider'], model: 'sora' };
 
     expect(videoToolSetup([openaiProvider], stale, { gemini: geminiStatus({ hasApiKey: true }) })).toBe('notSelected');
@@ -141,22 +142,22 @@ describe('videoToolSetup', () => {
 
 describe('ttsToolSetup', () => {
   it('is notSelected for no settings, or a provider, model or voice left empty', () => {
-    expect(ttsToolSetup([openaiProvider], null)).toBe('notSelected');
-    expect(ttsToolSetup([openaiProvider], { ...ttsConfig, ttsProvider: '' })).toBe('notSelected');
-    expect(ttsToolSetup([openaiProvider], { ...ttsConfig, ttsModel: '' })).toBe('notSelected');
-    expect(ttsToolSetup([openaiProvider], { ...ttsConfig, ttsVoice: '  ' })).toBe('notSelected');
+    expect(ttsToolSetup([elevenlabsProvider], null)).toBe('notSelected');
+    expect(ttsToolSetup([elevenlabsProvider], { ...ttsConfig, ttsProvider: '' })).toBe('notSelected');
+    expect(ttsToolSetup([elevenlabsProvider], { ...ttsConfig, ttsModel: '' })).toBe('notSelected');
+    expect(ttsToolSetup([elevenlabsProvider], { ...ttsConfig, ttsVoice: '  ' })).toBe('notSelected');
   });
 
-  it.each(['edge', 'piper', 'voicebox'])(
-    'is notSelected for %s, a provider only channel replies can use',
+  it.each(['edge', 'piper', 'voicebox', 'openai'])(
+    'is notSelected for %s, a provider the speech tool cannot use',
     (ttsProvider) => {
-      expect(ttsToolSetup([], { ...ttsConfig, ttsProvider })).toBe('notSelected');
+      expect(ttsToolSetup([openaiProvider], { ...ttsConfig, ttsProvider, ttsApiKey: 'sk-tts' })).toBe('notSelected');
     },
   );
 
   it('is ready on the key saved with the voice settings or on one in the provider table', () => {
     expect(ttsToolSetup([], { ...ttsConfig, ttsApiKey: 'sk-tts' })).toBe('ready');
-    expect(ttsToolSetup([openaiProvider], ttsConfig)).toBe('ready');
+    expect(ttsToolSetup([elevenlabsProvider], ttsConfig)).toBe('ready');
   });
 
   it('needs a key', () => {

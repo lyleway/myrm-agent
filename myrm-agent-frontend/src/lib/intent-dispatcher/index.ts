@@ -17,6 +17,10 @@ export interface IntentMessages {
   cloudProfileName: string;
 }
 
+function inDesktopShell(): boolean {
+  return typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__);
+}
+
 export class IntentDispatcher {
   private router: AppRouterInstance;
   private openFlowPad: (text: string) => void;
@@ -104,23 +108,47 @@ export class IntentDispatcher {
     }
   }
 
+  /** Brings the main window forward, also out of the tray, before an intent that shows something in it. */
+  private async focusMainWindow() {
+    if (!inDesktopShell()) {
+      return;
+    }
+    try {
+      // Dynamic import keeps browser/desktop APIs out of SSR evaluation.
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      const appWindow = getCurrentWindow();
+      await appWindow.show();
+      await appWindow.unminimize();
+      await appWindow.setFocus();
+    } catch (e) {
+      console.error('[UIP] Failed to focus window:', e);
+    }
+  }
+
+  /**
+   * An installed app opens in its own desktop window, so a launcher does not pull the main window forward. Without
+   * the desktop shell, or when the window cannot be opened, the app's page opens in the main window instead.
+   */
+  private async openInstalledApp(id: string) {
+    if (inDesktopShell()) {
+      const { openAppWindow } = await import('@/lib/desktop/appWindow');
+      // The title is set by the app's own page once it knows the app's name.
+      if (await openAppWindow(id, '')) {
+        return;
+      }
+    }
+    await this.focusMainWindow();
+    this.router.push(`/apps/${id}`);
+  }
+
   private async execute(intent: UIPIntent) {
     console.log(`[UIP] Executing intent: ${intent.action}`);
 
-    // Ensure the window is visible and focused when receiving a deep link
-    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
-      try {
-        // Dynamic import keeps browser/desktop APIs out of SSR evaluation.
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        const appWindow = getCurrentWindow();
-        // Ensure tray-hidden windows can be restored before focusing.
-        await appWindow.show();
-        await appWindow.unminimize();
-        await appWindow.setFocus();
-      } catch (e) {
-        console.error('[UIP] Failed to focus window:', e);
-      }
+    if (intent.action === 'app') {
+      await this.openInstalledApp(intent.id);
+      return;
     }
+    await this.focusMainWindow();
 
     switch (intent.action) {
       case 'chat':

@@ -25,6 +25,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 
 _POOL_FACTORY = "myrm_agent_harness.toolkits.acp.runtime.pool._create_runtime"
 _WAIT_SECONDS = 5
+_WORKSPACE = "/tmp/ws"
 
 
 class _FakeBackend:
@@ -44,7 +45,7 @@ class _FakeBackend:
         self.closed = False
 
     async def run_turn(
-        self, prompt: str, session_id: str, *, mcp_servers=None, images=None
+        self, prompt: str, session_id: str, *, mcp_servers=None, images=None, permissions=None
     ) -> AsyncIterator[RuntimeEvent]:
         self.started.set()
         if self.fail:
@@ -86,12 +87,12 @@ async def test_oneshot_never_touches_the_persistent_backend() -> None:
     oneshot = _FakeBackend()
 
     with patch(_POOL_FACTORY, side_effect=[persistent, oneshot]):
-        assert pool.get("claude") is persistent
-        await pool.prompt("claude", "review", mode="oneshot")
+        assert pool.get("claude", _WORKSPACE) is persistent
+        await pool.prompt("claude", "review", workspace=_WORKSPACE, mode="oneshot")
 
     assert oneshot.closed
     assert not persistent.closed
-    assert pool.get("claude") is persistent
+    assert pool.get("claude", _WORKSPACE) is persistent
 
 
 @pytest.mark.asyncio
@@ -100,10 +101,10 @@ async def test_oneshot_backend_is_unregistered_and_closed_when_the_turn_fails() 
     backend = _FakeBackend(fail=True)
 
     with patch(_POOL_FACTORY, return_value=backend), pytest.raises(RuntimeError, match="boom"):
-        await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot"))
+        await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
 
     assert backend.closed
-    assert pool._oneshot_backends == {}
+    assert pool._running == {}
 
 
 @pytest.mark.asyncio
@@ -112,10 +113,10 @@ async def test_oneshot_close_failure_does_not_replace_the_turn_error() -> None:
     backend = _FakeBackend(fail=True, close_fails=True)
 
     with patch(_POOL_FACTORY, return_value=backend), pytest.raises(RuntimeError, match=r"^boom$"):
-        await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot"))
+        await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
 
     assert backend.closed
-    assert pool._oneshot_backends == {}
+    assert pool._running == {}
 
 
 @pytest.mark.asyncio
@@ -124,7 +125,7 @@ async def test_oneshot_close_failure_after_a_finished_turn_is_only_logged(caplog
     backend = _FakeBackend(close_fails=True)
 
     with patch(_POOL_FACTORY, return_value=backend), caplog.at_level("WARNING"):
-        events = await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot"))
+        events = await _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
 
     assert events[-1].type == RuntimeEventType.DONE
     assert "pool_close_failed backend=claude" in caplog.text
@@ -133,7 +134,7 @@ async def test_oneshot_close_failure_after_a_finished_turn_is_only_logged(caplog
 @pytest.mark.asyncio
 async def test_oneshot_unknown_backend_raises_key_error() -> None:
     with pytest.raises(KeyError, match="Unknown backend"):
-        await _drain(RuntimePool().run_turn("nonexistent", "task", "s-1", mode="oneshot"))
+        await _drain(RuntimePool().run_turn("nonexistent", "task", "s-1", workspace=_WORKSPACE, mode="oneshot"))
 
 
 @pytest.mark.asyncio
@@ -143,8 +144,10 @@ async def test_cancel_routes_to_the_in_flight_oneshot_backend() -> None:
     oneshot = _FakeBackend(gated=True)
 
     with patch(_POOL_FACTORY, side_effect=[persistent, oneshot]):
-        pool.get("claude")
-        turn = asyncio.create_task(_drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot")))
+        pool.get("claude", _WORKSPACE)
+        turn = asyncio.create_task(
+            _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
+        )
         await asyncio.wait_for(oneshot.started.wait(), timeout=_WAIT_SECONDS)
         await pool.cancel("claude", "claude-oneshot-1")
         oneshot.release.set()
@@ -155,20 +158,22 @@ async def test_cancel_routes_to_the_in_flight_oneshot_backend() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_of_a_persistent_session_ignores_a_running_oneshot() -> None:
+async def test_cancel_of_a_session_that_is_not_running_reaches_no_backend() -> None:
     pool = _pool()
     persistent = _FakeBackend()
     oneshot = _FakeBackend(gated=True)
 
     with patch(_POOL_FACTORY, side_effect=[persistent, oneshot]):
-        pool.get("claude")
-        turn = asyncio.create_task(_drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot")))
+        pool.get("claude", _WORKSPACE)
+        turn = asyncio.create_task(
+            _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
+        )
         await asyncio.wait_for(oneshot.started.wait(), timeout=_WAIT_SECONDS)
         await pool.cancel("claude", "claude-chat-1")
         oneshot.release.set()
         await turn
 
-    assert persistent.cancelled == ["claude-chat-1"]
+    assert persistent.cancelled == []
     assert oneshot.cancelled == []
 
 
@@ -178,7 +183,9 @@ async def test_close_all_closes_in_flight_oneshot_backends() -> None:
     oneshot = _FakeBackend(gated=True)
 
     with patch(_POOL_FACTORY, return_value=oneshot):
-        turn = asyncio.create_task(_drain(pool.run_turn("claude", "task", "claude-oneshot-1", mode="oneshot")))
+        turn = asyncio.create_task(
+            _drain(pool.run_turn("claude", "task", "claude-oneshot-1", workspace=_WORKSPACE, mode="oneshot"))
+        )
         await asyncio.wait_for(oneshot.started.wait(), timeout=_WAIT_SECONDS)
         await pool.close_all()
         assert oneshot.closed

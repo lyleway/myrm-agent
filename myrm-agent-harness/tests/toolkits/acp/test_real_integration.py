@@ -1,6 +1,6 @@
 """Real integration tests for ACP module with live CLI backends.
 
-These tests spawn actual CLI processes (Claude Code, Codex, Gemini)
+These tests spawn actual agent processes (Claude Code per turn, Codex over its app server, Gemini over ACP)
 and verify end-to-end event parsing, session management, and pool routing.
 
 Requirements:
@@ -26,7 +26,9 @@ from myrm_agent_harness.toolkits.acp.acp_agent_tools import (
     create_invoke_acp_agent_tool,
 )
 from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
+from myrm_agent_harness.toolkits.acp.runtime.codex import CodexRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     McpServerConfig,
@@ -62,6 +64,30 @@ _CLAUDE_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_")
 def _claude_credentials() -> dict[str, str]:
     """What a host injects for Claude Code: a delegated CLI does not inherit provider keys from its parent."""
     return {key: value for key, value in os.environ.items() if key.startswith(_CLAUDE_ENV_PREFIXES)}
+
+
+_CODEX_KEYS = ("OPENAI_API_KEY", "CODEX_API_KEY")
+
+
+def _codex_config(**overrides: object) -> RuntimeConfig:
+    """Codex as a host registers it: over its app server, with an injected key when the environment has one.
+
+    The app server reads no key from its environment, so the runtime logs the injected key in; without one the turn
+    runs on the login of Codex itself.
+    """
+    defaults: dict[str, object] = {
+        "backend_type": "app_server",
+        "command": "codex",
+        "permission_mode": "allow_all",
+        "timeout_seconds": TIMEOUT,
+        "max_turns": 1,
+        "description": "Codex CLI",
+    }
+    credentials = {key: value for key, value in os.environ.items() if key in _CODEX_KEYS}
+    if credentials:
+        defaults.update(env=credentials, auth_mode="api_key")
+    defaults.update(overrides)
+    return RuntimeConfig(**defaults)  # type: ignore[arg-type]
 
 
 def _claude_can_answer() -> bool:
@@ -151,7 +177,7 @@ class TestClaudeCliReal:
     @pytest.mark.usefixtures("claude_can_answer")
     @pytest.mark.asyncio
     async def test_basic_prompt_returns_text(self) -> None:
-        rt = CliRuntime("claude-test", self._make_config())
+        rt = CliRuntime("claude-test", self._make_config(), workspace=os.getcwd())
         events: list[object] = []
 
         async for event in rt.run_turn(SIMPLE_PROMPT, "claude-real-s1"):
@@ -171,7 +197,7 @@ class TestClaudeCliReal:
     @pytest.mark.usefixtures("claude_can_answer")
     @pytest.mark.asyncio
     async def test_usage_events_present(self) -> None:
-        rt = CliRuntime("claude-usage", self._make_config())
+        rt = CliRuntime("claude-usage", self._make_config(), workspace=os.getcwd())
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "claude-usage-s1")]
 
         usage_events = [e for e in events if e.type == RuntimeEventType.USAGE_UPDATE]
@@ -183,7 +209,7 @@ class TestClaudeCliReal:
 
     @pytest.mark.asyncio
     async def test_status_update_at_start(self) -> None:
-        rt = CliRuntime("claude-status", self._make_config())
+        rt = CliRuntime("claude-status", self._make_config(), workspace=os.getcwd())
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "claude-status-s1")]
 
         status_events = [e for e in events if e.type == RuntimeEventType.STATUS_UPDATE]
@@ -191,38 +217,29 @@ class TestClaudeCliReal:
         assert status_events[0].data["status"] == "starting"
 
 
-# ── Codex CLI ───────────────────────────────────────────────────────────
+# ── Codex over its app server ───────────────────────────────────────────
 
 
 @skip_no_codex
-class TestCodexCliReal:
-    """Live tests against Codex CLI.
+class TestCodexAppServerReal:
+    """Live tests against Codex, which the runtime drives over ``codex app-server``.
 
-    Codex uses ``exec --json`` with the resolved permission-mode args for non-interactive NDJSON output.
-    The prompt is passed via stdin (``-p`` flag triggers stdin mode).
+    The launch args come from the agent's contract and the approval policy and sandbox are set with every turn, so the
+    config carries neither.
     """
-
-    def _make_config(self, **overrides: object) -> RuntimeConfig:
-        defaults: dict[str, object] = {
-            "backend_type": "cli",
-            "command": "codex",
-            "args": ["exec", "--json", "-p"],
-            "permission_mode": "allow_all",
-            "timeout_seconds": TIMEOUT,
-            "max_turns": 1,
-        }
-        defaults.update(overrides)
-        return RuntimeConfig(**defaults)  # type: ignore[arg-type]
 
     @pytest.mark.asyncio
     async def test_basic_prompt_produces_events(self) -> None:
-        """Codex should produce parseable NDJSON events.
+        """Codex should produce a turn the runtime translates.
 
         With valid API quota: TEXT_DELTA + DONE.
-        With exhausted quota: ERROR (rate_limited / turn.failed) — still validates parsing.
+        With exhausted quota: ERROR (rate_limited) — still validates the translation.
         """
-        rt = CliRuntime("codex-test", self._make_config())
-        events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-real-s1")]
+        rt = CodexRuntime("codex-test", _codex_config(), workspace=os.getcwd())
+        try:
+            events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-real-s1")]
+        finally:
+            await rt.close()
 
         types = [e.type for e in events]
         assert len(types) > 0, "Codex should produce at least one event"
@@ -234,10 +251,13 @@ class TestCodexCliReal:
         assert has_text or has_error or has_done, f"Expected TEXT_DELTA, ERROR, or DONE, got: {types}"
 
     @pytest.mark.asyncio
-    async def test_codex_ndjson_parsing(self) -> None:
-        """Verify NDJSON event stream is parseable regardless of API quota."""
-        rt = CliRuntime("codex-parse", self._make_config())
-        events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-parse-s1")]
+    async def test_every_event_belongs_to_the_session_of_the_turn(self) -> None:
+        """Verify the event stream is well formed regardless of API quota."""
+        rt = CodexRuntime("codex-parse", _codex_config(), workspace=os.getcwd())
+        try:
+            events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-parse-s1")]
+        finally:
+            await rt.close()
 
         for event in events:
             assert event.type in RuntimeEventType.__members__.values()
@@ -245,35 +265,19 @@ class TestCodexCliReal:
             assert isinstance(event.data, dict)
 
 
-# ── Gemini CLI ──────────────────────────────────────────────────────────
+# ── Gemini over ACP ─────────────────────────────────────────────────────
 
 
 @skip_no_gemini
-class TestGeminiCliReal:
-    """Live tests against Gemini CLI.
+class TestGeminiAcpReal:
+    """Live tests against Gemini, which the runtime drives over ACP (``gemini --acp``).
 
-    Gemini uses ``--output-format stream-json`` for NDJSON output.
-    The prompt is passed via ``-p <prompt>`` (prompt as argument, not stdin).
-    Note: ``-p`` in Gemini requires the prompt value immediately after the flag.
+    The launch args come from the agent's contract, so the config carries none.
     """
 
-    def _make_config(self, **overrides: object) -> RuntimeConfig:
-        """Gemini config: prompt is appended as trailing argument (no -p flag).
-
-        Gemini CLI's ``-p/--prompt`` expects a value argument immediately after
-        the flag (``-p "my prompt"``), not stdin input. To avoid confusion with
-        the stdin-based ``-p`` detection in CliRuntime, we omit ``-p`` and let
-        CliRuntime append the prompt as a trailing positional argument.
-        """
-        defaults: dict[str, object] = {
-            "backend_type": "cli",
-            "command": "gemini",
-            "args": ["--output-format", "stream-json", "--yolo"],
-            "timeout_seconds": TIMEOUT,
-            "max_turns": 1,
-        }
-        defaults.update(overrides)
-        return RuntimeConfig(**defaults)  # type: ignore[arg-type]
+    def _make_runtime(self, name: str) -> AcpRuntime:
+        config = RuntimeConfig(backend_type="acp", command="gemini", timeout_seconds=TIMEOUT, max_turns=1)
+        return AcpRuntime(name, config, workspace=os.getcwd())
 
     @pytest.mark.asyncio
     async def test_basic_prompt_produces_events(self) -> None:
@@ -282,7 +286,7 @@ class TestGeminiCliReal:
         With valid auth/network: TEXT_DELTA + DONE.
         With network/auth issues: ERROR — still validates runtime lifecycle.
         """
-        rt = CliRuntime("gemini-test", self._make_config())
+        rt = self._make_runtime("gemini-test")
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "gemini-real-s1")]
 
         types = [e.type for e in events]
@@ -297,7 +301,7 @@ class TestGeminiCliReal:
     @pytest.mark.asyncio
     async def test_gemini_event_validation(self) -> None:
         """Verify all events have correct structure regardless of API status."""
-        rt = CliRuntime("gemini-validate", self._make_config())
+        rt = self._make_runtime("gemini-validate")
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "gemini-validate-s1")]
 
         for event in events:
@@ -328,25 +332,13 @@ class TestRuntimePoolReal:
                 ),
             )
         if _HAS_CODEX:
-            pool.register(
-                "codex",
-                RuntimeConfig(
-                    backend_type="cli",
-                    command="codex",
-                    args=["exec", "--json", "-p"],
-                    permission_mode="allow_all",
-                    timeout_seconds=TIMEOUT,
-                    max_turns=1,
-                    description="Codex CLI",
-                ),
-            )
+            pool.register("codex", _codex_config())
         if _HAS_GEMINI:
             pool.register(
                 "gemini",
                 RuntimeConfig(
-                    backend_type="cli",
+                    backend_type="acp",
                     command="gemini",
-                    args=["--output-format", "stream-json", "--yolo"],
                     timeout_seconds=TIMEOUT,
                     max_turns=1,
                     description="Gemini CLI",
@@ -379,7 +371,11 @@ class TestRuntimePoolReal:
                 events = [
                     e
                     async for e in pool.run_turn(
-                        "cli-bridge", "hello", "pool-cli-mcp-s1", mcp_servers=[server] if per_call else None
+                        "cli-bridge",
+                        "hello",
+                        "pool-cli-mcp-s1",
+                        mcp_servers=[server] if per_call else None,
+                        workspace=os.getcwd(),
                     )
                 ]
             text = "".join(
@@ -408,7 +404,7 @@ class TestRuntimePoolReal:
         pool = self._build_pool()
         try:
             backend_name = pool.available_backends[0]
-            response = await pool.prompt(backend_name, SIMPLE_PROMPT, mode="oneshot")
+            response = await pool.prompt(backend_name, SIMPLE_PROMPT, mode="oneshot", workspace=os.getcwd())
             assert isinstance(response, str), f"Pool.prompt to {backend_name} should return str"
         finally:
             await pool.close_all()
@@ -424,7 +420,10 @@ class TestRuntimePoolReal:
             backend_name = pool.available_backends[0]
             session_id = f"{backend_name}-pool-stream"
             events = [
-                e async for e in pool.run_turn(backend_name, SIMPLE_PROMPT, session_id=session_id, mode="oneshot")
+                e
+                async for e in pool.run_turn(
+                    backend_name, SIMPLE_PROMPT, session_id=session_id, mode="oneshot", workspace=os.getcwd()
+                )
             ]
             types = {e.type for e in events}
             assert len(types) > 0, "Pool should produce at least one event"
@@ -451,8 +450,8 @@ class TestRuntimePoolReal:
         """
         pool = self._build_pool()
         try:
-            r1 = await pool.prompt("claude", SIMPLE_PROMPT, mode="oneshot")
-            r2 = await pool.prompt("gemini", SIMPLE_PROMPT, mode="oneshot")
+            r1 = await pool.prompt("claude", SIMPLE_PROMPT, mode="oneshot", workspace=os.getcwd())
+            r2 = await pool.prompt("gemini", SIMPLE_PROMPT, mode="oneshot", workspace=os.getcwd())
             assert len(r1) > 0, "Claude should return non-empty response"
             # Gemini may return empty due to network/auth — verify no exception raised
             assert isinstance(r2, str), "Gemini should return a string (may be empty on network error)"
@@ -468,7 +467,7 @@ class TestRuntimePoolReal:
         pool = self._build_pool()
         try:
             with pytest.raises(KeyError, match="Unknown backend"):
-                await pool.prompt("nonexistent-agent", SIMPLE_PROMPT)
+                await pool.prompt("nonexistent-agent", SIMPLE_PROMPT, workspace=os.getcwd())
         finally:
             await pool.close_all()
 
@@ -495,7 +494,7 @@ class TestDelegateToolReal:
             ),
         )
 
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         try:
             result = await tool_func.ainvoke({"agent_name": "claude", "task": SIMPLE_PROMPT, "mode": "oneshot"})
             assert isinstance(result, str)
@@ -512,16 +511,15 @@ class TestDelegateToolReal:
         pool.register(
             "gemini",
             RuntimeConfig(
-                backend_type="cli",
+                backend_type="acp",
                 command="gemini",
-                args=["--output-format", "stream-json", "--yolo"],
                 timeout_seconds=TIMEOUT,
                 max_turns=1,
                 description="Gemini CLI",
             ),
         )
 
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         try:
             result = await tool_func.ainvoke({"agent_name": "gemini", "task": SIMPLE_PROMPT, "mode": "oneshot"})
             assert isinstance(result, str)
@@ -535,20 +533,9 @@ class TestDelegateToolReal:
     @pytest.mark.skipif(not _HAS_CODEX, reason="codex CLI not installed")
     async def test_delegate_to_codex(self) -> None:
         pool = RuntimePool(max_concurrent=2)
-        pool.register(
-            "codex",
-            RuntimeConfig(
-                backend_type="cli",
-                command="codex",
-                args=["exec", "--json", "-p"],
-                permission_mode="allow_all",
-                timeout_seconds=TIMEOUT,
-                max_turns=1,
-                description="Codex CLI",
-            ),
-        )
+        pool.register("codex", _codex_config())
 
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         try:
             result = await tool_func.ainvoke({"agent_name": "codex", "task": SIMPLE_PROMPT, "mode": "oneshot"})
             assert isinstance(result, str)
@@ -561,7 +548,7 @@ class TestDelegateToolReal:
     @pytest.mark.asyncio
     async def test_delegate_to_unknown_agent(self) -> None:
         pool = RuntimePool(max_concurrent=2)
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         result = await tool_func.ainvoke({"agent_name": "nonexistent", "task": "hello", "mode": "oneshot"})
         assert "Unknown backend" in result
 
@@ -572,7 +559,7 @@ class TestDelegateToolReal:
             "dummy",
             RuntimeConfig(backend_type="cli", command="echo"),
         )
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         with pytest.raises(ValidationError, match="persistent"):
             await tool_func.ainvoke({"agent_name": "dummy", "task": "hello", "mode": "bad_mode"})
 
@@ -583,7 +570,7 @@ class TestDelegateToolReal:
             "dummy",
             RuntimeConfig(backend_type="cli", command="echo"),
         )
-        tool_func = create_invoke_acp_agent_tool(pool, cwd=os.getcwd())
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         huge_task = "x" * (3 * 1024 * 1024)
         result = await tool_func.ainvoke({"agent_name": "dummy", "task": huge_task, "mode": "oneshot"})
         assert "[error]" in result
@@ -602,6 +589,7 @@ class TestEdgeCases:
         rt = CliRuntime(
             "fake",
             RuntimeConfig(backend_type="cli", command="/nonexistent/agent"),
+            workspace=os.getcwd(),
         )
         events = [e async for e in rt.run_turn("hello", "edge-s1")]
         types = [e.type for e in events]
@@ -621,6 +609,7 @@ class TestEdgeCases:
                 timeout_seconds=30,
                 max_turns=1,
             ),
+            workspace=os.getcwd(),
         )
         events = [e async for e in rt.run_turn("", "edge-empty-s1")]
         assert len(events) > 0
@@ -663,6 +652,7 @@ class TestEdgeCases:
         rt = CliRuntime(
             "cancel-test",
             RuntimeConfig(backend_type="cli", command="echo"),
+            workspace=os.getcwd(),
         )
         await rt.cancel("any-session")
 
@@ -672,6 +662,7 @@ class TestEdgeCases:
         rt = CliRuntime(
             "close-test",
             RuntimeConfig(backend_type="cli", command="echo"),
+            workspace=os.getcwd(),
         )
         await rt.close()
         assert rt.is_alive is False
@@ -690,6 +681,7 @@ class TestEdgeCases:
                 timeout_seconds=TIMEOUT,
                 max_turns=1,
             ),
+            workspace=os.getcwd(),
         )
         session_key = "claude-resume-test"
         events = [e async for e in rt.run_turn(SIMPLE_PROMPT, session_key)]

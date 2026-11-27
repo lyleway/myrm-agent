@@ -34,12 +34,12 @@ def client() -> TestClient:
 
 
 def test_ensure_local_passes_when_available() -> None:
-    with patch("app.channels.voice.stt.is_local_available", return_value=True):
+    with patch("app.channels.voice.stt.local.is_local_available", return_value=True):
         _ensure_local_stt_if_needed(_local_voice())
 
 
 def test_ensure_local_raises_503_when_unavailable() -> None:
-    with patch("app.channels.voice.stt.is_local_available", return_value=False):
+    with patch("app.channels.voice.stt.local.is_local_available", return_value=False):
         with pytest.raises(HTTPException) as exc_info:
             _ensure_local_stt_if_needed(_local_voice())
 
@@ -49,12 +49,12 @@ def test_ensure_local_raises_503_when_unavailable() -> None:
 
 def test_ensure_local_skips_non_local_provider() -> None:
     voice = VoiceConfig(stt_enabled=True, stt_provider="openai", stt_api_key="sk-test")
-    with patch("app.channels.voice.stt.is_local_available", return_value=False):
+    with patch("app.channels.voice.stt.local.is_local_available", return_value=False):
         _ensure_local_stt_if_needed(voice)
 
 
 def test_local_stt_unavailable_detail_returns_hint() -> None:
-    with patch("app.channels.voice.stt.is_local_available", return_value=False):
+    with patch("app.channels.voice.stt.local.is_local_available", return_value=False):
         detail = local_stt_unavailable_detail(_local_voice())
 
     assert detail is not None
@@ -69,7 +69,7 @@ def test_local_stt_unavailable_detail_none_for_cloud() -> None:
 def test_transcribe_returns_503_when_local_unavailable(client: TestClient) -> None:
     with (
         patch("app.api.stt.router._load_user_voice_config", new_callable=AsyncMock) as mock_load,
-        patch("app.channels.voice.stt.is_local_available", return_value=False),
+        patch("app.channels.voice.stt.local.is_local_available", return_value=False),
     ):
         mock_load.return_value = _local_voice()
         response = client.post(

@@ -3,7 +3,7 @@
 - myrm_agent_harness.toolkits.llms.text_completion::acomplete_text (POS: One-shot text completion outside the chat-model stack.)
 
 [OUTPUT]
-- _resolve_base_url: Resolve the API base URL: config override (OpenAI & Voicebox) > provider default.
+- _resolve_base_url: Resolve the API base URL: config override (Voicebox) > provider default.
 - is_piper_available: Return whether the optional local Piper TTS engine is installed.
 - is_local_tts_available: Return whether any fully offline local TTS provider (Piper) is available.
 - is_edge_tts_available: Return whether the optional Edge TTS (GPL-3.0) package is installed.
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+from importlib import import_module
 from pathlib import Path
 from types import ModuleType
 
@@ -30,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 _DEFAULT_BASE_URLS: dict[str, str] = {
-    "openai": "https://api.openai.com/v1",
     "elevenlabs": "https://api.elevenlabs.io",
     "fish_audio": "https://api.fish.audio/v1",
     "minimax": "https://api.minimax.io/v1",
@@ -38,7 +38,6 @@ _DEFAULT_BASE_URLS: dict[str, str] = {
 }
 
 _DEFAULT_VOICES: dict[str, str] = {
-    "openai": "alloy",
     "elevenlabs": "21m00Tcm4TlvDq8ikWAM",
     "fish_audio": "7f92f8afb8ec43bf81429cc1c9199cb1",
     "minimax": "English_expressive_narrator",
@@ -49,8 +48,8 @@ _DEFAULT_VOICES: dict[str, str] = {
 
 
 def _resolve_base_url(config: VoiceConfig, provider: str) -> str:
-    """Resolve the API base URL: config override (OpenAI & Voicebox) > provider default."""
-    if provider in ("openai", "voicebox") and config.tts_base_url:
+    """Resolve the API base URL: config override (Voicebox) > provider default."""
+    if provider == "voicebox" and config.tts_base_url:
         return config.tts_base_url.rstrip("/")
     return _DEFAULT_BASE_URLS.get(provider, "")
 
@@ -92,10 +91,9 @@ def is_edge_tts_available() -> bool:
 def _import_edge_tts() -> ModuleType:
     """Import edge_tts or raise with an install hint."""
     try:
-        import edge_tts
+        return import_module("edge_tts")
     except ImportError as exc:
         raise ImportError(f"edge-tts is not installed. Install with: {_EDGE_TTS_INSTALL_HINT}") from exc
-    return edge_tts
 
 
 # ---------------------------------------------------------------------------

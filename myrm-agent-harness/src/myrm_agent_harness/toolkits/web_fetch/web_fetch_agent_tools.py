@@ -9,7 +9,7 @@ Contains:
 - toolkits.retriever.engine::RetrieverManager (POS: Hybrid retrieval manager for fetched pages) [lazy]
 - toolkits.retriever.sufficiency (POS: Retrieval Sufficiency Guard 模块入口。)
 - toolkits.web_fetch.processing.full_content_delivery::FetchedPage, plan_full_content, all_failed_content (POS: One shared budget for every fetched page) [lazy]
-- toolkits.web_fetch.processing.spill::store_full_text, emit_web_fetch_evicted_ref (POS: Sandbox persistence of the full text) [lazy]
+- toolkits.web_fetch.processing.spill::store_full_text, emit_web_fetch_evicted_ref, stored_copy_capacity (POS: Sandbox persistence of the full text) [lazy]
 - toolkits.web_fetch.processing.content_sanitize::strip_base64_images_from_markdown (POS: Inline image payload removal) [lazy]
 - utils.context_format::wrap_with_external_sources_tag (POS: UNTRUSTED_DATA boundary around fetched content) [lazy]
 - core.context_vars::source_indexer_var (POS: the run's source numbering, so the numbers a result prints are the indexes of its cards)
@@ -175,7 +175,11 @@ async def _fetch_full_content(
         plan_full_content,
     )
     from myrm_agent_harness.toolkits.web_fetch.processing.pipeline import SOURCE_TRUNCATED_KEY
-    from myrm_agent_harness.toolkits.web_fetch.processing.spill import emit_web_fetch_evicted_ref, store_full_text
+    from myrm_agent_harness.toolkits.web_fetch.processing.spill import (
+        emit_web_fetch_evicted_ref,
+        store_full_text,
+        stored_copy_capacity,
+    )
     from myrm_agent_harness.utils.context_format import wrap_with_external_sources_tag
 
     need_custom_engine = use_raw_markdown or allow_private_networks or bool(network_blocklist)
@@ -189,7 +193,9 @@ async def _fetch_full_content(
         if need_custom_engine
         else web_fetch_tools
     )
-    success_results, failed_results = await engine.crawl_many(urls)
+    # The model reads a budgeted preview and the stored copy holds the rest, so a long PDF or Office file is parsed up
+    # to what that copy can keep; without a store the cut preview is all there is.
+    success_results, failed_results = await engine.crawl_many(urls, max_parsed_chars=stored_copy_capacity())
 
     if not success_results and not failed_results:
         raise ToolError(

@@ -17,6 +17,7 @@ from app.ai_agents.general_agent.external_agents import ExternalAgentsMixin
 from app.services.external_agents.delegation import images
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+WORKSPACE = "/work/repo"
 
 
 class _RecordingPool:
@@ -24,6 +25,7 @@ class _RecordingPool:
 
     def __init__(self, *, endless: bool = False) -> None:
         self.prompts: list[str] = []
+        self.workspaces: list[str] = []
         self.images: list[list[str] | None] = []
         self.present_during_turn: list[bool] = []
         self.turn_closed = asyncio.Event()
@@ -35,8 +37,11 @@ class _RecordingPool:
     async def cancel(self, name: str, session_id: str) -> None:
         return None
 
-    async def run_turn(self, name: str, prompt: str, session_id: str, *, images: list[str] | None = None, **_: object):
+    async def run_turn(
+        self, name: str, prompt: str, session_id: str, *, workspace: str, images: list[str] | None = None, **_: object
+    ):
         self.prompts.append(prompt)
+        self.workspaces.append(workspace)
         self.images.append(images)
         self.present_during_turn.append(all(Path(path).exists() for path in images or []))
         try:
@@ -60,6 +65,7 @@ def _mixin(pool: object) -> ExternalAgentsMixin:
     mixin._runtime_pool = pool
     mixin.locale = "en"
     mixin.quote = None
+    mixin.declared_allowed_roots = (WORKSPACE,)
     return mixin
 
 
@@ -87,11 +93,12 @@ def _leftovers(directory: Path) -> list[Path]:
 async def test_the_cli_gets_the_staged_files_and_a_prompt_that_points_at_them(tmp_path: Path, staging: Path) -> None:
     pool = _RecordingPool()
 
-    events = [event async for event in _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path), chat_id="c1")]
+    events = [event async for event in _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path))]
 
     ((staged,),) = pool.images
     assert Path(staged).parent == staging
     assert pool.present_during_turn == [True]
+    assert pool.workspaces == [WORKSPACE]
     assert pool.prompts == [f"what is wrong here\n\n[Image: {staged}]"]
     assert any(event["type"] == AgentEventType.MESSAGE.value for event in events)
 
@@ -99,7 +106,7 @@ async def test_the_cli_gets_the_staged_files_and_a_prompt_that_points_at_them(tm
 async def test_the_staged_files_are_gone_once_the_turn_is_over(tmp_path: Path, staging: Path) -> None:
     pool = _RecordingPool()
 
-    async for _ in _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path), chat_id="c1"):
+    async for _ in _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path)):
         pass
 
     assert _leftovers(staging) == []
@@ -107,7 +114,7 @@ async def test_the_staged_files_are_gone_once_the_turn_is_over(tmp_path: Path, s
 
 async def test_closing_the_stream_early_stops_the_turn_and_removes_the_files(tmp_path: Path, staging: Path) -> None:
     pool = _RecordingPool(endless=True)
-    stream = _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path), chat_id="c1")
+    stream = _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path))
 
     async for event in stream:
         if event["type"] == AgentEventType.MESSAGE.value:
@@ -122,7 +129,7 @@ async def test_closing_the_stream_early_stops_the_turn_and_removes_the_files(tmp
 async def test_a_text_turn_stages_nothing_and_hands_the_pool_no_images(staging: Path) -> None:
     pool = _RecordingPool()
 
-    async for _ in _mixin(pool)._direct_delegate_stream("claude", "just text", chat_id="c1"):
+    async for _ in _mixin(pool)._direct_delegate_stream("claude", "just text"):
         pass
 
     assert pool.images == [None]
@@ -134,7 +141,7 @@ async def test_an_image_that_cannot_be_staged_still_runs_the_turn_with_the_path_
     pool = _RecordingPool()
     query = [{"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}}]
 
-    async for _ in _mixin(pool)._direct_delegate_stream("claude", query, chat_id="c1"):
+    async for _ in _mixin(pool)._direct_delegate_stream("claude", query):
         pass
 
     assert pool.images == [None]
@@ -145,7 +152,7 @@ async def test_the_turn_still_cancels_through_the_pool(tmp_path: Path, staging: 
     pool = _RecordingPool(endless=True)
     pool.cancel = AsyncMock()
     token = CancellationToken()
-    stream = _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path), cancel_token=token, chat_id="c1")
+    stream = _mixin(pool)._direct_delegate_stream("claude", _query(tmp_path), cancel_token=token)
 
     seen = [event["type"] async for event in _cancel_on_first_message(stream, token)]
     await stream.aclose()

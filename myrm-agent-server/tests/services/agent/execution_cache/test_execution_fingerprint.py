@@ -271,19 +271,6 @@ def test_execution_fingerprint_changes_when_jit_subagents_change() -> None:
     assert none_fp != configured_fp
 
 
-def test_execution_fingerprint_changes_when_force_delegate_changes() -> None:
-    """Forced delegation target is solidified into sub-agent wiring,
-    so a delegate override must bust the POOLED cache."""
-    wrapper = GeneralAgent(
-        model_cfg=ModelConfig(model="test-model", api_key="test-key", base_url="http://test"),
-        mcp_config=None,
-    )
-    none_fp = compute_execution_fingerprint(wrapper)
-    wrapper.force_external_agent = "researcher"
-    delegated_fp = compute_execution_fingerprint(wrapper)
-    assert none_fp != delegated_fp
-
-
 def test_execution_fingerprint_changes_when_privacy_routing_changes() -> None:
     """Privacy routing wraps the lite LLM at build time (factory:91,137-139),
     so routing rule changes must bust the POOLED cache while localApiKey rotation
@@ -639,10 +626,10 @@ def test_execution_fingerprint_changes_when_tts_params_change() -> None:
 
     wrapper = _base_wrapper()
     none_fp = compute_execution_fingerprint(wrapper)
-    wrapper.tts_params = TTSParams(provider="openai", model="tts-1", voice="alloy", api_key="k")
+    wrapper.tts_params = TTSParams(provider="elevenlabs", model="eleven_flash_v2_5", voice="rachel", api_key="k")
     enabled_fp = compute_execution_fingerprint(wrapper)
     assert none_fp != enabled_fp
-    wrapper.tts_params = TTSParams(provider="openai", model="tts-1", voice="onyx", api_key="k")
+    wrapper.tts_params = TTSParams(provider="elevenlabs", model="eleven_flash_v2_5", voice="domi", api_key="k")
     changed_fp = compute_execution_fingerprint(wrapper)
     assert enabled_fp != changed_fp
 

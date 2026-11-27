@@ -15,7 +15,7 @@
 
 import type { VoiceConfigValue } from '@/services/config/types';
 
-export type TtsProviderId = 'openai' | 'elevenlabs' | 'volcengine';
+export type TtsProviderId = 'elevenlabs' | 'volcengine';
 
 /** What the server holds under `voice`; every field is optional because nothing may be saved yet. */
 export type StoredVoice = Partial<VoiceConfigValue>;
@@ -27,17 +27,11 @@ export interface TtsModelOption {
 }
 
 export const TTS_PROVIDER_OPTIONS: TtsModelOption[] = [
-  { value: 'openai', label: 'OpenAI TTS', description: 'tts-1 / gpt-4o-mini-tts' },
   { value: 'elevenlabs', label: 'ElevenLabs', description: 'Turbo v2.5 / Multilingual v2' },
   { value: 'volcengine', label: 'Volcengine Speech', description: 'Seed-Audio / Doubao-TTS' },
 ];
 
 export const TTS_MODEL_OPTIONS: Record<TtsProviderId, TtsModelOption[]> = {
-  openai: [
-    { value: 'tts-1', label: 'TTS 1', description: 'Fast' },
-    { value: 'tts-1-hd', label: 'TTS 1 HD', description: 'Higher fidelity' },
-    { value: 'gpt-4o-mini-tts', label: 'GPT-4o mini TTS', description: 'Steerable' },
-  ],
   elevenlabs: [
     { value: 'eleven_turbo_v2_5', label: 'Turbo v2.5', description: 'Low latency' },
     { value: 'eleven_multilingual_v2', label: 'Multilingual v2', description: '30+ languages' },
@@ -50,14 +44,6 @@ export const TTS_MODEL_OPTIONS: Record<TtsProviderId, TtsModelOption[]> = {
 };
 
 export const TTS_VOICE_OPTIONS: Record<TtsProviderId, TtsModelOption[]> = {
-  openai: [
-    { value: 'alloy', label: 'Alloy', description: '' },
-    { value: 'echo', label: 'Echo', description: '' },
-    { value: 'fable', label: 'Fable', description: '' },
-    { value: 'onyx', label: 'Onyx', description: '' },
-    { value: 'nova', label: 'Nova', description: '' },
-    { value: 'shimmer', label: 'Shimmer', description: '' },
-  ],
   elevenlabs: [
     { value: '21m00Tcm4TlvDq8ikWAM', label: 'Rachel', description: '' },
     { value: 'AZnzlk1XvdvUeBnXmlld', label: 'Domi', description: '' },

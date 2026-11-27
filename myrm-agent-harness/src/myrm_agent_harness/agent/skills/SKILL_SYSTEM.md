@@ -516,16 +516,16 @@ Scanner（编排器）
 
 | 顺序 | 门禁 | 错误码 |
 |------|------|--------|
-| 1 | 安装目录名必须是单个相对路径段（名称由发布方控制，防目录穿越） | `INVALID_SKILL_NAME` |
+| 1 | 安装目录名必须是单个相对路径段（名称由发布方控制，防目录穿越）；技能名与包内每个路径分量不得超过 255 个 UTF-8 字节、不得含 NUL（第一次写盘就会抛 `OSError` / `ValueError`），也不得含孤立代理字符（没有 UTF-8 形式）；只按单个名字判断，不检查整条路径的总长与 Windows 保留名 | `INVALID_SKILL_NAME` / `INVALID_PACKAGE_PATH` |
 | 2 | 生命周期脚本门禁：`package.json` 里裸 `npm install` 会执行的脚本任一非空、含安装时自动执行的钩子文件（`binding.gyp`、npm 扩展、pnpmfile），或清单本身无法审计，即拒绝（§9.4） | `LIFECYCLE_SCRIPT_BLOCKED` |
 | 3 | 安全评分低于 50 分 | `SECURITY_SCORE_BELOW_THRESHOLD` |
 | 4 | 版本降级保护（`allow_downgrade=True` 可放行，§9.5） | `DOWNGRADE_BLOCKED` |
-| 5 | 安装目标是符号链接 / junction，或是装着其他子技能的分类桶 | `PATH_REDIRECT_ATTACK` / `CATEGORY_BUCKET_COLLISION` |
+| 5 | 提升阶段才发现的拒绝：安装目标是符号链接 / junction，或是装着其他子技能的分类桶；Agent Plugin 包里的 `plugin.json` / `mcp.json` 超过 1 MiB，或技能 / 智能体文件的 YAML 头超过 64 Ki 字符（整包拒绝） | `PATH_REDIRECT_ATTACK` / `CATEGORY_BUCKET_COLLISION` / `DOCUMENT_TOO_LARGE` |
 
 **事务式提升**：文件先写入系统临时目录下的隔离目录（`skill-quarantine-*`），门禁全部通过后由 `SkillInstallTransaction.stage_replace` 复制到安装目录；目标已存在时先把旧目录快照备份，随后写入 `origin.json` 与 `receipt.json`（§10.1），最后 `commit` 清理备份。任何一步异常都回滚到旧目录的快照，新建的目录被删除；Agent Plugin 包内的技能与主目录在同一个事务里提升，要么全部生效，要么全部回滚。隔离目录在 `finally` 里一律删除。
 
 **设计决策**：
-- 门禁在提升之前执行；提升阶段才发现的拒绝（目标不安全）由事务回滚，被拒绝的包不会留下痕迹
+- 门禁在提升之前执行；提升阶段才发现的拒绝（目标不安全、包内文档超过解码上限）由事务回滚，被拒绝的包不会留下痕迹；`DOCUMENT_TOO_LARGE`、`INVALID_PACKAGE_PATH` 与 `INVALID_SKILL_NAME` 给用户的只是一句固定文案，包内路径、技能名、数字与解析器原文只写日志；`INVALID_SKILL_NAME` 与 `INVALID_PACKAGE_PATH` 的拒绝结果回显技能名时，把其中的孤立代理字符换成 `U+FFFD`，JSON 响应才编码得了
 - 先快照后覆盖，升级失败时用户的旧版本原样保留
 - 评分通过但带有告警的技能照常安装，告警写入 `SkillInstallResult.scan_summary`，回执的 `security_verified` 记为 `false`
 - 安装根是 `<状态根>/skills`（`LOCAL_INSTALL_DIR`）；安装流水线不决定信任级别，由宿主载入技能时赋予（§5）
@@ -545,9 +545,9 @@ Scanner（编排器）
 
 不声明脚本也会在安装时被包管理器执行的文件同样判为 high：`binding.gyp`（用 node-gyp 构建）、`.npm-extension.cjs` / `.npm-extension.mjs`（npm 扩展）、`.pnpmfile.cjs` / `.pnpmfile.mjs`（pnpm 钩子）。文件名按小写比较，符号链接形式也算；压缩包的内存检查（`check_lifecycle_scripts`）与本地目录扫描（`audit_skill_directory`）两条路径用同一套规则。
 
-读不懂的清单不等于没有脚本：`package.json` 无法解析（JSON 无效、同一对象内键重复、嵌套过深、整数位数超出解析器能力，或超过 1,048,576 个字符）时，安装器读取它的宽严程度与审计的解析器不同，所以同样产生一条 high 的 `invalid_manifest` 发现并拒绝。本地目录扫描（§8）里，符号链接形式的 `package.json`（安装器会跟随链接）和读取失败的 `package.json` 也一样处理；开头恰好一个 BOM 会被跳过，文件名按小写比较，非 UTF-8 字节按替换字符解码后照常审计。整个审计对清单内容只返回发现、不抛异常。安装流程本身不执行任何依赖安装命令。
+读不懂的清单不等于没有脚本：`package.json` 无法解析（JSON 无效、同一对象内键重复、嵌套过深、整数位数超出解析器能力）时，安装器读取它的宽严程度与审计的解析器不同，所以同样产生一条 high 的 `invalid_manifest` 发现并拒绝。本地目录扫描（§8）里，符号链接形式的 `package.json`（安装器会跟随链接）和读取失败的 `package.json` 也一样处理；超过 1,048,576 个字符的 `package.json` 同样处理，磁盘上读到上限就停、不读到底，压缩包的内存审计按解码后的字符数判断（一个多字节字符只算一个字符），所以同一份清单在压缩包里和在磁盘上结论一致；开头恰好一个 BOM 会被跳过，文件名按小写比较，非 UTF-8 字节按替换字符解码后照常审计。整个审计对清单内容只返回发现、不抛异常。安装流程本身不执行任何依赖安装命令。
 
-本地目录扫描经 `backends/skills/scanning/tree_walk.py` 遍历整棵技能目录，没有深度上限，只有 `node_modules` 不进入（依赖目录不是技能自己的文件）；包管理器会读取工作区或 `file:` 依赖指向的任意深度的清单，所以审计也看任意深度。看不全同样不判为干净：某个目录读不了、目录树条目超过 100,000，以及第 100 份之后的 `package.json`，各产生一条 high 的 `invalid_manifest` 发现。审计只看技能自己的文件，依赖（注册表、压缩包、URL、`node_modules` 内的包）在安装时自带的脚本不在它的范围内。
+本地目录扫描经 `backends/skills/scanning/tree_walk.py` 遍历整棵技能目录，没有深度上限，只有 `node_modules` 不进入（依赖目录不是技能自己的文件），符号链接一律不跟随；包管理器会读取工作区或 `file:` 依赖指向的任意深度的清单，所以审计也看任意深度。包管理器还可以穿过指向技能目录之外的文件夹的符号链接（工作区通配、显式的工作区条目、`file:` 依赖，各管理器跟随其中哪几种各不相同）去读审计看不到的清单，所以技能含 `package.json` 时，这样的链接产生一条 high 的 `invalid_manifest` 发现（点名遍历顺序里的第一条）；没有 `package.json` 时这样的链接不算发现，只是链接了共享文件的技能照常判为干净；指向技能目录之内的链接也不算。看不全同样不判为干净：某个目录读不了、目录树条目超过 100,000，以及第 100 份之后的 `package.json`，各产生一条 high 的 `invalid_manifest` 发现。审计只看技能自己的文件，依赖（注册表、压缩包、URL、`node_modules` 内的包）在安装时自带的脚本不在它的范围内。
 
 ### 9.5 版本比较与升级
 

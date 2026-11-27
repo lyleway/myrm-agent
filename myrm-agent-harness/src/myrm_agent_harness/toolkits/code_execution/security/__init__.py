@@ -27,7 +27,6 @@ from myrm_agent_harness.toolkits.code_execution.security.blacklist import (
     CORE_DANGEROUS_MODULES,
     DANGEROUS_ENV_PREFIXES,
     DANGEROUS_ENV_VARS,
-    DANGEROUS_ENV_WILDCARDS,
     DANGEROUS_MODULES,
     DANGEROUS_MODULES_REASONS,
     FILE_MODIFYING_COMMANDS,
@@ -82,7 +81,6 @@ __all__ = [
     "CORE_DANGEROUS_MODULES",
     "DANGEROUS_ENV_PREFIXES",
     "DANGEROUS_ENV_VARS",
-    "DANGEROUS_ENV_WILDCARDS",
     # AST parser and capability boundaries
     "AtomicCommandAction",
     "BashASTParser",

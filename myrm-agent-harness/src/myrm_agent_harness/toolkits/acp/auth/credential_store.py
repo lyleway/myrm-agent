@@ -11,6 +11,7 @@ or inconvenient (the user pastes an ``auth.json`` captured on another machine).
 [OUTPUT]
 - AuthStatus: Authentication state of a backend.
 - CredentialState: Resolved auth state with the satisfying credential path.
+- CredentialStorageDisabledError: Raised when a store that must not keep credentials is asked to keep one.
 - CredentialStore: Detect / import / clear subscription credentials.
 
 [POS]
@@ -57,16 +58,26 @@ class CredentialState:
         return self.status is AuthStatus.AUTHENTICATED
 
 
+class CredentialStorageDisabledError(RuntimeError):
+    """The store was built not to keep credentials, and a credential was offered to it."""
+
+
 class CredentialStore:
     """Detect, import, and clear CLI subscription credentials.
 
     Constructed with an environment snapshot so the control plane can relocate a
     CLI's home (e.g. ``CODEX_HOME`` → a persistent volume) and have detection,
     import, and clearing all target the same location transparently.
+
+    A deployment that must not keep a user's subscription credentials (a shared
+    host the user does not own) builds the store with ``accepts_new_credentials=False``:
+    importing then fails before anything is written, while detection and clearing
+    keep working so credentials stored before the policy applied can still be removed.
     """
 
-    def __init__(self, env: Mapping[str, str] | None = None) -> None:
+    def __init__(self, env: Mapping[str, str] | None = None, *, accepts_new_credentials: bool = True) -> None:
         self._env: dict[str, str] = dict(env if env is not None else os.environ)
+        self._accepts_new_credentials = accepts_new_credentials
 
     def state(self, backend: str) -> CredentialState:
         """Resolve the current authentication state of a backend."""
@@ -105,8 +116,12 @@ class CredentialStore:
         it here. Written atomically with owner-only permissions.
 
         Raises:
+            CredentialStorageDisabledError: the store was built with ``accepts_new_credentials=False``.
             ValueError: unknown backend, empty/oversized content, or invalid filename.
         """
+        if not self._accepts_new_credentials:
+            msg = "This deployment does not store subscription credentials."
+            raise CredentialStorageDisabledError(msg)
         profile = profile_for(backend)
         if profile is None:
             msg = f"No auth profile for backend {backend!r}"

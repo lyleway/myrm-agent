@@ -19,13 +19,17 @@ to ten backticks closes at a bare run at least as long), so a block fenced by fo
 blocks it documents show as text. Text the agent writes never notifies a
 whole channel, workspace or user group: ``<!here>``, ``<!channel>``, ``<!everyone>`` and ``<!subteam^ID>``
 are escaped wherever they appear, and a Markdown link cannot aim at a mention, a channel or a special token.
+The spans that run from an opening ``<`` or ``[`` to a closing mark are found by scans that resume where the last one
+stopped, because a pattern that restarts from every opener reads to the end of the line each time when no closer
+follows: a line of 40,000 ``<`` takes seconds that way and a few milliseconds here.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 
-_SLACK_ANGLE_TOKEN_RE = re.compile(r"<[^>\n]+>")
+_ANGLE_END_RE = re.compile(r"[>\n]")
 # A fence line (CommonMark): a run of three to ten backticks and an info string that holds none. Tildes stay text, for
 # Slack has no block fenced by them.
 _FENCE_LINE_RE = re.compile(r"^(?P<fence>`{3,10})(?P<info>[^`]*)$")
@@ -34,7 +38,6 @@ _SLACK_FENCE = "```"
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"\*(?!\*)([^*]+?)\*(?!\*)")  # *italic* (not **bold**)
 _STRIKE_RE = re.compile(r"~~(.+?)~~")
-_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 # Tokens that notify everyone in a channel, the workspace or a user group (each may carry a ``|label``).
 _BROADCAST_TOKEN_RE = re.compile(r"<!(?:here|channel|everyone|subteam\^[^>\n|]*)(?:\|[^>\n]*)?>", re.IGNORECASE)
 # A Markdown link target starting with one of these is a mention, a channel or a special token, not a URL.
@@ -49,6 +52,59 @@ _NON_URL_LINK_TARGETS = ("@", "#", "!")
 #          fullwidth forms (FF00-FFEF).
 _CJK_CHAR = re.compile(r"[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFFEF]")
 _ZWS = "\u200b"
+
+
+def _angle_spans(text: str) -> Iterator[tuple[int, int]]:
+    """The ``(start, end)`` of each ``<...>`` in ``text`` that has content and no ``>`` or line break inside.
+
+    The first ``>`` after a ``<`` closes it, and a ``<`` inside the span belongs to it. A ``<`` that a line break or
+    the end of the text comes to before any ``>`` closes nothing, nor does any ``<`` before the same break.
+    """
+    position = 0
+    while (start := text.find("<", position)) != -1:
+        stop = _ANGLE_END_RE.search(text, start + 1)
+        if stop is None:
+            return  # no ``>`` and no line break ahead: no later ``<`` closes either
+        if stop.group() == ">" and stop.start() > start + 1:
+            yield start, stop.end()
+        position = stop.end()
+
+
+def _broadcast_tokens(text: str) -> Iterator[tuple[int, int]]:
+    """The ``(start, end)`` of each token in ``text`` that notifies a whole audience.
+
+    A token ends at the first ``>`` after its ``<``, so it lies inside one of the ``_angle_spans`` and ends where that
+    span does; the first ``<!`` in the span that reads as a token is the one.
+    """
+    for start, end in _angle_spans(text):
+        candidate = start
+        while (candidate := text.find("<!", candidate, end)) != -1:
+            if _BROADCAST_TOKEN_RE.fullmatch(text, candidate, end):
+                yield candidate, end
+                break
+            candidate += 1
+
+
+def _markdown_links(line: str) -> Iterator[tuple[int, int, int]]:
+    """The ``(start, label_end, end)`` of each ``[label](url)`` in ``line``; ``label`` and ``url`` are not empty.
+
+    ``label`` runs to the first ``]`` after the ``[`` and ``url`` to the first ``)`` after the ``(``. Every ``[`` up
+    to a ``]`` that no ``(`` follows meets that same ``]``, so the scan resumes after it.
+    """
+    position = 0
+    while (start := line.find("[", position)) != -1:
+        label_end = line.find("]", start + 1)
+        if label_end == -1:
+            return  # no ``]`` ahead: no later ``[`` has one either
+        if label_end == start + 1 or not line.startswith("(", label_end + 1):
+            position = label_end
+            continue
+        end = line.find(")", label_end + 2)
+        if end == -1:
+            return  # no ``)`` ahead: no later link closes either
+        if end > label_end + 2:
+            yield start, label_end, end + 1
+        position = end + 1
 
 
 def _is_allowed_slack_token(token: str) -> bool:
@@ -99,14 +155,21 @@ def neutralize_broadcast_mentions(text: str) -> str:
     complete text, never on a fragment, because a token can be split across two chunks; escaped text no longer
     matches, so applying it twice changes nothing.
     """
-    return _BROADCAST_TOKEN_RE.sub(lambda match: _escape_slack_segment(match.group(0)), text)
+    pieces: list[str] = []
+    last_end = 0
+    for start, end in _broadcast_tokens(text):
+        pieces.append(text[last_end:start])
+        pieces.append(_escape_slack_segment(text[start:end]))
+        last_end = end
+    pieces.append(text[last_end:])
+    return "".join(pieces)
 
 
 def _escape_slack_content(text: str) -> str:
     """Escape special chars while preserving allowed Slack angle-bracket tokens.
 
     Strategy:
-    1. Find all <...> tokens using regex
+    1. Find all <...> tokens
     2. For each token:
        - If allowed (mention/channel/link) → preserve
        - If not allowed → escape
@@ -127,16 +190,16 @@ def _escape_slack_content(text: str) -> str:
     parts: list[str] = []
     last_end = 0
 
-    for match in _SLACK_ANGLE_TOKEN_RE.finditer(text):
-        parts.append(_escape_slack_segment(text[last_end : match.start()]))
+    for start, end in _angle_spans(text):
+        parts.append(_escape_slack_segment(text[last_end:start]))
 
-        token = match.group(0)
+        token = text[start:end]
         if _is_allowed_slack_token(token):
             parts.append(token)
         else:
             parts.append(_escape_slack_segment(token))
 
-        last_end = match.end()
+        last_end = end
 
     parts.append(_escape_slack_segment(text[last_end:]))
     return "".join(parts)
@@ -182,19 +245,19 @@ def _defang_backtick_runs(line: str) -> str:
     return _BACKTICK_RUN_RE.sub(lambda run: _ZWS.join(run[0][i : i + 2] for i in range(0, len(run[0]), 2)), line)
 
 
-def _convert_markdown_link(match: re.Match[str]) -> str:
-    """Convert Markdown link to Slack link format.
+def _convert_markdown_link(label: str, target: str, original: str) -> str:
+    """Convert the Markdown link ``original`` (``[label](target)``) to Slack link format.
 
     Markdown: [text](url)
     Slack: <url|text>
 
     Only converts if text != url (to avoid redundant <url|url> format).
     """
-    text = neutralize_broadcast_mentions(match.group(1).strip())
-    url = match.group(2).strip()
+    text = neutralize_broadcast_mentions(label.strip())
+    url = target.strip()
 
     if not url:
-        return match.group(0)
+        return original
     if url.startswith(_NON_URL_LINK_TARGETS):
         return text
 
@@ -204,7 +267,19 @@ def _convert_markdown_link(match: re.Match[str]) -> str:
         safe_url = _escape_slack_segment(url)
         return f"<{safe_url}|{text}>"
 
-    return match.group(0)
+    return original
+
+
+def _convert_markdown_links(line: str) -> str:
+    """``line`` with each Markdown link written as a Slack link."""
+    pieces: list[str] = []
+    last_end = 0
+    for start, label_end, end in _markdown_links(line):
+        pieces.append(line[last_end:start])
+        pieces.append(_convert_markdown_link(line[start + 1 : label_end], line[label_end + 2 : end - 1], line[start:end]))
+        last_end = end
+    pieces.append(line[last_end:])
+    return "".join(pieces)
 
 
 def md_to_slack_mrkdwn(text: str) -> str:
@@ -264,7 +339,7 @@ def md_to_slack_mrkdwn(text: str) -> str:
             # 4. Strike
             result = _STRIKE_RE.sub(r"~\1~", result)
             # 5. Links
-            result = _MARKDOWN_LINK_RE.sub(_convert_markdown_link, result)
+            result = _convert_markdown_links(result)
             # 6. Escape
             result = _escape_slack_content(result)
             # 7. CJK boundary fix

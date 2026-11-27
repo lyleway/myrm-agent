@@ -1,12 +1,13 @@
 """Compaction DB persistence and failure cooldown.
 
 [INPUT]
+- app.database.factory::acquire_write_lock (POS: write lock before a read-then-write unit)
 - app.database.models::Chat, Message (POS: ORM compaction metadata)
 - app.services.chat.conversation_recall_index_service::ConversationRecallIndexService (POS: post-compact index rebuild)
 - compact._constants::COMPACTION_FAILURE_COOLDOWN_SECONDS (POS: cooldown duration)
 
 [OUTPUT]
-- do_persist_to_db: compaction metadata write (caller commits)
+- do_persist_to_db: compaction metadata write under the write lock (caller commits)
 - record_compaction_failure_cooldown / is_compaction_failure_cooldown_active: failure guards
 - persist_compaction: Pipeline fire-and-forget wrapper
 
@@ -18,10 +19,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import Protocol, cast
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.factory import acquire_write_lock
 from app.database.models import Chat, Message
 from app.services.chat.compact._constants import COMPACTION_FAILURE_COOLDOWN_SECONDS
 from app.services.chat.conversation_recall_index_service import (
@@ -31,6 +34,12 @@ from app.services.chat.conversation_recall_index_service import (
 logger = logging.getLogger(__name__)
 
 
+class _JsonSummary(Protocol):
+    """A structured summary the Pipeline hands over; anything else is stored as its text."""
+
+    def to_json(self) -> str: ...
+
+
 async def do_persist_to_db(
     db: AsyncSession,
     chat_id: str,
@@ -38,8 +47,16 @@ async def do_persist_to_db(
     before_message_id: str,
     tokens_saved: int,
 ) -> str:
-    """Execute compaction metadata DB write (caller commits)."""
+    """Execute compaction metadata DB write (caller commits).
+
+    The stored compaction boundary is read before the write, so the write lock is taken first: it leaves no moment
+    between that read and the write for another writer to commit in, which would abort the write with
+    SQLITE_BUSY_SNAPSHOT and lose a summary already paid for. Both callers get this from here, so neither can forget
+    it; the session's transaction must not have read anything yet.
+    """
     from sqlalchemy import desc
+
+    await acquire_write_lock(db)
 
     effective_before_id: str | None = before_message_id or None
     if not effective_before_id:
@@ -96,7 +113,7 @@ async def persist_compaction(
 
     summary_text: str
     if hasattr(summary, "to_json"):
-        summary_text = summary.to_json()
+        summary_text = cast(_JsonSummary, summary).to_json()
     else:
         summary_text = str(summary)
 

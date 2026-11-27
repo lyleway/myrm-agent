@@ -4,16 +4,17 @@ Encapsulates common logic shared by AcpRuntime and CliRuntime:
 environment variable sanitization, timeout control, and response truncation.
 
 [INPUT]
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry; resolves a command to its backend)
-- core.security.process_env::EnvInheritPolicy, sanitize_env (POS: Child process environment isolation SSOT) [lazy]
+- toolkits.acp.auth.launch_env::account_env, cli_base_env (POS: The environment every launch of a CLI starts from)
+- toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 
 [OUTPUT]
-- BaseRuntime: Abstract base for RuntimeBackend implementations.
-- build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the system trust store while enterprise network compatibility is on.
+- BaseRuntime: Abstract base for RuntimeBackend implementations; a runtime belongs to one workspace for its whole life.
+- build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the home of its account, plus the system trust store while enterprise network compatibility is on.
 - truncate_response: Truncate response text if it exceeds the configured limit.
 - KEEPALIVE_SECONDS / working_status: how long a turn may be silent, and the ``working`` status it reports then.
+- UNAUTHORIZED_RETRIES_LIMIT: how many refused-login retries in a row an agent's turn is given up after.
 
 [POS]
 Base class for RuntimeBackend implementations.
@@ -28,7 +29,8 @@ from collections.abc import AsyncGenerator
 from contextlib import aclosing
 
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
+from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env, cli_base_env
+from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -37,10 +39,12 @@ from myrm_agent_harness.toolkits.acp.types import (
     BackendStatus,
     BackendType,
     McpServerConfig,
+    PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
     create_event,
+    normalize_workspace,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +52,9 @@ logger = logging.getLogger(__name__)
 # An agent is silent while one tool call runs (a build, a long test run). Every this many seconds of silence the
 # turn says it is still working, so a host that watches for activity does not take the quiet for a hang.
 KEEPALIVE_SECONDS = 15.0
+# Consecutive retries of a request answered 401 after which a turn is given up: a rejected login does not heal by
+# retrying, while a token the agent refreshes on its own needs one retry.
+UNAUTHORIZED_RETRIES_LIMIT = 3
 
 
 def working_status(session_id: str, elapsed_seconds: float) -> RuntimeEvent:
@@ -103,7 +110,7 @@ def build_safe_env(
 ) -> dict[str, str]:
     """Build the environment of a delegated child process.
 
-    Two layers, both honouring ``config.auth_mode``, then the trust setting:
+    Two layers, both honouring ``config.auth_mode``, then the account's home and the trust setting:
 
     1. Baseline — from the parent environment only the shared core variables (PATH, HOME, locale, proxy, …)
        and the variable that relocates this CLI's own login home are inherited. A delegated CLI hands its
@@ -116,17 +123,13 @@ def build_safe_env(
          secrets are dropped so the CLI is forced onto its own logged-in
          subscription session rather than silently falling back to a key.
 
+    The home of the account the agent runs as (``config.account_home``) is applied last, over whatever the baseline or
+    ``config.env`` says, so the agent can only ever see that account's login.
+
     While enterprise network compatibility is on, ``NODE_USE_SYSTEM_CA=1`` is added so a Node-based CLI validates
     against the operating system's trust store the way the host does; a value ``config.env`` sets wins.
     """
-    from myrm_agent_harness.core.security.process_env import EnvInheritPolicy, sanitize_env
-
-    source = dict(os.environ if base_env is None else base_env)
-    env = sanitize_env(source, EnvInheritPolicy.CORE)
-    profile = profile_for(config.command) if config.command else None
-    home_env = profile.home_env if profile is not None else None
-    if home_env and home_env in source:
-        env[home_env] = source[home_env]
+    env = cli_base_env(config.command, os.environ if base_env is None else base_env)
 
     if config.env:
         if config.auth_mode == "subscription":
@@ -141,6 +144,7 @@ def build_safe_env(
         else:
             env.update(config.env)
 
+    env.update(account_env(config.command, config.account_home))
     return with_node_system_ca(env)
 
 
@@ -158,10 +162,13 @@ class BaseRuntime:
     ``_do_close``, and ``_do_get_status``.
     """
 
-    def __init__(self, runtime_name: str, config: RuntimeConfig, backend_type: BackendType) -> None:
+    def __init__(self, runtime_name: str, config: RuntimeConfig, backend_type: BackendType, *, workspace: str) -> None:
         self._name = runtime_name
         self._config = config
         self._backend_type: BackendType = backend_type
+        # The directory the agent starts in and the root its file access is confined to; fixed at creation so a
+        # runtime never serves a second workspace (the pool keeps one runtime per backend and workspace).
+        self._workspace = normalize_workspace(workspace)
         self._alive = False
 
     # -- Properties (satisfy RuntimeBackend Protocol) --
@@ -187,12 +194,13 @@ class BaseRuntime:
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Execute a turn with timeout control and streaming truncation.
 
         Wraps ``_do_run_turn`` with ``asyncio.timeout``, applies per-character
         truncation on TEXT_DELTA events, and emits an error event on timeout
-        or unexpected failure.
+        or unexpected failure. The time limit does not run while ``permissions`` waits for a person.
         """
         char_count = 0
         max_chars = self._config.max_response_chars
@@ -200,31 +208,38 @@ class BaseRuntime:
 
         try:
             # ``aclosing`` ends the turn generator (and so its process) the moment this stream stops, not at GC.
-            async with (
-                asyncio.timeout(self._config.timeout_seconds),
-                aclosing(self._do_run_turn(prompt, session_id, mcp_servers=mcp_servers, images=images)) as events,
-            ):
-                async for event in events:
-                    if truncated:
-                        if event.type == RuntimeEventType.TEXT_DELTA:
-                            continue
-                        yield event
-                        continue
-
-                    if event.type == RuntimeEventType.TEXT_DELTA:
-                        content = event.data.get("content", "")
-                        if isinstance(content, str):
-                            char_count += len(content)
-                            if char_count > max_chars:
-                                yield create_event(
-                                    RuntimeEventType.TEXT_DELTA,
-                                    session_id,
-                                    content="\n\n[truncated — response exceeded limit]",
-                                )
-                                truncated = True
+            async with asyncio.timeout(self._config.timeout_seconds) as clock:
+                turn_permissions = None if permissions is None else TurnPermissions(permissions, clock)
+                try:
+                    async with aclosing(
+                        self._do_run_turn(
+                            prompt, session_id, mcp_servers=mcp_servers, images=images, permissions=turn_permissions
+                        )
+                    ) as events:
+                        async for event in events:
+                            if truncated:
+                                if event.type == RuntimeEventType.TEXT_DELTA:
+                                    continue
+                                yield event
                                 continue
 
-                    yield event
+                            if event.type == RuntimeEventType.TEXT_DELTA:
+                                content = event.data.get("content", "")
+                                if isinstance(content, str):
+                                    char_count += len(content)
+                                    if char_count > max_chars:
+                                        yield create_event(
+                                            RuntimeEventType.TEXT_DELTA,
+                                            session_id,
+                                            content="\n\n[truncated — response exceeded limit]",
+                                        )
+                                        truncated = True
+                                        continue
+
+                            yield event
+                finally:
+                    if turn_permissions is not None:
+                        turn_permissions.close()
         except TimeoutError:
             logger.error(
                 "runtime_timeout name=%s session=%s timeout=%ds", self._name, session_id, self._config.timeout_seconds
@@ -251,7 +266,8 @@ class BaseRuntime:
             yield create_event(
                 RuntimeEventType.ERROR,
                 session_id,
-                error=AcpError(
+                error=self._classify_failure(exc)
+                or AcpError(
                     code=AcpErrorCode.UNKNOWN,
                     message=f"Agent '{self._name}' failed: {type(exc).__name__}: {exc}",
                 ),
@@ -286,6 +302,10 @@ class BaseRuntime:
 
     # -- Template methods (subclasses implement) --
 
+    def _classify_failure(self, exc: Exception) -> AcpError | None:
+        """The structured error for a failure this transport can name (a refused login), or None for an unknown one."""
+        return None
+
     async def _do_run_turn(
         self,
         prompt: str,
@@ -293,6 +313,7 @@ class BaseRuntime:
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         raise NotImplementedError
         yield  # pragma: no cover — makes this an async generator

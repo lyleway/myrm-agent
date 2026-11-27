@@ -1,14 +1,16 @@
-"""Chrome E2E: org-managed MCP server invoked during a live agent chat.
+"""Chrome E2E: org-managed MCP servers invoked during a live agent chat.
 
 [INPUT]
 - Control Plane pushes an org-level stdio MCP server via ``POST /api/admin/org-mcp-sync``.
 - WebUI chat sends a message that requires calling the org MCP server's tool.
 
 [OUTPUT]
-- The assistant turn completes and the tool result (``pong``) surfaces in the
-  persisted chat messages *and* in the rendered chat UI — proving org MCPs are
-  wired into the live agent path end to end (sync → merge → agent toolset →
-  tool call → UI result).
+- ``test_org_mcp_tool_invoked_in_live_chat``: the assistant turn completes and the tool result (``pong``) surfaces in the
+  persisted chat messages *and* in the rendered chat UI — proving org MCPs are wired into the live agent path end to end
+  (sync → merge → agent toolset → tool call → UI result).
+- ``test_org_mcp_server_never_receives_code_injection_env_in_live_chat``: a pushed server whose stored environment names
+  ``GIT_CONFIG_*`` is started without them while its ordinary variable arrives; the stored configuration is read back first,
+  so the names really were in the store when the server was started.
 - The persisted turn and the visible UI tail are printed (``E2E_LIVE_TURN_*``)
   so a PASS carries proof of what the model actually returned.
 """
@@ -18,6 +20,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -39,6 +44,13 @@ from dev_gate.contract import EvaluateIntent  # noqa: E402
 
 from tests.support.chrome_mcp_e2e import http_json  # noqa: E402
 from tests.support.e2e_runtime_guard import E2EResourceLedger, heartbeat_once  # noqa: E402
+from tests.support.mcp_env_probe import (  # noqa: E402
+    ENV_PROBE_ENV,
+    ENV_PROBE_PROMPT,
+    ENV_PROBE_SERVER,
+    EXPECTED_ENV_REPORT,
+    reported_env_states,
+)
 
 _ORG_PROBE_NAME = "e2e-minimal"
 _ORG_MCP_SYNC_PATH = "/api/admin/org-mcp-sync"
@@ -68,37 +80,64 @@ def _sync_org_mcp(api_url: str, servers: list[dict[str, object]]) -> None:
     assert isinstance(resp, dict) and resp.get("status") == "synced", resp
 
 
-def _org_mcp_server_names(api_url: str) -> list[str]:
+def _org_mcp_servers(api_url: str) -> list[dict[str, object]]:
     record = http_json("GET", f"{api_url}/api/v1/config/orgMcpServers")
     assert isinstance(record, dict), record
     value = record.get("value") or {}
     servers = value.get("servers") or []
     assert isinstance(servers, list), servers
-    return [str(s.get("name", "")) for s in servers if isinstance(s, dict)]
+    return [s for s in servers if isinstance(s, dict)]
+
+
+def _org_mcp_server_names(api_url: str) -> list[str]:
+    return [str(s.get("name", "")) for s in _org_mcp_servers(api_url)]
+
+
+def _stored_env_names(server: dict[str, object]) -> set[str]:
+    """Names of the environment variables a stored server entry carries."""
+    extra_params = server.get("extra_params")
+    env = extra_params.get("env") if isinstance(extra_params, dict) else None
+    return {str(name) for name in env} if isinstance(env, dict) else set()
+
+
+def _message_text(msg: dict[str, object]) -> str:
+    """The text of a persisted message, whether its content is one string or a list of chunks."""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for chunk in content:
+        if isinstance(chunk, str):
+            parts.append(chunk)
+        elif isinstance(chunk, dict):
+            text_chunk = chunk.get("text")
+            if isinstance(text_chunk, str):
+                parts.append(text_chunk)
+    return "".join(parts)
 
 
 def _pong_evidence(messages: list[dict[str, object]]) -> str:
     """Return the first ``pong`` evidence in tool results or assistant text."""
     for msg in messages:
-        role = str(msg.get("role") or "")
-        content = msg.get("content")
-        if isinstance(content, str):
-            text = content
-        elif isinstance(content, list):
-            parts: list[str] = []
-            for chunk in content:
-                if isinstance(chunk, str):
-                    parts.append(chunk)
-                elif isinstance(chunk, dict):
-                    text_chunk = chunk.get("text")
-                    if isinstance(text_chunk, str):
-                        parts.append(text_chunk)
-            text = "".join(parts)
-        else:
-            continue
+        text = _message_text(msg)
         if "pong" in text.lower():
-            return f"{role}:{text[:120]}"
+            return f"{msg.get('role') or ''}:{text[:120]}"
     return ""
+
+
+def _called_tool_names(messages: list[dict[str, object]]) -> list[str]:
+    """Names of the tools the turn called, from the progress steps persisted with the assistant message."""
+    names: list[str] = []
+    for msg in messages:
+        metadata = msg.get("metadata")
+        steps = metadata.get("progressSteps") if isinstance(metadata, dict) else None
+        for step in steps if isinstance(steps, list) else []:
+            tool_name = step.get("tool_name") if isinstance(step, dict) else None
+            if isinstance(tool_name, str):
+                names.append(tool_name)
+    return names
 
 
 def _log_turn_evidence(chat_id: str, messages: list[dict[str, object]]) -> None:
@@ -144,6 +183,66 @@ async def _resolve_chat_id(
     return _extract_chat_id(str(href) if href else "")
 
 
+@dataclass(frozen=True)
+class LiveTurn:
+    """A finished turn: the chat page still open, the chat's id and the messages it persisted."""
+
+    chat: McpChatSession
+    chat_id: str
+    messages: list[dict[str, object]]
+
+
+@asynccontextmanager
+async def _live_turn(
+    api_url: str, ledger: E2EResourceLedger, prompt: str, *, reply_ends_with_ok: bool
+) -> AsyncIterator[LiveTurn]:
+    """Send ``prompt`` in a new WebUI chat on the private runtime and hand over the finished turn, page still open.
+
+    ``reply_ends_with_ok`` says the prompt asks for a closing OK, which then marks the turn as done; without it the turn
+    is done once the reply has stopped streaming.
+    """
+    if not wait_e2e_provider_ready():
+        pytest.fail(
+            "Provider config not ready for live E2E — run via ./myrm-dev test -m chrome_e2e "
+            "after ./myrm-dev ready --chrome (API /api/v1/config/readiness provider.is_ready must be true)"
+        )
+    ensure_e2e_yolo_mode(api_url=api_url)
+    client = ChromeMcpClient(request_timeout_sec=180.0)
+    await asyncio.to_thread(client.start)
+    try:
+        ui_url = get_e2e_ui_url().rstrip("/")
+        page: McpPage | None = await asyncio.to_thread(client.new_page, ui_url, timeout_ms=120_000)
+        if page is None:
+            raise RuntimeError("new_page returned no page")
+
+        chat = McpChatSession(client, page)
+        await chat.bootstrap(ui_url, navigate=False, timeout_sec=180.0)
+        await chat.click_new_chat()
+        heartbeat_once()
+
+        first_send = await chat.send_message(prompt, prompt)
+        chat_id_hint = (
+            str(first_send.get("started", {}).get("chatId") or first_send.get("submit", {}).get("chatId") or "").strip() or None
+        )
+
+        if reply_ends_with_ok:
+            after = await chat.wait_turn_done(prompt, chat_id_hint=chat_id_hint, timeout_sec=TURN_WAIT_SEC)
+        else:
+            after = await chat.wait_turn_settled(chat_id_hint=chat_id_hint, timeout_sec=TURN_WAIT_SEC)
+        if str(after.get("path", "")).startswith("/settings"):
+            pytest.fail(f"Send redirected to settings: {after}")
+
+        chat_id = await _resolve_chat_id(chat, after)
+        assert chat_id, f"Expected chat id after turn: {after}"
+        ledger.register("chat", chat_id)
+
+        messages = fetch_chat_messages(chat_id, api_url=api_url)
+        _log_turn_evidence(chat_id, messages)
+        yield LiveTurn(chat=chat, chat_id=chat_id, messages=messages)
+    finally:
+        await asyncio.to_thread(client.close)
+
+
 @pytest.mark.chrome_e2e(
     execution_mode="PRIVATE",
     access_scope="GLOBAL_WRITE",
@@ -158,12 +257,6 @@ async def test_org_mcp_tool_invoked_in_live_chat(
     e2e_resource_ledger: E2EResourceLedger,
 ) -> None:
     """Org-pushed MCP server's tool is actually called and its result surfaces."""
-    if not wait_e2e_provider_ready():
-        pytest.fail(
-            "Provider config not ready for live E2E — run via ./myrm-dev test -m chrome_e2e "
-            "after ./myrm-dev ready --chrome (API /api/v1/config/readiness provider.is_ready must be true)"
-        )
-
     api_url = get_e2e_api_url()
     probe = {
         "name": _ORG_PROBE_NAME,
@@ -173,60 +266,56 @@ async def test_org_mcp_tool_invoked_in_live_chat(
         "description": "E2E org-managed MCP probe",
     }
     _sync_org_mcp(api_url, [probe])
-    assert _org_mcp_server_names(api_url) == [_ORG_PROBE_NAME], "org MCP config not visible on the private E2E backend"
-    ensure_e2e_yolo_mode(api_url=api_url)
     try:
-        client = ChromeMcpClient(request_timeout_sec=180.0)
-        await asyncio.to_thread(client.start)
-        try:
-            page: McpPage | None = await asyncio.to_thread(
-                client.new_page,
-                get_e2e_ui_url().rstrip("/"),
-                timeout_ms=120_000,
-            )
-            if page is None:
-                raise RuntimeError("new_page returned no page")
-
-            chat = McpChatSession(client, page)
-            await chat.bootstrap(
-                get_e2e_ui_url().rstrip("/"),
-                navigate=False,
-                timeout_sec=180.0,
-            )
-            await chat.click_new_chat()
-            heartbeat_once()
-
-            first_send = await chat.send_message(E2E_PROMPT, E2E_PROMPT)
-            chat_id_hint = (
-                str(first_send.get("started", {}).get("chatId") or first_send.get("submit", {}).get("chatId") or "").strip()
-                or None
-            )
-
-            after = await chat.wait_turn_done(
-                E2E_PROMPT,
-                chat_id_hint=chat_id_hint,
-                timeout_sec=TURN_WAIT_SEC,
-            )
-            if str(after.get("path", "")).startswith("/settings"):
-                pytest.fail(f"Send redirected to settings: {after}")
-
-            chat_id = await _resolve_chat_id(chat, after)
-            assert chat_id, f"Expected chat id after turn: {after}"
-            e2e_resource_ledger.register("chat", chat_id)
-
-            messages = fetch_chat_messages(chat_id, api_url=api_url)
-            _log_turn_evidence(chat_id, messages)
-            evidence = _pong_evidence(messages)
+        assert _org_mcp_server_names(api_url) == [_ORG_PROBE_NAME], "org MCP config not visible on the private E2E backend"
+        async with _live_turn(api_url, e2e_resource_ledger, E2E_PROMPT, reply_ends_with_ok=True) as turn:
+            evidence = _pong_evidence(turn.messages)
             assert evidence, (
-                f"Expected org MCP tool result 'pong' in chat {chat_id} messages; "
-                f"got {json.dumps(messages, ensure_ascii=False)[:2000]}"
+                f"Expected org MCP tool result 'pong' in chat {turn.chat_id} messages; "
+                f"got {json.dumps(turn.messages, ensure_ascii=False)[:2000]}"
             )
-            visible = await chat.evaluate(_VISIBLE_PONG_JS, intent=EvaluateIntent.SYNC_PROBE)
+            visible = await turn.chat.evaluate(_VISIBLE_PONG_JS, intent=EvaluateIntent.SYNC_PROBE)
             print(f"E2E_LIVE_TURN_UI: {json.dumps(visible, ensure_ascii=False)}", flush=True)
             assert isinstance(visible, dict) and visible.get("hasPong"), (
-                f"Persisted 'pong' evidence {evidence!r} is not visible in the chat UI for chat {chat_id}: {visible}"
+                f"Persisted 'pong' evidence {evidence!r} is not visible in the chat UI for chat {turn.chat_id}: {visible}"
             )
-        finally:
-            await asyncio.to_thread(client.close)
+    finally:
+        _sync_org_mcp(api_url, [])
+
+
+@pytest.mark.chrome_e2e(
+    execution_mode="PRIVATE",
+    access_scope="GLOBAL_WRITE",
+    workload="LIVE",
+    private_reason="live_shpoib",
+)
+@pytest.mark.e2e_search_policy("empty")
+@pytest.mark.integration
+@pytest.mark.timeout(600)
+@pytest.mark.asyncio
+async def test_org_mcp_server_never_receives_code_injection_env_in_live_chat(
+    e2e_resource_ledger: E2EResourceLedger,
+) -> None:
+    """A pushed server whose stored environment names ``GIT_CONFIG_*`` starts without them; its ordinary variable arrives."""
+    api_url = get_e2e_api_url()
+    _sync_org_mcp(api_url, [ENV_PROBE_SERVER])
+    try:
+        stored = _org_mcp_servers(api_url)
+        assert [s.get("name") for s in stored] == [ENV_PROBE_SERVER["name"]], stored
+        assert _stored_env_names(stored[0]) == set(ENV_PROBE_ENV), (
+            f"the injection names must be in the store, so that it is the server start that drops them: {stored}"
+        )
+        async with _live_turn(api_url, e2e_resource_ledger, ENV_PROBE_PROMPT, reply_ends_with_ok=False) as turn:
+            tools = _called_tool_names(turn.messages)
+            assert any("env_presence" in name for name in tools), (
+                f"the env-probe tool was never called; progress steps name {tools}"
+            )
+            answer = "\n".join(_message_text(m) for m in turn.messages if m.get("role") == "assistant")
+            reported = reported_env_states([answer])
+            print(f"E2E_ENV_REPORT: {reported}", flush=True)
+            assert reported == EXPECTED_ENV_REPORT, (
+                f"the stdio server received a GIT_CONFIG_ variable, or the tool result was not relayed — expected "
+                f"{EXPECTED_ENV_REPORT}, the answer reported {reported}: {answer[:600]!r}"
+            )
     finally:
         _sync_org_mcp(api_url, [])

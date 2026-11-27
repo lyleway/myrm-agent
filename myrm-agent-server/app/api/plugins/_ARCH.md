@@ -9,7 +9,7 @@ Agent Plugins 1.0.0 导入/导出 HTTP 层。导入：`preview`（解析 ZIP + �
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `__init__.py` | 入口 | Plugin import API module | ✅ |
-| `import_.py` | 模块 | `POST /plugins/import/preview` + `POST /plugins/import/confirm`；multipart 上传 → 持久化会话 → 批量落盘（技能、MCP、专家团队与模板物料）；响应模型经 `model_validate` 与服务层字典对齐（`blocked_reason` / `deployment` / `failures` 等字段不会在序列化中丢失）；归档安全错误输出结构化 `detail={message,error_code}` 供前端 i18n；`GET /plugins/import/installed`（已导入插件列表，含 `server_meta` 每 server `{name, enabled}` 状态）+ `DELETE /plugins/import/{plugin_name}`（插件卸载） | ✅ |
+| `import_.py` | 模块 | `POST /plugins/import/preview` + `POST /plugins/import/confirm`；multipart 上传 → 持久化会话 → 批量落盘（技能、MCP、专家团队与模板物料）；响应模型经 `model_validate` 与服务层字典对齐（`blocked_reason` / `deployment` / `failures` 等字段不会在序列化中丢失）；归档安全错误输出结构化 `detail={message,error_code}` 供前端 i18n；解析抛出的其余 `ValueError` 回 400、`detail` 是英文原因字符串，其中包括 `plugin.json`、`mcp.json` 或技能、智能体头超过解码上限而整包被拒（`DocumentTooLargeError`，原因点名是哪份文档），前端只把原因记进控制台、界面显示固定文案；`GET /plugins/import/installed`（已导入插件列表，含 `server_meta` 每 server `{name, enabled}` 状态）+ `DELETE /plugins/import/{plugin_name}`（插件卸载） | ✅ |
 | `export.py` | 模块 | `POST /plugins/export/preview` + `POST /plugins/export` 以及 `POST /plugins/export/batch/preview` + `POST /plugins/export/batch`；支持单专家与多专家联合批量导出；预览返回专家 / 技能 / 连接器（仅密钥名）/ 工作区文件卡片、`omitted`（结构化原因码）、复用技能导出的 `RedactionResponse` 脱敏差异与 `review_digest`、试构建包大小或 `build_error`；导出接收 `apply_redactions` / `ignored_redactions` / `review_digest`，成功返回 `application/zip`；拒绝一律 `detail={message,error_code}`（`expert_not_found` 404、`built_in_expert` 422、`redaction_review_required` / `export_changed_since_preview` 409、`package_rejected` 422） | ✅ |
 
 ## 设计原则

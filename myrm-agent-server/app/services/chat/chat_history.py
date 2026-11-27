@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.core.types.business import ChatHistoryReq
 from app.database.repositories.uow import UnitOfWork
@@ -31,7 +31,17 @@ logger = logging.getLogger(__name__)
 
 
 def _serialize_search_sent_at(value: datetime | str | None) -> str | None:
-    return value.isoformat() if isinstance(value, datetime) else value
+    """Render a stored message time as ISO 8601 with an explicit offset.
+
+    Message times are stored as UTC and SQLite keeps no offset, so the raw SQL read returns offset-less text. Clients
+    read an offset-less time as local time, so without the offset the UTC calendar day would show as the user's.
+    """
+    if value is None:
+        return None
+    moment = value if isinstance(value, datetime) else datetime.fromisoformat(value)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.isoformat()
 
 
 class _ChatHistoryMixin(_ChatServiceBase):

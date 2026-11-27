@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 
-import { closeAppWindow, openAppWindow, setAppWindowAlwaysOnTop } from '../appWindow';
+import { closeAppWindow, openAppWindow, setAppWindowAlwaysOnTop, setAppWindowTitle } from '../appWindow';
 
 describe('app window control', () => {
   beforeEach(() => {
@@ -17,11 +17,13 @@ describe('app window control', () => {
     await expect(openAppWindow('art-1', 'Weather')).resolves.toBe(true);
     await expect(closeAppWindow()).resolves.toBe(true);
     await expect(setAppWindowAlwaysOnTop(true)).resolves.toBe(true);
+    await expect(setAppWindowTitle('Weather')).resolves.toBe(true);
 
     expect(invoke.mock.calls).toEqual([
       ['open_app_window', { artifactId: 'art-1', title: 'Weather' }],
       ['close_app_window', {}],
       ['set_app_window_always_on_top', { alwaysOnTop: true }],
+      ['set_app_window_title', { title: 'Weather' }],
     ]);
   });
 
@@ -31,5 +33,6 @@ describe('app window control', () => {
     await expect(openAppWindow('art-1', 'Weather')).resolves.toBe(false);
     await expect(closeAppWindow()).resolves.toBe(false);
     await expect(setAppWindowAlwaysOnTop(false)).resolves.toBe(false);
+    await expect(setAppWindowTitle('Weather')).resolves.toBe(false);
   });
 });

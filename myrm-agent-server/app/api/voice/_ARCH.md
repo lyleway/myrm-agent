@@ -23,4 +23,5 @@
 | `gemini_live.py` | 模块 | Gemini Live token/WS；session `instructions` 含 profile `system_prompt`；always-available 包含后台任务 + 原生提醒工具 | ✅ |
 | `realtime.py` | 模块 | OpenAI Realtime token；session `instructions` 含 profile `system_prompt`；工具声明 import 自 `tool_catalog`；tool-exec 路由入口 `is_safe_session_id` 白名单拒绝非法 `chat_id`（400，防路径穿越，统一覆盖 background lifecycle / reminder 委托与 Agent 代理）；tool-exec Agent 代理注入 `build_agent_runtime_context`（`execution_mode` + `disabled_skill_roots`） | ✅ |
 | `realtime_background.py` | 模块 | Background task lifecycle handlers（run/cancel/status/steer）短路 Kanban，Reminder handlers（set/cancel/list）短路 CronManager SSOT（`JobType.REMINDER`）；由 `realtime.py` tool-exec 路由调用 | ✅ |
-| `ws_session.py` | 模块 | Full-duplex voice session WebSocket endpoint；type:config 用 `is_safe_session_id` 校验 `chat_id`，非法拒绝连接 | ✅ |
+| `ws_session.py` | 模块 | Full-duplex voice session WebSocket endpoint；首条消息与控制消息经 `ws_frames` 校验（不是 JSON 对象或字段类型不对的首条消息以 `Invalid config` 拒绝，控制消息忽略）；type:config 用 `is_safe_session_id` 校验 `chat_id`，非法拒绝连接 | ✅ |
+| `ws_frames.py` | 模块 | 语音会话 WebSocket 的浏览器文本帧：`SessionFrame` 以一个全可选 schema 覆盖 config 与控制帧，`parse_session_frame` 对乱码、非 JSON 对象、字段类型错误一律返回 `None`，处理器据此分支而不探测无类型的 dict | ✅ |

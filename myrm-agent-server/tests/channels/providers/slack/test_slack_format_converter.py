@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.channels.providers.slack.format_converter import (
-    _convert_markdown_link,
+    _convert_markdown_links,
     _escape_slack_content,
     _escape_slack_segment,
     _fix_cjk_formatting_boundaries,
@@ -102,44 +102,28 @@ class TestMarkdownLinkConversion:
     """Test Markdown link to Slack link conversion."""
 
     def test_basic_link(self) -> None:
-        import re
-
-        match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", "[click here](http://example.com)")
-        assert match is not None
-        result = _convert_markdown_link(match)
-        assert result == "<http://example.com|click here>"
+        assert _convert_markdown_links("[click here](http://example.com)") == "<http://example.com|click here>"
 
     def test_link_with_text_same_as_url(self) -> None:
-        import re
-
-        match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", "[http://example.com](http://example.com)")
-        assert match is not None
-        result = _convert_markdown_link(match)
-        assert result == "[http://example.com](http://example.com)"
+        line = "[http://example.com](http://example.com)"
+        assert _convert_markdown_links(line) == line
 
     def test_mailto_link(self) -> None:
-        import re
-
-        match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", "[Email me](mailto:user@example.com)")
-        assert match is not None
-        result = _convert_markdown_link(match)
-        assert result == "<mailto:user@example.com|Email me>"
+        assert _convert_markdown_links("[Email me](mailto:user@example.com)") == "<mailto:user@example.com|Email me>"
 
     def test_mailto_with_text_same_as_email(self) -> None:
-        import re
-
-        match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", "[user@example.com](mailto:user@example.com)")
-        assert match is not None
-        result = _convert_markdown_link(match)
-        assert result == "[user@example.com](mailto:user@example.com)"
+        line = "[user@example.com](mailto:user@example.com)"
+        assert _convert_markdown_links(line) == line
 
     def test_empty_url(self) -> None:
-        import re
+        assert _convert_markdown_links("[text]()") == "[text]()"
 
-        match = re.match(r"\[([^\]]+)\]\(([^)]+)\)", "[text]()")
-        if match:
-            result = _convert_markdown_link(match)
-            assert result == "[text]()"
+    def test_several_links_in_one_line_each_become_a_link(self) -> None:
+        line = "see [a](http://a.test) and [b](http://b.test)."
+        assert _convert_markdown_links(line) == "see <http://a.test|a> and <http://b.test|b>."
+
+    def test_a_label_that_holds_an_opening_bracket_is_kept(self) -> None:
+        assert _convert_markdown_links("[a [b](http://x.test)") == "<http://x.test|a [b>"
 
 
 class TestMdToSlackMrkdwn:

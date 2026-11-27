@@ -328,20 +328,15 @@ def _restore_chat_id_var() -> Iterator[None]:
 def _reset_ptc_safety_registry() -> Iterator[None]:
     """Isolate the dynamic MCP safety registry between all tests.
 
-    Connecting an MCP server registers per-skill and per-tool safety metadata in process-wide
-    registries. Left behind, they make the compliance audit report a ghost skill and let an unrelated
-    tool with the same name resolve to another server's read-only annotations, which skips approval.
+    Connecting an MCP server registers per-tool safety metadata in a process-wide table. Left behind,
+    it makes the compliance audit report a ghost server and lets an unrelated tool with the same name
+    resolve to another test's safety record, which changes how that tool is scheduled and guarded.
     """
-    from myrm_agent_harness.core.security.tool_registry.registry import (
-        _PTC_LOCK,
-        _PTC_SAFETY_METADATA,
-        _PTC_TOOL_FLAT_INDEX,
-    )
+    from myrm_agent_harness.core.security.tool_registry.registry import _PTC_LOCK, _PTC_TOOL_SAFETY
 
     def clear() -> None:
         with _PTC_LOCK:
-            _PTC_SAFETY_METADATA.clear()
-            _PTC_TOOL_FLAT_INDEX.clear()
+            _PTC_TOOL_SAFETY.clear()
 
     clear()
     yield

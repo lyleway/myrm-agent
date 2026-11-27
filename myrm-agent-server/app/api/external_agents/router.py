@@ -1,35 +1,57 @@
 """External agent subscription-auth endpoints.
 
-GUI/SaaS-driven authentication for delegated CLI agents (Codex / Claude Code /
+GUI-driven authentication for delegated CLI agents (Codex / Claude Code /
 Gemini / Qwen): query login status for badges, drive an interactive login over
 SSE (surfacing the login URL / device code), feed a pasted code, import a
-credential captured elsewhere, or log out. Mounted globally (local + SaaS) since
-subscription auth is an agent-config concern, not channel management.
+credential captured elsewhere, or log out (through the CLI itself, which alone can remove a login it keeps
+outside its home). Mounted globally since subscription
+auth is an agent-config concern, not channel management. Login and import store
+the user's own subscription credential on the host, so they are refused where the
+host is not the user's machine (a managed sandbox runs delegated CLIs on an API
+key); status and logout stay available so a leftover credential can be removed. Login, import and logout act
+on the login in the CLI's own home, or on the one of a named account when the request names one (the accounts
+themselves are managed by ``accounts_router``, mounted under ``/accounts``).
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.auth (POS: ACP subscription auth subsystem)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
+- app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
+- app.api.external_agents._account_scope::account_env (POS: the environment of the account a request names)
+- app.api.external_agents.accounts_router::router (POS: named account endpoints)
+- app.services.external_agents.logout::log_out_of_home (POS: logout through the CLI, shared with account removal)
+- app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
 
 [OUTPUT]
 - router: external agent auth endpoints under /external-agents
 
 [POS]
-外部 Agent 订阅鉴权 HTTP API 层。让 GUI/SaaS 用户用自有订阅驱动外部 CLI。
+外部 Agent 订阅鉴权 HTTP API 层。让用户在自己的机器上用自有订阅驱动外部 CLI；托管部署不开放登录与导入。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from app.api.external_agents._account_scope import account_env
+from app.api.external_agents._deploy_capability import require_subscription_login_capability
+from app.api.external_agents.accounts_router import router as accounts_router
+from app.platform_utils.deployment_capabilities import get_deployment_capabilities
+from app.services.external_agents.logout import log_out_of_home
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+router.include_router(accounts_router, prefix="/accounts")
+
+
+_ACCOUNT_DESCRIPTION = "Named account to act on; omitted: the login in the CLI's own home"
 
 
 class ExternalAgentLoginRequest(BaseModel):
@@ -37,6 +59,11 @@ class ExternalAgentLoginRequest(BaseModel):
     backend: str | None = Field(default=None, description="Backend key; inferred from command if omitted")
     session_id: str = Field(..., alias="sessionId", min_length=1, max_length=128)
     timeout_seconds: int = Field(default=300, alias="timeoutSeconds", ge=30, le=1800)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
+    remote: bool = Field(
+        default=False,
+        description="The browser that signs in is on another machine than this server, so the CLI is asked for a login that works from there",
+    )
 
     class Config:
         populate_by_name = True
@@ -50,10 +77,12 @@ class ExternalAgentImportRequest(BaseModel):
     backend: str = Field(..., min_length=1)
     content: str = Field(..., min_length=1)
     filename: str | None = Field(default=None)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
 
 
 class ExternalAgentLogoutRequest(BaseModel):
     backend: str = Field(..., min_length=1)
+    account: str | None = Field(default=None, description=_ACCOUNT_DESCRIPTION)
 
 
 class _LoginRegistry:
@@ -77,38 +106,58 @@ _login_registry = _LoginRegistry()
 
 @router.get("/auth/status")
 async def external_agent_auth_status() -> dict[str, object]:
-    """Report install + login state for every known backend via fresh detection."""
+    """Report install + login state for every known backend via fresh detection.
+
+    The login state is what each CLI says about itself where it can say it (Claude Code keeps its login in the
+    macOS Keychain, which no credential-file check sees); a CLI without a status command is judged by its file.
+    """
+    import asyncio
+
     from myrm_agent_harness.toolkits.acp.auth import (
         CredentialStore,
+        cli_base_env,
         known_backends,
         profile_for,
+        resolve_login_state,
     )
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 
     detector = BackendDetector()
     detected = {b.name: b for b in await detector.detect(include_version=True, refresh=True)}
     store = CredentialStore()
+    names = known_backends()
+    states = await asyncio.gather(
+        *(
+            resolve_login_state(
+                store,
+                name,
+                executable=detected[name].path if name in detected else None,
+                env=cli_base_env(detected[name].path if name in detected else None, os.environ),
+            )
+            for name in names
+        )
+    )
 
+    subscription_login_allowed = get_deployment_capabilities().allows_subscription_login
     backends: list[dict[str, object]] = []
-    for name in known_backends():
+    for name, state in zip(names, states, strict=True):
         profile = profile_for(name)
         if profile is None:
             continue
         found = detected.get(name)
-        state = store.state(name)
-        cli_installed = found is not None
         backends.append(
             {
                 "backend": name,
-                "installed": cli_installed,
+                "installed": found is not None,
                 "path": found.path if found else None,
                 "version": found.version if found else None,
                 "authenticated": state.authenticated,
                 "authStatus": state.status.value,
-                "readyForDelegation": state.authenticated or cli_installed,
+                "transport": profile.transport,
                 "loginStrategy": profile.login_strategy.value,
                 "scriptableLogin": profile.scriptable_login,
                 "needsCodeInput": profile.needs_code_input,
+                "subscriptionLoginAllowed": subscription_login_allowed,
             }
         )
     return {"backends": backends}
@@ -116,29 +165,28 @@ async def external_agent_auth_status() -> dict[str, object]:
 
 @router.post("/install/{backend}")
 async def external_agent_install(backend: str) -> StreamingResponse:
-    """Install an external agent CLI into the isolated toolchain."""
-    from myrm_agent_harness.toolkits.acp.toolchains import IsolatedToolchainManager
+    """Install an external agent CLI into the isolated toolchain.
+
+    ``success`` is sent only after the toolchain has seen the installed CLI start; any other ending is an ``error``.
+    """
+    from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.toolchains import IsolatedToolchainManager, ToolchainError
 
     manager = IsolatedToolchainManager()
 
     async def event_stream() -> AsyncIterator[str]:
         try:
             async for msg in manager.install_backend(backend):
-                payload = {"type": "progress", "message": msg}
-                yield f"data: {json.dumps(payload)}\n\n"
-
-            # After installation, force detector cache invalidation
-            from myrm_agent_harness.toolkits.acp.core.backend_detector import (
-                BackendDetector,
-            )
-
-            detector = BackendDetector()
-            detector.invalidate_cache()
-
+                yield f"data: {json.dumps({'type': 'progress', 'message': msg})}\n\n"
             yield f"data: {json.dumps({'type': 'success', 'message': 'Installation complete'})}\n\n"
-        except Exception as exc:
-            logger.error("Installation failed", exc_info=True)
+        except ToolchainError as exc:
+            logger.warning("external_agent_install_failed backend=%s reason=%s", backend, exc)
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        except Exception as exc:
+            logger.error("external_agent_install_crashed backend=%s", backend, exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Installation failed: {exc}'})}\n\n"
+        finally:
+            BackendDetector().invalidate_cache()
 
     return StreamingResponse(
         event_stream(),
@@ -147,7 +195,7 @@ async def external_agent_install(backend: str) -> StreamingResponse:
     )
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_login(
     body: ExternalAgentLoginRequest,
 ) -> StreamingResponse:
@@ -161,7 +209,13 @@ async def external_agent_auth_login(
             detail=f"Unknown external agent backend: {body.backend or body.command}",
         )
 
-    session = CliLoginSession(body.command, profile, timeout_seconds=body.timeout_seconds)
+    session = CliLoginSession(
+        body.command,
+        profile,
+        base_env=account_env(profile.backend, body.account, create=True),
+        timeout_seconds=body.timeout_seconds,
+        remote=body.remote,
+    )
     _login_registry.add(body.session_id, session)
 
     async def event_stream() -> AsyncIterator[str]:
@@ -194,7 +248,7 @@ async def external_agent_auth_login(
     )
 
 
-@router.post("/auth/login/{session_id}/feed")
+@router.post("/auth/login/{session_id}/feed", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_feed(session_id: str, body: ExternalAgentFeedRequest) -> dict[str, bool]:
     """Forward a user-supplied line (e.g. a pasted auth code) to a live login session."""
     from myrm_agent_harness.toolkits.acp.auth import CliLoginSession
@@ -206,16 +260,25 @@ async def external_agent_auth_feed(session_id: str, body: ExternalAgentFeedReque
     return {"ok": True}
 
 
-@router.post("/auth/import")
+@router.post("/auth/import", dependencies=[Depends(require_subscription_login_capability)])
 async def external_agent_auth_import(
     body: ExternalAgentImportRequest,
 ) -> dict[str, object]:
-    """Persist a credential blob captured on another machine (universal fallback)."""
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore
+    """Persist a credential blob captured on another machine (universal fallback).
 
-    store = CredentialStore()
+    The store is built from the same capability as the route gate, so a deployment that keeps no subscription
+    credentials has the store itself refuse the write even if a route were ever exposed without the gate.
+    """
+    from myrm_agent_harness.toolkits.acp.auth import CredentialStorageDisabledError, CredentialStore
+
+    store = CredentialStore(
+        account_env(body.backend, body.account, create=True),
+        accepts_new_credentials=get_deployment_capabilities().allows_subscription_login,
+    )
     try:
         state = store.import_credential(body.backend, body.content, filename=body.filename)
+    except CredentialStorageDisabledError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -229,12 +292,14 @@ async def external_agent_auth_import(
 async def external_agent_auth_logout(
     body: ExternalAgentLogoutRequest,
 ) -> dict[str, object]:
-    """Remove a backend's stored subscription credentials."""
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore
+    """Log a backend out of its login (the named account's, when one is named) and remove its stored credentials.
 
-    store = CredentialStore()
+    The CLI is asked to log itself out first: a login it keeps outside its home survives the removal of files. The
+    answer is what the CLI reports afterwards, so a login that could not be removed is still reported as one.
+    """
+    env = account_env(body.backend, body.account, create=False)
     try:
-        state = store.clear(body.backend)
+        state = await log_out_of_home(body.backend, env if env is not None else os.environ)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {

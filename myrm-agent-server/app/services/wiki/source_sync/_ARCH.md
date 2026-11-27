@@ -16,11 +16,12 @@ Wiki 外部来源确定性同步：Feishu 文档 / Gmail 标签 / Google Drive �
 | `state_store.py` | 持久化 | UserConfig `wikiSourceSyncState` 上次同步状态（按 agent） | ✅ |
 | `content_convert.py` | 辅助 | 云盘文件 bytes → Markdown（sniff+docx embed→wiki/assets）；文本经 harness `decode_text_bytes` 解码（UTF-8 / Unicode BOM / GBK 等可识别旧编码），编码无法可靠识别的文件记录警告并跳过，不写入替换字符乱码 | ✅ |
 | `publish_helpers.py` | 辅助 | 统一 `publish_raw(caller=settings)` + frontmatter；`publish_source_markdown` 支持 `conflict_policy`（默认 SKIP，ima 用 SUPERSEDE）；`sanitize_path_segment` 同时受字符与字节预算约束 | ✅ |
+| `guarded_fetch.py` | 辅助 | `fetch_configured_url`：RSS/Zotero 抓取用户配置地址的唯一出口，走 harness `secure_get`（DNS 钉住、逐跳校验重定向、流式限长）；只允许公网地址，自托管的内网源由运维设置 `MYRM_ALLOWED_INTERNAL_HOSTS` 放行；超限/被拒/不可达/超时一律以不泄露原因的固定文案抛 `SourceFetchError`（错误文案会回显给调用方，不能成为内网探测的回声），整体截止时间由 `asyncio.timeout` 兜底（单次读超时在慢速逐字节投喂时会被不断重置） | ✅ |
 | `feishu/` | 连接器 | Feishu 域 — 门面 + 纯函数渲染；见 [`feishu/_ARCH.md`](feishu/_ARCH.md) | ✅ |
 | `gmail/` | 连接器 | Gmail 域 — 门面 + HTML 渲染；见 [`gmail/_ARCH.md`](gmail/_ARCH.md) | ✅ |
 | `gdrive.py` | 连接器 | Google OAuth + Drive API → raw/gdrive/ | ✅ |
-| `rss.py` | 连接器 | RSS/Atom HTTP → raw/rss/ | ✅ |
-| `zotero.py` | 连接器 | Zotero Web API v3 文献库 → raw/zotero/<月份>/<item key>.md（top-level items 最新修改优先 + 子项高亮/注释标注 best-effort；`_is_allowed_base_url` 校验 scheme+netloc 防 SSRF） | ✅ |
+| `rss.py` | 连接器 | RSS/Atom（经 `guarded_fetch`，体积上限 10 MiB，超限整份失败而不是发布半份）→ raw/rss/; an entry's markup is stripped by `utils.html_tags.strip_tags` (linear in the text, whatever the feed holds) | ✅ |
+| `zotero.py` | 连接器 | Zotero Web API v3 文献库 → raw/zotero/<月份>/<item key>.md（top-level items 最新修改优先 + 子项高亮/注释标注 best-effort；`_is_allowed_base_url` 只校验 scheme+netloc 形态，地址本身由 `guarded_fetch` 校验；API key 头不会被重定向守卫剥离，所以不跟随任何重定向） | ✅ |
 | `integration_mirror.py` | 钩子 | IntegrationSyncResult.new_items → raw/integrations/（入队器由 `runner` 注入） | ✅ |
 | `read_it_later_hygiene.py` | 迁移 | 存量 agent-type read-it-later Cron → router `__wiki_source_sync__` | ✅ |
 | `ima/` | 连接器 | 腾讯 ima 知识库与笔记只读导入 — 台账 + 时间盒 cron 切片 + 断点续跑；见 [`ima/_ARCH.md`](ima/_ARCH.md) | ✅ |
@@ -30,10 +31,12 @@ Wiki 外部来源确定性同步：Feishu 文档 / Gmail 标签 / Google Drive �
 
 ## 测试
 
-- `tests/services/wiki/test_source_sync_{gmail,gmail_html,gdrive,rss,state,config,defaults,blueprint}.py`
+- `tests/services/wiki/test_source_sync_{gmail,gmail_html,gdrive,state,config,defaults,blueprint}.py`
+- `tests/services/wiki/test_source_sync_rss.py` — RSS/Atom 解析 + 真实回环端口端到端：内网地址被拒且一次都没连、同一固定文案对应被拒与不可达、运维放行的主机可发布、重定向到内网被拒、超限整份失败；未闭合标签的条目正文按线性时间读完
+- `tests/services/wiki/test_source_sync_guarded_fetch.py` — `fetch_configured_url`：地址守卫（字面私网/元数据地址、十进制整数主机、`MYRM_ALLOWED_INTERNAL_HOSTS`）、重定向上限、流式限长、整体截止时间（逐字节投喂）、固定失败文案
 - `tests/services/wiki/test_feishu_source_sync.py` — Feishu Docx blocks 全量渲染（标题/列表/嵌套列表缩进+独立计数/代码+围栏自适应/引用/待办/文件块/图片/行内样式+链接+URL解码/议程块/通用降级/@用户/@文档/日期提醒/公式/`$`转义）
 - `tests/services/wiki/test_feishu_images.py` — 图片下载→wiki/assets 落盘 + 失败降级
-- `tests/services/wiki/test_zotero_source_sync.py` — Zotero 连接器单测（creators 格式化/文献笔记渲染/标注渲染/config 缺失 fail-fast/base_url 校验/发布计数/拉取失败计账）
+- `tests/services/wiki/test_zotero_source_sync.py` — Zotero 连接器单测（creators 格式化/文献笔记渲染/标注渲染/config 缺失 fail-fast/base_url 校验/发布计数/拉取失败计账；真实回环端口端到端：内网库地址被拒且一次都没连、运维放行后带 API key 拉取、重定向不跟随所以 key 不会发往别处）
 - `tests/api/wiki/test_wiki_sources_status.py` — sources API：status 标志位 + PUT config zotero 字段透传/回读断言 + exclude_unset 部分更新保持语义（断链防回归锚点）
 - `tests/services/wiki/source_sync/test_publish_helpers.py` — 冲突策略透传 + 路径段字节预算
 - `tests/services/wiki/source_sync/test_deferred_enqueue.py` — 延迟入队：扫描看过之前不入 compile 队列；EXACT/NORMALIZED 组成员被留住、NEAR 与已 dismiss 的不留；用户处理组后幸存者编译；崩溃遗留的暂扣文件在下次扫描后放行；未完成扫描时连已存分组的成员也放行；无需扫描的一轮也重试上轮入队失败的遗留、且不放行 open 组成员；账本不可读/写入失败/单个入队失败都不丢文档
@@ -46,6 +49,7 @@ Wiki 外部来源确定性同步：Feishu 文档 / Gmail 标签 / Google Drive �
 ## 依赖
 
 - `app/services/wiki/_userconfig_scoped` — 共享 UserConfig scoped JSON 持久化（config/state store 复用）
+- harness `core.security.http.secure_fetch` — `guarded_fetch` 的地址守卫、重定向校验与限长读取；测试用 `tests/support/loopback_origin.py` 的真实回环服务
 - `app/services/integrations/oauth_store` — Google 连接探测
 - `app/services/agent/oauth_refresher` — Gmail / Drive token
 - `app/services/wiki/vault` — archiver / compile enqueue

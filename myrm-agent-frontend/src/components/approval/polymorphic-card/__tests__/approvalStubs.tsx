@@ -83,6 +83,9 @@ export const knowledgePatchModule = { KnowledgePatchContent: propsStub('Knowledg
 export const batchCostModule = { BatchCostApprovalContent: propsStub('BatchCostApprovalContent') };
 export const highRiskModule = { HighRiskDomActionContent: propsStub('HighRiskDomActionContent') };
 export const mcpElicitationModule = { McpElicitationContent: propsStub('McpElicitationContent') };
+export const externalAgentPermissionModule = {
+  ExternalAgentPermissionContent: propsStub('ExternalAgentPermissionContent'),
+};
 export const outboundDraftModule = { OutboundDraftApprovalBody: propsStub('OutboundDraftApprovalBody') };
 
 /** Reports the editor text it was given and lets a test change it. */

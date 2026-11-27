@@ -13,7 +13,9 @@
 - compact_chat: transactional compaction entry (``for_idle_stale`` idle predicate; ``request_tokens_for_guard`` aligns idle anti-thrash with gate; ``explicit_request`` marks a person's request, which the anti-thrash guard does not stop and which counts toward its streak only up to the guard limit)
 
 [POS]
-Server compaction orchestration; called by stale gate, /compact API, channel handler, idle worker.
+Server compaction orchestration; called by stale gate, /compact API, channel handler, idle worker. It reads in one
+transaction, calls the model with none open, then writes in a fresh one, so what the model call takes (seconds to
+minutes) never holds a database snapshot and a failed call still leaves its cooldown behind.
 """
 
 from __future__ import annotations
@@ -76,10 +78,7 @@ async def compact_chat(
         )
         from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
 
-        from app.services.chat.compact.compression_streak import (
-            hydrate_compression_streak_from_db,
-            save_compression_ineffective_streak,
-        )
+        from app.services.chat.compact.compression_streak import hydrate_compression_streak_from_db
 
         if is_summarize_circuit_open():
             return CompactResult(compacted=False, reason=CompactReason.SUMMARIZE_CIRCUIT_OPEN)
@@ -135,6 +134,12 @@ async def compact_chat(
                     reason=CompactReason.ANTI_THRASH_ACTIVE,
                 )
 
+        # The reads above hold a snapshot of the whole database until the transaction ends. Any commit during the model
+        # call (another chat's message, a background job) would then abort this compaction's own write with
+        # SQLITE_BUSY_SNAPSHOT, which busy_timeout does not cover, and the summary would be paid for and thrown away.
+        # Sessions of this app keep loaded rows readable after a commit, which the backup and the persist below rely on.
+        await db.commit()
+
         try:
             _, summary = await guarded_compact_summarize(
                 lc_messages=lc_messages,
@@ -144,20 +149,20 @@ async def compact_chat(
                 focus_topic=focus_topic,
                 max_context_tokens=max_context_tokens,
             )
-        except (asyncio.TimeoutError, Exception) as summarize_exc:
-            if isinstance(summarize_exc, asyncio.TimeoutError):
-                await record_compaction_failure_cooldown(
-                    db,
-                    chat_id,
-                    f"timeout: {summarize_exc}",
-                )
-                return CompactResult(
-                    compacted=False,
-                    original_tokens=original_tokens,
-                    message_count=len(db_messages),
-                    reason=CompactReason.TIMEOUT,
-                )
+        except asyncio.TimeoutError as timeout_exc:
+            # The cooldown is committed here: a session that closes without a commit rolls it back, and the next idle turn
+            # would then pay for the same failing summary again.
+            await record_compaction_failure_cooldown(db, chat_id, f"timeout: {timeout_exc}")
+            await db.commit()
+            return CompactResult(
+                compacted=False,
+                original_tokens=original_tokens,
+                message_count=len(db_messages),
+                reason=CompactReason.TIMEOUT,
+            )
+        except Exception as summarize_exc:
             await record_compaction_failure_cooldown(db, chat_id, str(summarize_exc))
+            await db.commit()
             raise
 
         summary_tokens = get_token_count(summary.to_json())
@@ -183,15 +188,6 @@ async def compact_chat(
                 original_tokens=original_tokens,
                 tokens_saved=tokens_saved,
                 streak_ceiling=ANTI_THRASHING_STREAK_LIMIT if explicit_request else None,
-            )
-            from myrm_agent_harness.agent.context_management.strategies.compression.compression_streak_store import (
-                get_compression_streak_store,
-            )
-
-            await save_compression_ineffective_streak(
-                db,
-                chat_id,
-                get_compression_streak_store().get_streak(chat_id),
             )
 
             logger.warning(

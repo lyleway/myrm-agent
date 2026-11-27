@@ -7,19 +7,22 @@
 - ArtifactApp: class — An artifact the user installed as an app.
 - ArtifactAppGrant: class — The user's decision on one capability of an app.
 - ArtifactAppActivity: class — Metadata-only record of one bridge call.
+- ArtifactAppAiUsage: class — What one model call of an app costs, charged before the call runs.
 
 [POS]
 Server business layer. An HTML artifact is untrusted generated code; installing it as an app is the user's opt-in to
-let its page ask the host for capabilities (notifications, proxied network access). A grant records what the user
-approved (decision, declared scope, the version they were looking at); the activity log records what the page then
-did, as metadata only — never request bodies, response bodies or notification text.
+let its page ask the host for capabilities (notifications, proxied network access, a model call, a tray item, global
+keys, floating). A grant records what the user approved (decision, declared scope, the version they were looking at);
+the activity log records what the page then did, as metadata only — never request bodies, response bodies,
+notification text or prompts.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.models.base import Base
 
@@ -40,8 +43,8 @@ class ArtifactApp(Base):
 class ArtifactAppGrant(Base):
     """The latest decision on one capability.
 
-    ``scope`` is the declared scope the user approved (a JSON list of exact host names for ``fetch``, ``[]`` for
-    ``notify``); a later version that declares something not covered by it is asked again. ``version_sha256`` is
+    ``scope`` is the declared scope the user approved (a JSON list of exact host names for ``fetch``, of key
+    combinations for ``shortcut``, ``[]`` for the others); a later version that declares something not covered by it is asked again. ``version_sha256`` is
     the version the user was looking at when they decided. A ``deny`` stays until the user flips it.
     """
 
@@ -70,3 +73,20 @@ class ArtifactAppActivity(Base):
     outcome = Column(String(16), nullable=False)
     detail = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=_utcnow, nullable=False)
+
+
+class ArtifactAppAiUsage(Base):
+    """One model call of an app, written before the call runs at the most it can cost and corrected when it completes.
+
+    A call that is cancelled or fails keeps the charge it was written with, so stopping a call cannot read the day's
+    budget back. Unlike the grants and the activity log, the rows stay when the app is uninstalled: the money was spent
+    either way, and a reinstall must not start the app's day again. Old rows are pruned on insert.
+    """
+
+    __tablename__ = "artifact_app_ai_usage"
+    __table_args__ = (Index("ix_artifact_app_ai_usage_artifact_time", "artifact_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    artifact_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    cost_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)

@@ -530,6 +530,7 @@ myrm_agent_harness.utils.db.sqlite
 myrm_agent_harness.utils.errors
 myrm_agent_harness.utils.event_utils
 myrm_agent_harness.utils.fuzzy_match
+myrm_agent_harness.utils.html_tags
 myrm_agent_harness.utils.image_utils
 myrm_agent_harness.utils.json_parsing
 myrm_agent_harness.utils.locale
@@ -550,6 +551,7 @@ myrm_agent_harness.utils.text_sanitizer
 myrm_agent_harness.utils.text_utils
 myrm_agent_harness.utils.token_economics.budget_guard
 myrm_agent_harness.utils.token_economics.cache_savings
+myrm_agent_harness.utils.token_economics.cost_engine
 myrm_agent_harness.utils.token_economics.multidim_budget
 myrm_agent_harness.utils.token_economics.tracker
 myrm_agent_harness.utils.token_estimation

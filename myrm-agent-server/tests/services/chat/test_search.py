@@ -2,8 +2,9 @@
 
 Covers:
 - _sanitize_snippet XSS protection (unit)
-- ChatService.search_messages FTS5 integration (real SQLite, no mocks)
-- sent_at ISO serialization correctness
+- _serialize_search_sent_at: every serialized time names its UTC offset (unit)
+- ChatService.search_messages FTS5 integration (real SQLite, no mocks), including the sent_at offset and the
+  since/until window on both the trigram and the substring search path
 - GET /chats/search API endpoint routing & response
 """
 
@@ -16,8 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.models import Chat, Message
 from app.database.repositories.conversation_recall import ConversationRecallRepository
 from app.services.chat.chat_helpers import _sanitize_snippet
+from app.services.chat.chat_history import _serialize_search_sent_at
 from app.services.chat.chat_service import ChatService
-from tests.services.chat.search_support import seed_chat_and_messages
+from tests.services.chat.search_support import seed_chat_and_messages, seed_chat_with_text
+
+# A message and a query that reach it: three characters or more go through the trigram index, fewer through the substring scan.
+_BOTH_SEARCH_PATHS = [("docker offset probe", "docker"), ("部署检查", "部署")]
 
 # ─────────────────────────────────────────────
 # 1. Unit tests for _sanitize_snippet
@@ -78,6 +83,24 @@ class TestSanitizeSnippet:
         assert "<mark>example</mark>" in result
 
 
+class TestSerializeSearchSentAt:
+    """Clients read an offset-less time as local time, so every serialized time must name its offset."""
+
+    @pytest.mark.parametrize(
+        ("stored", "expected"),
+        [
+            ("2026-11-19 23:30:00.123456", "2026-11-19T23:30:00.123456+00:00"),
+            ("2026-11-19 23:30:00", "2026-11-19T23:30:00+00:00"),
+            (datetime(2026, 11, 19, 23, 30), "2026-11-19T23:30:00+00:00"),
+            (datetime(2026, 11, 19, 23, 30, tzinfo=timezone.utc), "2026-11-19T23:30:00+00:00"),
+            ("2026-11-20T07:30:00+08:00", "2026-11-20T07:30:00+08:00"),
+            (None, None),
+        ],
+    )
+    def test_names_the_offset(self, stored: datetime | str | None, expected: str | None):
+        assert _serialize_search_sent_at(stored) == expected
+
+
 # ─────────────────────────────────────────────
 # 2. FTS5 integration tests (real SQLite)
 # ─────────────────────────────────────────────
@@ -115,6 +138,29 @@ class TestChatServiceSearch:
         for item in items:
             assert isinstance(item["sent_at"], str)
             datetime.fromisoformat(item["sent_at"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("text", "query"), _BOTH_SEARCH_PATHS, ids=["trigram", "substring"])
+    async def test_search_sent_at_names_its_utc_offset(self, fts_db: AsyncSession, text: str, query: str):
+        """SQLite hands back the stored UTC wall clock without an offset; the result must say it is UTC."""
+        sent = datetime(2026, 11, 19, 23, 30, 0, 123456, tzinfo=timezone.utc)
+        await seed_chat_with_text(fts_db, "chat-sent-at-offset", text, sent_at=[sent])
+        items, _ = await ChatService.search_messages(query)
+        assert [item["sent_at"] for item in items] == ["2026-11-19T23:30:00.123456+00:00"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("text", "query"), _BOTH_SEARCH_PATHS, ids=["trigram", "substring"])
+    async def test_search_window_keeps_the_history_it_covers(self, fts_db: AsyncSession, text: str, query: str):
+        """The Cmd+K presets send UTC bounds; both paths compare them with the stored UTC wall clock."""
+        await seed_chat_with_text(fts_db, "chat-window-inside", text, sent_at=[datetime(2026, 2, 28, 8, 0, tzinfo=timezone.utc)])
+        await seed_chat_with_text(fts_db, "chat-window-outside", text, sent_at=[datetime(2026, 2, 27, 4, 0, tzinfo=timezone.utc)])
+        since = datetime(2026, 2, 28, 7, 0, tzinfo=timezone.utc)
+        until = datetime(2026, 3, 31, 7, 0, tzinfo=timezone.utc)
+
+        items, total = await ChatService.search_messages(query, since=since, until=until)
+
+        assert [item["chat_id"] for item in items] == ["chat-window-inside"]
+        assert total == 1
 
     @pytest.mark.asyncio
     async def test_search_no_results(self, fts_db: AsyncSession):

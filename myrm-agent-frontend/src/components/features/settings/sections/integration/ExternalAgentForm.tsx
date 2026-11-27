@@ -11,21 +11,33 @@ import { Switch } from '@/components/primitives/switch';
 import { Textarea } from '@/components/primitives/textarea';
 import { isLocalMode } from '@/lib/deploy-mode';
 import type { ExternalAgentAuthMode, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
+import type { ExternalAgentAccount } from '@/services/external-agents';
+import ExternalAgentAccountField from './ExternalAgentAccountField';
 import ExternalAgentEnvEditor from './ExternalAgentEnvEditor';
 import {
   AGENT_PRESETS,
-  PERMISSION_MODE_HINTS,
   PERMISSION_MODE_OPTIONS,
+  accountBackend,
+  effectiveAuthMode,
   normalizePermissionMode,
+  permissionHintKey,
   toDraft,
   type ExternalAgentDraft,
 } from './externalAgentModel';
 
 interface ExternalAgentFormProps {
   draft: ExternalAgentDraft;
+  /** The transport the app fixes for this command (a known agent), or null when the type is the user's to choose. */
+  fixedTransport: ExternalAgentType | null;
   /** Adding a new agent: offers the one-click presets. */
   isNew: boolean;
   isTesting: boolean;
+  /** False in a hosted deployment: agents run on an API key there, so the form offers nothing else. */
+  subscriptionLoginAllowed: boolean;
+  /** The named accounts the server holds, for choosing the login the agent runs as. */
+  accounts: readonly ExternalAgentAccount[];
+  onAccountCreated: () => void;
+  onAccountDeleted: (backend: string, name: string) => void;
   onChange: (next: ExternalAgentDraft) => void;
   onSave: () => void;
   onCancel: () => void;
@@ -33,9 +45,24 @@ interface ExternalAgentFormProps {
 }
 
 const ExternalAgentForm = memo(
-  ({ draft, isNew, isTesting, onChange, onSave, onCancel, onTest }: ExternalAgentFormProps) => {
+  ({
+    draft,
+    fixedTransport,
+    isNew,
+    isTesting,
+    subscriptionLoginAllowed,
+    accounts,
+    onAccountCreated,
+    onAccountDeleted,
+    onChange,
+    onSave,
+    onCancel,
+    onTest,
+  }: ExternalAgentFormProps) => {
     const t = useTranslations('settings.developer.externalAgents');
-    const authMode = draft.authMode ?? 'subscription';
+    const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
+    const type = fixedTransport ?? draft.type;
+    const accountOf = accountBackend(draft.command, draft.authMode, subscriptionLoginAllowed);
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -64,7 +91,11 @@ const ExternalAgentForm = memo(
           </div>
           <div className="space-y-1.5" data-testid="external-agent-type">
             <label className="text-xs font-medium text-muted-foreground">{t('type')}</label>
-            <Select value={draft.type} onValueChange={(v: ExternalAgentType) => onChange({ ...draft, type: v })}>
+            <Select
+              value={type}
+              disabled={fixedTransport !== null}
+              onValueChange={(v: ExternalAgentType) => onChange({ ...draft, type: v })}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -75,8 +106,12 @@ const ExternalAgentForm = memo(
                 <SelectItem value="acp" data-testid="external-agent-type-acp">
                   {t('typeAcp')}
                 </SelectItem>
+                <SelectItem value="app_server" data-testid="external-agent-type-app-server">
+                  {t('typeAppServer')}
+                </SelectItem>
               </SelectContent>
             </Select>
+            {fixedTransport !== null && <p className="text-[11px] text-muted-foreground/60">{t('typeFixedHint')}</p>}
           </div>
         </div>
 
@@ -115,21 +150,21 @@ const ExternalAgentForm = memo(
           <div className="space-y-1.5" data-testid="external-agent-permission-mode">
             <label className="text-xs font-medium text-muted-foreground">{t('permissionMode')}</label>
             <Select
-              value={normalizePermissionMode(draft.type, draft.permissionMode)}
+              value={normalizePermissionMode(draft.permissionMode)}
               onValueChange={(v: ExternalAgentPermissionMode) => onChange({ ...draft, permissionMode: v })}
             >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {PERMISSION_MODE_OPTIONS[draft.type].map((option) => (
+                {PERMISSION_MODE_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value} data-testid={`permission-option-${option.value}`}>
                     {t(option.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground/60">{t(PERMISSION_MODE_HINTS[draft.type])}</p>
+            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(type, draft.command))}</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t('maxTurns')}</label>
@@ -151,12 +186,25 @@ const ExternalAgentForm = memo(
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="subscription">{t('authModeSubscription')}</SelectItem>
+              {subscriptionLoginAllowed && <SelectItem value="subscription">{t('authModeSubscription')}</SelectItem>}
               <SelectItem value="api_key">{t('authModeApiKey')}</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground/60">{t('authModeHint')}</p>
+          <p className="text-[11px] text-muted-foreground/60">
+            {t(subscriptionLoginAllowed ? 'authModeHint' : 'authModeHostedHint')}
+          </p>
         </div>
+
+        {accountOf !== null && (
+          <ExternalAgentAccountField
+            backend={accountOf}
+            value={draft.account}
+            accounts={accounts}
+            onChange={(account) => onChange({ ...draft, account })}
+            onCreated={onAccountCreated}
+            onDeleted={onAccountDeleted}
+          />
+        )}
 
         <ExternalAgentEnvEditor
           rows={draft.envRows}

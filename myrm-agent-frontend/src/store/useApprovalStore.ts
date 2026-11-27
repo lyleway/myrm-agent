@@ -101,8 +101,14 @@ export interface ApprovalPayloadData {
   /** MCP elicitation approval: server name and requested input schema */
   server_name?: string;
   requested_schema?: Record<string, unknown>;
-  /** knowledge_patch approval fields */
+  /** Headline of the request: a knowledge patch's title, or what an external agent says it wants to do. */
   title?: string;
+  /** External agent permission request: the agent that asks, the kind of its action, the files it names and its workspace. */
+  agent?: string;
+  kind?: string;
+  paths?: string[];
+  workspace?: string;
+  /** knowledge_patch approval fields */
   target_type?: 'wiki' | 'procedural' | 'skill_gap' | string;
   trigger_condition?: string;
   rationale?: string;
@@ -213,6 +219,14 @@ function parseSizeTuple(value: unknown): [number, number] | undefined {
   return [x, y];
 }
 
+function asStringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter((item): item is string => typeof item === 'string' && item !== '');
+  return items.length > 0 ? items : undefined;
+}
+
 function normalizeToolCalls(value: unknown): ApprovalToolCall[] {
   if (!Array.isArray(value)) {
     return [];
@@ -281,6 +295,12 @@ export function normalizeApprovalPayload(raw: Record<string, unknown>): Approval
       reason: payloadReason || undefined,
       messageId: payloadMessageId,
       action_type: asString(nestedPayload.action_type ?? raw.action_type) || undefined,
+      command: asString(nestedPayload.command) || undefined,
+      title: asString(nestedPayload.title) || undefined,
+      agent: asString(nestedPayload.agent) || undefined,
+      kind: asString(nestedPayload.kind) || undefined,
+      paths: asStringList(nestedPayload.paths),
+      workspace: asString(nestedPayload.workspace) || undefined,
       reviewConfigs,
     },
     chat_id: asString(raw.chat_id) || undefined,

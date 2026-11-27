@@ -56,7 +56,7 @@ export const CAPABILITY_SURFACES: readonly CapabilitySurfaceMeta[] = [
     key: 'web_egress',
     label: 'Web Egress & Retrieval',
     description: 'Outbound network requests, search engines, and live website browsing.',
-    tools: ['web_search', 'net_fetch', 'browser_navigate', 'fetch_web_content', 'web_search_tool'],
+    tools: ['net_fetch', 'browser_navigate', 'web_search_tool'],
     defaultAction: 'allow',
   },
   {
@@ -69,15 +69,15 @@ export const CAPABILITY_SURFACES: readonly CapabilitySurfaceMeta[] = [
   {
     key: 'remote_tools',
     label: 'Remote Tools & Delegation',
-    description: 'External MCP tool invocations, CLI external subagents, and SSH remote commands.',
-    tools: ['mcp_invoke', 'invoke_external_agent', 'remote_command_exec', 'remote_tunnel_open'],
+    description: 'External MCP tool invocations and delegation to external coding agents.',
+    tools: ['mcp_invoke', 'invoke_external_agent'],
     defaultAction: 'ask',
   },
   {
     key: 'local_filesystem',
     label: 'Local File Operations',
     description: 'Reading, writing, modifying, and listing local files in the workspace.',
-    tools: ['file_read', 'file_write', 'file_edit', 'file_delete', 'list_directory', 'search_files', 'get_file_info'],
+    tools: ['file_read', 'file_write', 'file_edit', 'file_delete'],
     defaultAction: 'ask',
   },
 ] as const;

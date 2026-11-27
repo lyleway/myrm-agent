@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncGenerator
+from functools import partial
 
 import pytest
 from myrm_agent_harness.api import AgentEventType
@@ -24,6 +25,7 @@ from app.services.external_agents.delegation.errors import (
     delegate_error_event,
     delegate_failed_event,
 )
+from app.services.external_agents.delegation.gate import DenialCause
 from app.services.external_agents.delegation.stream import SseEvent, stream_direct_delegate
 
 _SETTINGS_URL = "/settings/developer"
@@ -154,7 +156,9 @@ def test_other_failures_keep_the_words_of_the_cli(code: AcpErrorCode) -> None:
 # Failures the pipeline raises before any CLI turn exists: (event builder, expected error_type)
 _STANDALONE = [
     (agent_unavailable_event, "external_agent_unavailable"),
-    (delegate_denied_event, "external_agent_denied"),
+    (partial(delegate_denied_event, cause=DenialCause.POLICY), "external_agent_denied"),
+    (partial(delegate_denied_event, cause=DenialCause.SESSION_PRESET), "external_agent_denied_session_preset"),
+    (partial(delegate_denied_event, cause=DenialCause.REMOTE), "external_agent_denied_remote"),
     (delegate_failed_event, "external_agent_failed"),
 ]
 
@@ -186,17 +190,46 @@ def test_an_unavailable_agent_is_an_error_with_a_way_to_the_settings() -> None:
     assert event["recovery_actions"] == [{"id": "open_external_agents", "label": "打开设置", "url": _SETTINGS_URL}]
 
 
-def test_a_denied_delegation_sends_the_user_to_the_security_policy_in_their_language() -> None:
-    english = delegate_denied_event("codex", "en")
-    chinese = delegate_denied_event("codex", "zh")
+def test_a_policy_refusal_sends_the_user_to_the_security_policy_in_their_language() -> None:
+    english = delegate_denied_event("codex", "en", DenialCause.POLICY)
+    chinese = delegate_denied_event("codex", "zh", DenialCause.POLICY)
 
     assert english["recovery_actions"] == [{"id": "open_security_settings", "label": "Open Settings", "url": _SECURITY_URL}]
     assert chinese["recovery_actions"] == [{"id": "open_security_settings", "label": "打开设置", "url": _SECURITY_URL}]
     assert "Security Policy" in " ".join(_diagnostic(english)["resolution_steps"])
     assert "安全策略" in " ".join(_diagnostic(chinese)["resolution_steps"])
-    # The user reads what to change, never the policy engine's wording of the refusal.
-    visible = " ".join([str(english["data"]), *_diagnostic(english)["resolution_steps"]]).lower()
-    assert "denied" not in visible and "blocked" not in visible and "reason" not in visible
+
+
+def test_a_session_preset_refusal_says_to_switch_the_preset_and_has_no_settings_button() -> None:
+    english = delegate_denied_event("codex", "en", DenialCause.SESSION_PRESET)
+    chinese = delegate_denied_event("codex", "zh", DenialCause.SESSION_PRESET)
+
+    assert "recovery_actions" not in english and "recovery_actions" not in chinese  # the settings page does not change it
+    assert "Security Preset" in " ".join(_diagnostic(english)["resolution_steps"])
+    assert "安全预设" in " ".join(_diagnostic(chinese)["resolution_steps"])
+
+
+def test_a_remote_refusal_says_to_use_it_where_the_agent_is_and_has_no_settings_button() -> None:
+    english = delegate_denied_event("codex", "en", DenialCause.REMOTE)
+    chinese = delegate_denied_event("codex", "zh", DenialCause.REMOTE)
+
+    assert "recovery_actions" not in english and "recovery_actions" not in chinese  # nothing here lifts it
+    assert "Remote connections" in str(english["data"]) and "computer where codex is installed" in " ".join(
+        _diagnostic(english)["resolution_steps"]
+    )
+    assert "远程连接" in str(chinese["data"]) and "安装了 codex 的电脑" in " ".join(_diagnostic(chinese)["resolution_steps"])
+
+
+@pytest.mark.parametrize("locale", ["en", "zh"])
+def test_each_cause_of_a_refusal_reads_differently_and_never_shows_the_engines_wording(locale: str) -> None:
+    events = {cause: delegate_denied_event("codex", locale, cause) for cause in DenialCause}
+
+    assert len({str(event["data"]) for event in events.values()}) == len(DenialCause)
+    assert len({tuple(_diagnostic(event)["resolution_steps"]) for event in events.values()}) == len(DenialCause)
+    for event in events.values():
+        # The user reads what to change, never the policy engine's wording of the refusal.
+        visible = " ".join([str(event["data"]), *_diagnostic(event)["resolution_steps"]]).lower()
+        assert "denied" not in visible and "blocked" not in visible and "reason" not in visible
 
 
 def test_a_broken_delegation_asks_for_a_retry_and_points_to_the_settings() -> None:
@@ -236,9 +269,11 @@ class _FailingPool:
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: object = None,
         images: list[str] | None = None,
+        permissions: object = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         yield create_event(RuntimeEventType.ERROR, session_id, error=self._error)
 
@@ -247,7 +282,8 @@ class _FailingPool:
 
 
 async def _errors(pool: _FailingPool, locale: str = "en", agent: str = "claude") -> tuple[list[SseEvent], list[SseEvent]]:
-    events = [event async for event in stream_direct_delegate(pool, agent, "do it", session_id=f"{agent}-chat-1", locale=locale)]
+    turn = stream_direct_delegate(pool, agent, "do it", session_id=f"{agent}-chat-1", workspace="/work/repo", locale=locale)
+    events = [event async for event in turn]
     return events, [event for event in events if event["type"] == AgentEventType.ERROR.value]
 
 

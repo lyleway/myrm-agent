@@ -111,7 +111,7 @@ describe('TtsGenerationSection while the stored settings load', () => {
     const { container } = render(<TtsGenerationSection />);
 
     expect(container.querySelectorAll('.animate-pulse')).toHaveLength(3);
-    expect(screen.queryByRole('button', { name: /OpenAI TTS/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /ElevenLabs/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Select…' })).toBeNull();
     expect(screen.queryByPlaceholderText('Enter API Key')).toBeNull();
 
@@ -144,7 +144,7 @@ describe('TtsGenerationSection when the stored settings cannot be read', () => {
     await renderSection();
 
     expect(reloadButton()).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /OpenAI TTS/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /ElevenLabs/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Select…' })).toBeNull();
     expect(screen.queryByPlaceholderText('Enter API Key')).toBeNull();
     expect(puts()).toHaveLength(0);

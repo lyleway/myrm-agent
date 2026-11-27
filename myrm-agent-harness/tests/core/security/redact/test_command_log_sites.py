@@ -236,7 +236,7 @@ class TestCliRuntime:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         caplog.set_level(logging.WARNING)
-        config = RuntimeConfig(backend_type="cli", command=f"{tmp_path}/not-installed {_KEY}", cwd=str(tmp_path))
-        events = [event async for event in CliRuntime("t", config).run_turn("hello", "s1")]
+        config = RuntimeConfig(backend_type="cli", command=f"{tmp_path}/not-installed {_KEY}")
+        events = [event async for event in CliRuntime("t", config, workspace=str(tmp_path)).run_turn("hello", "s1")]
         assert events
         _assert_line_masked(caplog, "cli_launch_failed")

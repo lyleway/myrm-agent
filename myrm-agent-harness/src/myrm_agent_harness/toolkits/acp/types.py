@@ -1,7 +1,7 @@
 """Core type definitions for the ACP runtime system.
 
 Defines the fundamental abstractions: RuntimeBackend Protocol, RuntimeEvent,
-error codes, configuration, and permission types. All other ACP runtime modules
+error codes, configuration, and the permission vocabulary. All other ACP runtime modules
 depend on this module.
 
 
@@ -13,13 +13,17 @@ no - Base type definition module
 - DelegationPool: the pool surface a delegation caller needs (RuntimePool and host-side wrappers satisfy it)
 - RuntimeEvent: Runtime Event type
 - AcpErrorCode: ACP error enum
-- ContinuityStatus: status_update statuses for a CLI conversation that could not be continued
+- ContinuityStatus: status_update statuses for an agent conversation that could not be continued
+- StopReason: how an agent ended a turn (the ``stop_reason`` of ``done``), in the vocabulary of ACP, and the notice each unfinished ending earns
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
-- RuntimeConfig: Runtime configuration
-- CliSessionRecord: a CLI-native session id bound to the working directory that created it
-- CliSessionStore: protocol a host implements to keep CLI session records across process restarts
-- PermissionMode: Permission pattern type
-- PermissionDecision: Permission decision enum
+- BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
+- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace; the home of a named account is)
+- normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
+- delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
+- CliSessionRecord: an agent-native session id bound to the working directory that created it
+- CliSessionStore: protocol a host implements to keep agent session records across process restarts
+- PermissionMode: what a delegated agent may do without asking (``safe`` or ``allow_all``)
+- PermissionRequest, PermissionVerdict, PermissionBroker: one action a ``safe`` agent asks to take, the answer, and the host-side party that puts it to a person
 
 [POS]
 ACP runtime type definitions layer. Provides all ACP-related core abstractions and data
@@ -28,7 +32,7 @@ structures, serving as the foundation for the entire ACP module.
 
 from __future__ import annotations
 
-import asyncio
+import os
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -47,7 +51,6 @@ class RuntimeEventType(StrEnum):
     REASONING_DELTA = "reasoning_delta"
     TOOL_START = "tool_start"
     TOOL_RESULT = "tool_result"
-    PERMISSION_REQUEST = "permission_request"
     USAGE_UPDATE = "usage_update"
     STATUS_UPDATE = "status_update"
     ERROR = "error"
@@ -62,13 +65,12 @@ class AcpErrorCode(StrEnum):
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
     PROCESS_CRASHED = "process_crashed"
-    MAX_TURNS = "max_turns"
     CANCELLED = "cancelled"
     UNKNOWN = "unknown"
 
 
 class ContinuityStatus(StrEnum):
-    """``status_update`` statuses telling that the conversation a CLI agent recorded earlier is not continued."""
+    """``status_update`` statuses telling that the conversation an agent recorded earlier is not continued."""
 
     SESSION_EXPIRED = "session_expired"
     WORKSPACE_CHANGED = "session_workspace_changed"
@@ -76,19 +78,65 @@ class ContinuityStatus(StrEnum):
     @classmethod
     def of(cls, status: object) -> ContinuityStatus | None:
         """The continuity status that ``status`` stands for, or None for any other status."""
+        if not isinstance(status, str):
+            return None
         try:
             return cls(status)
         except ValueError:
             return None
 
 
+class StopReason(StrEnum):
+    """How an agent ended a turn: the ``stop_reason`` of ``done``, in the vocabulary of ACP's ``PromptResponse``.
+
+    ``end_turn`` is the normal end. The others tell the person that the reply is not what a finished turn leaves:
+    ``max_tokens`` cut it off, ``max_turn_requests`` stopped it at the agent's own limit, ``refusal`` declined it (and
+    the agent dropped the prompt from its context); ``cancelled`` is the host's own stop.
+    """
+
+    END_TURN = "end_turn"
+    MAX_TOKENS = "max_tokens"
+    MAX_TURN_REQUESTS = "max_turn_requests"
+    REFUSAL = "refusal"
+    CANCELLED = "cancelled"
+
+    @classmethod
+    def of(cls, stop_reason: object) -> StopReason | None:
+        """The stop reason that ``stop_reason`` stands for, or None for any other value."""
+        if not isinstance(stop_reason, str):
+            return None
+        try:
+            return cls(stop_reason)
+        except ValueError:
+            return None
+
+    @property
+    def notice(self) -> str | None:
+        """The kind of notice (``delegation_<agent>_<kind>``) a person is shown for a turn that ended this way.
+
+        None when there is nothing to say: the turn finished, or the person stopped it.
+        """
+        return _STOP_NOTICES.get(self)
+
+
+_STOP_NOTICES: dict[StopReason, str] = {
+    StopReason.MAX_TOKENS: "max_tokens",
+    StopReason.MAX_TURN_REQUESTS: "turn_limit",
+    StopReason.REFUSAL: "refusal",
+}
+
 # The ``status_update`` status of a turn whose images were not handed to the agent (its backend or the agent itself
 # takes none); the agent still has the image's location in the prompt.
 IMAGES_NOT_SENT_STATUS = "images_not_sent"
 
-PermissionMode = Literal["safe", "ask", "allow_all", "bypass"]
+# ``safe``: the agent reads freely and asks before anything else (an edit, a command, a download); where nobody can
+# answer it, it may only read. ``allow_all``: the agent acts without asking.
+PermissionMode = Literal["safe", "allow_all"]
 
-BackendType = Literal["acp", "cli"]
+# How a delegated backend is run: over the Agent Client Protocol, as a CLI process per turn, or over Codex's own app
+# server. The ACP and app-server backends keep one resident process that serves many turns.
+BackendType = Literal["acp", "cli", "app_server"]
+RESIDENT_BACKEND_TYPES: frozenset[BackendType] = frozenset({"acp", "app_server"})
 
 BackendStatus = Literal["ready", "starting", "error", "stopped"]
 
@@ -119,11 +167,7 @@ class AcpError:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeEvent:
-    """A single event emitted during a runtime turn.
-
-    For ``permission_request`` events, ``data["response_future"]`` contains an
-    ``asyncio.Future[PermissionDecision]`` that the subscriber must resolve.
-    """
+    """A single event emitted during a runtime turn."""
 
     type: RuntimeEventType
     data: dict[str, object]
@@ -141,6 +185,9 @@ class BackendCapabilities:
     supports_tools: bool = True
     # Image files can be attached to a turn (``run_turn(images=...)``); a backend without it is told nothing about them.
     supports_images: bool = False
+    # In ``safe`` mode the backend puts what it may not do on its own to the turn's ``PermissionBroker``; a backend
+    # without it can only refuse, so there ``safe`` means read-only.
+    supports_permission_requests: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,19 +220,22 @@ class RuntimeConfig:
     command: str | None = None
     args: list[str] = field(default_factory=list)
     env: dict[str, str] | None = None
-    cwd: str | None = None
     timeout_seconds: int = 300
-    permission_mode: PermissionMode = "allow_all"
+    permission_mode: PermissionMode = "safe"
     auth_mode: AuthMode = "subscription"
     mcp_servers: list[McpServerConfig] = field(default_factory=list)
     max_response_chars: int = 50_000
     max_turns: int = 25
     description: str = ""
+    # The directory of a named account (``auth.AccountStore``) the agent's CLI keeps its state and its login in,
+    # absolute, for a known agent only. The CLI is relocated into it whatever ``env`` says; ``None``: the CLI's
+    # own default home.
+    account_home: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CliSessionRecord:
-    """A CLI-native session id bound to the working directory it was created in.
+    """An agent-native session id (a CLI's, an ACP agent's, a Codex thread's) bound to the directory that created it.
 
     Claude Code files a conversation under its project directory, and before v2.1.223 ``--resume <id>`` finds
     it only from that directory. A turn resumes a record only when it starts in the directory that created
@@ -196,18 +246,45 @@ class CliSessionRecord:
     cwd: str
 
 
-class PermissionDecision(StrEnum):
-    """Possible outcomes for a permission request."""
+@dataclass(frozen=True, slots=True)
+class PermissionRequest:
+    """One action a ``safe`` agent asks to take, as much of it as the agent says."""
 
-    ALLOW_ONCE = "allow_once"
-    ALLOW_ALWAYS = "allow_always"
-    DENY_ONCE = "deny_once"
-    DENY_ALWAYS = "deny_always"
+    agent: str
+    session_id: str
+    tool_name: str
+    # The agent's own kind of tool: ``read``, ``search``, ``edit``, ``delete``, ``move``, ``execute``, ``fetch``, ``think``
+    # or ``other`` (what an agent does not classify).
+    kind: str
+    title: str
+    # What the agent is about to do (the command, the file); loosely typed because each agent words it its own way.
+    input: dict[str, object]
+    paths: tuple[str, ...] = ()
+    tool_call_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PermissionVerdict:
+    """A person's answer to a ``PermissionRequest``; ``message`` is why it was refused, for agents that can be told."""
+
+    allowed: bool
+    message: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Protocols
 # ---------------------------------------------------------------------------
+
+
+class PermissionBroker(Protocol):
+    """Puts one permission request of a delegated agent to a person and returns what they decided.
+
+    A host implements it and hands it to a turn. ``decide`` waits as long as the person takes (the turn's own time
+    limit stands still meanwhile) and ends the wait itself, with a refusal, when it gives up. A turn without a broker
+    has nobody to ask, so a ``safe`` agent there may only read; a ``decide`` that raises refuses the request.
+    """
+
+    async def decide(self, request: PermissionRequest) -> PermissionVerdict: ...
 
 
 @runtime_checkable
@@ -234,6 +311,7 @@ class RuntimeBackend(Protocol):
         *,
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...
 
     async def cancel(self, session_id: str) -> None: ...
@@ -263,9 +341,11 @@ class DelegationPool(Protocol):
         prompt: str,
         session_id: str,
         *,
+        workspace: str,
         mode: str = "persistent",
         mcp_servers: list[McpServerConfig] | None = None,
         images: list[str] | None = None,
+        permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...
 
     async def cancel(self, name: str, session_id: str) -> None: ...
@@ -274,10 +354,10 @@ class DelegationPool(Protocol):
 class CliSessionStore(Protocol):
     """Durable home of ``CliSessionRecord`` keyed by harness session id; one store serves one conversation scope.
 
-    A host implements it so CLI sessions survive a restart of the host process. The runtime awaits every call
-    while a turn runs (a record is saved as soon as the CLI announces its session), so an implementation bounds
-    its own latency; a call that raises is degraded by the runtime to a fresh CLI session and never fails a turn.
-    A record is never deleted: the next session the CLI announces overwrites it.
+    A host implements it so agent sessions survive a restart of the host process or of the agent. The runtime awaits
+    every call while a turn runs (a record is saved as soon as the agent announces its session), so an implementation
+    bounds its own latency; a call that raises is degraded by the runtime to a fresh agent session and never fails a
+    turn. A record is never deleted: the next session the agent announces overwrites it.
     """
 
     async def load(self, session_id: str) -> CliSessionRecord | None: ...
@@ -288,6 +368,28 @@ class CliSessionStore(Protocol):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def normalize_workspace(workspace: str) -> str:
+    """The directory a delegated turn starts in, as a normalized absolute path.
+
+    Raises:
+        ValueError: ``workspace`` is not an absolute path. A relative one would be resolved against whatever
+            directory the host process happens to run in, the ambient inference a turn must not depend on.
+    """
+    if not os.path.isabs(workspace):
+        msg = f"workspace must be an absolute path, got {workspace!r}"
+        raise ValueError(msg)
+    return os.path.normpath(workspace)
+
+
+def delegation_session_id(agent_name: str, session_scope: str | None = None) -> str:
+    """The session id of the persistent conversation with ``agent_name`` in one scope (a chat).
+
+    Every entry into the same agent in the same scope names this session, so a conversation that moves between
+    entries continues one external session instead of opening a second.
+    """
+    return f"{agent_name}-{session_scope or 'default'}"
 
 
 def create_event(
@@ -302,27 +404,3 @@ def create_event(
 def images_not_sent_event(session_id: str, images: int) -> RuntimeEvent:
     """The notice that the ``images`` image files of a turn were not handed to the agent."""
     return create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=IMAGES_NOT_SENT_STATUS, images=images)
-
-
-def create_permission_request(
-    session_id: str,
-    tool_name: str,
-    tool_input: dict[str, object],
-) -> tuple[RuntimeEvent, asyncio.Future[PermissionDecision]]:
-    """Create a permission_request event with its response Future.
-
-    Returns:
-        A (event, future) tuple. The subscriber resolves the future with a
-        PermissionDecision; the runtime awaits it.
-    """
-    future: asyncio.Future[PermissionDecision] = asyncio.get_running_loop().create_future()
-    event = RuntimeEvent(
-        type=RuntimeEventType.PERMISSION_REQUEST,
-        data={
-            "tool_name": tool_name,
-            "tool_input": tool_input,
-            "response_future": future,
-        },
-        session_id=session_id,
-    )
-    return event, future

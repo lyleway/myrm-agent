@@ -20,8 +20,8 @@
 | GET | `` | 分页列出 pending（`limit` 1–100，`offset`）；排除无 `thread_id` 的后台 growth draft |
 | POST | `/credentials` | 按 `chat_id` + `command` 内存暂存一次性执行凭据（会话键 `chat_session_id(chat_id)`，绑定 `command_digest(command)`，TTL 上限 600 秒，任一键非法则整体拒绝），返回 handle_id 引用，无密文落地与回显 |
 | POST | `/credentials/wipe` | 按 `chat_id` + `handle_ids` 立即销毁用户撤回或被拒绝/改写的审批所暂存的凭据 |
-| POST | `/{approval_id}/resolve` | 单条决策：`decision`（`approve`/`deny`/`reject`→`deny`）、`edited_payload`、`comment`、`allow_always`（bool 或 `{tool,args,pattern,duration,ttl_seconds}`）；有 `thread_id` 时发布 `APPROVAL_RESOLVED` |
-| POST | `/batch-resolve` | 批量 `approval_ids` + `decision`；逐条 resolve 并对有 `thread_id` 项发事件 |
+| POST | `/{approval_id}/resolve` | 单条决策：`decision`（`approve`/`deny`/`reject`→`deny`）、`edited_payload`、`comment`（外部 Agent 权限请求的拒绝理由会交还给 Agent）、`allow_always`（bool 或 `{tool,args,pattern,duration,ttl_seconds}`）；有 `thread_id` 时发布 `APPROVAL_RESOLVED`；`outbound_draft`、`external_agent_permission` 在 `resolve_approval` 之后直接返回（无 Agent 运行可恢复，不发「空闲」） |
+| POST | `/batch-resolve` | 批量 `approval_ids` + `decision`；逐条 resolve 并对有 `thread_id` 项发事件；`external_agent_permission` 项只 resolve（唤醒等它的回合），不发事件、不发「空闲」；其中 `execute` / `delete` / `move`（severity `high`）与破坏性命令按既有规则要求高危确认 |
 | POST | `/test/seed-mock` | local/test only（`test_routes.py`）：创建 chat + inline pending approval，返回 `push_url`（Chrome push deeplink E2E） |
 
 ## 契约要点

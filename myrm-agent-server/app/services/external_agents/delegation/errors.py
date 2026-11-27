@@ -3,11 +3,12 @@
 [INPUT]
 - myrm_agent_harness.api::AgentEventType (POS: 前端 SSE 事件类型)
 - myrm_agent_harness.toolkits.acp.types::AcpError, AcpErrorCode (POS: 外部 Agent 委托协议：运行时事件、错误码、委托池)
+- app.services.external_agents.delegation.gate::DenialCause (POS: 用户发起的回合被安全策略拒绝的拒因)
 
 [OUTPUT]
 - delegate_error_event: 未登录 / API Key 被拒 / 未安装 / 超时 → 带 diagnostic_result 与 recovery_actions 的错误事件（API Key 被拒时点名该 Agent 读取的环境变量）；其余失败返回 None
 - agent_unavailable_event: 用户指定的外部 Agent 不在可用后端中 → 同形状的错误事件
-- delegate_denied_event: 安全策略不允许委托给外部 Agent → 指向「设置 → 安全策略」的错误事件
+- delegate_denied_event: 安全策略不允许委托给外部 Agent → 按拒因给出不同处置步骤的错误事件（策略拒绝指向「设置 → 安全策略」；会话预设要切换预设；远程连接不给设置入口）
 - delegate_failed_event: 直连委托在到达 CLI 的结果之前就出了意外 → 同形状的错误事件
 
 [POS]
@@ -24,7 +25,26 @@ from typing import Final, Literal, TypeAlias
 from myrm_agent_harness.api import AgentEventType
 from myrm_agent_harness.toolkits.acp.types import AcpError, AcpErrorCode
 
-_Kind: TypeAlias = Literal["auth_subscription", "auth_api_key", "not_installed", "timeout", "unavailable", "denied", "failed"]
+from app.services.external_agents.delegation.gate import DenialCause
+
+_Kind: TypeAlias = Literal[
+    "auth_subscription",
+    "auth_api_key",
+    "not_installed",
+    "timeout",
+    "unavailable",
+    "denied",
+    "denied_session_preset",
+    "denied_remote",
+    "failed",
+]
+
+# The guidance of a refusal follows what the user can change: the policy in Settings, the chat's own preset, or nothing.
+_DENIED_KIND: Final[dict[DenialCause, _Kind]] = {
+    DenialCause.POLICY: "denied",
+    DenialCause.SESSION_PRESET: "denied_session_preset",
+    DenialCause.REMOTE: "denied_remote",
+}
 
 # 外部 Agent 的登录 / 安装 / API Key 都在「设置 → 开发者 → 外部 Agent」；是否允许委托在「设置 → 安全策略」。
 _DEVELOPER_SETTINGS: Final = "/settings/developer"
@@ -88,6 +108,19 @@ _GUIDANCE: Final[dict[str, dict[_Kind, _Guidance]]] = {
             ),
             _Action("open_security_settings", "Open Settings", _SECURITY_SETTINGS),
         ),
+        "denied_session_preset": _Guidance(
+            "This chat's security preset doesn't allow sending this to {agent}.",
+            (
+                "Switch this chat's Security Preset to Manual Approval or Auto-Approve Edits.",
+                "Then send your message again.",
+            ),
+            None,
+        ),
+        "denied_remote": _Guidance(
+            "Remote connections can't send this to {agent}.",
+            ("Use Myrm on the computer where {agent} is installed.",),
+            None,
+        ),
         "failed": _Guidance(
             "{agent} stopped unexpectedly.",
             (
@@ -128,6 +161,16 @@ _GUIDANCE: Final[dict[str, dict[_Kind, _Guidance]]] = {
             "安全策略不允许把这条消息交给 {agent} 处理。",
             ("前往「设置 → 安全策略」，允许「外部 CLI 智能体」权限。", "修改后重新发送消息。"),
             _Action("open_security_settings", "打开设置", _SECURITY_SETTINGS),
+        ),
+        "denied_session_preset": _Guidance(
+            "当前对话的安全预设不允许把这条消息交给 {agent} 处理。",
+            ("把本对话的「安全预设」切换为「手动审批」或「自动批准编辑」。", "切换后重新发送消息。"),
+            None,
+        ),
+        "denied_remote": _Guidance(
+            "远程连接不能把这条消息交给 {agent} 处理。",
+            ("请在安装了 {agent} 的电脑上直接使用 Myrm。",),
+            None,
         ),
         "failed": _Guidance(
             "{agent} 意外停止了。",
@@ -192,9 +235,13 @@ def agent_unavailable_event(agent: str, locale: str) -> dict[str, object]:
     return _guidance_event("unavailable", agent, locale)
 
 
-def delegate_denied_event(agent: str, locale: str) -> dict[str, object]:
-    """The error event for a forced external agent the security policy does not let the user delegate to."""
-    return _guidance_event("denied", agent, locale)
+def delegate_denied_event(agent: str, locale: str, cause: DenialCause) -> dict[str, object]:
+    """The error event for a forced external agent the security policy does not let the user delegate to.
+
+    The steps follow ``cause``: only a policy refusal is sent to the settings; a preset is switched in the chat, and a
+    remote connection has nothing to change from where it is.
+    """
+    return _guidance_event(_DENIED_KIND[cause], agent, locale)
 
 
 def delegate_failed_event(agent: str, locale: str) -> dict[str, object]:

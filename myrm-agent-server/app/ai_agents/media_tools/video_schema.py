@@ -1,6 +1,7 @@
 """[INPUT]
 - ProviderCapabilities (POS: capabilities metadata from video generation providers)
 - Pydantic BaseModel and FieldInfo specifications
+- app.ai_agents.media_tools.task_results::MAX_WAIT_SECONDS / WAIT_SECONDS_DESCRIPTION (POS: bound and wording of the status wait)
 
 [OUTPUT]
 - build_video_input_schema: Factory constructing the video tool input schema for a provider's capabilities
@@ -14,11 +15,14 @@ so it keeps the system prompt prefix cache stable.
 
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Literal, cast
 
 from myrm_agent_harness.toolkits.llms.video.models import ProviderCapabilities
 from pydantic import BaseModel, ConfigDict, create_model
 from pydantic.fields import FieldInfo
+
+from app.ai_agents.media_tools.task_results import MAX_WAIT_SECONDS, WAIT_SECONDS_DESCRIPTION
 
 _REFERENCE_FORMS = "media:// references from earlier results, workspace file paths or http(s) URLs"
 
@@ -89,6 +93,10 @@ def build_video_input_schema(capabilities: ProviderCapabilities | None) -> type[
             str | None,
             FieldInfo(default=None, description="Task ID from an earlier generate result (required when action='status')."),
         ),
+        "wait_seconds": (
+            int | None,
+            FieldInfo(default=None, ge=1, le=MAX_WAIT_SECONDS, description=WAIT_SECONDS_DESCRIPTION),
+        ),
     }
 
     if capabilities is not None:
@@ -99,10 +107,7 @@ def build_video_input_schema(capabilities: ProviderCapabilities | None) -> type[
         if capabilities.max_input_videos <= 0:
             del fields["reference_videos"]
 
-    # pydantic types a field definition as ``TypeForm``, which a runtime-built annotation cannot satisfy statically.
-    model: type[BaseModel] = create_model(  # type: ignore[call-overload]
-        "VideoToolInput",
-        __config__=ConfigDict(extra="allow"),
-        **fields,  # pyright: ignore[reportArgumentType]
-    )
-    return model
+    # pydantic types each field definition as ``TypeForm``, which annotations built at runtime cannot satisfy; the
+    # variadic callable keeps the call's real result type (a model class) without silencing any checker.
+    make_model = cast("Callable[..., type[BaseModel]]", create_model)
+    return make_model("VideoToolInput", __config__=ConfigDict(extra="allow"), **fields)

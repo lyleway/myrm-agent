@@ -5,9 +5,10 @@ Exercises the REAL capture chain on the current machine:
   capture_ax_snapshot("target", app) → app selector → same parse path
   inspect_foreground() → real frontmost app metadata
 
-These tests are skipped on non-macOS hosts and when the host lacks macOS
-Accessibility permission or the AX tree is unavailable, so they are safe to
-run on any CI host.
+They carry the ``integration`` marker, so the default run never reaches the
+host's accessibility stack; run them on purpose with ``-m integration``. They
+are skipped on non-macOS hosts and when the host lacks macOS Accessibility
+permission or the AX tree is unavailable.
 """
 
 from __future__ import annotations
@@ -25,7 +26,10 @@ from myrm_agent_harness.toolkits.computer_use.perception.macos_ax import (
     inspect_foreground,
 )
 
-pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="live capture drives the macOS accessibility stack")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(sys.platform != "darwin", reason="live capture drives the macOS accessibility stack"),
+]
 
 
 def _skip_without_accessibility(exc: BaseException) -> None:
@@ -90,6 +94,6 @@ def test_live_target_scope_matches_current_app() -> None:
         return
 
     assert targeted.meta.scope == "target"
-    assert (
-        targeted.meta.app_name == foreground.meta.app_name
-    ), "target capture must resolve to the same app as foreground"
+    assert targeted.meta.app_name == foreground.meta.app_name, (
+        "target capture must resolve to the same app as foreground"
+    )

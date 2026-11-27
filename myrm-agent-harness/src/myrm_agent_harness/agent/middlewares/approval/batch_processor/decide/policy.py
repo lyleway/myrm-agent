@@ -4,6 +4,7 @@
 - myrm_agent_harness.agent.security.tool_registry::resolve_permission_type / get_ptc_safety_metadata (POS: Tool safety registry — re-exported from core.security.tool_registry.)
 - myrm_agent_harness.agent.security.checks::check_path_policy (POS: Layers 2 and 2.5 of the permission engine's deterministic evaluation: per-call checks the engine composes with its rule lookup.)
 - myrm_agent_harness.agent.security.ptc_verifier::extract_ptc_intent (POS: AST-based static analysis for PTC scripts. Extracts MCP intent so the path policy and the approval card see the tool a script calls.)
+- myrm_agent_harness.agent.skills.mcp.script_tool::resolve_script_tool (POS: The one place a script's skill import pair becomes the tool's prefixed name, shared with the proxy that runs the call.)
 - myrm_agent_harness.agent.security.types::PermissionAction (POS: Security type definitions — re-exported from core.security.types.)
 - myrm_agent_harness.agent.middlewares.approval.batch_processor.decide.state::BatchContext / CallState (POS: Shared state of the decision stages in ``decide/``: the stages read the batch context, write the call state, and settle a call by writing it into the verdict lists.)
 
@@ -50,6 +51,7 @@ def _apply_ptc_intent(ctx: BatchContext, call: CallState) -> None:
     from myrm_agent_harness.agent.security.tool_registry import (
         get_ptc_safety_metadata,
     )
+    from myrm_agent_harness.agent.skills.mcp.script_tool import resolve_script_tool
 
     ptc_intent = extract_ptc_intent(command_text(call.permission_type, call.tool_input))
     if not ptc_intent:
@@ -59,7 +61,8 @@ def _apply_ptc_intent(ctx: BatchContext, call: CallState) -> None:
     ptc_tool_name_full = f"ptc:{skill_name}.{ptc_tool_name}"
     call.extra_ctx = {"ptc_tool_name_full": ptc_tool_name_full}
 
-    ptc_meta = get_ptc_safety_metadata(skill_name, ptc_tool_name)
+    tool_name = resolve_script_tool(skill_name, ptc_tool_name)
+    ptc_meta = get_ptc_safety_metadata(tool_name) if tool_name else None
     if ptc_meta:
         call.extra_ctx["ptc_annotations"] = ptc_meta[1]
 

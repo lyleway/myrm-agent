@@ -1,7 +1,7 @@
 """Entitlement gap preflight — emit capability_gap SSE before Agent execution.
 
 [INPUT]
-- (none — self-contained; reads no harness capability-gap registry)
+- (none — self-contained)
 
 [OUTPUT]
 - build_web_search_config_gap_sse_event: SSE when web_search profile on but API missing/unreachable

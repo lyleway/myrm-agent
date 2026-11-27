@@ -4,6 +4,10 @@ Pins the single-handshake guarantee end to end: one verification spawns the
 server exactly once and still reports the server's real ``initialize``
 instructions. The server logs one line per process start, so a regression that
 re-introduces a second connection for the instructions shows up as a second line.
+
+The same log shows where the security gate sits: a configuration whose env holds a
+code-injection variable name is refused before any process starts (zero lines),
+while an ordinary env still verifies with one.
 """
 
 from __future__ import annotations
@@ -62,8 +66,16 @@ class _StdioServer:
     def spawns(self) -> int:
         return len(self.spawn_log.read_text().splitlines()) if self.spawn_log.exists() else 0
 
-    def verify_body(self) -> dict[str, object]:
-        return {"name": _SERVER_NAME, "type": "stdio", "command": sys.executable, "args": [str(self.script)]}
+    def verify_body(self, env: dict[str, str] | None = None) -> dict[str, object]:
+        body: dict[str, object] = {
+            "name": _SERVER_NAME,
+            "type": "stdio",
+            "command": sys.executable,
+            "args": [str(self.script)],
+        }
+        if env is not None:
+            body["extraParams"] = {"env": env}
+        return body
 
     def agent_config(self) -> MCPConfig:
         return MCPConfig(name=_SERVER_NAME, type="stdio", command=sys.executable, args=[str(self.script)])
@@ -141,3 +153,34 @@ def test_server_without_instructions_verifies_with_null_instructions_in_one_spaw
     assert result.response.status_code == 200, result.response.text
     assert result.response.json()["data"]["instructions"] is None
     assert result.server.spawns == 1
+
+
+@pytest.mark.parametrize("env_name", ["GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL"])
+def test_verify_refuses_an_injection_env_name_before_the_server_is_spawned(
+    client: TestClient,
+    real_agent: MCPAgent,
+    tmp_path: Path,
+    env_name: str,
+) -> None:
+    server = _install_server(tmp_path, _INSTRUCTIONS)
+
+    response = client.post(_VERIFY_URL, json=server.verify_body(env={env_name: "1"}))
+
+    assert response.status_code == 400, response.text
+    assert f"extra_params.env.{env_name}" in response.text
+    assert server.spawns == 0, "the security gate must refuse the configuration before any process starts"
+
+
+def test_verify_still_spawns_the_server_once_when_the_env_holds_only_ordinary_names(
+    client: TestClient,
+    real_agent: MCPAgent,
+    tmp_path: Path,
+) -> None:
+    """Positive control: the same server with a harmless env verifies, so the zero spawns above come from the gate."""
+    server = _install_server(tmp_path, _INSTRUCTIONS)
+
+    response = client.post(_VERIFY_URL, json=server.verify_body(env={"LOG_LEVEL": "debug", "GIT_AUTHOR_NAME": "synthetic"}))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["tools_count"] == 1
+    assert server.spawns == 1

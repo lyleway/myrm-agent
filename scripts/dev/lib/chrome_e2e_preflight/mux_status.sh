@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Mux status probes: the current CDP ws url, its stamps, upstream readiness and the context count.
+# Mux status probes: the current CDP ws url, its stamps, upstream readiness, the context count and the check that
+# this checkout can run the mux CLI at all.
 # Sourced by chrome-e2e-preflight.sh, which owns every global read here; this file only defines functions.
 # shellcheck shell=bash
 
@@ -74,4 +75,15 @@ data = json.loads(sys.argv[1])
 contexts = data.get('contexts')
 print(len(contexts) if isinstance(contexts, list) else 0)
 " "${status_json}"
+}
+
+# The CLI imports its daemon from the package's own node_modules, so a checkout that never installed them cannot run
+# any mux command. Every step after this one reads that as "the daemon is down": it waits, stops the shared daemon
+# (the Agents attached to it lose their browser) and then fails to start it again. Refusing here leaves it alone.
+_require_mux_bin_deps() {
+  [[ "${MUX_USING}" -eq 1 && -f "${MUX_BIN}" ]] || return 0
+  local package_dir
+  package_dir="$(cd "$(dirname "${MUX_BIN}")/.." && pwd)"
+  [[ -f "${package_dir}/node_modules/chrome-devtools-mcp-mux/package.json" ]] && return 0
+  fail "cdmcp-mux dependencies are missing in ${package_dir}; the running mux daemon was left untouched — run: bash scripts/dev/install-cdmcp-mux-autoconnect.sh"
 }

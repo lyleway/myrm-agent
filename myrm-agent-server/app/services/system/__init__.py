@@ -11,11 +11,6 @@
 Subsystem facade exporting storage governance and support bundle generation services.
 """
 
-from app.services.system.model_ping_service import (
-    ModelPingResult,
-    ModelPingService,
-    get_model_ping_service,
-)
 from app.services.system.storage_service import (
     DatabaseStorageBreakdown,
     StorageOptimizePreflightData,
@@ -32,15 +27,12 @@ from app.services.system.vault_purge_service import (
 
 __all__ = [
     "DatabaseStorageBreakdown",
-    "ModelPingResult",
-    "ModelPingService",
     "SafeVaultPurgeResult",
     "SafeVaultPurgeService",
     "StorageOptimizePreflightData",
     "SupportBundleService",
     "check_storage_preflight",
     "execute_storage_optimization",
-    "get_model_ping_service",
     "get_sqlite_breakdown",
     "perform_sqlite_backup",
 ]

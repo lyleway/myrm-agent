@@ -266,6 +266,32 @@ class TestCaptureAxSnapshot:
             assert snapshot.meta.app_name == "Finder"
             assert call_count == 2
 
+    def test_targeted_fails_fallback_keeps_the_filter_and_drops_the_app(self) -> None:
+        scripts: list[str] = []
+        results = iter(
+            [
+                subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="no such app"),
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=self._mock_snapshot_stdout("Finder"), stderr=""
+                ),
+            ]
+        )
+
+        def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+            scripts.append(command[2])
+            return next(results)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            snapshot = capture_ax_snapshot("target", "NonExistentApp", query="Save", role="Button")
+
+        targeted, fallback = scripts
+        assert 'whose name is "NonExistentApp"' in targeted
+        assert "NonExistentApp" not in fallback
+        assert "first application process whose frontmost is true" in fallback
+        assert 'set targetQuery to "save"' in fallback
+        assert 'set targetRole to "button"' in fallback
+        assert snapshot.meta.scope == "foreground"
+
 
 class TestAxDispatchCaptureSnapshot:
     def test_macos_routes_correctly(self) -> None:

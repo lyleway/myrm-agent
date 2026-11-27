@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from myrm_agent_harness.agent.security.config import (
     expand_capability_surface_permissions,
     parse_security_config,
@@ -113,3 +115,54 @@ def test_parse_security_config_capability_matrix() -> None:
         tool_name="web_fetch_tool",
     )
     assert action == PermissionAction.DENY
+
+
+def _external_agent_verdict(
+    config_dict: dict[str, object], *, tool_name: str = "invoke_acp_agent_tool"
+) -> PermissionAction:
+    """The verdict a saved config gives an external-agent call, resolved the way a model-initiated call is."""
+    config = parse_security_config(config_dict)
+    assert config is not None
+    action, _reason = evaluate_tool_call(
+        permission=resolve_permission_type(tool_name),
+        tool_input={"agent_name": "claude"},
+        config=config,
+        tool_name=tool_name,
+    )
+    return action
+
+
+def test_the_remote_tools_surface_governs_external_agent_invocation() -> None:
+    """The switch is named "remote tools & delegation": delegating to an external agent is what it governs."""
+    assert resolve_permission_type("invoke_acp_agent_tool") == "invoke_external_agent"
+    assert "invoke_external_agent" in CAPABILITY_SURFACE_PERMISSIONS[CapabilitySurface.REMOTE_TOOLS]
+
+
+@pytest.mark.parametrize("key", ["permissions", "capabilityMatrix"])
+@pytest.mark.parametrize(
+    ("remote_tools", "expected"),
+    [
+        ("deny", PermissionAction.DENY),
+        ("ask", PermissionAction.ASK),
+        ("allow", PermissionAction.ALLOW),
+    ],
+)
+def test_the_remote_tools_setting_decides_external_agent_invocation(
+    key: str, remote_tools: str, expected: PermissionAction
+) -> None:
+    """High-security (deny), balanced and autonomous (ask) presets all write ``remote_tools``; it must reach the agent."""
+    assert _external_agent_verdict({key: {"remote_tools": remote_tools}}) == expected
+
+
+@pytest.mark.parametrize(
+    ("explicit", "expected"),
+    [("deny", PermissionAction.DENY), ("ask", PermissionAction.ASK), ("allow", PermissionAction.ALLOW)],
+)
+def test_an_explicit_external_agent_rule_outranks_the_remote_tools_setting(
+    explicit: str, expected: PermissionAction
+) -> None:
+    """A rule the user wrote for the external agent itself is more specific than the surface and stands."""
+    raw = {
+        "permissions": {"remote_tools": "deny" if explicit != "deny" else "allow", "invoke_external_agent": explicit}
+    }
+    assert _external_agent_verdict(raw) == expected

@@ -10,7 +10,9 @@ from app.services.agent.params.media import _extract_media_generation_params
 
 _IMAGE_MODEL = "gpt-image-2.6-sunburst"
 _VIDEO = {"provider": "volcengine", "model": "seedance-2-0"}
-_TTS = {"ttsProvider": "openai", "ttsModel": "gpt-4o-mini-tts", "ttsVoice": "alloy"}
+_TTS_MODEL = "eleven_flash_v2_5"
+_TTS_VOICE = "21m00Tcm4TlvDq8ikWAM"
+_TTS = {"ttsProvider": "elevenlabs", "ttsModel": _TTS_MODEL, "ttsVoice": _TTS_VOICE}
 
 
 def _tool_names(items: list[object]) -> set[str]:
@@ -87,13 +89,21 @@ def test_a_stored_pick_that_left_the_catalog_selects_nothing() -> None:
 
 def test_an_incomplete_tts_pick_selects_nothing() -> None:
     for incomplete in (
-        {"ttsProvider": "openai", "ttsModel": "gpt-4o-mini-tts"},
-        {"ttsProvider": "openai", "ttsVoice": "alloy"},
-        {"ttsModel": "gpt-4o-mini-tts", "ttsVoice": "alloy"},
+        {"ttsProvider": "elevenlabs", "ttsModel": _TTS_MODEL},
+        {"ttsProvider": "elevenlabs", "ttsVoice": _TTS_VOICE},
+        {"ttsModel": _TTS_MODEL, "ttsVoice": _TTS_VOICE},
     ):
-        _, _, tts_params = _extract_media_generation_params(None, _providers("openai"), ["tts"], incomplete)
+        _, _, tts_params = _extract_media_generation_params(None, _providers("elevenlabs"), ["tts"], incomplete)
 
         assert tts_params is None
+
+
+def test_an_unsupported_tts_provider_selects_nothing() -> None:
+    saved_pick = {"ttsProvider": "openai", "ttsModel": "tts-1", "ttsVoice": "alloy", "ttsApiKey": "sk-tts"}
+
+    _, _, tts_params = _extract_media_generation_params(None, _providers("openai"), ["tts"], saved_pick)
+
+    assert tts_params is None
 
 
 def test_adm_media_tools_mount_eager_not_deferred_with_credentials() -> None:
@@ -104,7 +114,7 @@ def test_adm_media_tools_mount_eager_not_deferred_with_credentials() -> None:
         enable_web_search=False,
         image_generation_params=ImageGenerationParams(model=_IMAGE_MODEL, api_key="sk-image"),
         video_generation_params=VideoGenerationParams(**_VIDEO, api_key="sk-video"),
-        tts_params=TTSParams(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key="sk-tts"),
+        tts_params=TTSParams(provider="elevenlabs", model=_TTS_MODEL, voice=_TTS_VOICE, api_key="sk-tts"),
     )
 
     tools: list[object] = []
@@ -121,7 +131,7 @@ def test_adm_media_tools_absent_without_credentials() -> None:
         enable_web_search=False,
         image_generation_params=ImageGenerationParams(model=_IMAGE_MODEL, api_key=None),
         video_generation_params=VideoGenerationParams(**_VIDEO, api_key=None),
-        tts_params=TTSParams(provider="openai", model="gpt-4o-mini-tts", voice="alloy", api_key=None),
+        tts_params=TTSParams(provider="elevenlabs", model=_TTS_MODEL, voice=_TTS_VOICE, api_key=None),
     )
 
     tools: list[object] = []
@@ -199,7 +209,7 @@ def test_tts_chain_from_voice_config_mounts_tts_generate() -> None:
     """TTS enabled + a full voice pick + key must mount tts_generate."""
     _, _, tts_params = _extract_media_generation_params(None, None, ["tts"], {**_TTS, "ttsApiKey": "sk-tts-voice"})
     assert tts_params is not None
-    assert (tts_params.provider, tts_params.model, tts_params.voice) == ("openai", "gpt-4o-mini-tts", "alloy")
+    assert (tts_params.provider, tts_params.model, tts_params.voice) == ("elevenlabs", _TTS_MODEL, _TTS_VOICE)
     assert tts_params.api_key == "sk-tts-voice"
 
     mixin = _mixin()

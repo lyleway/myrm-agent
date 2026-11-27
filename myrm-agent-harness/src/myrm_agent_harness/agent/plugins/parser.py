@@ -6,6 +6,9 @@ Orchestrates secure extraction and discovery with per-component failure isolatio
   - A bad skill is skipped; other skills and components still load.
   - A top-level ``mcp.json`` failure disables MCP; an invalid server variant is
     skipped; neither ever affects skills.
+  - A document over its decode ceiling (``rules.MAX_PLUGIN_JSON_BYTES`` for plugin.json and
+    mcp.json, ``rules.MAX_FRONTMATTER_CHARS`` for a skill or agent header) refuses the
+    whole package with ``DocumentTooLargeError``, like an archive over the zip limits.
 
 [INPUT]
 -- .agents::discover_agents / discover_workspace_files (POS: client-specific component discovery)
@@ -69,6 +72,8 @@ class AgentPluginParser:
             ArchiveSecurityError: archive-level security violation (Zip Bomb, size,
                 entry-count, executable-binary, traversal, symlink). The caller maps
                 this to a user-facing archive-security message.
+            DocumentTooLargeError: plugin.json, mcp.json or a skill or agent header is
+                over its decode ceiling; nothing of the package is returned.
         """
         ignored: list[str] = []
 
@@ -178,7 +183,7 @@ class AgentPluginParser:
             return None
 
         skill_md = skill_files["SKILL.md"].decode("utf-8", errors="replace")
-        metadata, description, pure_content = split_frontmatter(skill_md)
+        metadata, description, pure_content = split_frontmatter(skill_md, f"skills/{name}/SKILL.md")
         return PluginSkill(
             name=name,
             description=description,

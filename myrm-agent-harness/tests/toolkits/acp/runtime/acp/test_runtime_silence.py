@@ -20,9 +20,11 @@ from myrm_agent_harness.toolkits.acp.types import (
     create_event,
 )
 
+_WORKSPACE = "/tmp/ws"
+
 
 def _config() -> RuntimeConfig:
-    return RuntimeConfig(backend_type="acp", command="agent", cwd="/tmp/ws")
+    return RuntimeConfig(backend_type="acp", command="agent")
 
 
 def _is_working(event: RuntimeEvent) -> bool:
@@ -32,7 +34,7 @@ def _is_working(event: RuntimeEvent) -> bool:
 class TestSilentAgent:
     @pytest.mark.asyncio
     async def test_a_quiet_agent_keeps_reporting_how_long_the_turn_has_been_running(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1")
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         events = AcpRuntime._consume_events(handler, "s1", silence_seconds=0.05)
 
         quiet = [await asyncio.wait_for(anext(events), timeout=5) for _ in range(3)]
@@ -43,7 +45,7 @@ class TestSilentAgent:
 
     @pytest.mark.asyncio
     async def test_what_the_agent_says_comes_through_between_the_reports(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1")
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         events = AcpRuntime._consume_events(handler, "s1", silence_seconds=0.05)
         text = create_event(RuntimeEventType.TEXT_DELTA, "s1", content="hello")
 
@@ -57,7 +59,7 @@ class TestSilentAgent:
 
     @pytest.mark.asyncio
     async def test_an_agent_that_keeps_talking_is_never_reported_as_waiting(self) -> None:
-        handler = AcpCallbackHandler(_config(), "acp-1")
+        handler = AcpCallbackHandler(_config(), agent="mock", workspace=_WORKSPACE)
         handler.event_queue.put_nowait(create_event(RuntimeEventType.TEXT_DELTA, "s1", content="a"))
         handler.event_queue.put_nowait(None)
 
@@ -84,7 +86,7 @@ class TestMissingSdk:
     @pytest.mark.asyncio
     async def test_a_host_without_the_acp_extra_gets_one_named_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "acp", None)
-        runtime = AcpRuntime("agent", _config())
+        runtime = AcpRuntime("agent", _config(), workspace=_WORKSPACE)
 
         events = [event async for event in runtime.run_turn("hi", "s1")]
 

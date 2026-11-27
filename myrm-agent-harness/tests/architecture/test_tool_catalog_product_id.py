@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.agent.meta_tools.discover_capability.capability_gap import (
+from myrm_agent_harness.agent.tool_management.tool_catalog import (
     BUILTIN_TOOL_ID_TO_GROUP,
+    get_tool_product_id,
 )
-from myrm_agent_harness.agent.tool_management.tool_catalog import get_tool_product_id
 from myrm_agent_harness.core.security.tool_registry import TOOL_GROUP_MAP
 
 
 @pytest.mark.architecture
 def test_togglable_tool_groups_resolve_product_id() -> None:
-    """Every tool in a capability-gap group maps to the GUI togglable product ID."""
+    """Every tool in a GUI-togglable group maps to its GUI togglable product ID."""
     for product_id, group in BUILTIN_TOOL_ID_TO_GROUP.items():
         tools = TOOL_GROUP_MAP.get(group)
         assert tools, f"missing TOOL_GROUP_MAP entry for group {group!r}"

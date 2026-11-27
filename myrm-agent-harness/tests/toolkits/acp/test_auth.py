@@ -1,24 +1,21 @@
 """Tests for the ACP subscription auth subsystem.
 
-Covers auth profiles, credential detection/import/clear, the interactive login
-session driver, and auth_mode-aware environment sanitization.
+Covers auth profiles, credential detection/import/clear, and auth_mode-aware
+environment sanitization. The interactive login session is in ``test_login_session``.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import sys
+from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import (
-    AuthEventType,
-    AuthProfile,
     AuthStatus,
-    CliLoginSession,
+    CredentialStorageDisabledError,
     CredentialStore,
-    LoginStrategy,
     known_backends,
     profile_for,
 )
@@ -32,71 +29,80 @@ class TestProfiles:
     def test_known_backends(self) -> None:
         assert set(known_backends()) == {"codex", "claude", "gemini", "qwen"}
 
-    def test_permission_tables_cover_every_profile(self) -> None:
-        """A profile added without permission tables must fail, not mis-resolve args."""
-        from myrm_agent_harness.toolkits.acp.auth._profiles import _permission_backends
+    def test_permission_tables_cover_the_agents_that_need_them(self) -> None:
+        """Every agent the host launches by flags has a strip table, and exactly the CLI agents have a mode mapping.
 
-        assert set(_permission_backends()) == set(known_backends())
+        The app-server agent (codex) has neither: its approval policy and sandbox are set with every turn.
+        """
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+
+        _launch_args._check_tables()
+        assert set(_launch_args._PERMISSION_FLAGS_BY_BACKEND) == set(known_backends()) - {"codex"}
+        assert set(_launch_args._PERMISSION_MODE_ARGS) == {"claude"}
 
     def test_permission_table_drift_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A half-configured backend must raise with diagnostics instead of mis-resolving."""
-        from myrm_agent_harness.toolkits.acp.auth import _profiles
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
-        monkeypatch.delitem(_profiles._PERMISSION_FLAGS_BY_BACKEND, "qwen")
+        monkeypatch.delitem(_launch_args._PERMISSION_FLAGS_BY_BACKEND, "qwen")
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
-            _profiles._permission_backends()
+            _launch_args._check_tables()
 
     def test_resolve_rejects_a_half_configured_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """resolve_cli_args must fail loudly, never merge against missing permissions."""
-        from myrm_agent_harness.toolkits.acp.auth import _profiles
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
 
         monkeypatch.setattr(
-            _profiles,
+            _launch_args,
             "_PERMISSION_MODE_ARGS",
-            {k: v for k, v in _profiles._PERMISSION_MODE_ARGS.items() if k != "qwen"},
+            {k: v for k, v in _launch_args._PERMISSION_MODE_ARGS.items() if k != "claude"},
         )
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
-            _profiles.resolve_cli_args("qwen", ["--output-format", "stream-json"], "safe")
+            _launch_args.resolve_cli_args("claude", ["-p"], "safe")
 
-    def test_cli_launch_args_unknown_backend_is_empty(self) -> None:
+    def test_a_mode_mapping_on_an_acp_agent_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An ACP agent asks the host; a mode mapping for it would never be read, so it is a mistake."""
+        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+
+        monkeypatch.setitem(_launch_args._PERMISSION_MODE_ARGS, "qwen", {"safe": ("--approval-mode", "plan")})
+        with pytest.raises(ValueError, match="out of sync with _PROFILES"):
+            _launch_args.resolve_acp_args("qwen", [])
+
+    def test_cli_launch_args_only_exist_for_an_agent_driven_as_a_cli_process(self) -> None:
         from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args
 
         assert cli_launch_args("no-such-cli") == []
-        assert cli_launch_args("codex") == ["exec", "--json", "--skip-git-repo-check"]
+        assert cli_launch_args("claude") == ["-p", "--output-format", "stream-json", "--verbose"]
+        for backend in ("gemini", "qwen", "codex"):
+            assert cli_launch_args(backend) == []
 
-    @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
-    @pytest.mark.parametrize("mode", ["safe", "ask", "allow_all", "bypass"])
-    def test_every_backend_and_mode_resolves_arguments(self, backend: str, mode: str) -> None:
-        from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
+    @pytest.mark.parametrize("mode", ["safe", "allow_all"])
+    def test_the_cli_backend_resolves_arguments_in_every_mode(self, mode: str) -> None:
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
-        resolved = resolve_cli_args(backend, [], mode)
-        assert resolved, f"{backend}/{mode} resolved to no arguments"
+        assert resolve_cli_args("claude", [], mode), f"claude/{mode} resolved to no arguments"
+
+    @pytest.mark.parametrize("backend", ["gemini", "qwen"])
+    def test_every_acp_backend_resolves_arguments(self, backend: str) -> None:
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+
+        assert resolve_acp_args(backend, []).args, f"{backend} resolved to no arguments"
 
     def test_mode_owned_flags_replace_stale_config_flags(self) -> None:
         """Stored configs carrying an old permission flag must not override the mode."""
-        from myrm_agent_harness.toolkits.acp.auth._profiles import resolve_cli_args
+        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
 
-        # codex's `--yolo` is an alias of the bypass flag and conflicts with --sandbox.
-        assert "--yolo" not in resolve_cli_args("codex", ["--yolo"], "safe")
-        # A stored bypass flag must be replaced by the selected mode's own sandbox choice.
-        stale_bypass = resolve_cli_args("codex", ["--dangerously-bypass-approvals-and-sandbox"], "safe")
-        assert "--dangerously-bypass-approvals-and-sandbox" not in stale_bypass
-        assert stale_bypass[stale_bypass.index("--sandbox") + 1] == "read-only"
+        # A stored bypass flag must be replaced by the selected mode's own permission choice.
+        stale_bypass = resolve_cli_args("claude", ["--dangerously-skip-permissions"], "safe")
+        assert "--dangerously-skip-permissions" not in stale_bypass
+        assert stale_bypass[stale_bypass.index("--permission-mode") + 1] == "default"
         # The `--flag=value` spelling escapes a plain name lookup and must be stripped.
-        gemini = resolve_cli_args("gemini", ["--approval-mode=plan"], "allow_all")
-        assert gemini.count("--approval-mode") == 1
-        assert gemini[gemini.index("--approval-mode") + 1] == "yolo"
-        codex_eq = resolve_cli_args("codex", ["--sandbox=read-only"], "allow_all")
-        assert codex_eq.count("--sandbox") == 1
-        assert "--sandbox=read-only" not in codex_eq
-        # Stripping is scoped per backend: gemini's own sandbox toggle survives in both
-        # spellings, because that flag is the user's, not one this mapping owns.
-        assert "-s" in resolve_cli_args("gemini", ["-s"], "safe")
-        assert "--sandbox=true" in resolve_cli_args("gemini", ["--sandbox=true"], "safe")
-        # A hook-trust switch has no substitute in the mapping, so it must not be dropped.
-        assert "--dangerously-bypass-hook-trust" in resolve_cli_args(
-            "codex", ["--dangerously-bypass-hook-trust"], "safe"
-        )
+        claude_eq = resolve_cli_args("claude", ["--permission-mode=plan"], "allow_all")
+        assert claude_eq.count("--permission-mode") == 1
+        assert "--permission-mode=plan" not in claude_eq
+        # A tool allowlist has no substitute in the mapping, so it must not be dropped.
+        kept = resolve_cli_args("claude", ["--allowedTools", "Bash(git:*)"], "safe")
+        assert kept[-2:] == ["--allowedTools", "Bash(git:*)"]
 
     @pytest.mark.parametrize(
         ("token", "expected"),
@@ -136,17 +142,17 @@ class TestProfiles:
 
 
 class TestCredentialStore:
-    def test_state_not_authenticated(self, tmp_path) -> None:
+    def test_state_not_authenticated(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         state = store.state("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
         assert state.authenticated is False
 
-    def test_state_unknown_backend(self, tmp_path) -> None:
+    def test_state_unknown_backend(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.state("mystery").status is AuthStatus.UNKNOWN
 
-    def test_import_then_authenticated(self, tmp_path) -> None:
+    def test_import_then_authenticated(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         state = store.import_credential("codex", '{"tokens": {"access_token": "abc"}}')
         assert state.status is AuthStatus.AUTHENTICATED
@@ -156,50 +162,50 @@ class TestCredentialStore:
         assert json.loads(written.read_text())["tokens"]["access_token"] == "abc"
 
     @pytest.mark.skipif(not _POSIX, reason="POSIX file permissions")
-    def test_import_sets_owner_only_perms(self, tmp_path) -> None:
+    def test_import_sets_owner_only_perms(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
         mode = (tmp_path / ".codex" / "auth.json").stat().st_mode & 0o777
         assert mode == 0o600
 
-    def test_import_env_override_home(self, tmp_path) -> None:
+    def test_import_env_override_home(self, tmp_path: Path) -> None:
         persistent = tmp_path / "persistent" / ".codex"
         store = CredentialStore({"HOME": str(tmp_path), "CODEX_HOME": str(persistent)})
         store.import_credential("codex", '{"x": 1}')
         assert (persistent / "auth.json").is_file()
 
-    def test_import_claude_credentials_file(self, tmp_path) -> None:
+    def test_import_claude_credentials_file(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("claude", '{"claudeAiOauth": {"accessToken": "t"}}')
         assert (tmp_path / ".claude" / ".credentials.json").is_file()
 
-    def test_import_empty_raises(self, tmp_path) -> None:
+    def test_import_empty_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="empty"):
             store.import_credential("codex", "   ")
 
-    def test_import_invalid_json_raises(self, tmp_path) -> None:
+    def test_import_invalid_json_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="not valid JSON"):
             store.import_credential("codex", "not json")
 
-    def test_import_unknown_backend_raises(self, tmp_path) -> None:
+    def test_import_unknown_backend_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="No auth profile"):
             store.import_credential("mystery", '{"x": 1}')
 
     @pytest.mark.parametrize("bad", ["../escape.json", "sub/dir.json", ".."])
-    def test_import_bad_filename_raises(self, tmp_path, bad: str) -> None:
+    def test_import_bad_filename_raises(self, tmp_path: Path, bad: str) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="Invalid credential filename"):
             store.import_credential("codex", '{"x": 1}', filename=bad)
 
-    def test_import_empty_filename_uses_default(self, tmp_path) -> None:
+    def test_import_empty_filename_uses_default(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}', filename="")
         assert (tmp_path / ".codex" / "auth.json").is_file()
 
-    def test_clear_removes_credentials(self, tmp_path) -> None:
+    def test_clear_removes_credentials(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
         assert store.is_authenticated("codex") is True
@@ -207,43 +213,78 @@ class TestCredentialStore:
         assert state.status is AuthStatus.NOT_AUTHENTICATED
         assert store.is_authenticated("codex") is False
 
-    def test_clear_idempotent(self, tmp_path) -> None:
+    def test_clear_idempotent(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.clear("codex").status is AuthStatus.NOT_AUTHENTICATED
 
-    def test_empty_credential_file_not_authenticated(self, tmp_path) -> None:
+    def test_empty_credential_file_not_authenticated(self, tmp_path: Path) -> None:
         cred = tmp_path / ".codex" / "auth.json"
         cred.parent.mkdir(parents=True)
         cred.write_text("")
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.is_authenticated("codex") is False
 
-    def test_import_oversized_credential_raises(self, tmp_path) -> None:
+    def test_import_oversized_credential_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         oversized = '{"x": "' + "a" * (300 * 1024) + '"}'
         with pytest.raises(ValueError, match="exceeds"):
             store.import_credential("codex", oversized)
 
-    def test_clear_unknown_backend_raises(self, tmp_path) -> None:
+    def test_clear_unknown_backend_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="No auth profile"):
             store.clear("mystery")
 
-    def test_clear_survives_unlink_oserror(self, tmp_path, monkeypatch) -> None:
+    def test_clear_survives_unlink_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
 
         real_unlink = tmp_path.__class__.unlink
 
-        def _flaky_unlink(self, *args, **kwargs):
+        def _flaky_unlink(self: Path, missing_ok: bool = False) -> None:
             if self.name.endswith("auth.json"):
                 raise OSError("permission denied")
-            return real_unlink(self, *args, **kwargs)
+            real_unlink(self, missing_ok=missing_ok)
 
         monkeypatch.setattr(tmp_path.__class__, "unlink", _flaky_unlink)
 
         state = store.clear("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
+
+
+class TestCredentialStoreThatKeepsNothing:
+    """A deployment that must not hold a user's subscription credentials builds a store that refuses them."""
+
+    @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
+    def test_import_is_refused_before_anything_is_written(self, tmp_path: Path, backend: str) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential(backend, '{"x": 1}')
+
+        assert list(tmp_path.iterdir()) == []
+        assert store.is_authenticated(backend) is False
+
+    def test_refusal_does_not_depend_on_the_content_being_valid(self, tmp_path: Path) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential("codex", "")
+        with pytest.raises(CredentialStorageDisabledError):
+            store.import_credential("mystery", "x")
+
+    def test_a_credential_stored_before_the_policy_applied_can_still_be_seen_and_removed(self, tmp_path: Path) -> None:
+        CredentialStore({"HOME": str(tmp_path)}).import_credential("codex", '{"x": 1}')
+        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
+
+        assert store.is_authenticated("codex") is True
+        assert store.clear("codex").status is AuthStatus.NOT_AUTHENTICATED
+        assert store.is_authenticated("codex") is False
+
+    def test_the_default_store_keeps_credentials(self, tmp_path: Path) -> None:
+        store = CredentialStore({"HOME": str(tmp_path)})
+
+        assert store.import_credential("codex", '{"x": 1}').authenticated is True
 
 
 class TestBuildSafeEnvAuthMode:
@@ -286,181 +327,3 @@ class TestBuildSafeEnvAuthMode:
         )
         env = build_safe_env(cfg, base_env={"OPENAI_API_KEY": "from-host", "PATH": "/bin"})
         assert env["OPENAI_API_KEY"] == "injected"
-
-
-_LOGIN_OK_SCRIPT = (
-    "import os, pathlib;"
-    "print('To sign in, visit https://auth.example.com/device and enter ABCD-1234');"
-    "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-    "p.parent.mkdir(parents=True, exist_ok=True);"
-    "p.write_text('{\"ok\": true}')"
-)
-
-_LOGIN_FAIL_SCRIPT = "import sys; sys.stderr.write('login failed\\n'); sys.exit(3)"
-
-
-def _codex_login_profile(login_args: tuple[str, ...]) -> AuthProfile:
-    return AuthProfile(
-        backend="codex",
-        home_env="CODEX_HOME",
-        home_dir=".codex",
-        credential_files=("auth.json",),
-        login_strategy=LoginStrategy.DEVICE_CODE,
-        login_args=login_args,
-        logout_args=None,
-        needs_code_input=False,
-        api_key_env=("OPENAI_API_KEY",),
-    )
-
-
-class TestCliLoginSession:
-    @pytest.mark.asyncio
-    async def test_non_scriptable_yields_import_prompt(self) -> None:
-        profile = profile_for("gemini")
-        assert profile is not None
-        session = CliLoginSession("gemini", profile)
-        events = [e async for e in session.run()]
-        assert len(events) == 1
-        assert events[0].type is AuthEventType.PROMPT
-        assert "import" in events[0].message.lower()
-
-    @pytest.mark.asyncio
-    async def test_successful_login_persists_and_succeeds(self, tmp_path) -> None:
-        codex_home = tmp_path / ".codex"
-        profile = _codex_login_profile(("-c", _LOGIN_OK_SCRIPT))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(codex_home)},
-        )
-        events = [e async for e in session.run()]
-        types = [e.type for e in events]
-        assert AuthEventType.SUCCESS in types
-
-        prompts = [e for e in events if e.type is AuthEventType.PROMPT]
-        assert any(e.url == "https://auth.example.com/device" for e in prompts)
-        assert any(e.code == "ABCD-1234" for e in prompts)
-        assert (codex_home / "auth.json").is_file()
-
-    @pytest.mark.asyncio
-    async def test_failed_login_emits_error(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", _LOGIN_FAIL_SCRIPT))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-
-    @pytest.mark.asyncio
-    async def test_missing_executable_emits_error(self, tmp_path) -> None:
-        profile = _codex_login_profile(("login",))
-        session = CliLoginSession(
-            "/nonexistent/codex-binary-xyz",
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert any(e.type is AuthEventType.ERROR for e in events)
-
-    @pytest.mark.asyncio
-    async def test_login_timeout_emits_error(self, tmp_path) -> None:
-        # Never exits: forces the asyncio.timeout path (L139-142).
-        sleepy = "import time; time.sleep(60)"
-        profile = _codex_login_profile(("-c", sleepy))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-            timeout_seconds=1,
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-        assert "timed out" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_finished_without_credential_emits_error(self, tmp_path) -> None:
-        # Exits 0 but never writes a credential file (L150-153).
-        noop = "pass"
-        profile = _codex_login_profile(("-c", noop))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-        assert "no credential was persisted" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_feed_forwards_line_to_stdin(self, tmp_path) -> None:
-        # Reads one stdin line and prints it back; exercises feed() (L157-166).
-        echo_stdin = (
-            "import sys, os, pathlib;"
-            "line = sys.stdin.readline();"
-            "print('received:' + line.strip());"
-            "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-            "p.parent.mkdir(parents=True, exist_ok=True);"
-            "p.write_text('{\"ok\": true}')"
-        )
-        profile = _codex_login_profile(("-c", echo_stdin))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        iterator = session.run()
-        first = await anext(iterator)  # STATUS: process spawned, stdin open
-        assert first.type is AuthEventType.STATUS
-        # The child blocks on stdin.readline(); unblock it by feeding a line now.
-        await session.feed("ABCD-EFGH")
-        rest = [e async for e in iterator]
-        events = [first, *rest]
-        assert any(e.type is AuthEventType.SUCCESS for e in events)
-        assert any("received:ABCD-EFGH" in e.message for e in events)
-
-    @pytest.mark.asyncio
-    async def test_feed_after_process_exit_is_noop(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", "pass"))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        _ = [e async for e in session.run()]
-        # Process is gone: feed must not raise (guarded by proc is None / closing stdin).
-        await session.feed("ABCD-EFGH")
-
-    @pytest.mark.asyncio
-    async def test_cancel_terminates_process_group(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", "import time; time.sleep(60)"))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        iterator = session.run()
-        await anext(iterator)  # STATUS event: process spawned
-        await session.cancel()
-        # cancel() is idempotent and safe after termination.
-        await session.cancel()
-
-    @pytest.mark.asyncio
-    async def test_classify_skips_blank_line(self, tmp_path) -> None:
-        # A blank console line must not surface as an event (L175-176).
-        blank_line = (
-            "import sys, os, pathlib;"
-            "print('');"
-            "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-            "p.parent.mkdir(parents=True, exist_ok=True);"
-            "p.write_text('{\"ok\": true}')"
-        )
-        profile = _codex_login_profile(("-c", blank_line))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert not any(e.message == "" for e in events)

@@ -1,67 +1,66 @@
-"""Unit tests for AcpRuntime MCP config conversion."""
+"""MCP servers reach an ACP session as stdio servers, whether the session is new or given back."""
 
 from __future__ import annotations
 
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
-from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import _mcp_configs_to_acp_stdio
-from myrm_agent_harness.toolkits.acp.types import McpServerConfig, RuntimeConfig
+from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabilities
+from myrm_agent_harness.toolkits.acp.runtime.acp.sessions import AgentSessions, acp_mcp_servers
+from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, McpServerConfig
+
+from ._fakes import MemorySessionStore
+
+_WORKSPACE = "/tmp/ws"
+_SERVERS = [McpServerConfig(name="fs", command="mcp-fs", args=["--ro"], env={"FOO": "bar"})]
 
 
-def test_mcp_configs_to_acp_stdio_none_or_empty() -> None:
-    assert _mcp_configs_to_acp_stdio(None) is None
-    assert _mcp_configs_to_acp_stdio([]) is None
+def test_nothing_to_pass_is_none() -> None:
+    assert acp_mcp_servers(None) is None
+    assert acp_mcp_servers([]) is None
 
 
-def test_mcp_configs_to_acp_stdio_converts_stdio_servers() -> None:
-    servers = [
-        McpServerConfig(name="fs", command="mcp-fs", args=["--ro"], env={"FOO": "bar"}),
-    ]
-    converted = _mcp_configs_to_acp_stdio(servers)
+def test_stdio_servers_are_converted() -> None:
+    converted = acp_mcp_servers(_SERVERS)
+
     assert converted is not None
-    assert len(converted) == 1
-    assert converted[0].name == "fs"
-    assert converted[0].command == "mcp-fs"
-    assert converted[0].args == ["--ro"]
-    assert len(converted[0].env) == 1
-    assert converted[0].env[0].name == "FOO"
-    assert converted[0].env[0].value == "bar"
+    (server,) = converted
+    assert (server.name, server.command, server.args) == ("fs", "mcp-fs", ["--ro"])
+    assert [(variable.name, variable.value) for variable in server.env] == [("FOO", "bar")]
 
 
-@pytest.mark.asyncio
-async def test_create_session_passes_mcp_servers_when_configured() -> None:
-    from unittest.mock import AsyncMock, MagicMock
+async def test_a_new_session_is_opened_with_the_servers() -> None:
+    sessions = AgentSessions("claude", _WORKSPACE, None)
+    conn = MagicMock()
+    conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1", modes=None))
 
-    from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
+    opened = await sessions.open(conn, "chat-1", AgentCapabilities(), _SERVERS)
 
-    config = RuntimeConfig(backend_type="acp", command="claude", cwd="/tmp/ws")
-    runtime = AcpRuntime("claude", config)
-    runtime._conn = MagicMock()
-    runtime._conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-1"))
-    runtime._handler = MagicMock()
-
-    mcp = [McpServerConfig(name="fs", command="mcp-fs", args=[])]
-    await runtime._create_session(mcp_servers=mcp)
-
-    runtime._conn.new_session.assert_awaited_once()
-    _, kwargs = runtime._conn.new_session.await_args
-    assert kwargs["cwd"] == "/tmp/ws"
-    assert kwargs["mcp_servers"] is not None
+    conn.new_session.assert_awaited_once()
+    kwargs = conn.new_session.await_args.kwargs
+    assert kwargs["cwd"] == _WORKSPACE
     assert len(kwargs["mcp_servers"]) == 1
-    assert runtime._session_id == "sess-1"
+    assert (opened.agent_session_id, sessions.agent_session("chat-1")) == ("sess-1", "sess-1")
 
 
-@pytest.mark.asyncio
-async def test_create_session_omits_mcp_when_not_configured() -> None:
-    from unittest.mock import AsyncMock, MagicMock
+async def test_a_new_session_without_servers_leaves_the_sdk_default() -> None:
+    sessions = AgentSessions("claude", _WORKSPACE, None)
+    conn = MagicMock()
+    conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-2", modes=None))
 
-    from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
+    await sessions.open(conn, "chat-1", AgentCapabilities(), None)
 
-    config = RuntimeConfig(backend_type="acp", command="claude", cwd="/tmp/ws")
-    runtime = AcpRuntime("claude", config)
-    runtime._conn = MagicMock()
-    runtime._conn.new_session = AsyncMock(return_value=MagicMock(session_id="sess-2"))
+    conn.new_session.assert_awaited_once_with(cwd=_WORKSPACE, mcp_servers=None)
 
-    await runtime._create_session(mcp_servers=None)
 
-    runtime._conn.new_session.assert_awaited_once_with(cwd="/tmp/ws")
+async def test_a_session_given_back_is_opened_with_the_servers_too() -> None:
+    store = MemorySessionStore()
+    store.records["chat-1"] = CliSessionRecord("sess-3", _WORKSPACE)
+    sessions = AgentSessions("claude", _WORKSPACE, store)
+    conn = MagicMock()
+    conn.resume_session = AsyncMock(return_value=MagicMock(modes=None))
+
+    opened = await sessions.open(conn, "chat-1", AgentCapabilities(resume_session=True), _SERVERS)
+
+    kwargs = conn.resume_session.await_args.kwargs
+    assert (kwargs["session_id"], kwargs["cwd"], len(kwargs["mcp_servers"])) == ("sess-3", _WORKSPACE, 1)
+    assert opened.agent_session_id == "sess-3"

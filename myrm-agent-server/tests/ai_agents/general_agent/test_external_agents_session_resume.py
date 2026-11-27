@@ -81,7 +81,6 @@ def _new_mixin(cli: _FakeClaude, scope_id: str | None) -> ExternalAgentsMixin:
             "type": "cli",
             "command": str(cli.command),
             "args": ["-p", "--output-format", "stream-json"],
-            "cwd": str(cli.workdir),
             "permissionMode": "safe",
             "timeout": 20,
         }
@@ -91,15 +90,14 @@ def _new_mixin(cli: _FakeClaude, scope_id: str | None) -> ExternalAgentsMixin:
     mixin._runtime_pool_from_registry = False
     mixin._owned_runtime_pool = None
     mixin.agent_id = "general"
-    mixin.force_external_agent = None
     return mixin
 
 
-async def _turn(mixin: ExternalAgentsMixin, session_id: str) -> str:
-    """Run one delegation turn and return the session id the fake CLI answered with."""
+async def _turn(mixin: ExternalAgentsMixin, session_id: str, workspace: Path) -> str:
+    """Run one delegation turn in ``workspace`` and return the session id the fake CLI answered with."""
     assert mixin._runtime_pool is not None
     text: list[str] = []
-    async for event in mixin._runtime_pool.run_turn("claude", "prompt", session_id):
+    async for event in mixin._runtime_pool.run_turn("claude", "prompt", session_id, workspace=str(workspace)):
         assert event.type != RuntimeEventType.ERROR, event.data
         if event.type == RuntimeEventType.TEXT_DELTA:
             text.append(str(event.data.get("content")))
@@ -119,10 +117,10 @@ async def test_a_restarted_server_resumes_the_external_session_of_the_chat(fake_
     session_id = f"claude-{chat_id}"
     first_server = _new_mixin(fake_claude, chat_id)
     await first_server._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(first_server, session_id)
+    first = await _turn(first_server, session_id, fake_claude.workdir)
 
     restarted = await _restart_server(fake_claude, chat_id)
-    second = await _turn(restarted, session_id)
+    second = await _turn(restarted, session_id, fake_claude.workdir)
 
     assert first
     assert second == first
@@ -135,10 +133,10 @@ async def test_an_incognito_chat_starts_a_new_external_session_after_a_restart(f
     session_id = f"claude-{chat_id}"
     first_server = _new_mixin(fake_claude, chat_id)
     await first_server._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(first_server, session_id)
+    first = await _turn(first_server, session_id, fake_claude.workdir)
 
     restarted = await _restart_server(fake_claude, chat_id)
-    second = await _turn(restarted, session_id)
+    second = await _turn(restarted, session_id, fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
@@ -147,11 +145,11 @@ async def test_an_incognito_chat_starts_a_new_external_session_after_a_restart(f
 async def test_without_a_chat_scope_nothing_is_persisted(fake_claude: _FakeClaude) -> None:
     ephemeral = _new_mixin(fake_claude, None)
     await ephemeral._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(ephemeral, "claude-ephemeral")
+    first = await _turn(ephemeral, "claude-ephemeral", fake_claude.workdir)
 
     again = _new_mixin(fake_claude, None)
     await again._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    second = await _turn(again, "claude-ephemeral")
+    second = await _turn(again, "claude-ephemeral", fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
@@ -169,13 +167,43 @@ async def test_flushing_the_chat_makes_the_external_agent_start_over(fake_claude
     session_id = f"claude-{chat_id}"
     before = _new_mixin(fake_claude, chat_id)
     await before._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    first = await _turn(before, session_id)
+    first = await _turn(before, session_id, fake_claude.workdir)
 
     assert await ChatService.focus_flush_session(chat_id) is True
 
     after = _new_mixin(fake_claude, chat_id)
     await after._do_setup_external_agents([], mount_invoke_acp_agent_tool=False)
-    second = await _turn(after, session_id)
+    second = await _turn(after, session_id, fake_claude.workdir)
 
     assert second != first
     assert fake_claude.resume_args() == [None, None]
+
+
+@pytest.mark.parametrize("entries", [("direct", "tool"), ("tool", "direct")])
+async def test_a_conversation_begun_through_one_entry_is_continued_through_the_other(
+    entries: tuple[str, str], fake_claude: _FakeClaude
+) -> None:
+    """The user's own turn and the model's call name the same session, so each resumes what the other began."""
+    chat_id = await _create_chat()
+    mixin = _new_mixin(fake_claude, chat_id)
+    mixin.locale = "en"
+    mixin.quote = None
+    mixin.declared_allowed_roots = (str(fake_claude.workdir),)
+    tools: list[object] = []
+    await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
+    delegate_tool = next(t for t in tools if getattr(t, "name", None) == "invoke_acp_agent_tool")
+
+    async def the_user_addresses_the_agent() -> None:
+        async for _ in mixin._direct_delegate_stream("claude", "prompt"):
+            pass
+
+    async def the_model_calls_the_tool() -> None:
+        await delegate_tool.ainvoke({"agent_name": "claude", "task": "prompt"})  # type: ignore[attr-defined]
+
+    turns = {"direct": the_user_addresses_the_agent, "tool": the_model_calls_the_tool}
+    for entry in entries:
+        await turns[entry]()
+
+    began, continued = fake_claude.resume_args()
+    assert began is None
+    assert continued, "the second entry opened a new external session instead of resuming the first one's"

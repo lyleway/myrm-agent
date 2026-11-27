@@ -6,12 +6,16 @@ Only external I/O (Bot API calls, DB) is mocked.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Iterator
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.channels.providers.telegram.channel import TelegramChannel
 from app.channels.types import TopicContext
+from app.channels.types.messages import InboundMessage
 
 
 @dataclass
@@ -23,11 +27,18 @@ class FakeAgentProfile:
 class FakeTopicManager:
     """Stub for SqlTopicManager that returns no binding."""
 
-    async def resolve_topic(self, *args, **kwargs) -> TopicContext | None:
+    async def resolve_topic(self, channel: str, chat_id: str, thread_id: str | None) -> TopicContext | None:
         return None
 
 
-def _build_text_update(text: str, chat_id: int = 123, user_id: int = 456) -> dict:
+class BoundTopicManager(FakeTopicManager):
+    """Stub for SqlTopicManager whose every binding names the agent ``active-agent``."""
+
+    async def resolve_topic(self, channel: str, chat_id: str, thread_id: str | None) -> TopicContext | None:
+        return TopicContext(topic_id="t", agent_id="active-agent")
+
+
+def _build_text_update(text: str, chat_id: int = 123, user_id: int = 456) -> dict[str, object]:
     """Build a Telegram Update payload with a text message."""
     return {
         "update_id": 1,
@@ -41,7 +52,7 @@ def _build_text_update(text: str, chat_id: int = 123, user_id: int = 456) -> dic
     }
 
 
-def _build_callback_update(data: str, chat_id: int = 123, user_id: int = 456, message_id: int = 99) -> dict:
+def _build_callback_update(data: str, chat_id: int = 123, user_id: int = 456, message_id: int = 99) -> dict[str, object]:
     """Build a Telegram Update payload with a callback_query."""
     return {
         "update_id": 2,
@@ -62,30 +73,38 @@ def _build_callback_update(data: str, chat_id: int = 123, user_id: int = 456, me
 
 
 @pytest.fixture
-def channel():
-    """Create a TelegramChannel with mocked HTTP client."""
-    from app.channels.providers.telegram.channel import TelegramChannel
+def client() -> AsyncMock:
+    """The Bot API client of the channel under test."""
+    return AsyncMock()
 
+
+@pytest.fixture
+def emitted() -> list[InboundMessage]:
+    """The messages the channel passes on to the agent router."""
+    return []
+
+
+@pytest.fixture
+def channel(client: AsyncMock, emitted: list[InboundMessage]) -> Iterator[TelegramChannel]:
+    """A TelegramChannel with the mocked Bot API ``client`` that records what it passes on in ``emitted``."""
     ch = TelegramChannel(bot_token="123:FAKE", commands=[])
-    ch._client = AsyncMock()
-    ch._client.answer_callback_query = AsyncMock()
-    ch._client.send_message = AsyncMock()
-    ch._client.edit_message_text = AsyncMock()
+    ch._client = client
     ch._bot_username = "testbot"
-    ch._emitted_messages: list = []
 
-    async def _capture_emit(msg, raw=None):
-        ch._emitted_messages.append(msg)
+    async def capture_emit(msg: InboundMessage, update: dict[str, object]) -> None:
+        emitted.append(msg)
 
-    ch._buffer_or_emit = _capture_emit
-    return ch
+    with patch.object(ch, "_buffer_or_emit", capture_emit):
+        yield ch
 
 
 class TestAgentCommandWebhookIntegration:
     """Full /agent command flow via handle_webhook_update."""
 
     @pytest.mark.asyncio
-    async def test_agent_command_sends_picker_and_suppresses(self, channel):
+    async def test_agent_command_sends_picker_and_suppresses(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """Webhook with /agent text → picker sent, no message emitted."""
         update = _build_text_update("/agent")
 
@@ -106,10 +125,10 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 0
-        channel._client.send_message.assert_awaited_once()
+        assert len(emitted) == 0
+        client.send_message.assert_awaited_once()
 
-        call_args = channel._client.send_message.call_args
+        call_args = client.send_message.call_args
         assert call_args[0][0] == "123"
         reply_markup = call_args.kwargs.get("reply_markup")
         assert reply_markup is not None
@@ -119,7 +138,9 @@ class TestAgentCommandWebhookIntegration:
         assert keyboard[1][0]["callback_data"] == "ag:agent-2"
 
     @pytest.mark.asyncio
-    async def test_ag_callback_edits_and_emits_bind(self, channel):
+    async def test_ag_callback_edits_and_emits_bind(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """Webhook with ag: callback → editMessage + emit /bind."""
         update = _build_callback_update("ag:my-agent", message_id=42)
 
@@ -130,22 +151,19 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        channel._client.edit_message_text.assert_awaited_once()
-        call_args = channel._client.edit_message_text.call_args
+        client.edit_message_text.assert_awaited_once()
+        call_args = client.edit_message_text.call_args
         assert call_args[0][0] == "123"
         assert call_args[0][1] == 42
         assert "My Agent" in call_args[0][2]
         assert call_args.kwargs.get("reply_markup") == {"inline_keyboard": []}
 
-        assert len(channel._emitted_messages) == 1
-        emitted = channel._emitted_messages[0]
-        assert emitted.content == "/bind my-agent"
+        assert len(emitted) == 1
+        assert emitted[0].content == "/bind my-agent"
 
     @pytest.mark.asyncio
-    async def test_ag_callback_answers_query(self, channel):
+    async def test_ag_callback_answers_query(self, channel: TelegramChannel, client: AsyncMock) -> None:
         """Verify answerCallbackQuery is scheduled for ag: callbacks."""
-        import asyncio
-
         update = _build_callback_update("ag:x")
 
         with patch(
@@ -156,20 +174,24 @@ class TestAgentCommandWebhookIntegration:
             await channel.handle_webhook_update(update)
             await asyncio.sleep(0)
 
-        channel._client.answer_callback_query.assert_awaited_once_with("cbq-001")
+        client.answer_callback_query.assert_awaited_once_with("cbq-001")
 
     @pytest.mark.asyncio
-    async def test_normal_message_emits_normally(self, channel):
+    async def test_normal_message_emits_normally(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """Non-command messages pass through to emit."""
         update = _build_text_update("Hello world")
         await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 1
-        assert channel._emitted_messages[0].content == "Hello world"
-        channel._client.send_message.assert_not_awaited()
+        assert len(emitted) == 1
+        assert emitted[0].content == "Hello world"
+        client.send_message.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_agent_command_with_bot_suffix(self, channel):
+    async def test_agent_command_with_bot_suffix(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """Webhook with /agent@testbot → same picker behavior."""
         update = _build_text_update("/agent@testbot")
 
@@ -187,11 +209,11 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 0
-        channel._client.send_message.assert_awaited_once()
+        assert len(emitted) == 0
+        client.send_message.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_picker_marks_current_agent(self, channel):
+    async def test_picker_marks_current_agent(self, channel: TelegramChannel, client: AsyncMock) -> None:
         """Picker should show ✅ prefix on currently bound agent."""
         update = _build_text_update("/agent")
 
@@ -199,10 +221,6 @@ class TestAgentCommandWebhookIntegration:
             FakeAgentProfile(id="active-agent", display_name="Active"),
             FakeAgentProfile(id="other-agent", display_name="Other"),
         ]
-
-        class BoundTopicManager(FakeTopicManager):
-            async def resolve_topic(self, *args, **kwargs):
-                return TopicContext(topic_id="t", agent_id="active-agent")
 
         with (
             patch(
@@ -217,13 +235,15 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        call_args = channel._client.send_message.call_args
+        call_args = client.send_message.call_args
         keyboard = call_args.kwargs["reply_markup"]["inline_keyboard"]
         assert keyboard[0][0]["text"].startswith("✅")
         assert not keyboard[1][0]["text"].startswith("✅")
 
     @pytest.mark.asyncio
-    async def test_agent_command_with_trailing_space_still_matches(self, channel):
+    async def test_agent_command_with_trailing_space_still_matches(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """'/agent ' with trailing space → still triggers picker."""
         update = _build_text_update("/agent ")
 
@@ -241,24 +261,26 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 0
-        channel._client.send_message.assert_awaited_once()
+        assert len(emitted) == 0
+        client.send_message.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_agent_command_with_args_passes_through(self, channel):
+    async def test_agent_command_with_args_passes_through(self, channel: TelegramChannel, emitted: list[InboundMessage]) -> None:
         """'/agent help' should NOT trigger picker — only bare /agent."""
         update = _build_text_update("/agent help")
         await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 1
-        assert channel._emitted_messages[0].content == "/agent help"
+        assert len(emitted) == 1
+        assert emitted[0].content == "/agent help"
 
     @pytest.mark.asyncio
-    async def test_ag_callback_edit_failure_still_emits_bind(self, channel):
+    async def test_ag_callback_edit_failure_still_emits_bind(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """If editMessageText fails, /bind still emitted."""
         update = _build_callback_update("ag:fail-agent", message_id=55)
 
-        channel._client.edit_message_text.side_effect = RuntimeError("Telegram 403")
+        client.edit_message_text.side_effect = RuntimeError("Telegram 403")
 
         with patch(
             "app.services.agent.agent_service.AgentService.get_agent_by_id",
@@ -267,11 +289,13 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        assert len(channel._emitted_messages) == 1
-        assert channel._emitted_messages[0].content == "/bind fail-agent"
+        assert len(emitted) == 1
+        assert emitted[0].content == "/bind fail-agent"
 
     @pytest.mark.asyncio
-    async def test_ag_callback_agent_not_found_uses_id_as_name(self, channel):
+    async def test_ag_callback_agent_not_found_uses_id_as_name(
+        self, channel: TelegramChannel, client: AsyncMock, emitted: list[InboundMessage]
+    ) -> None:
         """If get_agent_by_id returns None, use raw agent_id in confirmation."""
         update = _build_callback_update("ag:unknown-id", message_id=60)
 
@@ -282,15 +306,15 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        call_args = channel._client.edit_message_text.call_args
+        call_args = client.edit_message_text.call_args
         assert "unknown-id" in call_args[0][2]
-        assert len(channel._emitted_messages) == 1
-        assert channel._emitted_messages[0].content == "/bind unknown-id"
+        assert len(emitted) == 1
+        assert emitted[0].content == "/bind unknown-id"
 
     @pytest.mark.asyncio
-    async def test_picker_passes_thread_id_to_message(self, channel):
+    async def test_picker_passes_thread_id_to_message(self, channel: TelegramChannel, client: AsyncMock) -> None:
         """Picker message should include message_thread_id for Forum Topics."""
-        update = {
+        update: dict[str, object] = {
             "update_id": 1,
             "message": {
                 "message_id": 10,
@@ -317,5 +341,5 @@ class TestAgentCommandWebhookIntegration:
         ):
             await channel.handle_webhook_update(update)
 
-        call_kwargs = channel._client.send_message.call_args.kwargs
+        call_kwargs = client.send_message.call_args.kwargs
         assert call_kwargs.get("message_thread_id") == 42

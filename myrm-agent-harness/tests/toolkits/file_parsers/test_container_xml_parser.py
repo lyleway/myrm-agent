@@ -143,30 +143,23 @@ class TestOffTheEventLoop:
         assert threads[0] != threading.current_thread().name
 
     @pytest.mark.asyncio
-    async def test_the_event_loop_keeps_ticking_while_an_archive_is_read(
+    async def test_the_event_loop_runs_while_an_archive_is_read(
         self, container: tuple[FileParser, str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         parser, path = container
         parse_sync = vars(type(parser))["_parse_sync"]
+        loop_ran = threading.Event()
 
-        def slow(self: FileParser, file: Path) -> str:
-            time.sleep(0.4)  # stands in for a large container
+        def wait_for_the_loop(self: FileParser, file: Path) -> str:
+            # The event loop is the one that sets the event, so a read that held the loop could never be answered.
+            assert loop_ran.wait(timeout=10), "the event loop did not run while the archive was being read"
             return parse_sync(self, file)
 
-        monkeypatch.setattr(type(parser), "_parse_sync", slow)
-        ticks = 0
+        async def mark_the_loop_as_run() -> None:
+            loop_ran.set()
 
-        async def ticker() -> None:
-            nonlocal ticks
-            while True:
-                await asyncio.sleep(0.01)
-                ticks += 1
+        monkeypatch.setattr(type(parser), "_parse_sync", wait_for_the_loop)
+        marker = asyncio.create_task(mark_the_loop_as_run())
 
-        ticker_task = asyncio.create_task(ticker())
-        try:
-            await parser.parse(path)
-        finally:
-            ticker_task.cancel()
-
-        # A blocked loop records no tick at all; a responsive one records dozens (the bound is deliberately lax).
-        assert ticks >= 10
+        await parser.parse(path)
+        await marker

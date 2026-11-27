@@ -9,10 +9,13 @@ self-report-and-ignore semantics:
 
 [INPUT]
 -- .models::AgentPluginManifestMeta (POS: shared parser output dataclasses)
+-- utils.clean_json::load_clean_json (POS: Parse step for the plugin.json and mcp.json of a plugin package that comes from an archive the user uploaded or a market supplied.)
+-- .rules::is_valid_plugin_name, MAX_PLUGIN_JSON_BYTES, ensure_document_size (POS: plugin name predicate, the decode ceiling of a JSON document and the refusal of one over it)
 
 [OUTPUT]
 -- decode_manifest_json / parse_manifest: validate plugin.json under the closed
-   schema with $schema version negotiation.
+   schema with $schema version negotiation; every decoded string is UTF-8 encodable, nesting at most 64 levels.
+-- decode_manifest_json: a payload over ``MAX_PLUGIN_JSON_BYTES`` is refused undecoded (``DocumentTooLargeError``).
 
 [POS]
 Closed-schema plugin.json manifest validator for the framework parser.
@@ -23,8 +26,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from myrm_agent_harness.utils.clean_json import load_clean_json
+
 from .models import AgentPluginManifestMeta, PluginCapabilityTier
-from .rules import is_valid_plugin_name
+from .rules import MAX_PLUGIN_JSON_BYTES, ensure_document_size, is_valid_plugin_name
 
 # Canonical schema identifiers for the 1.0.0 release (spec §5.2 / §7.2.1).
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
@@ -225,15 +230,17 @@ def _validate_author(value: object) -> dict[str, str] | None:
 
 
 def decode_manifest_json(raw: bytes) -> dict[str, Any] | None:
-    """Decode plugin.json bytes into a dict, tolerating a UTF-8 BOM.
+    """Decode plugin.json bytes into a dict, tolerating a UTF-8 BOM; every string, key or value, is UTF-8 encodable.
 
-    Returns ``None`` when the payload is not a JSON object.
+    Raises ``DocumentTooLargeError`` when the payload is over ``MAX_PLUGIN_JSON_BYTES``, before any of it is decoded, and
+    ``ManifestParseError`` when it is not valid JSON or not a top-level object.
     """
+    ensure_document_size("plugin.json", len(raw), MAX_PLUGIN_JSON_BYTES, "bytes")
     text = raw.decode("utf-8", errors="replace")
     if text.startswith("\ufeff"):
         text = text[1:]
     try:
-        decoded = json.loads(text)
+        decoded = load_clean_json(text)
     except json.JSONDecodeError as exc:
         raise ManifestParseError(f"plugin.json is not valid JSON: {exc}") from exc
     if isinstance(decoded, dict):

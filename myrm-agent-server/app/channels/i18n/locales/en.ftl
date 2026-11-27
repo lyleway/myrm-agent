@@ -196,6 +196,7 @@ cron_notice_interrupted_message =
     The app stopped while it was running, so this run did not finish.
 cron_system_job_heartbeat = Agent Auto-Check
 new_session_started =  New conversation started. Your next message begins a fresh session.
+new_session_failed =  Could not start a new conversation. Send /new again to retry.
 compact_not_configured = ℹ Compaction not configured.
 compact_success =  Context compacted: { $message_count } messages summarized, ~{ $tokens_saved } tokens saved.{ $topic_hint }
 compact_topic_hint = (focus: { $topic })
@@ -323,6 +324,7 @@ knowledge_patch_review_reason = Knowledge update suggested from a gap in past co
 approval_card_title = ⚠️ **Approval Required: { $action }**
 approval_card_severity = Severity: `{ $severity }`
 approval_card_open_app = Open the Myrm AI app to review and decide.
+approval_permission_title = 🔐 **An external agent asks for your permission**
 approval_draft_title = ✏️ **Reply awaiting your review**
 approval_draft_incoming = **Incoming message**
 approval_draft_reply = **Drafted reply**

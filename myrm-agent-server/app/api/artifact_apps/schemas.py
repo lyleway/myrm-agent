@@ -3,9 +3,10 @@
 [INPUT]
 - app.services.artifact_apps.capabilities (POS: Capability, Decision, Outcome)
 - app.services.artifact_apps.fetch_proxy (POS: Method and size limits)
+- app.services.artifact_apps.ai_proxy (POS: Prompt and output limits)
 
 [OUTPUT]
-- AppSummary / AppDetail / GrantBody / GrantView / ActivityBody / ActivityView / FetchBody / FetchReply
+- AppSummary / AppDetail / GrantBody / GrantView / ActivityBody / ActivityView / FetchBody / FetchReply / AiBody / AiReply
 
 [POS]
 API layer schemas. Field limits mirror what the service enforces so a bad request fails here with a validation error.
@@ -17,6 +18,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.services.artifact_apps.ai_proxy import DEFAULT_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS, MAX_PROMPT_CHARS, MAX_SYSTEM_CHARS
 from app.services.artifact_apps.capabilities import MAX_FETCH_HOSTS, Capability, Decision, Outcome
 from app.services.artifact_apps.fetch_proxy import MAX_REQUEST_BYTES, MAX_URL_LENGTH, Method
 
@@ -87,5 +89,21 @@ class FetchReply(BaseModel):
     status: int | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     body: str = ""
+    code: str | None = None
+    message: str | None = None
+
+
+class AiBody(BaseModel):
+    version_sha256: str = Field(pattern=_SHA256)
+    prompt: str = Field(min_length=1, max_length=MAX_PROMPT_CHARS)
+    system: str | None = Field(default=None, max_length=MAX_SYSTEM_CHARS)
+    max_tokens: int = Field(default=DEFAULT_OUTPUT_TOKENS, ge=1, le=MAX_OUTPUT_TOKENS)
+
+
+class AiReply(BaseModel):
+    """``ok`` is false when the call was refused or failed; the text is the model's answer."""
+
+    ok: bool
+    text: str = ""
     code: str | None = None
     message: str | None = None

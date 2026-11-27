@@ -145,7 +145,7 @@ def _register_mcp_tool(*, read_only: bool) -> None:
     )
     from myrm_agent_harness.core.security.tool_registry.safety_table import SafetyMetadata
 
-    register_ptc_safety_metadata("mcp_demo_skill", "create-record", SafetyMetadata(is_read_only=read_only), {})
+    register_ptc_safety_metadata("create-record", SafetyMetadata(is_read_only=read_only), {})
 
 
 def _create_record(**extra: object) -> dict[str, object]:

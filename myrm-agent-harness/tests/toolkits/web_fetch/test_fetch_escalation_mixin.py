@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
+from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import EscalationFetchResult
 from tests.toolkits.web_fetch._degradation_support import (
+    StubProvider,
     http_result,
     make_document,
     mock_pipeline,
@@ -20,7 +23,6 @@ class TestEscalationMixin:
     @pytest.mark.asyncio
     async def test_escalation_no_providers(self) -> None:
         engine = FetchEngine()
-        engine._escalation_providers = None
 
         doc, result = await engine._try_escalation("http://example.com/page")
 
@@ -33,17 +35,13 @@ class TestEscalationMixin:
         engine = FetchEngine()
         engine._pipeline = mock_pipeline()  # type: ignore[assignment]
         engine._pipeline.aprocess.return_value = make_document()
-        good = SimpleNamespace(
-            provider_id="reader2",
-            fetch_url=AsyncMock(return_value=SimpleNamespace(content="# final", is_markdown=True, url=None, title="t")),
+        good = StubProvider(
+            "reader2", EscalationFetchResult(url="", content="# final", title="t", provider_id="reader2")
         )
-        bad = SimpleNamespace(
-            provider_id="broken",
-            fetch_url=AsyncMock(side_effect=RuntimeError("boom")),
-        )
-        engine.set_escalation_providers([bad, good])
+        bad = StubProvider("broken", error=RuntimeError("boom"))
 
-        doc, result = await engine._try_escalation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=[bad, good]):
+            doc, result = await engine._try_escalation("http://example.com/page")
 
         assert doc is not None
         assert doc.page_content == "# final"
@@ -55,20 +53,19 @@ class TestEscalationMixin:
         engine = FetchEngine()
         engine._pipeline = mock_pipeline()  # type: ignore[assignment]
         engine._pipeline.aprocess.return_value = make_document("html doc")
-        provider = SimpleNamespace(
-            provider_id="reader4",
-            fetch_url=AsyncMock(
-                return_value=SimpleNamespace(
-                    content="<p>html</p>",
-                    is_markdown=False,
-                    url="http://example.com/page",
-                    title="t",
-                )
+        provider = StubProvider(
+            "reader4",
+            EscalationFetchResult(
+                url="http://example.com/page",
+                content="<p>html</p>",
+                title="t",
+                provider_id="reader4",
+                is_markdown=False,
             ),
         )
-        engine.set_escalation_providers([provider])
 
-        doc, _result = await engine._try_escalation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=[provider]):
+            doc, _result = await engine._try_escalation("http://example.com/page")
 
         assert doc is not None
         assert doc.metadata.get("escalation_provider") == "reader4"
@@ -77,13 +74,10 @@ class TestEscalationMixin:
     @pytest.mark.asyncio
     async def test_escalation_empty_content_skipped(self) -> None:
         engine = FetchEngine()
-        provider = SimpleNamespace(
-            provider_id="reader5",
-            fetch_url=AsyncMock(return_value=SimpleNamespace(content="   ", is_markdown=True, url=None, title="")),
-        )
-        engine.set_escalation_providers([provider])
+        provider = StubProvider("reader5", EscalationFetchResult(url="", content="   ", provider_id="reader5"))
 
-        doc, result = await engine._try_escalation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=[provider]):
+            doc, result = await engine._try_escalation("http://example.com/page")
 
         assert doc is None
         assert result is None
@@ -147,23 +141,14 @@ class TestEscalationMixin:
         engine = FetchEngine()
         http = stub_fetchers(engine)
         http.fetch.return_value = http_result("", status=404)
-        engine._escalation_providers = [
-            SimpleNamespace(
-                provider_id="p1",
-                fetch_url=AsyncMock(
-                    return_value=SimpleNamespace(
-                        content="<p>raw html</p>",
-                        is_markdown=False,
-                        url=None,
-                        title=None,
-                    )
-                ),
-            )
-        ]
+        provider = StubProvider(
+            "p1", EscalationFetchResult(url="", content="<p>raw html</p>", provider_id="p1", is_markdown=False)
+        )
         engine._pipeline = mock_pipeline()  # type: ignore[assignment]
         engine._pipeline.aprocess.return_value = None
 
-        doc, result = await engine._crawl_with_degradation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=[provider]):
+            doc, result = await engine._crawl_with_degradation("http://example.com/page")
 
         assert doc is None
         assert result is None

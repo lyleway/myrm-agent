@@ -2,10 +2,10 @@
 
 Hosts cross-cutting mechanisms used by the runtime and server subsystems:
 - ``backend_detector``: CLI agent backend auto-detection.
-- ``event_bus``: publish-subscribe event bus for the runtime system.
+- ``probe``: bounded questions asked of a CLI.
 
 Modules here are consumed via explicit submodule imports (e.g.
-``from myrm_agent_harness.toolkits.acp.core.event_bus import EventBus``);
+``from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector``);
 no public symbols are re-exported at this package level.
 
 [INPUT]

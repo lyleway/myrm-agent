@@ -6,8 +6,8 @@
 - ToolSetupBaseMixin: Mixin providing all tool initialization methods for GeneralAgent.
 
 [POS]
-各工具族 mixin 共同继承，避免重复声明宿主属性；并提供各工具族共用的宿主安全策略解析（`_merged_security_config`）
-与工具描述语言解析（`_tool_description_locale`）。
+各工具族 mixin 共同继承，避免重复声明宿主属性；并提供各工具族共用的宿主安全策略解析（`_merged_security_config`，
+以及按指定的用户配置求值的 `_security_config_for`）与工具描述语言解析（`_tool_description_locale`）。
 """
 
 from __future__ import annotations
@@ -95,13 +95,21 @@ class ToolSetupBaseMixin(ExternalAgentsMixin):
         Tool families that carry their own network policy read it here: the browser builds its domain lists once, the
         web fetch tool reads the blocklist on every call, so a list edited mid-session applies to the next fetch.
         """
+        return self._security_config_for(self.security_config_raw)
+
+    def _security_config_for(self, security_config_raw: dict[str, object] | None) -> SecurityConfig:
+        """The channel preset with ``security_config_raw`` as the user's config and this agent's own overrides.
+
+        ``security_config_raw`` is the saved config with whichever request overlays are to apply, so a caller can ask
+        what the same turn would be judged as under other overlays.
+        """
         from myrm_agent_harness.agent.security.channel_presets import build_channel_security_config
 
         from app.config.deploy_mode import is_local_mode
 
         return build_channel_security_config(
             self.channel_name,
-            self.security_config_raw,
+            security_config_raw,
             agent_security_raw=self.agent_security_raw,
             declared_capabilities=self.declared_capabilities,
             declared_allowed_roots=self.declared_allowed_roots,

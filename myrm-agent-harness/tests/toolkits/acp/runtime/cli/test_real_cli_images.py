@@ -184,12 +184,11 @@ def _claude(tmp_path: Path, base_url: str, permission_mode: str, extra_args: tup
             "DISABLE_TELEMETRY": "1",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         },
-        cwd=str(tmp_path),
         permission_mode=permission_mode,  # type: ignore[arg-type]
         auth_mode="api_key",
         timeout_seconds=90,
     )
-    return CliRuntime("claude", config)
+    return CliRuntime("claude", config, workspace=str(tmp_path))
 
 
 async def _run(runtime: CliRuntime, prompt: str, images: list[str] | None = None, session: str = "s1") -> None:
@@ -206,7 +205,6 @@ async def _run(runtime: CliRuntime, prompt: str, images: list[str] | None = None
         pytest.param("safe", 200, id="safe-below-256KiB"),
         pytest.param("safe", 300, id="safe-above-256KiB"),
         pytest.param("safe", 4800, id="safe-near-5MiB"),
-        pytest.param("ask", 300, id="ask-above-256KiB"),
         pytest.param("allow_all", 300, id="allow_all-above-256KiB"),
     ],
 )

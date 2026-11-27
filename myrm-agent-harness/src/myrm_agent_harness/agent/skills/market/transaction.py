@@ -188,7 +188,7 @@ class SkillInstallTransaction:
 
         backup_temp: Path | None = None
         if target_dir.exists():
-            backup_temp = Path(tempfile.mkdtemp(prefix=f"skill-snap-backup-{target_dir.name}-"))
+            backup_temp = Path(tempfile.mkdtemp(prefix="skill-snap-backup-"))
             # Copy current contents to snapshot backup temp
             shutil.copytree(target_dir, backup_temp / "snapshot", dirs_exist_ok=True)
             shutil.rmtree(target_dir)

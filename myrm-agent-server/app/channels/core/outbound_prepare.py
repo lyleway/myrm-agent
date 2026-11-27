@@ -150,7 +150,7 @@ def prepare_outbound(msg: OutboundMessage, capabilities: ChannelCapabilities, *,
 
 
 def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities, *, channel_name: str) -> OutboundMessage:
-    """Downgrade interactive components to text when the route lacks native support.
+    """Downgrade interactive components and unsupported media to text when the route lacks native support.
 
     Returns the original message unchanged if no downgrade is needed.
 
@@ -162,6 +162,10 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
     fallback (e.g. approval prompts). Non-required items (e.g. suggestions)
     are silently dropped to avoid cluttering text-only channels.
 
+    Media the route cannot carry (``caps.media`` for non-documents, ``caps.file_upload`` for
+    documents) becomes a ``[Image: url]`` text line when it has a URL, or a localized "attachment
+    not sent" note when it only has a local path; with neither it is dropped.
+
     **Locale support**: Reads ``msg.metadata["locale"]`` (default: "en" for framework
     internationalization compliance). Business layer should inject user's preferred
     locale via metadata (e.g., from UserConfig or browser Accept-Language header).
@@ -169,8 +173,8 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
     - "zh": "选项", "回复数字选择"
     - "en": "Options", "Reply with a number to select"
 
-    **Logging**: When components are downgraded, an INFO-level log is emitted:
-    ``Downgrading components for channel 'whatsapp': buttons, quick_replies(2) → text fallback``
+    **Logging**: When components or media are downgraded, an INFO-level log is emitted:
+    ``Downgrading components/media for channel 'whatsapp': buttons, quick_replies(2) → text fallback``
 
     **Example**::
 

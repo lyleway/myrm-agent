@@ -1,23 +1,18 @@
-"""Tests for WebPushService — subscription CRUD, broadcast, and error handling."""
+"""Tests for WebPushService — subscription CRUD and broadcast.
+
+Sending to one subscription is covered by test_web_push_send_one.py (pywebpush mocked) and
+test_web_push_delivery.py (the real library).
+"""
 
 from __future__ import annotations
 
 import hashlib
-import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Mock pywebpush before importing service (pywebpush may not be installed in test env)
-_mock_pywebpush = MagicMock()
-_mock_pywebpush.WebPushException = type("WebPushException", (Exception,), {})
-_mock_pywebpush.webpush = MagicMock()
-sys.modules.setdefault("pywebpush", _mock_pywebpush)
-
-from app.core.web_push.service import WebPushService, get_web_push_service  # noqa: E402
-
-WebPushException = _mock_pywebpush.WebPushException
+from app.core.web_push.service import BroadcastResult, WebPushService, get_web_push_service
 
 
 def _mock_session_ctx(mock_db: AsyncMock) -> AsyncMock:
@@ -165,7 +160,7 @@ class TestUnsubscribe:
 
 class TestBroadcast:
     @pytest.mark.asyncio
-    async def test_returns_zero_when_no_subscriptions(self) -> None:
+    async def test_addresses_nobody_when_no_subscriptions(self) -> None:
         svc = WebPushService()
         mock_db = AsyncMock()
         mock_result = MagicMock()
@@ -176,9 +171,9 @@ class TestBroadcast:
             "app.database.connection.get_session",
             return_value=_mock_session_ctx(mock_db),
         ):
-            count = await svc.broadcast("Test", "Body")
+            result = await svc.broadcast("Test", "Body")
 
-        assert count == 0
+        assert result == BroadcastResult(subscriptions=0)
 
     @pytest.mark.asyncio
     async def test_broadcasts_to_all_subscriptions(self) -> None:
@@ -194,7 +189,7 @@ class TestBroadcast:
         mock_result.scalars.return_value.all.return_value = [sub1, sub2]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        mock_send = AsyncMock(return_value=True)
+        mock_send = AsyncMock(return_value=None)
         with (
             patch(
                 "app.database.connection.get_session",
@@ -202,13 +197,14 @@ class TestBroadcast:
             ),
             patch.object(svc, "_send_one", mock_send),
         ):
-            count = await svc.broadcast("Title", "Body", "/chat")
+            result = await svc.broadcast("Title", "Body", "/chat")
 
-        assert count == 2
+        assert result == BroadcastResult(subscriptions=2)
+        assert result.delivered == 2
         assert mock_send.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_counts_only_successful_sends(self) -> None:
+    async def test_reports_why_each_missed_subscription_failed(self) -> None:
         svc = WebPushService()
         svc._private_pem = "MOCK_PEM"
         svc._public_key = "MOCK_PUB"
@@ -221,9 +217,9 @@ class TestBroadcast:
         mock_result.scalars.return_value.all.return_value = [sub1, sub2]
         mock_db.execute = AsyncMock(return_value=mock_result)
 
-        send_results = [True, False]
+        send_results = [None, "HTTP 500 Internal Server Error"]
 
-        async def side_effect(**_kwargs: object) -> bool:
+        async def side_effect(**_kwargs: object) -> str | None:
             return send_results.pop(0)
 
         with (
@@ -233,169 +229,10 @@ class TestBroadcast:
             ),
             patch.object(svc, "_send_one", side_effect=side_effect),
         ):
-            count = await svc.broadcast("Title", "Body")
+            result = await svc.broadcast("Title", "Body")
 
-        assert count == 1
-
-
-class TestSendOne:
-    @pytest.mark.asyncio
-    async def test_successful_send(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        with patch(
-            "asyncio.to_thread",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload='{"title":"T"}',
-                endpoint_hash="h1",
-            )
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_removes_gone_subscription_on_410(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 410
-
-        exc = WebPushException("gone")
-        exc.response = mock_response
-
-        with (
-            patch(
-                "asyncio.to_thread",
-                new_callable=AsyncMock,
-                side_effect=exc,
-            ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload="{}",
-                endpoint_hash="h_gone",
-            )
-
-        assert result is False
-        mock_remove.assert_called_once_with("h_gone")
-
-    @pytest.mark.asyncio
-    async def test_removes_gone_subscription_on_404(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 404
-
-        exc = WebPushException("not found")
-        exc.response = mock_response
-
-        with (
-            patch(
-                "asyncio.to_thread",
-                new_callable=AsyncMock,
-                side_effect=exc,
-            ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload="{}",
-                endpoint_hash="h_404",
-            )
-
-        assert result is False
-        mock_remove.assert_called_once_with("h_404")
-
-    @pytest.mark.asyncio
-    async def test_returns_false_on_generic_exception(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        with patch(
-            "asyncio.to_thread",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError("network"),
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload="{}",
-                endpoint_hash="h_err",
-            )
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_returns_false_on_webpush_exception_without_response(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        exc = WebPushException("server error")
-
-        with patch(
-            "asyncio.to_thread",
-            new_callable=AsyncMock,
-            side_effect=exc,
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload="{}",
-                endpoint_hash="h_no_resp",
-            )
-
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_webpush_exception_with_non_gone_status(self) -> None:
-        svc = WebPushService()
-        svc._private_pem = "MOCK_PEM"
-        svc._public_key = "MOCK_PUB"
-
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-
-        exc = WebPushException("server error")
-        exc.response = mock_response
-
-        with (
-            patch(
-                "asyncio.to_thread",
-                new_callable=AsyncMock,
-                side_effect=exc,
-            ),
-            patch.object(svc, "_remove_subscription", new_callable=AsyncMock) as mock_remove,
-        ):
-            result = await svc._send_one(
-                endpoint="https://e.com",
-                p256dh="k",
-                auth="a",
-                payload="{}",
-                endpoint_hash="h_500",
-            )
-
-        assert result is False
-        mock_remove.assert_not_called()
+        assert result == BroadcastResult(subscriptions=2, failures=("HTTP 500 Internal Server Error",))
+        assert result.delivered == 1
 
 
 class TestRemoveSubscription:

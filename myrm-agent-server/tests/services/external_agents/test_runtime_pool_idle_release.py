@@ -59,7 +59,7 @@ async def test_released_pool_is_released_again_only_after_it_was_used() -> None:
     await registry.acquire("chat-3", "fp-a", _build_mock_pool)
     assert pool.release_resident.await_count == 1
 
-    async with registry.guard_turn("chat-1"):
+    async with registry.track_turn("chat-1"):
         pass
     await asyncio.sleep(0.03)
     await registry.acquire("chat-4", "fp-a", _build_mock_pool)
@@ -67,26 +67,21 @@ async def test_released_pool_is_released_again_only_after_it_was_used() -> None:
 
 
 @pytest.mark.asyncio
-async def test_idle_release_skips_pool_with_turn_in_flight() -> None:
-    """A delegation that outlives the idle window keeps its processes and its turn lock."""
+async def test_idle_release_skips_pool_until_its_last_turn_in_flight_ends() -> None:
+    """A delegation that outlives the idle window keeps its processes, and so does the one still running after it."""
     registry = ChatRuntimePoolRegistry(idle_seconds=0.02)
     pool = await registry.acquire("chat-1", "fp-a", _build_mock_pool)
-    started = asyncio.Event()
-    release = asyncio.Event()
-    running = 0
-    peak_running = 0
+    started = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
 
-    async def turn() -> None:
-        nonlocal running, peak_running
-        async with registry.guard_turn("chat-1"):
-            running += 1
-            peak_running = max(peak_running, running)
-            started.set()
-            await release.wait()
-            running -= 1
+    async def turn(index: int) -> None:
+        async with registry.track_turn("chat-1"):
+            started[index].set()
+            await release[index].wait()
 
-    first = asyncio.create_task(turn())
-    await started.wait()
+    first = asyncio.create_task(turn(0))
+    second = asyncio.create_task(turn(1))
+    await asyncio.gather(started[0].wait(), started[1].wait())
     await asyncio.sleep(0.05)
     await registry.acquire("chat-2", "fp-a", _build_mock_pool)
 
@@ -94,21 +89,23 @@ async def test_idle_release_skips_pool_with_turn_in_flight() -> None:
     pool.close_all.assert_not_called()
     assert await registry.acquire("chat-1", "fp-a", _unexpected_build) is pool
 
-    second = asyncio.create_task(turn())
-    await asyncio.sleep(0.01)
-    assert peak_running == 1
-    release.set()
-    await asyncio.gather(first, second)
-    assert peak_running == 1
+    release[0].set()
+    await first
+    await asyncio.sleep(0.05)
+    await registry.acquire("chat-3", "fp-a", _build_mock_pool)
+    pool.release_resident.assert_not_called()
+
+    release[1].set()
+    await second
 
 
 @pytest.mark.asyncio
-async def test_guard_turn_exit_restarts_idle_clock() -> None:
+async def test_track_turn_exit_restarts_idle_clock() -> None:
     """A turn longer than the idle window must not get its processes released the moment it ends."""
     registry = ChatRuntimePoolRegistry(idle_seconds=0.05)
     pool = await registry.acquire("chat-1", "fp-a", _build_mock_pool)
 
-    async with registry.guard_turn("chat-1"):
+    async with registry.track_turn("chat-1"):
         await asyncio.sleep(0.08)
     await registry.acquire("chat-2", "fp-a", _build_mock_pool)
     pool.release_resident.assert_not_called()
@@ -119,12 +116,12 @@ async def test_guard_turn_exit_restarts_idle_clock() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guard_turn_restarts_idle_clock_when_turn_fails() -> None:
+async def test_track_turn_restarts_idle_clock_when_turn_fails() -> None:
     registry = ChatRuntimePoolRegistry(idle_seconds=0.05)
     pool = await registry.acquire("chat-1", "fp-a", _build_mock_pool)
 
     with pytest.raises(RuntimeError, match="delegation failed"):
-        async with registry.guard_turn("chat-1"):
+        async with registry.track_turn("chat-1"):
             await asyncio.sleep(0.08)
             raise RuntimeError("delegation failed")
     await registry.acquire("chat-2", "fp-a", _build_mock_pool)

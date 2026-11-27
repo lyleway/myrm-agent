@@ -9,6 +9,8 @@
 //! [POS]
 //! Tauri invoke 命令层模块根；叶子清单见 `_ARCH.md` 与各子目录 _ARCH。
 
+pub mod app_launcher;
+pub mod app_surface;
 pub mod app_window;
 pub mod config;
 pub mod data_migration;

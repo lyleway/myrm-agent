@@ -35,9 +35,9 @@ class TestImagePrompts:
     async def test_an_agent_that_advertises_image_prompts_receives_the_images_in_order(self, tmp_path: Path) -> None:
         first, first_body = make_png(tmp_path, "a.png", 4_000)
         second, second_body = make_png(tmp_path, "b.png", 9_000)
-        pool = make_pool(tmp_path, "--images")
+        pool = make_pool("--images")
         try:
-            text, events = await run_turn(pool, [str(first), str(second)])
+            text, events = await run_turn(pool, [str(first), str(second)], workspace=tmp_path)
         finally:
             await pool.close_all()
 
@@ -48,9 +48,9 @@ class TestImagePrompts:
     @pytest.mark.asyncio
     async def test_an_image_of_the_largest_size_the_server_stages_arrives_whole(self, tmp_path: Path) -> None:
         image, body = make_png(tmp_path, "big.png", 5 * 1024 * 1024)
-        pool = make_pool(tmp_path, "--images")
+        pool = make_pool("--images")
         try:
-            text, events = await run_turn(pool, [str(image)])
+            text, events = await run_turn(pool, [str(image)], workspace=tmp_path)
         finally:
             await pool.close_all()
 
@@ -63,9 +63,9 @@ class TestImagePrompts:
     ) -> None:
         first, _ = make_png(tmp_path, "a.png", 4_000)
         second, _ = make_png(tmp_path, "b.png", 5_000)
-        pool = make_pool(tmp_path)
+        pool = make_pool()
         try:
-            text, events = await run_turn(pool, [str(first), str(second)])
+            text, events = await run_turn(pool, [str(first), str(second)], workspace=tmp_path)
         finally:
             await pool.close_all()
 
@@ -78,9 +78,9 @@ class TestImagePrompts:
 
     @pytest.mark.asyncio
     async def test_a_turn_without_images_sends_the_text_alone(self, tmp_path: Path) -> None:
-        pool = make_pool(tmp_path, "--images")
+        pool = make_pool("--images")
         try:
-            text, events = await run_turn(pool, [])
+            text, events = await run_turn(pool, [], workspace=tmp_path)
         finally:
             await pool.close_all()
 

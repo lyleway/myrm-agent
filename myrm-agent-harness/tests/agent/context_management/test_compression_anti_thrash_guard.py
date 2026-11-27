@@ -37,6 +37,17 @@ def test_should_not_block_when_above_safety_net() -> None:
     )
 
 
+def test_should_not_block_below_the_streak_limit() -> None:
+    chat_id = "guard-below-limit"
+    create_task_metrics(chat_id).compression_ineffective_streak = ANTI_THRASHING_STREAK_LIMIT - 1
+
+    assert not should_block_automatic_compression(chat_id, total_tokens=50_000, max_context_tokens=128_000)
+
+
+def test_a_turn_without_a_chat_is_never_blocked() -> None:
+    assert not should_block_automatic_compression(None, total_tokens=50_000, max_context_tokens=128_000)
+
+
 def test_record_resets_streak_on_effective_savings() -> None:
     chat_id = "guard-record-reset"
     metrics = create_task_metrics(chat_id)
@@ -69,6 +80,14 @@ def test_record_creates_metrics_when_missing() -> None:
     updated = get_task_metrics(chat_id)
     assert updated is not None
     assert updated.compression_ineffective_streak == 1
+
+
+def test_record_ignores_a_compaction_that_started_from_no_tokens() -> None:
+    chat_id = f"guard-record-no-tokens-{uuid4().hex}"
+
+    record_compression_effectiveness(chat_id, original_tokens=0, tokens_saved=0)
+
+    assert get_task_metrics(chat_id) is None
 
 
 _INEFFECTIVE = 50

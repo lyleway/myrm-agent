@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEventType
 
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="process livenes
 _MOCK_AGENT = Path(__file__).with_name("_mock_acp_agent.py")
 
 
-def _mock_pool(cwd: Path) -> RuntimePool:
+def _mock_pool() -> RuntimePool:
     pool = RuntimePool(max_concurrent=1)
     pool.register(
         "mock",
@@ -26,23 +27,22 @@ def _mock_pool(cwd: Path) -> RuntimePool:
             backend_type="acp",
             command=sys.executable,
             args=[str(_MOCK_AGENT)],
-            cwd=str(cwd),
             timeout_seconds=30,
         ),
     )
     return pool
 
 
-async def _echo(pool: RuntimePool, prompt: str) -> str:
+async def _echo(pool: RuntimePool, prompt: str, workspace: Path) -> str:
     text: list[str] = []
-    async for event in pool.run_turn("mock", prompt, session_id="chat-1"):
+    async for event in pool.run_turn("mock", prompt, session_id="chat-1", workspace=str(workspace)):
         if event.type == RuntimeEventType.TEXT_DELTA:
             text.append(str(event.data.get("content")))
     return "".join(text)
 
 
-def _pid_of(pool: RuntimePool) -> int:
-    process = getattr(pool.get("mock"), "_process", None)
+def _pid_of(pool: RuntimePool, workspace: Path) -> int:
+    process = getattr(pool.get("mock", str(workspace)), "_process", None)
     assert process is not None
     return int(process.pid)
 
@@ -60,10 +60,10 @@ async def _wait_until_gone(pid: int, *, timeout: float = 5.0) -> bool:
 
 @pytest.mark.asyncio
 async def test_pool_round_trips_through_an_acp_process_and_close_all_stops_it(tmp_path: Path) -> None:
-    pool = _mock_pool(tmp_path)
+    pool = _mock_pool()
     try:
-        text = await _echo(pool, "ping")
-        pid = _pid_of(pool)
+        text = await _echo(pool, "ping", tmp_path)
+        pid = _pid_of(pool, tmp_path)
     finally:
         await pool.close_all()
 
@@ -74,15 +74,15 @@ async def test_pool_round_trips_through_an_acp_process_and_close_all_stops_it(tm
 @pytest.mark.asyncio
 async def test_pool_respawns_an_acp_process_that_died_between_turns(tmp_path: Path) -> None:
     """No supervisor is needed: the next turn notices the dead process and starts a new one."""
-    pool = _mock_pool(tmp_path)
+    pool = _mock_pool()
     try:
-        assert "[echo] first" in await _echo(pool, "first")
-        dead_pid = _pid_of(pool)
+        assert "[echo] first" in await _echo(pool, "first", tmp_path)
+        dead_pid = _pid_of(pool, tmp_path)
         os.kill(dead_pid, signal.SIGKILL)
         assert await _wait_until_gone(dead_pid)
 
-        assert "[echo] second" in await _echo(pool, "second")
-        new_pid = _pid_of(pool)
+        assert "[echo] second" in await _echo(pool, "second", tmp_path)
+        new_pid = _pid_of(pool, tmp_path)
     finally:
         await pool.close_all()
 
@@ -92,27 +92,28 @@ async def test_pool_respawns_an_acp_process_that_died_between_turns(tmp_path: Pa
 
 def _resident(backend: object) -> tuple[int, str]:
     """The (pid, ACP session id) a backend is currently running."""
-    process = getattr(backend, "_process", None)
-    session_id = getattr(backend, "_session_id", None)
-    assert process is not None
-    assert session_id is not None
-    return int(process.pid), str(session_id)
+    assert isinstance(backend, AcpRuntime)
+    assert backend._process is not None
+    (session_id,) = backend._sessions.held()
+    return int(backend._process.pid), session_id
 
 
 @pytest.mark.asyncio
 async def test_oneshot_runs_in_its_own_process_and_session_and_leaves_the_persistent_one_alone(tmp_path: Path) -> None:
-    pool = _mock_pool(tmp_path)
+    pool = _mock_pool()
     try:
-        assert "[echo] first" in await _echo(pool, "first")
-        persistent_pid, persistent_session = _resident(pool.get("mock"))
+        assert "[echo] first" in await _echo(pool, "first", tmp_path)
+        persistent_pid, persistent_session = _resident(pool.get("mock", str(tmp_path)))
 
         oneshot_resident: tuple[int, str] | None = None
         oneshot_backend: object | None = None  # referenced so garbage collection cannot stand in for close()
         oneshot_text: list[str] = []
-        async for event in pool.run_turn("mock", "review", session_id="mock-oneshot-1", mode="oneshot"):
+        async for event in pool.run_turn(
+            "mock", "review", session_id="mock-oneshot-1", workspace=str(tmp_path), mode="oneshot"
+        ):
             if event.type == RuntimeEventType.TEXT_DELTA:
                 oneshot_text.append(str(event.data.get("content")))
-                oneshot_backend = pool._oneshot_backends[("mock", "mock-oneshot-1")]
+                oneshot_backend = pool._running[("mock", "mock-oneshot-1")]
                 oneshot_resident = _resident(oneshot_backend)
 
         assert "[echo] review" in "".join(oneshot_text)
@@ -123,28 +124,28 @@ async def test_oneshot_runs_in_its_own_process_and_session_and_leaves_the_persis
         assert await _wait_until_gone(oneshot_pid)
 
         # The persistent backend is the same process and session as before the oneshot turn.
-        assert "[echo] second" in await _echo(pool, "second")
-        assert _resident(pool.get("mock")) == (persistent_pid, persistent_session)
+        assert "[echo] second" in await _echo(pool, "second", tmp_path)
+        assert _resident(pool.get("mock", str(tmp_path))) == (persistent_pid, persistent_session)
     finally:
         await pool.close_all()
 
 
 @pytest.mark.asyncio
 async def test_release_resident_stops_the_acp_process_and_the_next_turn_starts_a_new_one(tmp_path: Path) -> None:
-    pool = _mock_pool(tmp_path)
+    pool = _mock_pool()
     try:
-        assert "[echo] first" in await _echo(pool, "first")
-        released_pid = _pid_of(pool)
+        assert "[echo] first" in await _echo(pool, "first", tmp_path)
+        released_pid = _pid_of(pool, tmp_path)
         # Keep the backend referenced: an unreferenced one could be torn down by garbage collection
         # and make the process look released even if release_resident never closed it.
-        released_backend = pool.get("mock")
+        released_backend = pool.get("mock", str(tmp_path))
 
         await pool.release_resident()
 
         assert await _wait_until_gone(released_pid)
-        assert released_backend is not pool.get("mock")
-        assert "[echo] second" in await _echo(pool, "second")
-        new_pid = _pid_of(pool)
+        assert released_backend is not pool.get("mock", str(tmp_path))
+        assert "[echo] second" in await _echo(pool, "second", tmp_path)
+        new_pid = _pid_of(pool, tmp_path)
     finally:
         await pool.close_all()
 

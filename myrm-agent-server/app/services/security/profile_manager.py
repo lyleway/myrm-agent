@@ -2,7 +2,7 @@
 
 Persists SecurityConfig snapshots as named profiles in the database.
 Users can save, load, delete, and switch between profiles.
-Builtin profiles (readonly, workspace, full_access) are seeded on first access.
+Builtin profiles (readonly, workspace, full_access) are created when missing and re-synced when they drift.
 
 [INPUT]
 - app.database.models.security::SecurityProfile (ORM model)
@@ -34,7 +34,7 @@ from app.platform_utils import get_session_factory
 
 logger = logging.getLogger(__name__)
 
-# Builtin profile definitions — seeded on first access
+# Builtin profile definitions: the rows _ensure_builtins creates when missing and re-syncs on drift
 _BUILTIN_PROFILES: list[dict[str, object]] = [
     {
         "profile_key": "readonly",
@@ -102,12 +102,12 @@ def _serialize_config(config_dict: dict[str, object]) -> dict[str, object]:
 class ProfileManager:
     """Async CRUD service for security profiles.
 
-    Builtin profiles are seeded lazily on first ``list_all()`` call.
+    ``list_all()`` creates missing builtin profiles and re-syncs drifted ones; an up-to-date set costs no write.
     Builtin profiles cannot be deleted or overwritten — only cloned.
     """
 
     async def list_all(self) -> list[dict[str, object]]:
-        """List all profiles, seeding builtins if needed."""
+        """List all profiles, writing missing or drifted builtins first."""
         await self._ensure_builtins()
         session_factory = get_session_factory()
         async with session_factory() as session:
@@ -134,17 +134,19 @@ class ProfileManager:
             return _to_dict(profile) if profile else None
 
     async def activate(self, profile_key: str) -> dict[str, object] | None:
-        """Set a profile as active (deactivates all others)."""
+        """Set a profile as active (deactivates all others).
+
+        An unknown key returns ``None`` and leaves the profile that is active now in place.
+        """
         session_factory = get_session_factory()
         async with session_factory() as session:
-            # Deactivate all
-            await session.execute(update(SecurityProfile).values(is_active=False))
-            # Activate target
             result = await session.execute(select(SecurityProfile).where(SecurityProfile.profile_key == profile_key))
             profile = result.scalar_one_or_none()
             if profile is None:
-                await session.commit()
                 return None
+            await session.execute(
+                update(SecurityProfile).where(SecurityProfile.profile_key != profile_key).values(is_active=False)
+            )
             profile.is_active = True
             await session.commit()
             await session.refresh(profile)
@@ -228,28 +230,38 @@ class ProfileManager:
         )
 
     async def _ensure_builtins(self) -> None:
-        """Seed builtin profiles if they don't exist yet."""
+        """Seed missing builtin profiles and re-sync drifted ones.
+
+        A listing that finds every builtin current writes nothing: SQLite has one writer, so a write on a read path
+        makes a concurrent activation fail with "database is locked" (HTTP 503).
+        """
         session_factory = get_session_factory()
         async with session_factory() as session:
             for builtin in _BUILTIN_PROFILES:
                 key = str(builtin["profile_key"])
                 result = await session.execute(select(SecurityProfile).where(SecurityProfile.profile_key == key))
                 existing = result.scalar_one_or_none()
+                display_name = str(builtin["display_name"])
+                description = str(builtin.get("description", ""))
                 seed_config = _serialize_config(cast("dict[str, object]", builtin["config_json"]))
                 if existing is None:
                     profile = SecurityProfile(
                         id=str(uuid.uuid4()),
                         profile_key=key,
-                        display_name=str(builtin["display_name"]),
-                        description=str(builtin.get("description", "")),
+                        display_name=display_name,
+                        description=description,
                         config_json=seed_config,
                         is_builtin=True,
                         is_active=False,
                     )
                     session.add(profile)
-                elif existing.is_builtin:
-                    existing.display_name = str(builtin["display_name"])
-                    existing.description = str(builtin.get("description", ""))
+                elif existing.is_builtin and (
+                    existing.display_name != display_name
+                    or existing.description != description
+                    or existing.config_json != seed_config
+                ):
+                    existing.display_name = display_name
+                    existing.description = description
                     existing.config_json = seed_config
                     existing.updated_at = datetime.now()
             await session.commit()

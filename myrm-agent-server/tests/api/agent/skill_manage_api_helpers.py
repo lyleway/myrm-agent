@@ -6,15 +6,19 @@
 
 [OUTPUT]
 - isolated_backend_url / requires_live_model: the guards every live test starts with
-- create_agent / create_chat / stream_turn: a skill-only agent, its chat, and one streamed turn
-- user_request / rewrite_request / patch_request / delete_request: the plain requests the model is given
-- batch_id_of / announced_batch / announced_batches / persisted_skill_steps / stored_batch_ids / catalog_skill_id /
-  skill_md / wait_for: what the tests read back from the stream and the API
+- create_agent / create_chat / stream_turn: a skill-only agent, its chat, and one streamed turn (optionally under a
+  session security preset)
+- user_request / rewrite_request / patch_request / delete_request / workflow_message: the plain requests the model
+  is given
+- batch_id_of / announced_batch / announced_batches / announced_batches_in_order / persisted_skill_steps /
+  stored_batch_ids / catalog_skills / catalog_skill_id / skill_md / wait_for: what the tests read back from the stream
+  and the API
 
 [POS]
-Support module of ``test_skill_manage_undo_live_api_e2e.py``. The harness completion guard reads freshness words
-(live, latest, current, ...) in the request as a demand for web evidence, which a skill-only agent can never produce;
-the request and system-prompt wording stays free of them so a turn ends on its own.
+Support module of ``test_skill_manage_undo_live_api_e2e.py`` and ``test_learn_command_live_api_e2e.py``;
+``test_profiles_activate_live_api_e2e.py`` takes only ``isolated_backend_url``. The harness completion guard reads
+freshness words (live, latest, current, ...) in the request as a demand for web evidence, which a skill-only agent
+can never produce; the request and system-prompt wording stays free of them so a turn ends on its own.
 """
 
 from __future__ import annotations
@@ -97,6 +101,18 @@ def patch_request(name: str, old: str, new: str) -> str:
     )
 
 
+def workflow_message(marker: str) -> str:
+    """A plain turn that tells the agent how a task is done as exact commands; the last one carries a marker only this chat knows.
+
+    The authoring standard asks a skill to keep exact commands verbatim, so a marker inside a command survives distillation
+    where a step described in prose ("print a confirmation line") would lose it.
+    """
+    return (
+        "For context, this is how I ship a build: step 1 run `make lint`, step 2 run `make test`, "
+        f"step 3 run `echo {marker}`. Reply with exactly: NOTED"
+    )
+
+
 def data(response: httpx.Response) -> dict[str, object]:
     """The ``data`` object of a standard API envelope, or the body itself when the route is not wrapped."""
     response.raise_for_status()
@@ -144,8 +160,19 @@ def create_chat(client: httpx.Client, backend_url: str, chat_id: str, agent_id: 
     assert response.json().get("success") is True, response.text
 
 
-def stream_turn(client: httpx.Client, backend_url: str, agent_id: str, chat_id: str, query: str) -> list[dict[str, object]]:
-    """Every event the stream delivered, in arrival order, until the server closes it; prints the model it ran on."""
+def stream_turn(
+    client: httpx.Client,
+    backend_url: str,
+    agent_id: str,
+    chat_id: str,
+    query: str,
+    *,
+    security_preset: str | None = None,
+) -> list[dict[str, object]]:
+    """Every event the stream delivered, in arrival order, until the server closes it; prints the model it ran on.
+
+    *security_preset* is the chat session's preset (``hitl``, ``accept_edits``, ``explore``); ``None`` sends none.
+    """
     request_data: dict[str, object] = {
         "messageId": f"live-skill-{uuid.uuid4().hex[:10]}",
         "chatId": chat_id,
@@ -157,6 +184,8 @@ def stream_turn(client: httpx.Client, backend_url: str, agent_id: str, chat_id: 
         "memoryRequireConfirmation": False,
         "enableMemoryAutoExtraction": False,
     }
+    if security_preset is not None:
+        request_data["securityPreset"] = security_preset
     events: list[dict[str, object]] = []
     with client.stream("POST", f"{backend_url}/api/v1/agents/agent-stream", json=request_data, timeout=600.0) as response:
         response.raise_for_status()
@@ -196,8 +225,13 @@ def announced_batch(events: list[dict[str, object]]) -> str | None:
     return next((batch_id for event in events if (batch_id := batch_id_of(event))), None)
 
 
+def announced_batches_in_order(events: list[dict[str, object]]) -> list[str]:
+    """The distinct batch ids the stream announced, oldest first."""
+    return list(dict.fromkeys(batch_id for event in events if (batch_id := batch_id_of(event))))
+
+
 def announced_batches(events: list[dict[str, object]]) -> set[str]:
-    return {batch_id for event in events if (batch_id := batch_id_of(event))}
+    return set(announced_batches_in_order(events))
 
 
 def skill_md(client: httpx.Client, backend_url: str, skill_id: str) -> str:
@@ -234,16 +268,22 @@ def stored_batch_ids(client: httpx.Client, backend_url: str, chat_id: str) -> li
     ]
 
 
-def catalog_skill_id(client: httpx.Client, backend_url: str, name: str) -> str | None:
+def catalog_skills(client: httpx.Client, backend_url: str) -> dict[str, str]:
+    """Skill name -> id for every skill in the catalog."""
     listing = client.get(f"{backend_url}/api/v1/skills/", timeout=30.0)
     listing.raise_for_status()
-    for skill in listing.json().get("skills") or []:
-        if isinstance(skill, dict) and skill.get("name") == name:
-            return str(skill["id"])
-    return None
+    return {
+        str(skill["name"]): str(skill["id"])
+        for skill in listing.json().get("skills") or []
+        if isinstance(skill, dict) and "name" in skill and "id" in skill
+    }
 
 
-def wait_for[T](check: Callable[[], T], *, timeout_sec: float, what: str) -> T:
+def catalog_skill_id(client: httpx.Client, backend_url: str, name: str) -> str | None:
+    return catalog_skills(client, backend_url).get(name)
+
+
+def wait_for[T](check: Callable[[], T | None], *, timeout_sec: float, what: str) -> T:
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         value = check()

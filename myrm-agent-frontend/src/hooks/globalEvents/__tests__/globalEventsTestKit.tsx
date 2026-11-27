@@ -38,6 +38,7 @@ const hoisted = vi.hoisted(() => ({
   showOAuthReauthRequiredToast: vi.fn(),
   showBackupFailureToast: vi.fn(),
   showCloudSyncFailureToast: vi.fn(),
+  showWebPushFailureToast: vi.fn(),
 }));
 
 export const mocks = hoisted;
@@ -113,10 +114,11 @@ vi.mock('@/hooks/globalEvents/reauthToasts', () => ({
   showMcpAuthRequiredToast: hoisted.showMcpAuthRequiredToast,
   showOAuthReauthRequiredToast: hoisted.showOAuthReauthRequiredToast,
 }));
-vi.mock('@/hooks/globalEvents/backupAlertToast', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/globalEvents/backupAlertToast')>()),
+vi.mock('@/hooks/globalEvents/failureAlertToast', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/globalEvents/failureAlertToast')>()),
   showBackupFailureToast: hoisted.showBackupFailureToast,
   showCloudSyncFailureToast: hoisted.showCloudSyncFailureToast,
+  showWebPushFailureToast: hoisted.showWebPushFailureToast,
 }));
 
 import { useGlobalEvents } from '../useGlobalEvents';

@@ -1,11 +1,13 @@
 """Skill file-tree installation: quarantine, security gates and transactional promotion.
 
 [INPUT]
+- agent.plugins.rules::DocumentTooLargeError (POS: Refusal of a plugin document over its decode ceiling)
 - backends.skills.market_protocols::SkillInstallResult (POS: Typed install outcome)
 - backends.skills.scanning::compute_scan_summary (POS: Security score of a scan)
 - backends.skills.scanning.archive_security::classify_archive_security_issue, format_archive_security_user_message (POS: Canonical archive-security contract for typed/untyped ZIP guard errors.)
 - backends.skills.scanning.package_audit::check_lifecycle_scripts (POS: In-memory lifecycle script gate)
 - backends.skills.versioning::validate_version_guard (POS: Downgrade guard)
+- utils.text_sanitizer::encodable_text (POS: repairs a text that only has to become UTF-8 encodable, replacing each lone surrogate with ``U+FFFD``)
 - .helpers::read_origin, write_origin, scan_all_text_files (POS: Provenance file and in-memory scan)
 - .transaction::SkillInstallTransaction, build_skill_receipt, write_receipt_file (POS: Atomic promotion and receipts)
 
@@ -13,6 +15,7 @@
 - install_skill_files: Install an in-memory skill file tree under an install root through the quarantine pipeline.
 - is_safe_skill_dir_name: Whether a publisher-controlled name is a single relative path segment.
 - resolve_install_error: Map an install exception to a user message and a stable error code.
+- DOCUMENT_TOO_LARGE_MESSAGE, INVALID_PACKAGE_PATH_MESSAGE, INVALID_SKILL_NAME_MESSAGE: The fixed refusal sentences a user sees; the details go to the log.
 
 [POS]
 The one install path for every source that already holds the files. The market service passes its install root, so the
@@ -24,9 +27,11 @@ from __future__ import annotations
 import logging
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from itertools import chain
 from pathlib import Path
 
+from myrm_agent_harness.agent.plugins.rules import DocumentTooLargeError
 from myrm_agent_harness.backends.skills.local_skill_id import local_skill_id_from_path
 from myrm_agent_harness.backends.skills.market_protocols import SkillInstallResult
 from myrm_agent_harness.backends.skills.scanning import compute_scan_summary
@@ -40,11 +45,20 @@ from myrm_agent_harness.backends.skills.scanning.path_security import (
     PathRedirectSecurityError,
 )
 from myrm_agent_harness.backends.skills.versioning import SkillDowngradeBlockedError, validate_version_guard
+from myrm_agent_harness.utils.text_sanitizer import encodable_text
 
 from .helpers import read_origin, scan_all_text_files, write_origin
 from .transaction import SkillInstallTransaction, build_skill_receipt, write_receipt_file
 
 logger = logging.getLogger(__name__)
+
+# 用户可见拒绝原因的固定文案：不含包内路径、数字与解析器原文，这些细节只写日志
+DOCUMENT_TOO_LARGE_MESSAGE = "安装被拦截：Agent Plugin 包内有文件超出大小限制。"
+INVALID_PACKAGE_PATH_MESSAGE = "安装被拦截：包内有文件名或目录名过长，或含不支持的字符。"
+INVALID_SKILL_NAME_MESSAGE = "安装被拦截：技能名称无效，不能用作安装目录名。"
+
+# ext4 等 POSIX 文件系统的路径分量上限是 255 字节；按 UTF-8 字节数计，同一个包在每台主机上的结论一致
+_MAX_NAME_BYTES = 255
 
 
 def is_safe_skill_dir_name(name: str) -> bool:
@@ -61,12 +75,26 @@ def is_safe_skill_dir_name(name: str) -> bool:
     return not Path(name).is_absolute()
 
 
-def resolve_install_error(error: Exception) -> tuple[str, str]:
-    from myrm_agent_harness.backends.skills.scanning.path_security import (
-        CategoryBucketCollisionError,
-        PathRedirectSecurityError,
-    )
+def _is_storable(part: str) -> bool:
+    try:
+        raw = part.encode("utf-8")
+    except UnicodeEncodeError:  # 孤立代理字符没有 UTF-8 形式
+        return False
+    return len(raw) <= _MAX_NAME_BYTES and b"\0" not in raw
 
+
+def _find_unstorable_name(skill_name: str, file_paths: Iterable[str]) -> str | None:
+    """The first name of a package beyond the portable limits: the skill name, then each component of each path.
+
+    Every name is chosen by the publisher; the first write to one that is too long or holds a NUL raises an
+    OSError or ValueError, and a lone surrogate has no UTF-8 form, so each has to be refused before the quarantine
+    is created. Each name is judged on its own: the total path length and Windows reserved names are not checked.
+    """
+    names = chain([skill_name], (part for path in file_paths for part in path.split("/")))
+    return next((name for name in names if not _is_storable(name)), None)
+
+
+def resolve_install_error(error: Exception) -> tuple[str, str]:
     if isinstance(error, CategoryBucketCollisionError):
         return (
             str(error),
@@ -77,6 +105,8 @@ def resolve_install_error(error: Exception) -> tuple[str, str]:
             str(error),
             "PATH_REDIRECT_ATTACK",
         )
+    if isinstance(error, DocumentTooLargeError):
+        return DOCUMENT_TOO_LARGE_MESSAGE, "DOCUMENT_TOO_LARGE"
 
     violation = classify_archive_security_issue(error)
     if violation is None:
@@ -102,9 +132,11 @@ async def install_skill_files(
     the canonical local skill id is derived from the install path.
 
     Rejection pipeline (each returns a failed SkillInstallResult, never
-    raises): invalid directory name → lifecycle script guard → security
-    score gate → version downgrade guard → unsafe install target
-    (symlink/junction or category bucket). Unexpected errors propagate.
+    raises): invalid directory name → package name beyond the portable
+    limits → lifecycle script guard → security score gate → version downgrade guard →
+    refusals found while promoting (unsafe install target: symlink/junction
+    or category bucket; an Agent Plugin document over its decode ceiling).
+    Unexpected errors propagate.
     """
 
     def _emit(stage: str, msg: str) -> None:
@@ -112,16 +144,37 @@ async def install_skill_files(
             progress_callback(skill_id, stage, msg)
 
     # 0. 安装目录名必须是单个相对路径段：frontmatter 的 name 完全由
-    # 技能发布方控制，未经校验会拼出目录穿越或让 mkdtemp 直接崩溃
+    # 技能发布方控制，未经校验会拼出目录穿越或让 mkdtemp 直接崩溃。
+    # 本步两道门的拒绝结果都回显这个名字，它可能含孤立代理字符，须先换成 U+FFFD，否则 JSON 响应序列化会抛异常
     if not is_safe_skill_dir_name(name):
-        reason = f"Invalid skill name for install directory: {name!r}"
-        logger.warning("Skill install rejected: %s", reason)
-        _emit("rejected", reason)
+        logger.warning("Skill %.80r install rejected: not a single relative path segment", name)
+        _emit("rejected", INVALID_SKILL_NAME_MESSAGE)
         return SkillInstallResult(
             success=False,
-            skill_name=name,
-            error=reason,
+            skill_name=encodable_text(name),
+            error=INVALID_SKILL_NAME_MESSAGE,
             error_code="INVALID_SKILL_NAME",
+        )
+
+    # 同属第 0 步：技能名与包内路径分量同样由发布方决定。过长或含 NUL 的名字在第一次写盘时就会抛 OSError/ValueError
+    # （隔离目录的创建、写入循环、提升都会碰到），孤立代理字符没有 UTF-8 形式，按 UTF-8 判断才能让各主机的结论一致，
+    # 所以都必须在创建任何目录之前拒绝；名字本身只写日志
+    unstorable = _find_unstorable_name(name, files)
+    if unstorable is not None:
+        logger.warning(
+            "Skill %.80r install rejected: a package name beyond %d UTF-8 bytes, or with a NUL or a lone surrogate "
+            "(%d characters): %r",
+            name,
+            _MAX_NAME_BYTES,
+            len(unstorable),
+            unstorable[:80],
+        )
+        _emit("rejected", INVALID_PACKAGE_PATH_MESSAGE)
+        return SkillInstallResult(
+            success=False,
+            skill_name=encodable_text(name),
+            error=INVALID_PACKAGE_PATH_MESSAGE,
+            error_code="INVALID_PACKAGE_PATH",
         )
 
     # 1. 前置生命周期脚本防御门禁 (Lifecycle Script Guard)
@@ -139,7 +192,7 @@ async def install_skill_files(
             scan_summary=reason_str,
         )
 
-    quarantine_dir = Path(tempfile.mkdtemp(prefix=f"skill-quarantine-{name}-"))
+    quarantine_dir = Path(tempfile.mkdtemp(prefix="skill-quarantine-"))
 
     try:
         _emit("quarantine", "Writing to quarantine...")
@@ -243,7 +296,7 @@ async def install_skill_files(
                     declared_mcp_servers = [s.name for s in parsed.servers]
                     for p_skill in parsed.skills:
                         s_target_dir = install_root / p_skill.name
-                        s_quarantine = Path(tempfile.mkdtemp(prefix=f"skill-q-{p_skill.name}-"))
+                        s_quarantine = Path(tempfile.mkdtemp(prefix="skill-q-"))
                         try:
                             for rel_p, data in p_skill.files.items():
                                 f_path = s_quarantine / rel_p
@@ -328,11 +381,11 @@ async def install_skill_files(
             declared_mcp_servers=declared_mcp_servers,
             receipt=receipt,
         )
-    except (CategoryBucketCollisionError, PathRedirectSecurityError) as exc:
-        # 安装目标是符号链接/分类桶等不安全路径：属于可预期的安全拒绝，
-        # 转成结构化失败结果，避免调用方收到不透明的 500
+    except (CategoryBucketCollisionError, PathRedirectSecurityError, DocumentTooLargeError) as exc:
+        # 安装目标是符号链接/分类桶等不安全路径，或 Agent Plugin 包内有文档超过解码上限：
+        # 都是可预期的拒绝，转成结构化失败结果，避免调用方收到不透明的 500
         resolved_error, error_code = resolve_install_error(exc)
-        logger.warning("Skill '%s' install target rejected: %s", name, resolved_error)
+        logger.warning("Skill '%s' install rejected: %s", name, exc)
         _emit("rejected", resolved_error)
         return SkillInstallResult(
             success=False,

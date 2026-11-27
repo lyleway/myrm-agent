@@ -41,12 +41,12 @@ describe('mediaGeneratedEntriesOf', () => {
     const success = {
       status: 'success',
       audio_url: 'media://media_speech',
-      model: 'gpt-4o-mini-tts',
+      model: 'eleven_multilingual_v2',
       duration_seconds: 3.2,
     };
 
     expect(mediaGeneratedEntriesOf('tts_generate', success)).toEqual([
-      { kind: 'tts', media: 'media://media_speech', model: 'gpt-4o-mini-tts', duration_seconds: 3.2 },
+      { kind: 'tts', media: 'media://media_speech', model: 'eleven_multilingual_v2', duration_seconds: 3.2 },
     ]);
     expect(mediaGeneratedEntriesOf('tts_generate', { ...success, status: 'error' })).toEqual([]);
     expect(mediaGeneratedEntriesOf('tts_generate', { ...success, audio_url: 'https://cdn.example/a.mp3' })).toEqual([]);

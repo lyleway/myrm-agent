@@ -56,6 +56,17 @@ const DOM_APPROVAL: ApprovalPayload = {
   },
 };
 
+const PERMISSION_APPROVAL: ApprovalPayload = {
+  approval_id: 'perm-drawer-1',
+  user_id: 'user-1',
+  action_type: 'external_agent_permission',
+  status: 'PENDING',
+  severity: 'high',
+  chat_id: 'chat-1',
+  reason: 'claude-code: Bash',
+  payload: { agent: 'claude-code', kind: 'execute', command: 'rm -rf build' },
+};
+
 function seed(approval: ApprovalPayload): void {
   queue.length = 0;
   queue.push(approval);
@@ -85,6 +96,46 @@ describe('ApprovalDrawer resolve payload', () => {
     expect(action).toBe('approve');
     expect(extra.guidance).toBe('only staging');
     expect(extra.feedback).toBeUndefined();
+  });
+
+  describe('an external agent permission request', () => {
+    const resolveBody = () => {
+      const [url, init] = vi.mocked(global.fetch).mock.calls[0] as unknown as [string, { body: string }];
+      return { url, body: JSON.parse(init.body) as Record<string, unknown> };
+    };
+
+    it('is titled for what it is, not by its internal type', async () => {
+      seed(PERMISSION_APPROVAL);
+      render(<ApprovalDrawer />);
+
+      expect(await screen.findByText('toolApproval.externalAgentPermission.drawerTitle')).toBeInTheDocument();
+      expect(screen.queryByText(/external_agent_permission/)).not.toBeInTheDocument();
+    });
+
+    it('hands the reason for a refusal to the server and resumes no stream', async () => {
+      seed(PERMISSION_APPROVAL);
+      render(<ApprovalDrawer />);
+
+      await userEvent.type(await screen.findByPlaceholderText('toolApproval.addCommentPlaceholder'), 'not in prod');
+      await userEvent.click(screen.getByRole('button', { name: 'toolApproval.reject' }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const { url, body } = resolveBody();
+      expect(url).toMatch(/\/approvals\/perm-drawer-1\/resolve$/);
+      expect(body).toMatchObject({ decision: 'reject', comment: 'not in prod' });
+      expect(resumeDrawerApprovalStream).not.toHaveBeenCalled();
+    });
+
+    it('approves with one call and resumes no stream', async () => {
+      seed(PERMISSION_APPROVAL);
+      render(<ApprovalDrawer />);
+
+      await userEvent.click(await screen.findByRole('button', { name: 'toolApproval.approve' }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      expect(resolveBody().body).toMatchObject({ decision: 'approve' });
+      expect(resumeDrawerApprovalStream).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps a rejection reason on feedback, where the harness reads it', async () => {

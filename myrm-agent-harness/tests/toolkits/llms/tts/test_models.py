@@ -14,10 +14,10 @@ from myrm_agent_harness.toolkits.llms.tts.models import (
 
 
 def test_media_meta_fields() -> None:
-    meta = MediaMeta(prompt="hello", model="tts-1", provider="openai")
+    meta = MediaMeta(prompt="hello", model="eleven_v2", provider="elevenlabs")
     assert meta.prompt == "hello"
-    assert meta.model == "tts-1"
-    assert meta.provider == "openai"
+    assert meta.model == "eleven_v2"
+    assert meta.provider == "elevenlabs"
 
 
 def test_tts_generation_error_stores_latency() -> None:
@@ -30,11 +30,11 @@ def test_tts_result_frozen() -> None:
     result = TTSResult(
         audio_bytes=b"x",
         mime_type="audio/mpeg",
-        provider="openai",
-        model="tts-1",
+        provider="elevenlabs",
+        model="eleven_v2",
     )
     with pytest.raises(AttributeError):
-        result.provider = "elevenlabs"  # type: ignore[misc]
+        result.provider = "volcengine"  # type: ignore[misc]
 
 
 def test_tts_config_requires_provider_model_and_voice() -> None:
@@ -50,4 +50,4 @@ def test_tts_config_keeps_the_selection_and_default_tuning() -> None:
 
 
 def test_supported_providers_cover_the_engine_request_builders() -> None:
-    assert sorted(SUPPORTED_TTS_PROVIDERS) == ["elevenlabs", "openai", "volcengine"]
+    assert sorted(SUPPORTED_TTS_PROVIDERS) == ["elevenlabs", "volcengine"]

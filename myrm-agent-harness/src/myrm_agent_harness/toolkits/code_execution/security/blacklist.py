@@ -194,21 +194,6 @@ DANGEROUS_ENV_VARS: frozenset[str] = CODE_INJECTION_ENV_VARS | _REDIRECTION_ENV_
 
 DANGEROUS_ENV_PREFIXES: tuple[str, ...] = (*CODE_INJECTION_ENV_PREFIXES, "GIT_SSL_")
 
-DANGEROUS_ENV_WILDCARDS: tuple[str, ...] = (
-    "KEY",
-    "SECRET",
-    "TOKEN",
-    "PASSWORD",
-    "CREDENTIAL",
-    "AUTH_",
-    "_AUTH",
-    "AUTHORIZATION",
-    "AUTHENTICATION",
-    "BEARER",
-    "SIGNATURE",
-    "PASS",
-)
-
 
 # ============================================================
 # File-modifying commands (for path checking)

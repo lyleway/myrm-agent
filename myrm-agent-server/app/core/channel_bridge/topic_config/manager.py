@@ -1,11 +1,11 @@
 """[INPUT]
-- .binding / .identity / .policy / .config_store (POS: the four mixins)
+- .binding / .lifecycle / .policy / .config_store (POS: the four mixins)
 
 [OUTPUT]
 - SqlTopicManager
 
 [POS]
-The topic manager: one class composed from the binding, identity, policy and config-store mixins.
+The topic manager: one class composed from the binding, lifecycle, policy and config-store mixins.
 """
 
 from __future__ import annotations
@@ -13,11 +13,11 @@ from __future__ import annotations
 from .binding import BindingMixin
 from .common import _DEFAULT_IDLE_TIMEOUT_HOURS
 from .config_store import ConfigStoreMixin
-from .identity import IdentityMixin
+from .lifecycle import LifecycleMixin
 from .policy import PolicyMixin
 
 
-class SqlTopicManager(BindingMixin, IdentityMixin, PolicyMixin, ConfigStoreMixin):
+class SqlTopicManager(BindingMixin, LifecycleMixin, PolicyMixin, ConfigStoreMixin):
     """Manages per-topic/channel configuration in UserConfig DB.
 
     Config structure in UserConfig (config_key = "telegramTopics" etc.):
@@ -47,5 +47,4 @@ class SqlTopicManager(BindingMixin, IdentityMixin, PolicyMixin, ConfigStoreMixin
         self._read_generation: dict[str, int] = {}
         self._default_idle_timeout_h = idle_timeout_hours
         self._default_max_age_h = max_age_hours
-        self._active_mem: dict[str, str] = {}
         self._active_flush_ts: dict[str, float] = {}

@@ -5,7 +5,7 @@
 - app.api.web_push.schemas
 
 [OUTPUT]
-- router: Web Push REST endpoints (VAPID key, subscribe, unsubscribe, test)
+- router: Web Push REST endpoints (VAPID key, subscribe, unsubscribe, test); the test reports the delivered count and why devices were missed
 
 [POS]
 API layer for Web Push. Thin delegation to WebPushService.
@@ -19,6 +19,7 @@ from app.api.web_push.schemas import (
     WebPushSubscriptionRequest,
     WebPushSubscriptionResponse,
     WebPushTestRequest,
+    WebPushTestResponse,
     WebPushUnsubscribeRequest,
     WebPushVapidKeyResponse,
 )
@@ -27,6 +28,9 @@ from app.core.web_push.service import get_web_push_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/web-push", tags=["Web Push"])
+
+# A test with nobody registered reaches nobody, so it reports that as its reason rather than as a bare zero.
+_NO_DEVICE_REASON = "No device is registered for Web Push on this server."
 
 
 @router.get("/vapid-key", response_model=WebPushVapidKeyResponse)
@@ -57,9 +61,10 @@ async def unsubscribe(req: WebPushUnsubscribeRequest) -> dict[str, str]:
     return {"status": "ok" if deleted else "not_found"}
 
 
-@router.post("/test")
-async def send_test(req: WebPushTestRequest) -> dict[str, int]:
-    """Send a test push notification to all registered subscriptions."""
+@router.post("/test", response_model=WebPushTestResponse)
+async def send_test(req: WebPushTestRequest) -> WebPushTestResponse:
+    """Send a test push notification to all registered subscriptions and report why any did not arrive."""
     service = get_web_push_service()
-    delivered = await service.broadcast(title=req.title, body=req.body, url=req.url)
-    return {"delivered": delivered}
+    result = await service.broadcast(title=req.title, body=req.body, url=req.url)
+    failures = list(result.reasons) if result.subscriptions else [_NO_DEVICE_REASON]
+    return WebPushTestResponse(delivered=result.delivered, subscriptions=result.subscriptions, failures=failures)

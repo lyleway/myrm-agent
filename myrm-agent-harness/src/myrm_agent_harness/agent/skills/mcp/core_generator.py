@@ -266,13 +266,18 @@ class MCPSkillGenerator:
 
     @staticmethod
     def _dedupe_skill_name(base: str, claimed: dict[str, str]) -> str:
-        """Return *base* or the first free ``base_<n>`` so every server keeps a skill."""
+        """Return *base* or the first free numbered variant (``mcp_x_2_skill``) so every server keeps a skill.
+
+        The number goes before the ``_skill`` suffix because the script-side recognizers (import detection, the
+        approval intent, the completion guard, the IPC scope gate) identify a generated skill by that suffix.
+        """
         if base not in claimed:
             return base
+        stem = base.removesuffix("_skill")
         index = 2
-        while f"{base}_{index}" in claimed:
+        while f"{stem}_{index}_skill" in claimed:
             index += 1
-        return f"{base}_{index}"
+        return f"{stem}_{index}_skill"
 
     # ========== Internal: Tool Documentation ==========
 

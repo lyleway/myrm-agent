@@ -1,11 +1,12 @@
 /**
  * [INPUT]
  * - @/services/artifactApps (POS: HTTP client of the installed-app API)
- * - @/lib/app-bridge (POS: declaration parsing, permission status, page-side client injection)
+ * - @/lib/app-bridge (POS: declaration parsing, permission status, external scripts, page-side client injection)
  * - @/lib/api::getStorageUrl (POS: resolves `vault://` references to a fetchable address)
  *
  * [OUTPUT]
- * - useAppHostData: loads an installed app (record, page HTML, decisions) and derives what the page declared and may use.
+ * - useAppHostData: loads an installed app (record, page HTML, decisions) and derives what the page declared and may use,
+ *   and which other sites serve its scripts.
  *
  * [POS]
  * Data half of the app host page. The page HTML is the version recorded in the same response, so the declaration the
@@ -15,12 +16,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, getStorageUrl } from '@/lib/api';
 import {
+  EMPTY_DECLARATION,
   parseDeclaration,
   resolveStatuses,
   type CapabilityStatus,
   type Declaration,
   type GrantRecord,
 } from '@/lib/app-bridge/declaration';
+import { listExternalScripts, type ExternalScript } from '@/lib/app-bridge/externalScripts';
 import type { BridgeCapability } from '@/lib/app-bridge/protocol';
 import { injectAppBridge } from '@/lib/app-bridge/shim';
 import { fetchAppDetail, type AppDetail } from '@/services/artifactApps';
@@ -47,11 +50,11 @@ export interface AppHostData {
   html: string | null;
   declaration: Declaration;
   statuses: Record<BridgeCapability, CapabilityStatus>;
+  externalScripts: ExternalScript[];
   /** Merges decisions the user just saved into what the page may use. */
   applyGrants: (saved: GrantRecord[]) => void;
 }
 
-const NO_DECLARATION: Declaration = { notify: false, fetchHosts: [] };
 const NO_GRANTS: GrantRecord[] = [];
 
 export function useAppHostData(artifactId: string): AppHostData {
@@ -88,9 +91,10 @@ export function useAppHostData(artifactId: string): AppHostData {
   const state: AppLoadState = current === null ? 'loading' : (current.failure ?? 'ready');
 
   const source = app?.source ?? null;
-  const declaration = useMemo(() => (source === null ? NO_DECLARATION : parseDeclaration(source)), [source]);
+  const declaration = useMemo(() => (source === null ? EMPTY_DECLARATION : parseDeclaration(source)), [source]);
   const statuses = useMemo(() => resolveStatuses(declaration, app?.grants ?? NO_GRANTS), [declaration, app?.grants]);
   const html = useMemo(() => (source === null ? null : injectAppBridge(source)), [source]);
+  const externalScripts = useMemo(() => (source === null ? [] : listExternalScripts(source)), [source]);
 
   const applyGrants = useCallback(
     (saved: GrantRecord[]) => {
@@ -108,5 +112,5 @@ export function useAppHostData(artifactId: string): AppHostData {
     [artifactId],
   );
 
-  return { state, detail: app?.detail ?? null, html, declaration, statuses, applyGrants };
+  return { state, detail: app?.detail ?? null, html, declaration, statuses, externalScripts, applyGrants };
 }

@@ -61,7 +61,7 @@ export interface ChatSettingsConfigValue {
 /**
  * PersonalSettings 配置值
  */
-export type WebTtsProvider = 'browser' | 'openai' | 'elevenlabs' | 'fish_audio' | 'minimax' | 'edge';
+export type WebTtsProvider = 'browser' | 'elevenlabs' | 'fish_audio' | 'minimax' | 'edge';
 export type ReasoningDisplayMode = 'off' | 'collapsed' | 'inline';
 
 export interface NotificationDelivery {

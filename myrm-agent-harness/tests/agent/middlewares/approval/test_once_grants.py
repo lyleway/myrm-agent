@@ -7,6 +7,7 @@ the folder for the session. Without the first the executor refuses a call the pe
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -118,6 +119,22 @@ async def test_approving_a_write_opens_nothing_for_a_quoted_path_since_it_opens_
     await _decide(call, "file_write", {"type": "approve", "extensions": {}}, _POLICY)
 
     assert grants.once == ()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privileges on Windows")
+async def test_approving_a_read_opens_the_file_a_whitespace_named_link_opens(
+    run: tuple[Path, Path, AccessGrants],
+) -> None:
+    # The read tool opens the name as sent, trailing space included, so the grants have to resolve that same text.
+    workspace, outside, grants = run
+    (outside / "a.csv").write_text("x", encoding="utf-8")
+    (workspace / "a.csv ").symlink_to(outside / "a.csv")
+    call = _call("file_read_tool", {"paths": ["a.csv "]})
+
+    await _decide(call, "file_read", {"type": "approve", "extensions": {"grantDirectory": True}}, _POLICY)
+
+    assert _once_paths(grants) == [(os.path.join(outside, "a.csv"), False)]
+    assert [root.path for root in grants.session] == [str(outside)]
 
 
 async def test_the_toggle_also_keeps_the_folder_for_the_session(run: tuple[Path, Path, AccessGrants]) -> None:

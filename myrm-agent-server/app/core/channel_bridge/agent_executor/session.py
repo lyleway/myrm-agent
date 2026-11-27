@@ -1,4 +1,24 @@
+"""Session keys of channel conversations: the peer, thread, agent and reset epoch a chat is stored under.
+
+[INPUT]
+- app.channels.types::SessionKey, SessionPolicy, compute_daily_epoch, started_key_time (POS: Session identity, reset policy, epoch computation and the key of a conversation opened on request)
+- app.database.repositories.channel_key_match::channel_key_epochs, channel_key_started (POS: Boundary-safe matches of a conversation in ``Chat.channel_session_key``)
+- app.services.budget.channel_budget_key::group_budget_key (POS: Canonical key of a group's channel budget)
+
+[OUTPUT]
+- resolve_session_key: the key the next turn of a peer is stored under
+- build_channel_session_key: the base key of a peer's conversation, without a reset epoch, which a conversation opened on request extends
+- build_channel_budget_key: the budget key of a group message
+
+[POS]
+The one place that decides which conversation a channel message belongs to. A conversation the person opened on request
+(``/new``, ``/handoff``) stays the peer's conversation for as long as the reset policy lets it; otherwise the policy's own
+epoch applies.
+"""
+
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 from app.channels.types import (
     InboundMessage,
@@ -6,6 +26,7 @@ from app.channels.types import (
     SessionPolicy,
     SessionResetMode,
     compute_daily_epoch,
+    started_key_time,
 )
 from app.services.budget.channel_budget_key import group_budget_key
 
@@ -40,11 +61,10 @@ def build_channel_session_key(
     *,
     agent_id: str | None = None,
 ) -> str:
-    """Return the base ``channel_session_key`` for a message's conversation.
+    """Return the base ``channel_session_key`` for a message's conversation, without a reset epoch.
 
-    Public counterpart of ``_build_session_key`` for callers that need to look up the Chat row
-    rather than resolve a reset epoch: ``Chat.channel_session_key`` stores this exact string, so
-    a lookup built from only channel + peer never matches a topic- or agent-scoped conversation.
+    Public counterpart of ``_build_session_key`` for callers that derive a key of their own from the base: a
+    conversation opened on request extends it with its opening time (``started_session_key``).
     """
     return _build_session_key(msg, agent_id=agent_id)
 
@@ -76,22 +96,19 @@ async def resolve_session_key(
     policy: SessionPolicy,
     *,
     agent_id: str | None = None,
-    force_new_epoch: bool = False,
 ) -> str:
     """Resolve the final session key according to the reset policy.
 
+    - opened on request (``/new``, ``/handoff``): the newest such conversation, while the policy lets it continue
     - persistent: base key only (one Chat per peer forever)
     - daily: base key + date epoch (new Chat each day at reset_hour UTC)
     - idle: base key + time epoch (new Chat after idle_minutes of inactivity)
-    - force_new_epoch: used by /new command to force a new Chat
     """
-    from datetime import UTC, datetime
-
     base = _build_session_key(msg, agent_id=agent_id)
 
-    if force_new_epoch:
-        epoch = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S")
-        return f"{base}:e={epoch}"
+    started_key = await _current_started_key(base, policy)
+    if started_key is not None:
+        return started_key
 
     match policy.mode:
         case SessionResetMode.PERSISTENT:
@@ -104,17 +121,64 @@ async def resolve_session_key(
     return base
 
 
+async def _current_started_key(base_key: str, policy: SessionPolicy) -> str | None:
+    """The key of the newest conversation the person opened on request, while it is still the one they talk in.
+
+    A conversation opened on request is not tied to the reset epoch the policy derives, so the policy only decides how
+    long it lasts: persistent, until another is opened; daily, until the next reset hour; idle, until it has been idle for
+    ``idle_minutes``. Its own last activity is what counts, so a late write to an older conversation does not bring that
+    one back. ``None`` when the peer opened none or it has ended: the policy's own key applies then.
+    """
+    from sqlalchemy import select
+
+    from app.database.connection import get_session
+    from app.database.models import Chat
+    from app.database.repositories.channel_key_match import channel_key_started
+
+    async with get_session() as session:
+        result = await session.execute(
+            select(Chat.channel_session_key, Chat.updated_at)
+            .where(channel_key_started(base_key))
+            .order_by(Chat.channel_session_key.desc())
+            .limit(1)
+        )
+        row = result.first()
+    if row is None or row[0] is None:
+        return None
+
+    key: str = row[0]
+    updated_at: datetime = row[1]
+    now = datetime.now(tz=UTC)
+    match policy.mode:
+        case SessionResetMode.PERSISTENT:
+            return key
+        case SessionResetMode.DAILY:
+            opened_at = started_key_time(key)
+            same_epoch = opened_at is not None and compute_daily_epoch(
+                policy.daily_reset_hour, at=opened_at
+            ) == compute_daily_epoch(policy.daily_reset_hour, at=now)
+            return key if same_epoch else None
+        case SessionResetMode.IDLE:
+            return None if _is_idle_expired(updated_at, now, policy.idle_minutes) else key
+    return None
+
+
+def _is_idle_expired(updated_at: datetime, now: datetime, idle_minutes: int) -> bool:
+    """Whether a chat last active at ``updated_at`` (a naive time is UTC) has been idle for more than ``idle_minutes``."""
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=UTC)
+    return (now - updated_at).total_seconds() > idle_minutes * 60
+
+
 async def _resolve_idle_key(
     base_key: str,
     idle_minutes: int,
 ) -> str:
     """Resolve session key for idle mode by checking the latest Chat's activity.
 
-    Only the conversation's own chats count (its key and its reset epochs): the chat of another
-    peer, topic or agent that shares the key's leading characters must not be continued.
+    Only the conversation's own chats count (its key, its reset epochs and the conversations opened on request):
+    the chat of another peer, topic or agent that shares the key's leading characters must not be continued.
     """
-    from datetime import UTC, datetime
-
     from sqlalchemy import select
 
     from app.database.connection import get_session
@@ -139,11 +203,7 @@ async def _resolve_idle_key(
     updated_at: datetime = row[0]
     existing_key: str = row[1]
 
-    if updated_at.tzinfo is None:
-        updated_at = updated_at.replace(tzinfo=UTC)
-
-    elapsed = (now - updated_at).total_seconds()
-    if elapsed > idle_minutes * 60:
+    if _is_idle_expired(updated_at, now, idle_minutes):
         return new_epoch_key
 
     return existing_key

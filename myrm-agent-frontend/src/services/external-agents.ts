@@ -4,29 +4,36 @@
  *
  * [OUTPUT]
  * - ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
- * - getExternalAgentAuthStatus / streamExternalAgentLogin / feedExternalAgentLogin
- *   / importExternalAgentCredential / logoutExternalAgent
+ * - ExternalAgentAccount 类型
+ * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
+ *   / feedExternalAgentLogin / importExternalAgentCredential / logoutExternalAgent
+ * - listExternalAgentAccounts / createExternalAgentAccount / deleteExternalAgentAccount
  *
  * [POS]
- * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 交互式登录、
- * 凭据导入/登出，供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
+ * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
+ * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、凭据导入/登出，
+ * 命名账号的列出、创建、删除，供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
+ * 登录、导入、登出可带账号名，作用于该账号目录里的登录而不是 CLI 自己的。
  */
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
+import type { ExternalAgentType } from '@/services/config';
 
-export type ExternalAgentLoginStrategy = 'device_code' | 'browser_oauth' | 'setup_token' | 'manual_import';
+export type ExternalAgentLoginStrategy = 'browser_oauth' | 'paste_code' | 'manual_import';
 
 export interface ExternalAgentAuthStatus {
   backend: string;
   installed: boolean;
   path: string | null;
   version: string | null;
+  /** How the app runs this agent. It is the agent's own contract, so a stored choice of type never changes it. */
+  transport: ExternalAgentType;
   authenticated: boolean;
   authStatus: 'authenticated' | 'not_authenticated' | 'unknown';
-  /** True when subscription cred exists OR the CLI binary is on PATH (third-party model setups). */
-  readyForDelegation: boolean;
   loginStrategy: ExternalAgentLoginStrategy;
   scriptableLogin: boolean;
   needsCodeInput: boolean;
+  /** False in a hosted deployment, which runs delegated agents on an API key and never keeps a subscription login. */
+  subscriptionLoginAllowed: boolean;
 }
 
 export interface ExternalAgentAuthEvent {
@@ -42,33 +49,20 @@ interface ExternalAgentCredentialState {
   authStatus: string;
 }
 
+/** One named login of a delegated CLI, kept in a home of its own. */
+export interface ExternalAgentAccount {
+  backend: string;
+  name: string;
+  authenticated: boolean;
+  authStatus: ExternalAgentAuthStatus['authStatus'];
+}
+
 /** Fetch install + login state for every known delegated backend (drives badges). */
 export async function getExternalAgentAuthStatus(): Promise<ExternalAgentAuthStatus[]> {
   const res = await apiRequest<{ backends: ExternalAgentAuthStatus[] }>('/external-agents/auth/status', {
     silent: true,
   });
   return res.backends ?? [];
-}
-
-/** Whether this backend can be delegated to (subscription cred OR CLI on PATH). */
-export function isExternalAgentDelegationReady(
-  status: Pick<ExternalAgentAuthStatus, 'authenticated' | 'installed' | 'readyForDelegation'>,
-): boolean {
-  return Boolean(status.readyForDelegation || status.authenticated || status.installed);
-}
-
-export type ExternalAgentBadgeKind = 'subscription' | 'cli_ready' | 'logged_out';
-
-export function resolveExternalAgentBadgeKind(
-  status: Pick<ExternalAgentAuthStatus, 'authenticated' | 'installed' | 'readyForDelegation'>,
-): ExternalAgentBadgeKind {
-  if (status.authenticated) {
-    return 'subscription';
-  }
-  if (isExternalAgentDelegationReady(status)) {
-    return 'cli_ready';
-  }
-  return 'logged_out';
 }
 
 /**
@@ -92,9 +86,9 @@ function resolveConfiguredBackendStatus(
  */
 export type ExternalCliReadiness = 'not_configured' | 'unavailable' | 'ready';
 
-/** True when auth/status reports any backend ready for delegation (PATH auto-detect). */
+/** True when auth/status reports any backend installed on this machine (PATH auto-detect). */
 export function hasAutoDetectedExternalCliBackend(statuses: ReadonlyArray<ExternalAgentAuthStatus>): boolean {
-  return statuses.some((row) => isExternalAgentDelegationReady(row));
+  return statuses.some((row) => row.installed);
 }
 
 /**
@@ -123,130 +117,30 @@ export function resolveExternalCliReadiness(
       return true;
     }
     const status = resolveConfiguredBackendStatus(command, statuses);
-    return status ? isExternalAgentDelegationReady(status) : true;
+    return status ? status.installed : true;
   });
   return resolvable ? 'ready' : 'unavailable';
 }
 
-export async function* streamExternalAgentInstall(
-  backend: string,
-): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
-  const response = await fetchWithTimeout(
-    `/external-agents/install/${backend}`,
-    {
-      method: 'POST',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    },
-    300000, // 5 minutes for installation
-  );
-
-  if (!response.body) {
-    throw new Error('No response body');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            return;
-          }
-          try {
-            const event = JSON.parse(data) as ExternalAgentAuthEvent;
-            yield event;
-          } catch (e) {
-            console.error('Failed to parse SSE event:', data, e);
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-/** Persist a credential blob captured elsewhere (universal fallback). */
-export function importExternalAgentCredential(
-  backend: string,
-  content: string,
-  filename?: string,
-): Promise<ExternalAgentCredentialState> {
-  return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/import', {
-    method: 'POST',
-    body: JSON.stringify({ backend, content, filename }),
-  });
-}
-
-/** Remove a backend's stored subscription credentials. */
-export function logoutExternalAgent(backend: string): Promise<ExternalAgentCredentialState> {
-  return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/logout', {
-    method: 'POST',
-    body: JSON.stringify({ backend }),
-  });
-}
-
-/** Forward a user-supplied code to a live login session (setup_token flow). */
-export function feedExternalAgentLogin(sessionId: string, text: string): Promise<{ ok: boolean }> {
-  return apiRequest<{ ok: boolean }>(`/external-agents/auth/login/${encodeURIComponent(sessionId)}/feed`, {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
+/** `fetchWithTimeout` (used for SSE) does not attach the bearer token the way `apiRequest` does. */
+function withBearerToken(headers: Record<string, string>): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  return token ? { ...headers, Authorization: `Bearer ${token}` } : headers;
 }
 
 /**
- * Drive an interactive CLI login over SSE, invoking `onEvent` for each event
- * until the stream closes. Pass an AbortSignal to cancel mid-flight.
+ * Parse an SSE body into events. Malformed frames are skipped; `[DONE]` ends the stream.
+ * Leaving early (consumer stops or the request is aborted) closes the underlying connection.
  */
-export async function streamExternalAgentLogin(
-  params: { command: string; backend?: string; sessionId: string },
-  onEvent: (event: ExternalAgentAuthEvent) => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetchWithTimeout(
-    '/external-agents/auth/login',
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ command: params.command, backend: params.backend, sessionId: params.sessionId }),
-      signal,
-    },
-    0,
-  );
-
-  if (!response.ok || !response.body) {
-    throw new Error(`Login stream failed: ${response.status}`);
-  }
-
-  const reader = response.body.getReader();
+async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) {
-        break;
+        return;
       }
       buffer += decoder.decode(value, { stream: true });
       let sep: number;
@@ -257,14 +151,131 @@ export async function streamExternalAgentLogin(
         if (!dataLine) {
           continue;
         }
+        const data = dataLine.slice(5).trim();
+        if (data === '[DONE]') {
+          return;
+        }
         try {
-          onEvent(JSON.parse(dataLine.slice(5).trim()) as ExternalAgentAuthEvent);
+          yield JSON.parse(data) as ExternalAgentAuthEvent;
         } catch {
           // ignore malformed frame
         }
       }
     }
   } finally {
-    reader.releaseLock();
+    reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * Install a backend CLI into the managed toolchain, yielding the installer's progress, then `success` or `error`.
+ * The server bounds every install step itself, so no client-side deadline applies; abort the signal to cancel.
+ */
+export async function* streamExternalAgentInstall(
+  backend: string,
+  signal?: AbortSignal,
+): AsyncGenerator<ExternalAgentAuthEvent, void, unknown> {
+  const response = await fetchWithTimeout(
+    `/external-agents/install/${encodeURIComponent(backend)}`,
+    { method: 'POST', headers: withBearerToken({ Accept: 'text/event-stream' }), signal },
+    0,
+  );
+  if (!response.ok || !response.body) {
+    throw new Error(`Install stream failed: ${response.status}`);
+  }
+  yield* readSseEvents(response.body);
+}
+
+/** Persist a credential blob captured elsewhere (universal fallback), into the named account when one is given. */
+export function importExternalAgentCredential(
+  backend: string,
+  content: string,
+  filename?: string,
+  account?: string,
+): Promise<ExternalAgentCredentialState> {
+  return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/import', {
+    method: 'POST',
+    body: JSON.stringify({ backend, content, filename, account }),
+  });
+}
+
+/**
+ * Log a backend out through its CLI and remove its stored credentials (those of the named account, when one is given).
+ * The state it returns is what the CLI reports afterwards: a login that could not be removed is still `authenticated`.
+ */
+export function logoutExternalAgent(backend: string, account?: string): Promise<ExternalAgentCredentialState> {
+  return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({ backend, account }),
+  });
+}
+
+/** Every named account with whether it is logged in. */
+export async function listExternalAgentAccounts(): Promise<ExternalAgentAccount[]> {
+  const res = await apiRequest<{ accounts: ExternalAgentAccount[] }>('/external-agents/accounts', { silent: true });
+  return res.accounts ?? [];
+}
+
+/** Make a new, empty account. A name that is taken rejects with an `ApiError` of code 409. */
+export function createExternalAgentAccount(backend: string, name: string): Promise<{ backend: string; name: string }> {
+  return apiRequest<{ backend: string; name: string }>('/external-agents/accounts', {
+    method: 'POST',
+    body: JSON.stringify({ backend, name }),
+    silent: true,
+  });
+}
+
+/**
+ * Remove an account with its login, settings and history. The account's CLI logs out first; when the login still
+ * stands afterwards the account is kept and this rejects with an `ApiError` of code 409.
+ */
+export function deleteExternalAgentAccount(backend: string, name: string): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>(
+    `/external-agents/accounts/${encodeURIComponent(backend)}/${encodeURIComponent(name)}`,
+    { method: 'DELETE', silent: true },
+  );
+}
+
+/** Forward a user-supplied code to a live login session (paste_code flow). */
+export function feedExternalAgentLogin(sessionId: string, text: string): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>(`/external-agents/auth/login/${encodeURIComponent(sessionId)}/feed`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
+}
+
+/**
+ * Drive an interactive CLI login over SSE, invoking `onEvent` for each event
+ * until the stream closes. Pass an AbortSignal to cancel mid-flight. `remote`: the browser that signs in is on
+ * another machine than the CLI, so the CLI is asked for a login that works from there.
+ */
+export async function streamExternalAgentLogin(
+  params: { command: string; backend?: string; sessionId: string; account?: string; remote?: boolean },
+  onEvent: (event: ExternalAgentAuthEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetchWithTimeout(
+    '/external-agents/auth/login',
+    {
+      method: 'POST',
+      headers: withBearerToken({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        command: params.command,
+        backend: params.backend,
+        sessionId: params.sessionId,
+        account: params.account,
+        remote: params.remote,
+      }),
+      signal,
+    },
+    0,
+  );
+
+  if (!response.ok || !response.body) {
+    throw new Error(`Login stream failed: ${response.status}`);
+  }
+
+  for await (const event of readSseEvents(response.body)) {
+    onEvent(event);
   }
 }

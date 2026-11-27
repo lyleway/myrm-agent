@@ -22,6 +22,7 @@ _REQUIRED_ROUTER_METHODS = (
     "_janitor_sweep",
     # pipeline/inbound.py
     "_dispatch_inbound_message",
+    "_open_requested_conversation",
     "_is_duplicate",
     # pipeline/command_dispatch.py
     "_dispatch_resolved",
@@ -56,15 +57,8 @@ def test_agent_router_keeps_its_composed_methods() -> None:
     )
 
 
-def test_prefix_lookup_lives_on_chat_service() -> None:
-    """The prefix lookup belongs to ChatService, so both router and goal code share it."""
-    from app.services.chat.chat_service import ChatService
-
-    assert callable(ChatService.get_newest_channel_chat_under)
-
-
 def test_web_handoff_takes_only_the_message() -> None:
-    """``_attach_web_handoff`` resolves the Chat row from ``msg``; a peer argument would be dead."""
+    """``_attach_web_handoff`` resolves the conversation from ``msg``; a peer argument would be dead."""
     import inspect
 
     from app.channels.routing.router import AgentRouter

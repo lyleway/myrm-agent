@@ -61,7 +61,7 @@ import { BLUEPRINT_TEMPLATES } from '../blueprintTemplates';
 type User = ReturnType<typeof userEvent.setup>;
 
 function externalAgent(name: string, enabled: boolean): ExternalAgentConfig {
-  return { name, type: 'cli', command: name, enabled, permissionMode: 'ask' };
+  return { name, type: 'cli', command: name, enabled, permissionMode: 'safe' };
 }
 
 /** Opens the select that currently shows `shown` and picks `option` from its list. */

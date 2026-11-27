@@ -16,7 +16,9 @@ Abstract persistent shell session base. Manages subprocess lifecycle, state mach
 script armor (on POSIX each command runs as ``bash <script>`` in a child of the shell, so what it exports or
 changes dies with it), and runs the commands of one shell one at a time; the command pump lives in
 ``CommandStreamMixin``. A command whose request is cancelled is stopped like a timed-out one (tree killed, session
-rebuilt on the next command); a command that reaches a shell that died is never replayed. A closed session is final:
+rebuilt on the next command); a command that reaches a shell that died is never replayed. A start that ends before
+its shell is ready (it failed, or its caller was cancelled) stops the shell it spawned, because the owner keeps a
+session only after ``start()`` returns and nothing else would close that shell. A closed session is final:
 it starts no shell, even through ``start()``; a command that reaches it after ``close()``, or whose shell was still
 starting when it closed, is refused and never reaches a shell; ``close()`` runs to its end even when the caller that
 awaits it is cancelled.
@@ -141,9 +143,12 @@ class PersistentSession(CommandStreamMixin, ABC):
             await self._initialize_shell()
             await self._transit_state(SessionState.ACTIVE)
             logger.info(f" Persistent session started: {self.config.session_id}")
-        except Exception as e:
-            await self._transit_state(SessionState.TERMINATED)
-            logger.error(f" Failed to start session: {e}")
+        except (Exception, asyncio.CancelledError) as error:
+            # A start that ends before its shell is ready takes the shell it spawned with it: the owner keeps a session
+            # only after ``start()`` returns, so nothing else would ever close that shell.
+            await self._discard_shell()
+            if isinstance(error, Exception):
+                logger.error(f" Failed to start session: {error}")
             raise
 
     @abstractmethod

@@ -12,14 +12,18 @@
  */
 
 /**
- * External Agent runtime type.
+ * How an External Agent is run: a command-line process per turn, over ACP, or over the agent's own app server.
  */
-export type ExternalAgentType = 'cli' | 'acp';
+export type ExternalAgentType = 'cli' | 'acp' | 'app_server';
 
 /**
  * External Agent permission mode.
+ *
+ * - `safe`: the agent may not change anything without the user's say-so (a known agent asks the user; a command the
+ *   app does not know keeps its own permission behaviour).
+ * - `allow_all`: the agent acts unattended.
  */
-export type ExternalAgentPermissionMode = 'allow_all' | 'ask' | 'safe';
+export type ExternalAgentPermissionMode = 'allow_all' | 'safe';
 
 /**
  * External Agent authentication mode.
@@ -45,6 +49,11 @@ export interface ExternalAgentConfig {
   maxTurns?: number;
   /** Variables set when the agent starts, such as its API key; the values are secrets. */
   env?: Record<string, string>;
+  /**
+   * The named account the agent runs as: its own login, settings and history, so a work and a personal
+   * subscription never mix. Absent: the login the CLI already has on this machine.
+   */
+  account?: string;
 }
 
 /**

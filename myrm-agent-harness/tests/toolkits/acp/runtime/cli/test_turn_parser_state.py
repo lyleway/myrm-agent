@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.parser import tool_summary
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
+from myrm_agent_harness.toolkits.acp.runtime.event_text import tool_summary
 from myrm_agent_harness.toolkits.acp.types import RuntimeEvent, RuntimeEventType
 
 _ID = "11111111-2222-3333-4444-555555555555"
@@ -29,13 +29,6 @@ class TestAnnouncedSession:
         events = _feed(parser, {"type": "system", "subtype": "init", "session_id": _ID})
 
         assert events == []
-        assert parser.take_announced() == _ID
-
-    def test_codex_announces_its_thread_when_it_starts(self) -> None:
-        parser = TurnParser("s1")
-
-        _feed(parser, {"type": "thread.started", "thread_id": _ID})
-
         assert parser.take_announced() == _ID
 
     def test_an_announcement_is_taken_once(self) -> None:
@@ -88,7 +81,7 @@ class TestClaudeMessages:
         assert events[1].data["tool_name"] == "Read"
         assert events[1].data["tool_call_id"] == "toolu_1"
         assert events[1].data["summary"] == "/work/a.py"
-        assert events[2].data["content"] == "Done."
+        assert events[2].data["content"] == "\n\nDone."
 
     def test_tool_results_come_back_in_user_lines(self) -> None:
         parser = TurnParser("s1")
@@ -173,6 +166,29 @@ class TestPartialMessages:
         events = _feed(parser, self._start(), self._delta("Hello"), full)
 
         assert [event.type for event in events] == [RuntimeEventType.TEXT_DELTA, RuntimeEventType.TOOL_START]
+
+    def test_text_streamed_after_a_tool_call_starts_a_new_paragraph(self) -> None:
+        parser = TurnParser("s1")
+        call = {"type": "tool_use", "id": "toolu_1", "name": "Read", "input": {}}
+        first = {
+            "type": "assistant",
+            "message": {"id": "msg_1", "content": [{"type": "text", "text": "I will read."}, call]},
+        }
+        answer = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_1"}]}}
+
+        events = _feed(
+            parser,
+            self._start("msg_1"),
+            self._delta("I will read.", "msg_1"),
+            first,
+            answer,
+            self._start("msg_2"),
+            self._delta("Done", "msg_2"),
+            self._delta(".", "msg_2"),
+            self._full("Done.", "msg_2"),
+        )
+
+        assert _texts(events) == ["I will read.", "\n\nDone", "."]
 
     def test_a_message_that_was_not_streamed_is_emitted_in_full(self) -> None:
         parser = TurnParser("s1")

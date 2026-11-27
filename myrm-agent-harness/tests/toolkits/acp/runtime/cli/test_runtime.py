@@ -15,9 +15,11 @@ from myrm_agent_harness.toolkits.acp.types import (
     McpServerConfig,
     RuntimeConfig,
     RuntimeEventType,
+    StopReason,
 )
+from tests.toolkits.acp._stores import RecordingStore
 
-from ._fakes import FakeCli, RecordingStore, errors_of, make_runtime, run_turn, text_of, types_of
+from ._fakes import FakeCli, errors_of, make_runtime, run_turn, text_of, types_of
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLI stand-ins are POSIX shebang scripts")
 
@@ -31,21 +33,20 @@ def _argv(fake_cli: FakeCli, index: int = 0) -> list[str]:
 
 
 class TestProperties:
-    def test_claude_and_codex_resume_conversations_and_other_clis_do_not(self) -> None:
+    def test_claude_resumes_conversations_and_other_clis_do_not(self) -> None:
         def capabilities(command: str):
-            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command)).capabilities
+            return CliRuntime("t", RuntimeConfig(backend_type="cli", command=command), workspace="/tmp/ws").capabilities
 
-        for command in ("claude", "codex"):
-            caps = capabilities(command)
-            assert caps.supports_resume is True
-            assert caps.supports_streaming is True
-            assert caps.supports_mcp is False
-            assert caps.supports_tools is False
-        assert capabilities("gemini").supports_resume is False
+        caps = capabilities("claude")
+        assert caps.supports_resume is True
+        assert caps.supports_streaming is True
+        assert caps.supports_mcp is False
+        assert caps.supports_tools is False
+        assert capabilities("my-agent").supports_resume is False
         assert capabilities("/opt/custom/agent").supports_resume is False
 
     def test_is_alive_without_a_process_and_name(self) -> None:
-        runtime = CliRuntime("my-cli", RuntimeConfig(backend_type="cli", command="claude"))
+        runtime = CliRuntime("my-cli", RuntimeConfig(backend_type="cli", command="claude"), workspace="/tmp/ws")
 
         assert runtime.is_alive is False
         assert runtime.name == "my-cli"
@@ -54,7 +55,7 @@ class TestProperties:
 class TestRunTurn:
     @pytest.mark.asyncio
     async def test_requires_command(self) -> None:
-        runtime = CliRuntime("test", RuntimeConfig(backend_type="cli", command=None))
+        runtime = CliRuntime("test", RuntimeConfig(backend_type="cli", command=None), workspace="/tmp/ws")
 
         with pytest.raises(ValueError, match="requires 'command'"):
             async for _ in runtime._do_run_turn("hello", "s1"):
@@ -178,28 +179,21 @@ class TestFailures:
         assert RuntimeEventType.DONE not in types_of(events)
 
     @pytest.mark.asyncio
-    async def test_the_cli_turn_limit_is_its_own_error_code_after_the_work_it_did(self, fake_cli: FakeCli) -> None:
+    async def test_the_cli_turn_limit_ends_the_turn_with_the_work_it_did_and_says_why(self, fake_cli: FakeCli) -> None:
         fake_cli.set_scenario({"text": "got this far", "fail": "max_turns"})
 
         events = await run_turn(make_runtime(fake_cli))
 
-        errors = errors_of(events)
-        assert [e.data["error"].code for e in errors] == [AcpErrorCode.MAX_TURNS]
-        assert errors[0].data["error"].message == "Reached maximum number of turns (3)"
+        assert errors_of(events) == []
         assert text_of(events) == "got this far"
+        assert types_of(events)[-1] is RuntimeEventType.DONE
+        assert events[-1].data["stop_reason"] is StopReason.MAX_TURN_REQUESTS
 
     @pytest.mark.asyncio
-    async def test_a_failure_the_cli_streamed_is_not_reported_a_second_time_for_its_exit_code(
-        self, fake_cli: FakeCli
-    ) -> None:
-        fake_cli.set_scenario({"fail": "turn_failed"})
+    async def test_a_turn_that_finished_ends_with_end_turn(self, fake_cli: FakeCli) -> None:
+        events = await run_turn(make_runtime(fake_cli))
 
-        events = await run_turn(make_runtime(fake_cli, "codex"))
-
-        errors = errors_of(events)
-        assert [e.data["error"].message for e in errors] == ["stream disconnected"]
-        assert types_of(events)[-1] is RuntimeEventType.ERROR
-        assert RuntimeEventType.DONE not in types_of(events)
+        assert events[-1].data["stop_reason"] is StopReason.END_TURN
 
 
 class TestLaunchArgs:
@@ -216,20 +210,9 @@ class TestLaunchArgs:
     @pytest.mark.asyncio
     async def test_no_turn_limit_flag_when_unlimited_or_for_clis_without_one(self, fake_cli: FakeCli) -> None:
         await run_turn(make_runtime(fake_cli, max_turns=0))
-        await run_turn(make_runtime(fake_cli, "codex", args=["exec", "--json"], max_turns=10))
-        await run_turn(make_runtime(fake_cli, "gemini", max_turns=10))
+        await run_turn(make_runtime(fake_cli, "my-agent", max_turns=10))
 
         assert all("--max-turns" not in call["argv"] for call in fake_cli.calls())
-
-    @pytest.mark.asyncio
-    async def test_codex_runs_exec_in_a_directory_that_is_not_a_git_repository(self, fake_cli: FakeCli) -> None:
-        runtime = make_runtime(fake_cli, "codex", args=["exec", "--json"], permission_mode="allow_all")
-
-        await run_turn(runtime)
-
-        argv = _argv(fake_cli)
-        assert argv[argv.index("exec") + 1 :][:2] == ["--json", "--skip-git-repo-check"]
-        assert argv.index("--sandbox") < argv.index("exec")
 
     @pytest.mark.asyncio
     async def test_permission_mode_args_are_resolved_per_backend(self, fake_cli: FakeCli) -> None:
@@ -247,30 +230,9 @@ class TestLaunchArgs:
         assert claude_safe[claude_safe.index("--permission-mode") + 1] == "default"
         assert "--dangerously-skip-permissions" not in claude_safe
 
-        codex_safe = await launched("codex", args=["exec", "--json"], permission_mode="safe")
-        assert codex_safe[codex_safe.index("--sandbox") + 1] == "read-only"
-        assert "--full-auto" not in codex_safe
-
-        codex_bypass = await launched("codex", args=["exec", "--json"], permission_mode="bypass")
-        assert "--dangerously-bypass-approvals-and-sandbox" in codex_bypass
-        assert "--sandbox" not in codex_bypass
-
-        codex_dup = await launched("codex", args=["exec", "--json", "-s", "read-only"], permission_mode="allow_all")
-        assert codex_dup.count("--sandbox") == 1
-        assert codex_dup[codex_dup.index("--sandbox") + 1] == "workspace-write"
-
-        gemini_eq = await launched(
-            "gemini", args=[*_STREAM_JSON, "--approval-mode=plan", "--yolo"], permission_mode="allow_all"
-        )
-        assert gemini_eq.count("--approval-mode") == 1
-        assert gemini_eq[gemini_eq.index("--approval-mode") + 1] == "yolo"
-
-        for name, expected in (("gemini", "auto_edit"), ("qwen", "auto-edit")):
-            edit = await launched(name, args=[], permission_mode="ask")
-            assert edit[edit.index("--approval-mode") + 1] == expected
-
-        gemini_sandbox = await launched("gemini", args=["-s"], permission_mode="safe")
-        assert "-s" in gemini_sandbox
+        claude_stale = await launched("claude", args=["-p", "--permission-mode", "plan"], permission_mode="allow_all")
+        assert claude_stale.count("--permission-mode") == 1
+        assert claude_stale[claude_stale.index("--permission-mode") + 1] == "bypassPermissions"
 
         custom = await launched("my-agent", args=["-s", "--silent"], permission_mode="safe")
         assert custom == ["-s", "--silent", "test prompt"]

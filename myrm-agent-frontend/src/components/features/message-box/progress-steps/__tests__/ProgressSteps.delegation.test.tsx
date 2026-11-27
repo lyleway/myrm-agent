@@ -64,7 +64,7 @@ describe('ProgressSteps delegated external agent steps', () => {
     expect(screen.queryByText(/claude:/)).not.toBeInTheDocument();
   });
 
-  it.each(['session_expired', 'images_not_sent', 'turn_limit'])(
+  it.each(['session_expired', 'images_not_sent', 'turn_limit', 'max_tokens', 'refusal'])(
     'renders the %s notice as a title-only step',
     async (kind) => {
       await open([

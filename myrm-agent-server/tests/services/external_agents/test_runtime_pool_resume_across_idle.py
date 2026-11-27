@@ -74,7 +74,7 @@ async def registry() -> AsyncIterator[ChatRuntimePoolRegistry]:
     await chat_registry.close_all()
 
 
-def _builder(fake_claude: _FakeClaude, cwd: Path):
+def _builder(fake_claude: _FakeClaude):
     async def build_pool() -> RuntimePool:
         pool = RuntimePool(max_concurrent=2)
         pool.register(
@@ -84,7 +84,6 @@ def _builder(fake_claude: _FakeClaude, cwd: Path):
                 command=str(fake_claude.command),
                 args=["-p", "--output-format", "stream-json"],
                 permission_mode="safe",
-                cwd=str(cwd),
                 timeout_seconds=20,
             ),
         )
@@ -97,9 +96,9 @@ async def _unexpected_build() -> RuntimePool:
     raise AssertionError("the chat's pool must be reused, not rebuilt")
 
 
-async def _delegate(facade: ChatScopedRuntimePoolFacade) -> str:
+async def _delegate(facade: ChatScopedRuntimePoolFacade, workspace: Path) -> str:
     text: list[str] = []
-    async for event in facade.run_turn("claude", "prompt", session_id="claude-chat-1"):
+    async for event in facade.run_turn("claude", "prompt", session_id="claude-chat-1", workspace=str(workspace)):
         if event.type == RuntimeEventType.TEXT_DELTA:
             text.append(str(event.data.get("content")))
     return "".join(text)
@@ -114,14 +113,14 @@ async def test_follow_up_resumes_after_another_chat_triggered_the_idle_pass(
     registry: ChatRuntimePoolRegistry, fake_claude: _FakeClaude, tmp_path: Path
 ) -> None:
     """The cached execution unit keeps its facade; another chat's acquire runs the idle pass meanwhile."""
-    build = _builder(fake_claude, tmp_path)
+    build = _builder(fake_claude)
     pool = await registry.acquire("chat-1", _FINGERPRINT, build)
     facade = ChatScopedRuntimePoolFacade(pool, "chat-1", registry, _FINGERPRINT)
-    first = await _delegate(facade)
+    first = await _delegate(facade, tmp_path)
     await _idle_past_the_window()
     await registry.acquire("chat-2", _FINGERPRINT, build)
 
-    follow_up = await _delegate(facade)
+    follow_up = await _delegate(facade, tmp_path)
 
     assert follow_up == first
     assert fake_claude.resume_args() == [None, first]
@@ -132,12 +131,12 @@ async def test_follow_up_resumes_after_the_chat_rebuilt_its_agent_past_the_idle_
     registry: ChatRuntimePoolRegistry, fake_claude: _FakeClaude, tmp_path: Path
 ) -> None:
     """A new message rebuilds the agent and acquires the pool again; the idle pass must hand the same pool back."""
-    pool = await registry.acquire("chat-1", _FINGERPRINT, _builder(fake_claude, tmp_path))
-    first = await _delegate(ChatScopedRuntimePoolFacade(pool, "chat-1", registry, _FINGERPRINT))
+    pool = await registry.acquire("chat-1", _FINGERPRINT, _builder(fake_claude))
+    first = await _delegate(ChatScopedRuntimePoolFacade(pool, "chat-1", registry, _FINGERPRINT), tmp_path)
     await _idle_past_the_window()
 
     returned = await registry.acquire("chat-1", _FINGERPRINT, _unexpected_build)
-    follow_up = await _delegate(ChatScopedRuntimePoolFacade(returned, "chat-1", registry, _FINGERPRINT))
+    follow_up = await _delegate(ChatScopedRuntimePoolFacade(returned, "chat-1", registry, _FINGERPRINT), tmp_path)
 
     assert returned is pool
     assert follow_up == first

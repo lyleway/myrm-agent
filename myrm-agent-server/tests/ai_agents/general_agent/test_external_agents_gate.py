@@ -22,6 +22,7 @@ from app.ai_agents.general_agent.external_agents import (
     should_mount_invoke_acp_agent_tool,
 )
 from app.ai_agents.general_agent.external_agents_runtime_config import _permission_mode
+from app.services.external_agents.permission_broker import ChatPermissionBroker
 
 
 def test_auth_mode_resolves_api_key_and_subscription() -> None:
@@ -34,9 +35,10 @@ def test_permission_mode_keeps_each_known_mode(mode: str) -> None:
     assert _permission_mode({"permissionMode": mode}) == mode
 
 
-@pytest.mark.parametrize("raw", [None, "", "allow-all", "ALLOW_ALL", 3, ["safe"]])
+@pytest.mark.parametrize("raw", [None, "", "allow-all", "ALLOW_ALL", "ask", "bypass", 3, ["safe"]])
 def test_permission_mode_unknown_value_fails_closed_to_safe(raw: object) -> None:
-    # An unknown name would otherwise map to no CLI flag at all and leave the CLI on its own default.
+    # A name the harness does not know would stop the agent from launching; ``ask`` and ``bypass`` are names of an
+    # older vocabulary that stored settings may still hold.
     assert _permission_mode({"permissionMode": raw}) == "safe"
 
 
@@ -87,7 +89,6 @@ def test_config_fingerprint_changes_when_runtime_fields_change() -> None:
         "args": ["-p"],
         "authMode": "subscription",
         "env": {"FOO": "bar"},
-        "cwd": "/workspace",
         "timeout": 300,
         "maxResponseChars": 50000,
         "permissionMode": "allow_all",
@@ -109,9 +110,10 @@ def test_config_fingerprint_changes_when_runtime_fields_change() -> None:
     changed_max_turns["maxTurns"] = 12
     assert _config_fingerprint([changed_max_turns]) != baseline
 
-    changed_cwd = dict(base_cfg)
-    changed_cwd["cwd"] = "/workspace/subdir"
-    assert _config_fingerprint([changed_cwd]) != baseline
+    stored_cwd = dict(base_cfg)
+    stored_cwd["cwd"] = "/workspace/subdir"
+    # A directory stored with the agent decides nothing: the turn names where it runs.
+    assert _config_fingerprint([stored_cwd]) == baseline
 
 
 @pytest.mark.asyncio
@@ -149,6 +151,71 @@ async def test_resolve_external_agent_cfgs_auto_detect_local() -> None:
     assert cfgs[0]["name"] == "claude"
     assert cfgs[0]["command"] == "/usr/bin/claude"
     assert seen_include_version["value"] is False
+
+
+@pytest.mark.asyncio
+async def test_auto_detect_gives_each_agent_the_transport_and_baseline_args_of_its_contract() -> None:
+    class _FakeDetector:
+        async def detect(self, *, include_version: bool = True) -> list[object]:
+            return [
+                SimpleNamespace(name="claude", path="/usr/bin/claude"),
+                SimpleNamespace(name="gemini", path="/usr/bin/gemini"),
+                SimpleNamespace(name="codex", path="/usr/bin/codex"),
+            ]
+
+    with (
+        patch("app.config.deploy_mode.is_local_mode", return_value=True),
+        patch("myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", _FakeDetector),
+    ):
+        cfgs = await _resolve_external_agent_cfgs(None)
+
+    assert cfgs is not None
+    by_name = {cfg["name"]: cfg for cfg in cfgs}
+    assert by_name["claude"]["type"] == "cli"
+    assert by_name["claude"]["args"] == ["-p", "--output-format", "stream-json", "--verbose"]
+    # The ACP flags come from the contract when the runtime launches the agent, not from a stored list.
+    assert by_name["gemini"]["type"] == "acp"
+    assert by_name["gemini"]["args"] == []
+    # Codex is driven over its own app server: its approval policy and sandbox travel with every turn, not as flags.
+    assert by_name["codex"]["type"] == "app_server"
+    assert by_name["codex"]["args"] == []
+
+
+@pytest.mark.parametrize(
+    ("command", "stored", "expected"),
+    [
+        # A known agent runs over the transport its contract names, whichever one was stored for it.
+        ("/usr/local/bin/gemini", "cli", "acp"),
+        ("qwen", "cli", "acp"),
+        ("claude", "acp", "cli"),
+        ("codex", "cli", "app_server"),
+        ("/opt/bin/codex", "acp", "app_server"),
+        # What is stored for an agent that is already on its own transport changes nothing.
+        ("codex", "app_server", "app_server"),
+        # Anything else keeps what was stored: an adapter that merely carries an agent's name is not that agent.
+        ("claude-code-acp", "acp", "acp"),
+        ("gemini-wrapper", "cli", "cli"),
+        ("my-acp-agent", "acp", "acp"),
+        ("my-app-server-agent", "app_server", "app_server"),
+    ],
+)
+def test_register_backends_on_pool_runs_a_known_agent_over_its_contract_transport(
+    command: str, stored: str, expected: str
+) -> None:
+    pool = MagicMock()
+
+    _register_backends_on_pool(pool, [{"name": "a", "command": command, "type": stored}])
+
+    assert pool.register.call_args[0][1].backend_type == expected
+
+
+def test_config_fingerprint_does_not_tell_a_known_agent_apart_by_the_transport_stored_for_it() -> None:
+    cli = {"name": "g", "command": "gemini", "type": "cli"}
+
+    assert _config_fingerprint([cli]) == _config_fingerprint([{**cli, "type": "acp"}])
+    assert _config_fingerprint([{**cli, "command": "my-agent"}]) != _config_fingerprint(
+        [{**cli, "command": "my-agent", "type": "acp"}]
+    )
 
 
 def test_register_backends_on_pool_skips_invalid_and_registers_valid() -> None:
@@ -245,44 +312,15 @@ async def test_do_setup_returns_early_without_configs() -> None:
 
 
 def test_should_mount_invoke_acp_agent_tool_matrix() -> None:
-    assert should_mount_invoke_acp_agent_tool(agent_id="general", force_external_agent=None) is True
-    assert should_mount_invoke_acp_agent_tool(agent_id=BUILTIN_CLI_VISUAL_AGENT_ID, force_external_agent=None) is False
-    assert should_mount_invoke_acp_agent_tool(agent_id="general", force_external_agent="claude") is False
+    assert should_mount_invoke_acp_agent_tool(agent_id="general") is True
+    assert should_mount_invoke_acp_agent_tool(agent_id=None) is True
+    assert should_mount_invoke_acp_agent_tool(agent_id=BUILTIN_CLI_VISUAL_AGENT_ID) is False
 
 
 def test_needs_runtime_pool_matrix() -> None:
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id="builtin-writer",
-            force_external_agent=None,
-        )
-        is False
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=True,
-            agent_id="builtin-developer",
-            force_external_agent=None,
-        )
-        is True
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id=BUILTIN_CLI_VISUAL_AGENT_ID,
-            force_external_agent=None,
-        )
-        is True
-    )
-    assert (
-        needs_runtime_pool(
-            enable_external_cli=False,
-            agent_id="builtin-writer",
-            force_external_agent="claude",
-        )
-        is True
-    )
+    assert needs_runtime_pool(enable_external_cli=False, agent_id="builtin-writer") is False
+    assert needs_runtime_pool(enable_external_cli=True, agent_id="builtin-developer") is True
+    assert needs_runtime_pool(enable_external_cli=False, agent_id=BUILTIN_CLI_VISUAL_AGENT_ID) is True
 
 
 @pytest.mark.asyncio
@@ -290,7 +328,9 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
     mixin = ExternalAgentsMixin.__new__(ExternalAgentsMixin)
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = None
+    mixin.agent_id = "agent-9"
     mixin._runtime_pool_scope_id = None
+    mixin.declared_allowed_roots = ("/workspace/root",)
 
     mock_pool = MagicMock()
     mock_pool.available_backends = ["test-cli"]
@@ -308,19 +348,16 @@ async def test_do_setup_ephemeral_pool_without_chat_scope() -> None:
         ) as mock_create,
     ):
         tools: list[object] = []
-        await mixin._do_setup_external_agents(
-            tools,
-            mount_invoke_acp_agent_tool=True,
-            external_agent_workdir="/workspace/root",
-        )
+        await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
 
     assert mixin._owned_runtime_pool is mock_pool
     assert mixin._runtime_pool_from_registry is False
     assert tools == [mock_tool]
     mock_create.assert_called_once_with(
         mock_pool,
-        cwd="/workspace/root",
+        workspace="/workspace/root",
         session_scope=None,
+        permissions=ChatPermissionBroker(agent_id="agent-9", chat_id=None, workspace="/workspace/root"),
     )
 
 
@@ -329,7 +366,9 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
     mixin = ExternalAgentsMixin.__new__(ExternalAgentsMixin)
     mixin.external_agents_config = [{"name": "test-cli", "command": "echo", "args": []}]
     mixin.chat_id = " chat-scope-1 "
+    mixin.agent_id = None
     mixin._runtime_pool_scope_id = None
+    mixin.declared_allowed_roots = ("/workspace/chat-scope-1",)
 
     mock_pool = MagicMock()
     mock_pool.available_backends = ["test-cli"]
@@ -357,17 +396,15 @@ async def test_do_setup_passes_chat_scope_to_delegate_tool() -> None:
         ) as mock_create,
     ):
         tools: list[object] = []
-        await mixin._do_setup_external_agents(
-            tools,
-            mount_invoke_acp_agent_tool=True,
-            external_agent_workdir="/workspace/chat-scope-1",
-        )
+        await mixin._do_setup_external_agents(tools, mount_invoke_acp_agent_tool=True)
 
     assert tools == [mock_tool]
     mock_create.assert_called_once_with(
         mock_pool,
-        cwd="/workspace/chat-scope-1",
+        workspace="/workspace/chat-scope-1",
         session_scope="chat-scope-1",
+        # The approvals belong to the chat as stored; only the pool's scope is the trimmed id.
+        permissions=ChatPermissionBroker(agent_id="default", chat_id=" chat-scope-1 ", workspace="/workspace/chat-scope-1"),
     )
 
 

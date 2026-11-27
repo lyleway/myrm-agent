@@ -155,6 +155,7 @@ from myrm_agent_harness.core.security.redact.command_line import (
     command_preview as command_preview,
 )
 from myrm_agent_harness.core.security.redact.engine import (
+    escape_invisible_unicode as escape_invisible_unicode,
     redact_field_text as redact_field_text,
     redact_sensitive_text as redact_sensitive_text,
 )
@@ -164,7 +165,6 @@ from myrm_agent_harness.core.security.redact.nested import (
 from myrm_agent_harness.core.security.tool_registry.registry import (
     MCPAnnotations as MCPAnnotations,
     SafetyMetadata as SafetyMetadata,
-    evict_skill_safety_metadata as evict_skill_safety_metadata,
     get_ptc_safety_metadata as get_ptc_safety_metadata,
     register_ptc_safety_metadata as register_ptc_safety_metadata,
     unregister_ptc_safety_metadata as unregister_ptc_safety_metadata,
@@ -294,6 +294,9 @@ from myrm_agent_harness.toolkits.llms.routing.complexity_router import (
 from myrm_agent_harness.toolkits.llms.routing.specialty_router import (
     TaskSpecialty as TaskSpecialty,
     route_task_specialty as route_task_specialty,
+)
+from myrm_agent_harness.toolkits.mcp.tool_processing import (
+    evict_tool_annotations as evict_tool_annotations,
 )
 from myrm_agent_harness.toolkits.memory.consolidation import (
     TaskSessionSnapshot as TaskSessionSnapshot,

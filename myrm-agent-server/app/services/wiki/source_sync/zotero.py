@@ -1,6 +1,7 @@
 """Zotero library → wiki raw sync.
 
 [INPUT]
+- app.services.wiki.source_sync.guarded_fetch (POS: GET of a user-configured address, public addresses only, capped body)
 - app.services.wiki.source_sync.publish_helpers (POS: publish_raw wrapper)
 
 [OUTPUT]
@@ -17,11 +18,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
-import httpx
 from myrm_agent_harness.toolkits.wiki import WikiStructure
 
+from app.services.wiki.source_sync.guarded_fetch import fetch_configured_url
 from app.services.wiki.source_sync.publish_helpers import (
     build_frontmatter,
     publish_source_markdown,
@@ -31,8 +32,10 @@ from app.services.wiki.source_sync.schemas import WikiSourceSyncResult
 
 logger = logging.getLogger(__name__)
 
-_ZOTERO_TIMEOUT = 25.0
 _MAX_PER_REQUEST = 50  # Zotero API page-size cap
+_MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # a page of 50 items with their abstracts is well under 1 MiB
+# The API key travels in a header the redirect guard does not strip across origins, so no redirect is followed.
+_MAX_REDIRECTS = 0
 
 
 async def sync_zotero_library_to_wiki(
@@ -108,20 +111,21 @@ async def _fetch_top_level_items(
 ) -> list[dict[str, object]]:
     """Fetch most-recently-modified top-level items from the user library."""
     headers = {"Zotero-API-Key": api_key, "Zotero-API-Version": "3"}
-    url = f"{base_url.rstrip('/')}/users/{user_id}/items/top"
-    async with httpx.AsyncClient(timeout=_ZOTERO_TIMEOUT) as client:
-        response = await client.get(
-            url,
-            params={
-                "format": "json",
-                "limit": min(max(limit, 1), _MAX_PER_REQUEST),
-                "sort": "dateModified",
-                "direction": "desc",
-            },
-            headers=headers,
-        )
-        response.raise_for_status()
-        data = response.json()
+    query = urlencode(
+        {
+            "format": "json",
+            "limit": min(max(limit, 1), _MAX_PER_REQUEST),
+            "sort": "dateModified",
+            "direction": "desc",
+        }
+    )
+    response = await fetch_configured_url(
+        f"{base_url.rstrip('/')}/users/{user_id}/items/top?{query}",
+        headers=headers,
+        max_bytes=_MAX_RESPONSE_BYTES,
+        max_redirects=_MAX_REDIRECTS,
+    )
+    data = response.json()
     if not isinstance(data, list):
         raise ValueError("unexpected Zotero API response shape")
     return [entry for entry in data if isinstance(entry, dict)]
@@ -228,15 +232,14 @@ async def _fetch_annotations(
     """Fetch highlight/note annotation lines for an item (best-effort, non-fatal)."""
     try:
         headers = {"Zotero-API-Key": api_key, "Zotero-API-Version": "3"}
-        url = f"{base_url.rstrip('/')}/users/{user_id}/items/{item_key}/children"
-        async with httpx.AsyncClient(timeout=_ZOTERO_TIMEOUT) as client:
-            response = await client.get(
-                url,
-                params={"format": "json", "limit": _MAX_PER_REQUEST},
-                headers=headers,
-            )
-            response.raise_for_status()
-            payload = response.json()
+        query = urlencode({"format": "json", "limit": _MAX_PER_REQUEST})
+        response = await fetch_configured_url(
+            f"{base_url.rstrip('/')}/users/{user_id}/items/{item_key}/children?{query}",
+            headers=headers,
+            max_bytes=_MAX_RESPONSE_BYTES,
+            max_redirects=_MAX_REDIRECTS,
+        )
+        payload = response.json()
     except Exception as exc:
         logger.debug("Zotero annotations fetch skipped for %s: %s", item_key, exc)
         return []
@@ -256,9 +259,7 @@ def _render_annotations(children: list[object]) -> list[str]:
         if str(data.get("itemType") or "") != "annotation":
             continue
         annotation_type = str(data.get("annotationType") or "")
-        text = str(
-            data.get("annotationText") or data.get("annotationComment") or ""
-        ).strip()
+        text = str(data.get("annotationText") or data.get("annotationComment") or "").strip()
         if not text:
             continue
         if annotation_type == "highlight":

@@ -1,7 +1,7 @@
 """Security Profiles API — CRUD endpoints for named security configuration profiles.
 
 Provides list, get, create, update, delete, clone, and activate operations.
-Builtin profiles (readonly, workspace, full_access) are auto-seeded and protected.
+Builtin profiles (readonly, workspace, full_access) are created and re-synced by ProfileManager and are protected.
 
 [INPUT]
 - app.services.security.profile_manager::ProfileManager

@@ -282,7 +282,6 @@ def compute_execution_fingerprint(agent_wrapper: GeneralAgent, *, has_active_goa
         "providers_dict": _credential_free_json(agent_wrapper.providers_dict),
         "privacy_routing_raw": _credential_free_json(agent_wrapper.privacy_routing_raw),
         "jit_subagents": _stable_json(agent_wrapper.jit_subagents),
-        "force_external_agent": agent_wrapper.force_external_agent,
         # Org model policy revision busts POOLED cache after CP sandbox sync.
         "org_model_policy_revision": get_org_model_policy_revision(),
         # An active goal mounts complete_goal_tool and planning at build time.

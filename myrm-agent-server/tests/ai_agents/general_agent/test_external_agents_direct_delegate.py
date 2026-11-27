@@ -16,6 +16,7 @@ def _mixin(pool: MagicMock, *, locale: str = "en") -> ExternalAgentsMixin:
     mixin._runtime_pool = pool
     mixin.locale = locale
     mixin.quote = None
+    mixin.declared_allowed_roots = ("/work/repo",)
     return mixin
 
 
@@ -47,7 +48,7 @@ async def test_direct_delegate_stream_maps_runtime_events() -> None:
     mixin = _mixin(mock_pool)
 
     events: list[dict[str, object]] = []
-    async for event in mixin._direct_delegate_stream("claude", "run task", chat_id="chat-1"):
+    async for event in mixin._direct_delegate_stream("claude", "run task"):
         events.append(event)
 
     event_types = {str(event.get("type")) for event in events}
@@ -79,7 +80,6 @@ async def test_direct_delegate_stream_cancels_when_token_set() -> None:
         "codex",
         "task",
         cancel_token=cancel_token,
-        chat_id="chat-2",
     ):
         events.append(event)
 
@@ -104,9 +104,7 @@ async def test_direct_delegate_stream_words_a_failure_in_the_session_language() 
     mock_pool.run_turn = _fake_run_turn
     mock_pool.cancel = AsyncMock()
 
-    events = [
-        event async for event in _mixin(mock_pool, locale="zh-CN")._direct_delegate_stream("claude", "task", chat_id="chat-3")
-    ]
+    events = [event async for event in _mixin(mock_pool, locale="zh-CN")._direct_delegate_stream("claude", "task")]
 
     errors = [event for event in events if event["type"] == AgentEventType.ERROR.value]
     assert [error["diagnostic_result"]["locale"] for error in errors] == ["zh"]

@@ -67,6 +67,7 @@ class FetchEngineFetchMixin:
         *,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_parsed_chars: int | None = None,
     ) -> tuple[Document | None, bool, FetchResult | None]:
         """Fetch with HTTP fetcher and process through the pipeline."""
         if etag or last_modified:
@@ -94,7 +95,9 @@ class FetchEngineFetchMixin:
         if fetch_result.raw_body is not None:
             from ..processing.binary_router import route_binary_content
 
-            doc = await route_binary_content(fetch_result.raw_body, fetch_result.headers, url)
+            doc = await route_binary_content(
+                fetch_result.raw_body, fetch_result.headers, url, max_chars=max_parsed_chars
+            )
             if doc is not None or fetch_result.status_code < 400:
                 return doc, False, fetch_result
 
@@ -147,6 +150,7 @@ class FetchEngineFetchMixin:
         *,
         etag: str | None = None,
         last_modified: str | None = None,
+        max_parsed_chars: int | None = None,
     ) -> tuple[Document | None, bool, FetchResult | None]:
         """Attempt HTTP fetch and record failures in domain metrics."""
         doc, degradable, fetch_result = await self._try_fetch_and_process(
@@ -154,6 +158,7 @@ class FetchEngineFetchMixin:
             fetcher_type,
             etag=etag,
             last_modified=last_modified,
+            max_parsed_chars=max_parsed_chars,
         )
         if doc is not None or degradable:
             self._report_feedback(url, fetcher_type, success=(doc is not None))
@@ -166,6 +171,7 @@ class FetchEngineFetchMixin:
         etag: str | None = None,
         last_modified: str | None = None,
         allow_escalation: bool = True,
+        max_parsed_chars: int | None = None,
     ) -> tuple[Document | None, FetchResult | None]:
         """Fetch via L1 HTTP, escalating to optional L4 remote providers when configured."""
         doc, degradable, result = await self._try_and_report(
@@ -173,6 +179,7 @@ class FetchEngineFetchMixin:
             FetcherType.HTTP,
             etag=etag,
             last_modified=last_modified,
+            max_parsed_chars=max_parsed_chars,
         )
         if doc:
             return doc, result
@@ -202,10 +209,12 @@ class FetchEngineFetchMixin:
         etag: str | None,
         last_modified: str | None,
         allow_escalation: bool,
+        max_parsed_chars: int | None,
     ) -> tuple[Document | None, FetchResult | None]:
         """Fetch ``url`` over the network: the platform fast-path when it has one, then L1 HTTP / optional L4.
 
         Each stage runs under its own crawl timeout, so a URL whose fast-path misses can take twice the cap.
+        ``max_parsed_chars`` only reaches the parser of a PDF or Office file; the other payloads have no such cut.
         """
 
         async def degrade() -> tuple[Document | None, FetchResult | None]:
@@ -215,6 +224,7 @@ class FetchEngineFetchMixin:
                     etag=etag,
                     last_modified=last_modified,
                     allow_escalation=allow_escalation,
+                    max_parsed_chars=max_parsed_chars,
                 )
 
         proxy_pool = self._http_fetcher._proxy_pool

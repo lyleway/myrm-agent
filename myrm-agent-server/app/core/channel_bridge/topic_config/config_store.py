@@ -3,16 +3,19 @@
 - app.database.factory::acquire_write_lock (POS: takes the SQLite write lock at the start of a read-then-write transaction)
 
 [OUTPUT]
-- ConfigStoreMixin: reads and writes the topic map of a channel, with a read cache per manager that any write of the process invalidates
+- ConfigStoreMixin: reads the topic map of a channel through a read cache per manager, and changes it only through ``_mutate_config``
 
 [POS]
-Topic manager mixin: UserConfig read/write for topic maps. A save holds the write lock from its read on, and every
-committed save bumps the channel's write generation, which tells the read caches of the other managers they are stale.
+Topic manager mixin: UserConfig read/write for topic maps. A change is applied to the stored map as it is once the write
+lock is held, never to a copy read earlier, so two managers editing one channel keep each other's edits. Every committed
+change bumps the channel's write generation, which tells the read caches of the other managers they are stale.
 """
 
 from __future__ import annotations
 
+import copy
 import time
+from collections.abc import Callable
 
 from .common import (
     _CACHE_TTL,
@@ -22,71 +25,92 @@ from .common import (
 )
 
 
+async def _commit_mutation[T](channel: str, mutate: Callable[[dict[str, object]], T | None]) -> T | None:
+    """Apply ``mutate`` to the stored topic map of ``channel`` under the write lock; ``None`` when it changed nothing."""
+    from nanoid import generate as nanoid
+    from sqlalchemy import select
+
+    from app.database.connection import get_session
+    from app.database.factory import acquire_write_lock
+    from app.database.models import UserConfig
+
+    config_key = f"{channel}Topics"
+    async with get_session() as session:
+        # The lock comes before the read: a writer committing between the select and the update would abort the save with
+        # "database is locked", and the map read under the lock is the one the change is applied to.
+        await acquire_write_lock(session)
+        result = await session.execute(select(UserConfig).where(UserConfig.config_key == config_key))
+        row = result.scalar_one_or_none()
+        # A JSON column does not track in-place edits, and assigning the same object back issues no UPDATE: the edit goes
+        # to a copy.
+        config = copy.deepcopy(row.config_value) if row is not None and isinstance(row.config_value, dict) else {}
+        outcome = mutate(config)
+        if outcome is None:
+            return None
+        if row is None:
+            session.add(
+                UserConfig(
+                    id=nanoid(size=21),
+                    config_key=config_key,
+                    config_value=config,
+                    version="1_0",
+                    last_device_id="server",
+                )
+            )
+        else:
+            row.config_value = config
+        await session.commit()
+    return outcome
+
+
 class ConfigStoreMixin:
     # The read cache of the stored topic maps; ``SqlTopicManager.__init__`` creates it.
     _cache: dict[str, dict[str, object]]
     _cache_ts: dict[str, float]
     _read_generation: dict[str, int]
 
-    async def _upsert_topic(
+    async def _mutate_config[T](
         self,
         channel: str,
-        chat_id: str,
-        storage_key: str,
-        topic_entry: dict[str, object],
-    ) -> None:
-        config = await self._load_config(channel)
+        mutate: Callable[[dict[str, object]], T | None],
+        *,
+        best_effort: bool = False,
+    ) -> T | None:
+        """Change the stored topic map of ``channel`` with ``mutate``, and return what ``mutate`` returned.
 
-        group_topics = config.get(chat_id)
-        if not isinstance(group_topics, dict):
-            group_topics = {}
-            config[chat_id] = group_topics
-
-        group_topics[storage_key] = topic_entry
-        await self._save_config(channel, config)
-
-    async def _save_config(self, channel: str, config: dict[str, object]) -> None:
+        ``mutate`` edits the map it is given in place and returns what it did, or ``None`` when there was nothing to change
+        (nothing is written then). It runs on the map as stored once the write lock is held, so it decides from that map,
+        not from what its caller read earlier, and it must not await: the lock is held until it returns. A write that fails
+        raises; with ``best_effort`` (housekeeping the caller can do without) it is logged and the result is ``None``.
+        """
         try:
-            from sqlalchemy import select
-
-            from app.database.connection import get_session
-            from app.database.factory import acquire_write_lock
-            from app.database.models import UserConfig
-
-            config_key = f"{channel}Topics"
-            async with get_session() as session:
-                # The lock comes before the read: a writer committing between this select and the update would abort
-                # the save with "database is locked", and a failed save is only logged.
-                await acquire_write_lock(session)
-                result = await session.execute(
-                    select(UserConfig).where(
-                        UserConfig.config_key == config_key,
-                    )
-                )
-                row = result.scalar_one_or_none()
-                if row:
-                    row.config_value = config
-                else:
-                    session.add(
-                        UserConfig(
-                            id=__import__("nanoid").generate(size=21),
-                            config_key=config_key,
-                            config_value=config,
-                            version="1_0",
-                            last_device_id="server",
-                        )
-                    )
-                await session.commit()
-
-            self._invalidate_cache(channel)
+            outcome = await _commit_mutation(channel, mutate)
         except Exception as exc:
+            if not best_effort:
+                raise
             logger.warning("SqlTopicManager: failed to save %s topics: %s", channel, exc)
+            return None
+        if outcome is not None:
+            self._invalidate_cache(channel)
+        return outcome
+
+    async def _stored_channels(self) -> list[str]:
+        """The channels that have a stored topic map."""
+        from sqlalchemy import select
+
+        from app.database.connection import get_session
+        from app.database.models import UserConfig
+
+        async with get_session() as session:
+            result = await session.execute(select(UserConfig.config_key).where(UserConfig.config_key.like("%Topics")))
+            keys = result.scalars().all()
+        return [key.removesuffix("Topics") for key in keys if key.endswith("Topics")]
 
     async def _load_config(self, channel: str) -> dict[str, object]:
+        """The topic map of ``channel`` from this manager's read cache; read it, never edit it (``_mutate_config`` edits)."""
         generation = write_generation(channel)
         if self._read_generation.setdefault(channel, generation) != generation:
-            # Another manager wrote since this one cached: the copy is stale however young it is, and a save of it
-            # (the last-active flush, an expiry clean-up) would undo that write.
+            # Another manager wrote since this one cached: the copy is stale however young it is.
             self._drop_cache(channel)
             self._read_generation[channel] = generation
 

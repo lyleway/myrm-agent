@@ -23,6 +23,8 @@ def test_parse_idle_compact_after_seconds_defaults_to_zero() -> None:
     assert parse_idle_compact_after_seconds({"idle_compact_after_seconds": 1800}) == 1800
     assert parse_idle_compact_after_seconds({"idle_compact_after_seconds": -5}) == 0
     assert parse_idle_compact_after_seconds({"idle_compact_after_seconds": "bad"}) == 0
+    assert parse_idle_compact_after_seconds({"idle_compact_after_seconds": "900"}) == 900
+    assert parse_idle_compact_after_seconds({"idle_compact_after_seconds": [1800]}) == 0
 
 
 @pytest.mark.asyncio
@@ -288,11 +290,15 @@ async def test_run_pre_reply_stale_compact_gate_delegates_with_profile() -> None
             "chat-1",
             agent_id="agent-1",
             request_engine_params={"idle_compact_after_seconds": 3600},
+            turn_message_id="turn-1",
         )
 
     assert result is gate_result
     mock_gate.assert_awaited_once()
-    assert mock_gate.await_args.kwargs["idle_after_seconds"] == 1800
+    gate_call = mock_gate.await_args
+    assert gate_call is not None
+    assert gate_call.kwargs["idle_after_seconds"] == 1800
+    assert gate_call.kwargs["turn_message_id"] == "turn-1"
 
 
 @pytest.mark.asyncio

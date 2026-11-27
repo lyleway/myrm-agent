@@ -12,7 +12,6 @@ from myrm_agent_harness.toolkits.web_fetch.processing.html_scan import (
     body_content,
     extract_title,
     strip_script_and_style,
-    strip_tags,
 )
 
 # The regexes the scans replace. They define the expected result for every input.
@@ -20,7 +19,6 @@ _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _BODY_RE = re.compile(r"<body\b[^>]*>([\s\S]*)</body>", re.IGNORECASE)
 _SCRIPT_RE = re.compile(r"<script\b[\s\S]*?</script>", re.IGNORECASE)
 _STYLE_RE = re.compile(r"<style\b[\s\S]*?</style>", re.IGNORECASE)
-_TAG_RE = re.compile(r"<[^>]+>")
 
 _PAGE_SIZE = 750_000
 
@@ -78,22 +76,6 @@ class TestStripScriptAndStyle:
         assert strip_script_and_style(html) == expected
 
 
-class TestStripTags:
-    @pytest.mark.parametrize(
-        ("text", "expected"),
-        [
-            ("<p>a</p><b>b</b>", "ab"),
-            ('<a href="x\ny">link</a>', "link"),
-            ("a<>b", "a<>b"),
-            ("a < b", "a < b"),
-            ("a<<b>c", "ac"),
-            ("1 < 2 and 3 > 2", "1  2"),
-        ],
-    )
-    def test_examples(self, text: str, expected: str) -> None:
-        assert strip_tags(text) == expected
-
-
 class TestEquivalenceWithTheRegexes:
     _TOKENS = (
         *("<title", "</title>", "<title>", "<TiTle ", "TITLE", "</TITLE>"),
@@ -113,7 +95,6 @@ class TestEquivalenceWithTheRegexes:
             assert extract_title(html) == (title.group(1) if title else None), html
             assert body_content(html) == (body.group(1) if body else None), html
             assert strip_script_and_style(html) == _STYLE_RE.sub("", _SCRIPT_RE.sub("", html)), html
-            assert strip_tags(html) == _TAG_RE.sub("", html), html
 
 
 @pytest.mark.timeout(10)
@@ -133,11 +114,6 @@ class TestHostilePages:
 
     def test_script_openers_closed_only_at_the_very_end_are_one_block(self) -> None:
         assert strip_script_and_style("<script>" * (_PAGE_SIZE // 8) + "</script>tail") == "tail"
-
-    def test_angle_brackets_without_a_tag_end(self) -> None:
-        page = "<" * _PAGE_SIZE
-
-        assert strip_tags(page) == page
 
     @pytest.mark.parametrize("opener", ["<script", "<style"])
     def test_anti_bot_check_survives_unclosed_blocks_on_a_large_page(self, opener: str) -> None:

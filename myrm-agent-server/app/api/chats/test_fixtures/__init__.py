@@ -35,6 +35,7 @@ from .evicted import router as evicted_fixture_router
 from .file_edit_batch import router as file_edit_batch_fixture_router
 from .file_mutation import router as file_mutation_fixture_router
 from .guardrail_bash import router as guardrail_bash_fixture_router
+from .installed_app import router as installed_app_fixture_router
 from .media_cards import router as media_cards_fixture_router
 from .memory_lifecycle import router as memory_lifecycle_fixture_router
 from .prior_chat import router as prior_chat_fixture_router
@@ -63,6 +64,7 @@ router.include_router(copilot_fixture_router)
 router.include_router(clarify_refresh_fixture_router)
 router.include_router(chat_share_fixture_router)
 router.include_router(artifact_share_fixture_router)
+router.include_router(installed_app_fixture_router)
 router.include_router(file_edit_batch_fixture_router)
 router.include_router(file_mutation_fixture_router)
 router.include_router(evicted_fixture_router)

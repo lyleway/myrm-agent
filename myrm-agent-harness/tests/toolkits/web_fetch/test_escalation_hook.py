@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
-from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import EscalationFetchResult
-from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetcherType
+from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
+from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
+    EscalationFetchResult,
+    FetchEscalationProvider,
+)
 
 
 class _StubProvider:
@@ -30,9 +34,9 @@ async def test_try_escalation_returns_document_when_provider_succeeds() -> None:
             provider_id="stub",
         )
     )
-    engine.set_escalation_providers([provider])
 
-    doc, fetch_result = await engine._try_escalation("https://example.com")
+    with bind_web_fetch_escalation_context(providers=[provider]):
+        doc, fetch_result = await engine._try_escalation("https://example.com")
 
     assert doc is not None
     assert "Body text" in doc.page_content
@@ -45,9 +49,11 @@ async def test_try_escalation_returns_document_when_provider_succeeds() -> None:
 async def test_crawl_with_degradation_skips_escalation_when_disabled() -> None:
     engine = FetchEngine()
     provider = _StubProvider(EscalationFetchResult(url="https://example.com", content="remote", provider_id="stub"))
-    engine.set_escalation_providers([provider])
 
-    with patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))):
+    with (
+        bind_web_fetch_escalation_context(providers=[provider]),
+        patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))),
+    ):
         doc, _ = await engine._crawl_with_degradation("https://example.com", allow_escalation=False)
 
     assert doc is None
@@ -55,40 +61,15 @@ async def test_crawl_with_degradation_skips_escalation_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_escalation_prefers_context_over_instance_providers() -> None:
-    from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
-
-    instance_provider = _StubProvider(
-        EscalationFetchResult(url="https://example.com", content="instance", provider_id="instance")
-    )
-    context_provider = _StubProvider(
-        EscalationFetchResult(url="https://example.com", content="context", provider_id="context")
-    )
+async def test_try_escalation_logs_when_no_provider_has_usable_content(caplog: pytest.LogCaptureFixture) -> None:
     engine = FetchEngine()
-    engine.set_escalation_providers([instance_provider])
+    providers: list[FetchEscalationProvider] = [_StubProvider(None), _StubProvider(None)]
 
-    with bind_web_fetch_escalation_context(providers=[context_provider]):
+    with caplog.at_level(logging.INFO), bind_web_fetch_escalation_context(providers=providers):
         doc, _ = await engine._try_escalation("https://example.com")
 
-    assert doc is not None
-    assert doc.page_content == "context"
-    context_provider.fetch_url.assert_awaited_once()
-    instance_provider.fetch_url.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_try_escalation_records_failure_when_all_providers_fail() -> None:
-    from myrm_agent_harness.toolkits.web_fetch.escalation.metrics import web_fetch_escalation_metrics
-
-    before = web_fetch_escalation_metrics.snapshot()["failure_count"]
-    engine = FetchEngine()
-    provider = _StubProvider(None)
-    engine.set_escalation_providers([provider])
-
-    doc, _ = await engine._try_escalation("https://example.com")
-
     assert doc is None
-    assert web_fetch_escalation_metrics.snapshot()["failure_count"] == before + 1
+    assert "Escalation found no usable content for https://example.com (2 provider(s) tried)" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -97,9 +78,11 @@ async def test_crawl_with_degradation_calls_escalation_after_l3_failure() -> Non
     provider = _StubProvider(
         EscalationFetchResult(url="https://example.com", content="remote body", provider_id="stub")
     )
-    engine.set_escalation_providers([provider])
 
-    with patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))):
+    with (
+        bind_web_fetch_escalation_context(providers=[provider]),
+        patch.object(engine, "_try_and_report", new=AsyncMock(return_value=(None, True, None))),
+    ):
         doc, _ = await engine._crawl_with_degradation("https://example.com", allow_escalation=True)
 
     assert doc is not None

@@ -3,13 +3,13 @@
 from myrm_agent_harness.core.security.tool_registry.registry import (
     MCPAnnotations,
     SafetyMetadata,
-    evict_skill_safety_metadata,
     register_ptc_safety_metadata,
 )
 from myrm_agent_harness.runtime.diagnostics.compliance import (
     ComplianceAuditEngine,
     ComplianceStatus,
 )
+from myrm_agent_harness.toolkits.mcp.tool_processing import evict_tool_annotations
 
 
 def test_compliance_audit_engine_clean():
@@ -25,22 +25,17 @@ def test_compliance_audit_engine_clean():
     assert d["compliance_score"] == 100
 
 
-def test_compliance_audit_detects_unregistered_ghost_skill():
-    skill_name = "ghost_plugin_alpha"
-    tool_name = "ghost_tool"
-    register_ptc_safety_metadata(
-        skill_name, tool_name, SafetyMetadata(), MCPAnnotations()
-    )
+def test_compliance_audit_detects_tools_of_inactive_server():
+    server_name = "ghost-plugin-alpha"
+    register_ptc_safety_metadata("mcp__ghost_plugin_alpha__ghost_tool", SafetyMetadata(), MCPAnnotations())
 
     try:
-        # Active list does not include ghost_plugin_alpha
-        report = ComplianceAuditEngine.evaluate_full_compliance(
-            active_skill_names=[skill_name]
-        )
+        # The ghost server is among the active ones: its tools are expected
+        report = ComplianceAuditEngine.evaluate_full_compliance(active_server_names=[server_name])
         assert report.is_fully_compliant is True
 
         eviction_needed_report = ComplianceAuditEngine.evaluate_full_compliance(
-            active_skill_names=["authorized_plugin_beta"]
+            active_server_names=["authorized-plugin-beta"]
         )
         assert eviction_needed_report.status in (
             ComplianceStatus.WARNING,
@@ -48,17 +43,29 @@ def test_compliance_audit_detects_unregistered_ghost_skill():
         )
         assert eviction_needed_report.compliance_score < 100
         assert eviction_needed_report.is_fully_compliant is False
-        assert any(
-            "ghost_plugin_alpha" in v.target
-            for v in eviction_needed_report.violations
-        )
+        assert [v.target for v in eviction_needed_report.violations] == ["ghost_plugin_alpha"]
         assert eviction_needed_report.questions["Q2_REGISTRY_CLEAN"] is False
     finally:
-        evict_skill_safety_metadata(skill_name)
+        assert evict_tool_annotations(server_name) == 1
 
     # After eviction, clean again
-    clean_report = ComplianceAuditEngine.evaluate_full_compliance()
+    clean_report = ComplianceAuditEngine.evaluate_full_compliance(active_server_names=["authorized-plugin-beta"])
     assert clean_report.is_fully_compliant is True
+
+
+def test_compliance_audit_does_not_take_a_server_for_the_one_it_prefixes():
+    """Server ``a`` being active must not hide that server ``a_b`` is not."""
+    register_ptc_safety_metadata("mcp__a_b__tool", SafetyMetadata(), MCPAnnotations())
+
+    report = ComplianceAuditEngine.evaluate_full_compliance(active_server_names=["a"])
+
+    assert [v.target for v in report.violations] == ["a_b"]
+
+
+def test_compliance_audit_without_active_servers_has_nothing_to_compare():
+    register_ptc_safety_metadata("mcp__ghost__tool", SafetyMetadata(), MCPAnnotations())
+
+    assert ComplianceAuditEngine.evaluate_full_compliance().is_fully_compliant is True
 
 
 def test_compliance_audit_custom_business_checks():

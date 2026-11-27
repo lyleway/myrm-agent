@@ -64,22 +64,26 @@ def set_session_access_roots(roots: tuple[AccessRoot, ...]) -> None:
 def _resolve_named_path(raw_path: str, workspace_root: str | None) -> str:
     """The absolute, symlink-free path a tool call names, read as the file tools open it.
 
-    A bare ``~`` is the user's home; any other relative spelling is below the workspace (``opened_path``).
+    The text is read as sent, so a name with a space at an end is a file of its own. A bare ``~`` is the user's
+    home; any other relative spelling is below the workspace (``opened_path``).
 
     Empty for a network share or NT-namespace spelling: it names nothing a grant can open, and resolving it on
     Windows would connect to the host it names. Empty too for a text no file can be named by.
     """
-    trimmed = raw_path.strip()
-    if not trimmed or is_network_or_nt_path(trimmed):
+    if not raw_path or is_network_or_nt_path(raw_path):
         return ""
-    return opened_path(trimmed, workspace_root) or ""
+    return opened_path(raw_path, workspace_root) or ""
 
 
 def resolve_grant_directory_path(
     raw_path: str,
     workspace_root: str | None,
 ) -> str:
-    """Resolve a grant target to an absolute directory (workspace-relative when applicable)."""
+    """Resolve a grant target to an absolute directory (workspace-relative when applicable).
+
+    The text is read exactly as given: a folder named ``"d "`` is not the folder ``"d"``, and re-reading a planned
+    root with its spaces cut would grant the folder above it. A caller that takes a folder from a person trims it.
+    """
     resolved = _resolve_named_path(raw_path, workspace_root)
     if not resolved or os.path.isdir(resolved):
         return resolved

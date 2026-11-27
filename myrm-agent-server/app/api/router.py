@@ -97,7 +97,6 @@ from app.api.ssh_vault.router import router as ssh_vault_router
 from app.api.statistics import build_statistics_router
 from app.api.stt.router import router as stt_router
 from app.api.stt.ws_stream import router as stt_ws_router
-from app.api.system.model_ping_api import router as system_model_ping_router
 from app.api.system.router import router as system_router
 from app.api.system.shutdown import router as system_shutdown_router
 from app.api.system_assistant import router as system_assistant_router
@@ -291,7 +290,6 @@ api_router.include_router(voice_realtime_router, prefix="/voice", tags=["voice"]
 api_router.include_router(voice_gemini_live_router, prefix="/voice", tags=["voice"])
 api_router.include_router(system_router, prefix="/system", tags=["system"])
 api_router.include_router(system_shutdown_router, prefix="/system", tags=["system"])
-api_router.include_router(system_model_ping_router)
 api_router.include_router(remote_access_router, prefix="/remote-access", tags=["remote-access"])
 
 api_router.include_router(api_keys_router)

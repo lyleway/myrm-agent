@@ -19,7 +19,7 @@
 |------|------|------|-------|
 | `__init__.py` | 门面 | 导出契约与两种存储的策略和配置，调用方只从这里导入 | ✅ |
 | `base.py` | 核心 | 契约：`RemoteBackupStrategy`（upload/download/list_files/delete/check_connection）、`RemoteBackupFile`、`RemoteStorageError` | ✅ |
-| `webdav.py` | 核心 | WebDAV（坚果云、Nextcloud、ownCloud 等）：`WebDAVBackupConfig`、`WebDAVBackupStrategy`、PROPFIND 207 响应解析 | ✅ |
+| `webdav.py` | 核心 | WebDAV（坚果云、Nextcloud、ownCloud 等）：`WebDAVBackupConfig`、`WebDAVBackupStrategy`、PROPFIND 207 响应解析（`defusedxml` 按命名空间读 `multistatus/response/href` 与 `propstat/prop` 属性，各家服务器给 `DAV:` 起的前缀不同都读得一样，耗时与响应大小成线性；不是 multistatus 文档的 207 应答抛 `RemoteStorageError`，不当作空目录） | ✅ |
 | `s3.py` | 核心 | S3 兼容存储（AWS S3、MinIO、阿里云 OSS、Cloudflare R2 等）：`S3BackupConfig`、`S3BackupStrategy`，以及按企业网络兼容设置取 TLS 上下文的 aiobotocore 会话类 | ✅ |
 
 ## 依赖方向

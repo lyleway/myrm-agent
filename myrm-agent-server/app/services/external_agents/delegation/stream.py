@@ -12,7 +12,8 @@
 [POS]
 绕过 LangChain Agent 的外部 Agent 直连路由的事件翻译层。每次外部工具调用是一个带 tool_call_id 的独立步骤
 （开始与结果落在同一步）。状态步骤的措辞由前端按当前语言给出，这里只带 CLI 自己给的内容（已运行时长、CLI 的
-警告原文）；会话没有被续接、图片没有直接交给外部 Agent、回合停在轮数上限，都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
+警告原文）；会话没有被续接、图片没有直接交给外部 Agent、回合在中途结束（停在轮数上限、输出被截断、Agent 拒绝继续），
+都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
 终止外部进程，外部 Agent 静默时同样即时生效。失败时：用户能自己处置的（未登录、未安装、超时）给带处置步骤的
 错误事件（API Key 被拒时点名该 Agent 读取的环境变量），CLI 的原话改记 WARNING 日志（脱敏并截断）；其余保持 CLI 的原话。
 """
@@ -32,6 +33,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     ContinuityStatus,
     RuntimeEventType,
+    StopReason,
 )
 
 from app.services.external_agents.delegation.errors import delegate_error_event
@@ -39,7 +41,7 @@ from app.services.external_agents.delegation.errors import delegate_error_event
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping
 
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool, RuntimeEvent
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker, RuntimeEvent
     from myrm_agent_harness.utils import CancellationToken
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ class _TurnTranslator:
                 return self._usage(data)
             case RuntimeEventType.ERROR:
                 return self._error(data)
+            case RuntimeEventType.DONE:
+                return self._done(data)
             case _:
                 return []
 
@@ -200,6 +204,16 @@ class _TurnTranslator:
             return self._status_step(message)
         return self._status_step()
 
+    def _done(self, data: Mapping[str, object]) -> list[SseEvent]:
+        """A turn the agent ended before it finished says so; one that finished, or that the user stopped, does not."""
+        reason = StopReason.of(data.get("stop_reason"))
+        if reason is StopReason.MAX_TURN_REQUESTS:
+            # The agent's own turn limit, with its work and session intact: reported once the turn closes.
+            self.outcome = _Outcome.TURN_LIMIT
+            return []
+        kind = reason.notice if reason is not None else None
+        return [self._notice(kind)] if kind is not None else []
+
     def _usage(self, data: Mapping[str, object]) -> list[SseEvent]:
         input_tokens = _token_count(data.get("input_tokens"))
         output_tokens = _token_count(data.get("output_tokens"))
@@ -227,10 +241,6 @@ class _TurnTranslator:
         if code is AcpErrorCode.CANCELLED:
             self.outcome = _Outcome.CANCELLED
             return []
-        if code is AcpErrorCode.MAX_TURNS:
-            # The agent stopped at its own limit with its work and session intact: a stop to report, not a failure.
-            self.outcome = _Outcome.TURN_LIMIT
-            return []
         self.outcome = _Outcome.FAILED
         if isinstance(error, AcpError):
             guidance = delegate_error_event(
@@ -255,13 +265,17 @@ async def stream_direct_delegate(
     prompt: str,
     *,
     session_id: str,
+    workspace: str,
     images: list[str] | None = None,
+    permissions: PermissionBroker | None = None,
     cancel_token: CancellationToken | None = None,
     locale: str = "en",
 ) -> AsyncGenerator[SseEvent]:
-    """Run one turn of ``agent_name`` on ``pool`` and stream it as frontend events.
+    """Run one turn of ``agent_name`` on ``pool`` in ``workspace`` and stream it as frontend events.
 
     ``images`` are the local files of the images attached to ``prompt``, for a CLI that takes them natively.
+    ``permissions`` is who decides when the agent asks to do something (see ``ChatPermissionBroker``); without it the
+    agent is refused everything but reading.
 
     Closing the stream (a client that went away) closes the turn, which stops the external process. A tripped
     ``cancel_token`` does the same even while the external agent is silent, and ends the stream with a
@@ -278,7 +292,16 @@ async def stream_direct_delegate(
     yield turn.connecting()
 
     async with (
-        aclosing(pool.run_turn(agent_name, prompt, session_id=session_id, images=images or None)) as events,
+        aclosing(
+            pool.run_turn(
+                agent_name,
+                prompt,
+                session_id=session_id,
+                workspace=workspace,
+                images=images or None,
+                permissions=permissions,
+            )
+        ) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:

@@ -22,7 +22,6 @@ def test_personal_settings_schema_ui_sections() -> None:
     assert properties["webTtsProvider"]["x-ui-section"] == "voice"
     assert set(properties["webTtsProvider"]["enum"]) == {
         "browser",
-        "openai",
         "elevenlabs",
         "fish_audio",
         "minimax",

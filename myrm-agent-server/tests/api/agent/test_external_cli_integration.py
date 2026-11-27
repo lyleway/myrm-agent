@@ -174,33 +174,15 @@ def test_readonly_security_config_spawn_allow_invoke_deny_engine() -> None:
     assert external_action == PermissionAction.DENY
 
 
-@pytest.mark.e2e
-@patch(
+_ECHO_CLI_BACKEND = patch(
     "app.ai_agents.general_agent.external_agents._resolve_external_agent_cfgs",
     new=AsyncMock(return_value=[{"name": "echo-cli", "type": "cli", "command": "echo", "args": []}]),
 )
-def test_workspace_security_config_blocks_force_external_on_ask(
-    client: TestClient,
-    mock_load_user_configs: AsyncMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Lane-C: workspace invoke_external_agent=ASK must block direct force_external routing."""
-    mock_load_user_configs.return_value = _user_configs(
-        {
-            "capabilities": [{"permission": "*", "pattern": "*"}],
-            "permissions": {
-                "spawn_subagent": "allow",
-                "invoke_external_agent": "ask",
-                "file_write": "ask",
-                "shell_exec": "ask",
-            },
-            "yoloModeEnabled": False,
-            "autoModeEnabled": False,
-        }
-    )
 
-    chat_id = f"test_workspace_ext_block_{uuid.uuid4().hex[:8]}"
-    payload: dict[str, object] = {
+
+def _force_external_payload(chat_id: str, **overrides: object) -> dict[str, object]:
+    """A chat request in which the user addresses the external agent ``echo-cli`` directly."""
+    return {
         "query": "Run external CLI task",
         "message_id": f"msg-{chat_id}",
         "chat_id": chat_id,
@@ -212,121 +194,132 @@ def test_workspace_security_config_blocks_force_external_on_ask(
             "skill_ids": [],
         },
         "timezone": "UTC",
+        **overrides,
     }
-    events = _collect_agent_stream(client, payload)
+
+
+def _saved_security(**permissions: str) -> dict[str, object]:
+    """A securityConfig the user saved: the given permissions, everything else as the defaults leave it."""
+    return {
+        "capabilities": [{"permission": "*", "pattern": "*"}],
+        "permissions": {"spawn_subagent": "allow", "file_write": "ask", "shell_exec": "ask", **permissions},
+        "yoloModeEnabled": False,
+        "autoModeEnabled": False,
+    }
+
+
+def _the_agent_answered(events: list[dict[str, object]]) -> bool:
+    """Whether the external agent's own reply reached the stream: ``echo`` hands the user's message back."""
+    return any(event.get("type") == "message" and "Run external CLI task" in str(event.get("data")) for event in events)
+
+
+@pytest.mark.e2e
+@_ECHO_CLI_BACKEND
+def test_an_ask_is_the_users_own_confirmation_for_force_external(
+    client: TestClient,
+    mock_load_user_configs: AsyncMock,
+) -> None:
+    """The user named the agent: an ``invoke_external_agent`` ask is their confirmation, and the agent answers."""
+    mock_load_user_configs.return_value = _user_configs(_saved_security(invoke_external_agent="ask"))
+
+    events = _collect_agent_stream(client, _force_external_payload(f"test_ask_ext_{uuid.uuid4().hex[:8]}"))
+
+    assert _error_types(events) == [], events
+    assert _the_agent_answered(events), events
+
+
+@pytest.mark.e2e
+@_ECHO_CLI_BACKEND
+def test_workspace_security_config_blocks_force_external_on_deny(
+    client: TestClient,
+    mock_load_user_configs: AsyncMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Lane-C: a saved ``invoke_external_agent`` deny blocks direct force_external routing."""
+    mock_load_user_configs.return_value = _user_configs(_saved_security(invoke_external_agent="deny"))
+
+    events = _collect_agent_stream(client, _force_external_payload(f"test_workspace_ext_block_{uuid.uuid4().hex[:8]}"))
+
     assert _error_types(events) == ["external_agent_denied"], events
     blocked = _policy_block_log(caplog)
-    assert "blocked by security policy" in blocked
-    assert "ask" in blocked or "denied" in blocked
+    assert "blocked by security policy" in blocked and "denied" in blocked
     assert not _delegate_stream_started(events), events
 
 
 @pytest.mark.e2e
-@patch(
-    "app.ai_agents.general_agent.external_agents._resolve_external_agent_cfgs",
-    new=AsyncMock(return_value=[{"name": "echo-cli", "type": "cli", "command": "echo", "args": []}]),
-)
+@_ECHO_CLI_BACKEND
+def test_the_high_security_remote_tools_setting_blocks_force_external(
+    client: TestClient,
+    mock_load_user_configs: AsyncMock,
+) -> None:
+    """The high-security preset writes ``remote_tools: deny``; delegating to an external agent is what it governs."""
+    mock_load_user_configs.return_value = _user_configs(_saved_security(remote_tools="deny"))
+
+    events = _collect_agent_stream(client, _force_external_payload(f"test_remote_tools_ext_{uuid.uuid4().hex[:8]}"))
+
+    assert _error_types(events) == ["external_agent_denied"], events
+    assert not _delegate_stream_started(events), events
+
+
+@pytest.mark.e2e
+@_ECHO_CLI_BACKEND
 def test_readonly_security_config_blocks_force_external_delegate_stream(
     client: TestClient,
     mock_load_user_configs: AsyncMock,
 ) -> None:
     """Lane-C: builtin readonly profile must block force_external_agent direct routing."""
     mock_load_user_configs.return_value = _user_configs(
-        {
-            "capabilities": [{"permission": "*", "pattern": "*"}],
-            "permissions": {
-                "spawn_subagent": "allow",
-                "invoke_external_agent": "deny",
-                "file_write": "deny",
-                "shell_exec": "deny",
-            },
-            "yoloModeEnabled": False,
-            "autoModeEnabled": False,
-        }
+        _saved_security(invoke_external_agent="deny", file_write="deny", shell_exec="deny")
     )
 
-    chat_id = f"test_readonly_ext_block_{uuid.uuid4().hex[:8]}"
-    payload: dict[str, object] = {
-        "query": "Run external CLI task",
-        "message_id": f"msg-{chat_id}",
-        "chat_id": chat_id,
-        "action_mode": "agent",
-        "force_external_agent": "echo-cli",
-        "model_selection": get_lite_model_selection(),
-        "agent_config": {
-            "enabled_builtin_tools": ["external_cli"],
-            "skill_ids": [],
-        },
-        "timezone": "UTC",
-    }
-    events = _collect_agent_stream(client, payload)
+    events = _collect_agent_stream(client, _force_external_payload(f"test_readonly_ext_block_{uuid.uuid4().hex[:8]}"))
+
     assert _error_types(events) == ["external_agent_denied"], events
     assert not _delegate_stream_started(events), events
 
 
 @pytest.mark.e2e
-@patch(
-    "app.ai_agents.general_agent.external_agents._resolve_external_agent_cfgs",
-    new=AsyncMock(return_value=[{"name": "echo-cli", "type": "cli", "command": "echo", "args": []}]),
-)
+@_ECHO_CLI_BACKEND
 def test_explore_preset_blocks_force_external_delegate_stream(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Lane-C: explore preset deny invoke_external_agent must block force_external_agent path."""
-    chat_id = f"test_explore_ext_block_{uuid.uuid4().hex[:8]}"
-    payload: dict[str, object] = {
-        "query": "Run external CLI task",
-        "message_id": f"msg-{chat_id}",
-        "chat_id": chat_id,
-        "action_mode": "agent",
-        "security_preset": "explore",
-        "force_external_agent": "echo-cli",
-        "model_selection": get_lite_model_selection(),
-        "agent_config": {
-            "enabled_builtin_tools": ["external_cli"],
-            "skill_ids": [],
-        },
-        "timezone": "UTC",
-    }
+    """Lane-C: the explore preset denies invoke_external_agent; the user is told to switch the preset."""
+    payload = _force_external_payload(f"test_explore_ext_block_{uuid.uuid4().hex[:8]}", security_preset="explore")
+
     events = _collect_agent_stream(client, payload)
-    assert _error_types(events) == ["external_agent_denied"], events
+
+    assert _error_types(events) == ["external_agent_denied_session_preset"], events
     blocked = _policy_block_log(caplog)
-    assert "invoke_external_agent" in blocked or "denied" in blocked
+    assert "cause=session_preset" in blocked and "invoke_acp_agent_tool" in blocked
     assert not _delegate_stream_started(events), events
 
 
 @pytest.mark.e2e
-@patch(
-    "app.ai_agents.general_agent.external_agents._resolve_external_agent_cfgs",
-    new=AsyncMock(return_value=[{"name": "echo-cli", "type": "cli", "command": "echo", "args": []}]),
-)
-def test_missing_security_config_blocks_force_external_delegate_stream(
+@_ECHO_CLI_BACKEND
+def test_auto_approve_edits_preset_lets_force_external_through(client: TestClient) -> None:
+    """The accept_edits preset asks about external agents; the user addressing one is that approval."""
+    payload = _force_external_payload(f"test_accept_edits_ext_{uuid.uuid4().hex[:8]}", security_preset="accept_edits")
+
+    events = _collect_agent_stream(client, payload)
+
+    assert _error_types(events) == [], events
+    assert _the_agent_answered(events), events
+
+
+@pytest.mark.e2e
+@_ECHO_CLI_BACKEND
+def test_a_user_who_never_saved_a_security_policy_can_force_external(
     client: TestClient,
     mock_load_user_configs: AsyncMock,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Lane-C: missing security config must fail-closed block force_external_agent routing."""
+    """Nothing saved is the defaults, which the model's own delegation meets too; it is no reason to refuse."""
     mock_load_user_configs.return_value = _user_configs(None)
 
-    chat_id = f"test_missing_sec_ext_block_{uuid.uuid4().hex[:8]}"
-    payload: dict[str, object] = {
-        "query": "Run external CLI task",
-        "message_id": f"msg-{chat_id}",
-        "chat_id": chat_id,
-        "action_mode": "agent",
-        "force_external_agent": "echo-cli",
-        "model_selection": get_lite_model_selection(),
-        "agent_config": {
-            "enabled_builtin_tools": ["external_cli"],
-            "skill_ids": [],
-        },
-        "timezone": "UTC",
-    }
-    events = _collect_agent_stream(client, payload)
-    assert _error_types(events) == ["external_agent_denied"], events
-    assert "security config missing" in _policy_block_log(caplog), events
-    assert not _delegate_stream_started(events), events
+    events = _collect_agent_stream(client, _force_external_payload(f"test_missing_sec_ext_{uuid.uuid4().hex[:8]}"))
+
+    assert _error_types(events) == [], events
+    assert _the_agent_answered(events), events
 
 
 @pytest.mark.e2e

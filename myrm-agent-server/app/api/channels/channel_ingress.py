@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.channels.types import InboundMessage
+from app.channels.types import METADATA_NEW_CONVERSATION_KEY, InboundMessage
 from app.core.security.auth.control_plane_guard import verify_control_plane_token
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ async def ingest_channel_message(body: ChannelIngressRequest) -> dict[str, str]:
         thread_id=body.resolved_identity.thread_id or body.thread_id,
         metadata={
             "resolved_identity": body.resolved_identity.model_dump(mode="json"),
-            "force_new_epoch": body.force_new_epoch,
+            METADATA_NEW_CONVERSATION_KEY: body.force_new_epoch,
             "trusted_inbound": "control_plane",
         },
         message_id=body.message_id,

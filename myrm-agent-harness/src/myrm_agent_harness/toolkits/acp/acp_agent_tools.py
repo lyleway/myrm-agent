@@ -6,18 +6,16 @@ interface via the unified RuntimePool.
 
 [INPUT]
 - myrm_agent_harness.core.events.types::AgentEventType (POS: streaming event types and enums, framework-agnostic)
+- myrm_agent_harness.toolkits.acp.delegate_report::STOP_NOTES, DelegateMeta, DelegateUsage, as_int, notice_step (POS: What a delegated turn reports)
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
-- myrm_agent_harness.toolkits.acp.runtime.cli.dialect::has_native_turn_limit (POS: Per-CLI launch knowledge of CliRuntime)
-- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
-- myrm_agent_harness.toolkits.acp.types::DelegationPool (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
+- myrm_agent_harness.toolkits.acp.runtime.cli.claude::is_claude (POS: Launch knowledge of CliRuntime about the one CLI it knows)
+- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, StopReason, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
+- myrm_agent_harness.toolkits.acp.types::DelegationPool, PermissionBroker (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
 - myrm_agent_harness.utils.runtime.cancel_hook::on_token_cancelled (POS: Cancellation bridge for streams that must be stopped from outside)
 - myrm_agent_harness.utils.runtime.progress_sink::ToolProgressSink, get_tool_progress_sink (POS: Progress event push mechanism. Tools implicitly obtain a sink via ContextVar to push intermediate progress events to the Agent SSE stream)
-- myrm_agent_harness.toolkits.code_execution.utils.workspace_path::WorkspacePathResolver (POS: Workspace path resolver with intelligent auto-detection) [lazy]
 
 [OUTPUT]
-- DelegateUsage: Token usage statistics from an external agent delegation.
-- DelegateMeta: Metadata collected during an external agent delegation turn.
 - create_invoke_acp_agent_tool: Create the invoke_acp_agent tool.
 
 [POS]
@@ -29,16 +27,30 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 
 from myrm_agent_harness.core.events.types import AgentEventType
+from myrm_agent_harness.toolkits.acp.delegate_report import (
+    STOP_NOTES,
+    DelegateMeta,
+    DelegateUsage,
+    as_int,
+    notice_step,
+)
 from myrm_agent_harness.toolkits.acp.runtime._base import truncate_response
-from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import has_native_turn_limit
-from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, ContinuityStatus, RuntimeEventType
+from myrm_agent_harness.toolkits.acp.runtime.cli.claude import is_claude
+from myrm_agent_harness.toolkits.acp.types import (
+    AcpErrorCode,
+    ContinuityStatus,
+    RuntimeEventType,
+    StopReason,
+    delegation_session_id,
+    normalize_workspace,
+)
 from myrm_agent_harness.utils.runtime.cancel_hook import on_token_cancelled
 from myrm_agent_harness.utils.runtime.cancellation import get_cancel_token
 from myrm_agent_harness.utils.runtime.progress_sink import ToolProgressSink, get_tool_progress_sink
@@ -46,23 +58,7 @@ from myrm_agent_harness.utils.runtime.progress_sink import ToolProgressSink, get
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from myrm_agent_harness.toolkits.acp.types import DelegationPool
-
-
-class DelegateUsage(TypedDict):
-    """Token usage statistics from an external agent delegation."""
-
-    input_tokens: int
-    output_tokens: int
-    total_tokens: int
-
-
-class DelegateMeta(TypedDict):
-    """Metadata collected during an external agent delegation turn."""
-
-    tool_calls: int
-    errors: int
-    usage: NotRequired[DelegateUsage]
+    from myrm_agent_harness.toolkits.acp.types import DelegationPool, PermissionBroker
 
 
 logger = logging.getLogger(__name__)
@@ -75,22 +71,26 @@ _DEFAULT_MAX_TURNS = 25
 def create_invoke_acp_agent_tool(
     pool: DelegationPool,
     *,
-    cwd: str | None = None,
+    workspace: str,
     session_scope: str | None = None,
+    permissions: PermissionBroker | None = None,
 ) -> BaseTool:
     """Create the invoke_acp_agent tool.
 
     Args:
         pool: Pre-configured pool (a ``RuntimePool`` or any ``DelegationPool``) with registered backends.
-        cwd: Working directory injected as context into delegated tasks.
+        workspace: Absolute directory every delegated turn starts in; the host names it, the tool never infers it.
         session_scope: Optional chat/session id for stable CLI resume keys.
+        permissions: Who is asked, mid-turn, before a ``safe`` agent edits or runs something; without one such an
+            agent may only read.
 
     Returns:
         A LangChain tool function.
-    """
-    from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import WorkspacePathResolver
 
-    effective_cwd = cwd or str(WorkspacePathResolver.resolve_workspace_root())
+    Raises:
+        ValueError: If ``workspace`` is not an absolute path.
+    """
+    workspace = normalize_workspace(workspace)
 
     tool_description = """Invoke an external ACP coding agent.
 
@@ -142,8 +142,6 @@ context and capabilities.
         if task_size > MAX_TASK_BYTES:
             return f"[error] Task too large ({task_size} bytes). Max: {MAX_TASK_BYTES} bytes."
 
-        enriched_task = f"{task}\n\n[Context: cwd={effective_cwd}]"
-
         logger.info("acp_invoke agent=%s mode=%s task_length=%d", agent_name, mode, len(task))
 
         t0 = time.monotonic()
@@ -152,9 +150,11 @@ context and capabilities.
                 result, meta = await _run_turn_and_collect(
                     pool,
                     agent_name,
-                    enriched_task,
+                    task,
+                    workspace=workspace,
                     mode=mode,
                     session_scope=session_scope,
+                    permissions=permissions,
                 )
                 elapsed = time.monotonic() - t0
                 truncated = result.endswith("[truncated — response exceeded limit]")
@@ -225,26 +225,15 @@ context and capabilities.
     return invoke_acp_agent_func
 
 
-def _as_int(value: object) -> int:
-    """Best-effort int coercion for loosely-typed (``object``) event payloads."""
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
-        return int(value)
-    return 0
-
-
 async def _run_turn_and_collect(
     pool: DelegationPool,
     agent_name: str,
     task: str,
     *,
+    workspace: str,
     mode: str,
     session_scope: str | None = None,
+    permissions: PermissionBroker | None = None,
 ) -> tuple[str, DelegateMeta]:
     """Stream events from pool.run_turn(), collect text, and track metadata.
 
@@ -255,18 +244,16 @@ async def _run_turn_and_collect(
     Supports cancellation propagation: if the parent Agent's CancellationToken
     fires, the external agent process is terminated via pool.cancel().
     """
-    if mode == "oneshot":
-        session_id = f"{agent_name}-oneshot-{uuid4().hex}"
-    elif session_scope:
-        session_id = f"{agent_name}-{session_scope}"
-    else:
-        session_id = f"{agent_name}-default"
+    session_id = (
+        f"{agent_name}-oneshot-{uuid4().hex}" if mode == "oneshot" else delegation_session_id(agent_name, session_scope)
+    )
 
     config = pool.get_config(agent_name)
     max_turns = config.max_turns if config else _DEFAULT_MAX_TURNS
-    # A CLI with its own turn limit stops itself and says so (ERROR/MAX_TURNS). Counting its tool calls here would
-    # cut it off early, since one turn can run several tool calls; every other backend is counted below.
-    native_limit = config is not None and config.backend_type == "cli" and has_native_turn_limit(config.command)
+    # Claude stops itself at the configured turn limit and says so (DONE with ``max_turn_requests``). Counting its
+    # tool calls here would cut it off early, since one turn can run several tool calls; every other backend is
+    # counted below.
+    native_limit = config is not None and config.backend_type == "cli" and is_claude(config.command)
 
     sink: ToolProgressSink | None = get_tool_progress_sink()
     cancel_token = get_cancel_token()
@@ -277,10 +264,15 @@ async def _run_turn_and_collect(
     output_tokens = 0
     was_cancelled = False
     turns_used: int | None = None
+    stopped_early: StopReason | None = None
 
     # The watcher stops the delegated process the moment the token trips, even while its stream is silent.
     async with (
-        aclosing(pool.run_turn(agent_name, task, session_id=session_id, mode=mode)) as events,
+        aclosing(
+            pool.run_turn(
+                agent_name, task, session_id=session_id, workspace=workspace, mode=mode, permissions=permissions
+            )
+        ) as events,
         on_token_cancelled(cancel_token, lambda: pool.cancel(agent_name, session_id)),
     ):
         async for event in events:
@@ -329,16 +321,13 @@ async def _run_turn_and_collect(
                         }
                     )
             elif event.type == RuntimeEventType.USAGE_UPDATE:
-                input_tokens += _as_int(event.data.get("input_tokens"))
-                output_tokens += _as_int(event.data.get("output_tokens"))
+                input_tokens += as_int(event.data.get("input_tokens"))
+                output_tokens += as_int(event.data.get("output_tokens"))
             elif event.type == RuntimeEventType.ERROR:
                 error_data = event.data.get("error")
                 code = getattr(error_data, "code", None)
                 if code is AcpErrorCode.CANCELLED:
                     was_cancelled = True
-                elif code is AcpErrorCode.MAX_TURNS:
-                    logger.info("acp_delegate_native_max_turns agent=%s limit=%d", agent_name, max_turns)
-                    turns_used = max_turns
                 else:
                     error_count += 1
                     if hasattr(error_data, "message"):
@@ -347,6 +336,13 @@ async def _run_turn_and_collect(
                         exc = RuntimeError(message)
                         exc.retryable = getattr(error_data, "retryable", False)  # type: ignore[attr-defined]
                         raise exc
+            elif event.type == RuntimeEventType.DONE:
+                stop = StopReason.of(event.data.get("stop_reason"))
+                if stop is not None and stop.notice is not None:
+                    logger.info("acp_delegate_stopped_early agent=%s reason=%s", agent_name, stop)
+                    stopped_early = stop
+                    if sink:
+                        await sink.emit(notice_step(agent_name, stop.notice))
             elif event.type == RuntimeEventType.STATUS_UPDATE:
                 status = event.data.get("status", "")
                 message = event.data.get("message", "")
@@ -356,16 +352,7 @@ async def _run_turn_and_collect(
                 if sink:
                     continuity = ContinuityStatus.of(status)
                     if continuity is not None:
-                        # A notice the UI words itself (title only), not a step that is still running.
-                        await sink.emit(
-                            {
-                                "type": AgentEventType.TASKS_STEPS.value,
-                                "step_key": f"delegation_{agent_name}_{continuity}",
-                                "tool_name": f"delegate:{agent_name}",
-                                "status": "completed",
-                                "data": [],
-                            }
-                        )
+                        await sink.emit(notice_step(agent_name, continuity))
                     else:
                         await sink.emit(
                             {
@@ -382,6 +369,8 @@ async def _run_turn_and_collect(
         collected += "\n\n[cancelled — user aborted delegation]"
     elif turns_used is not None:
         collected += f"\n\n[stopped — max turns limit reached ({turns_used}/{max_turns})]"
+    elif stopped_early is not None:
+        collected += f"\n\n{STOP_NOTES[stopped_early]}"
     result = truncate_response(collected, max_chars)
 
     meta = DelegateMeta(tool_calls=tool_calls, errors=error_count)

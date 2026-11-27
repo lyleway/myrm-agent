@@ -26,8 +26,7 @@ preserving the flat-module import surface for all consumers.
 from .file_args import PATHS_ALIAS_KEYS, READ_RANGE_PATTERN, coerce_path_list, host_file_paths, is_url, strip_read_range
 from .persistent_state_tools import PERSISTENT_STATE_MUTATOR_TOOLS
 from .registry import (
-    _PTC_SAFETY_METADATA,
-    _PTC_TOOL_FLAT_INDEX,
+    _PTC_TOOL_SAFETY,
     AUTO_APPROVE_REASONS,
     AUTO_APPROVED_BUILTIN_TOOLS,
     BUILTIN_TOOL_NAMES,
@@ -43,7 +42,7 @@ from .registry import (
     MCPAnnotations,
     _check_safety_coverage,
     compute_canonical_args_hash,
-    evict_skill_safety_metadata,
+    evict_ptc_safety_metadata_by_prefix,
     get_ptc_safety_metadata,
     register_ptc_safety_metadata,
     resolve_permission_type,
@@ -75,8 +74,7 @@ __all__ = [
     "TOOL_TO_GROUP",
     "URL_BEARING_PERMISSIONS",
     "_FAIL_CLOSED_DEFAULTS",
-    "_PTC_SAFETY_METADATA",
-    "_PTC_TOOL_FLAT_INDEX",
+    "_PTC_TOOL_SAFETY",
     "PATHS_ALIAS_KEYS",
     "READ_RANGE_PATTERN",
     "MCPAnnotations",
@@ -85,7 +83,7 @@ __all__ = [
     "check_safety_coverage",
     "coerce_path_list",
     "compute_canonical_args_hash",
-    "evict_skill_safety_metadata",
+    "evict_ptc_safety_metadata_by_prefix",
     "get_ptc_safety_metadata",
     "host_file_paths",
     "is_url",

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { BRIDGE_CAPABILITIES } from '../protocol';
 import {
   EMPTY_DECLARATION,
   declaredScope,
   isExactPublicHost,
   isSubset,
+  offeredCapabilities,
   parseDeclaration,
   resolveStatuses,
   type Declaration,
@@ -15,11 +17,45 @@ const page = (block: string) =>
 const declare = (json: string) => page(`<script type="application/json" id="myrm-app">${json}</script>`);
 
 describe('parseDeclaration', () => {
-  it('reads both capabilities', () => {
+  it('reads the capabilities of notification and network', () => {
     expect(parseDeclaration(declare('{"notify": true, "fetch": ["api.weather.com", "b.example.org"]}'))).toEqual({
+      ...EMPTY_DECLARATION,
       notify: true,
       fetchHosts: ['api.weather.com', 'b.example.org'],
     });
+  });
+
+  it('reads the desktop capabilities, spelling the key combinations canonically', () => {
+    expect(
+      parseDeclaration(
+        declare('{"tray": true, "float": true, "shortcut": ["shift+commandorcontrol+k", "Alt+F1", "alt+f1"]}'),
+      ),
+    ).toEqual({
+      ...EMPTY_DECLARATION,
+      tray: true,
+      float: true,
+      shortcuts: ['Alt+F1', 'CommandOrControl+Shift+K'],
+    });
+  });
+
+  it('only a literal true declares tray, float or ai', () => {
+    const declaration = parseDeclaration(declare('{"tray": "yes", "float": 1, "ai": "true"}'));
+    expect([declaration.tray, declaration.float, declaration.ai]).toEqual([false, false, false]);
+    expect(parseDeclaration(declare('{"ai": true}'))).toEqual({ ...EMPTY_DECLARATION, ai: true });
+  });
+
+  it('drops the whole shortcut list when one combination is not allowed or there are more than four', () => {
+    for (const list of [
+      '["K"]',
+      '["Shift+K"]',
+      '["Alt+F1", "Super+K"]',
+      '["Alt+1","Alt+2","Alt+3","Alt+4","Alt+5"]',
+      '"Alt+F1"',
+      '[]',
+      '[1]',
+    ]) {
+      expect(parseDeclaration(declare(`{"shortcut": ${list}}`)).shortcuts, list).toEqual([]);
+    }
   });
 
   it('canonicalises hosts: trimmed, lower-cased, de-duplicated, sorted', () => {
@@ -76,7 +112,7 @@ describe('parseDeclaration', () => {
     const html = page(
       '<script type="application/json" id="myrm-app">{"notify":true}</script><script type="application/json" id="myrm-app">{"fetch":["a.example.com"]}</script>',
     );
-    expect(parseDeclaration(html)).toEqual({ notify: true, fetchHosts: [] });
+    expect(parseDeclaration(html)).toEqual({ ...EMPTY_DECLARATION, notify: true });
   });
 
   it('does not run scripts while reading', () => {
@@ -107,11 +143,23 @@ describe('isExactPublicHost', () => {
 
 describe('declaredScope / isSubset', () => {
   it('maps a declaration to the scope of each capability, or null when undeclared', () => {
-    const declaration: Declaration = { notify: true, fetchHosts: ['a.example.com'] };
+    const declaration: Declaration = {
+      notify: true,
+      fetchHosts: ['a.example.com'],
+      ai: true,
+      tray: true,
+      float: true,
+      shortcuts: ['Alt+F1'],
+    };
     expect(declaredScope('notify', declaration)).toEqual([]);
     expect(declaredScope('fetch', declaration)).toEqual(['a.example.com']);
-    expect(declaredScope('notify', EMPTY_DECLARATION)).toBeNull();
-    expect(declaredScope('fetch', EMPTY_DECLARATION)).toBeNull();
+    expect(declaredScope('ai', declaration)).toEqual([]);
+    expect(declaredScope('tray', declaration)).toEqual([]);
+    expect(declaredScope('float', declaration)).toEqual([]);
+    expect(declaredScope('shortcut', declaration)).toEqual(['Alt+F1']);
+    for (const capability of BRIDGE_CAPABILITIES) {
+      expect(declaredScope(capability, EMPTY_DECLARATION), capability).toBeNull();
+    }
   });
 
   it('is a subset check', () => {
@@ -133,37 +181,76 @@ describe('resolveStatuses', () => {
     scope,
     version_sha256: sha,
   });
-  const both: Declaration = { notify: true, fetchHosts: ['a.example.com'] };
+  const both: Declaration = { ...EMPTY_DECLARATION, notify: true, fetchHosts: ['a.example.com'] };
+  const undeclared = {
+    notify: 'undeclared',
+    fetch: 'undeclared',
+    ai: 'undeclared',
+    tray: 'undeclared',
+    shortcut: 'undeclared',
+    float: 'undeclared',
+  };
 
   it('marks what the page does not declare as undeclared, whatever was granted before', () => {
-    expect(resolveStatuses(EMPTY_DECLARATION, [grant('notify', 'allow', [])])).toEqual({
-      notify: 'undeclared',
-      fetch: 'undeclared',
-    });
+    expect(resolveStatuses(EMPTY_DECLARATION, [grant('notify', 'allow', [])])).toEqual(undeclared);
   });
 
   it('asks for every declared capability that has no decision yet', () => {
-    expect(resolveStatuses(both, [])).toEqual({ notify: 'ask', fetch: 'ask' });
+    expect(resolveStatuses(both, [])).toEqual({ ...undeclared, notify: 'ask', fetch: 'ask' });
   });
 
   it('applies a stored allow or deny while the declaration stays within the decided scope', () => {
     expect(resolveStatuses(both, [grant('notify', 'allow', []), grant('fetch', 'deny', ['a.example.com'])])).toEqual({
+      ...undeclared,
       notify: 'allowed',
       fetch: 'denied',
     });
   });
 
   it('keeps an allow when the new version narrows the hosts', () => {
-    const narrower: Declaration = { notify: false, fetchHosts: ['a.example.com'] };
+    const narrower: Declaration = { ...EMPTY_DECLARATION, fetchHosts: ['a.example.com'] };
     expect(resolveStatuses(narrower, [grant('fetch', 'allow', ['a.example.com', 'b.example.com'])]).fetch).toBe(
       'allowed',
     );
   });
 
   it('asks again when the declaration reaches a host the user never decided on', () => {
-    const wider: Declaration = { notify: false, fetchHosts: ['a.example.com', 'new.example.com'] };
+    const wider: Declaration = { ...EMPTY_DECLARATION, fetchHosts: ['a.example.com', 'new.example.com'] };
     expect(resolveStatuses(wider, [grant('fetch', 'allow', ['a.example.com'])]).fetch).toBe('ask');
     expect(resolveStatuses(wider, [grant('fetch', 'deny', ['a.example.com'])]).fetch).toBe('ask');
+  });
+
+  it('asks again when a new version declares a key combination the user never saw', () => {
+    const declared: Declaration = { ...EMPTY_DECLARATION, shortcuts: ['Alt+F1', 'Alt+F2'] };
+
+    expect(resolveStatuses(declared, [grant('shortcut', 'allow', ['Alt+F1'])]).shortcut).toBe('ask');
+    expect(resolveStatuses(declared, [grant('shortcut', 'allow', ['Alt+F1', 'Alt+F2', 'Alt+F3'])]).shortcut).toBe(
+      'allowed',
+    );
+  });
+
+  it('keeps a decision about a scopeless capability while the page still declares it', () => {
+    const tray: Declaration = { ...EMPTY_DECLARATION, tray: true };
+
+    expect(resolveStatuses(tray, [grant('tray', 'allow', [])]).tray).toBe('allowed');
+    expect(resolveStatuses(tray, [grant('tray', 'deny', [])]).tray).toBe('denied');
+    expect(resolveStatuses(EMPTY_DECLARATION, [grant('tray', 'allow', [])]).tray).toBe('undeclared');
+  });
+
+  it('treats ai like any scopeless capability: asked once, then the decision stands', () => {
+    const declared: Declaration = { ...EMPTY_DECLARATION, ai: true };
+
+    expect(resolveStatuses(declared, []).ai).toBe('ask');
+    expect(resolveStatuses(declared, [grant('ai', 'allow', [])]).ai).toBe('allowed');
+    expect(resolveStatuses(declared, [grant('ai', 'deny', [])]).ai).toBe('denied');
+    expect(resolveStatuses(EMPTY_DECLARATION, [grant('ai', 'allow', [])]).ai).toBe('undeclared');
+  });
+
+  it('offers ai in every window, unlike the desktop capabilities', () => {
+    const statuses = resolveStatuses({ ...EMPTY_DECLARATION, ai: true, tray: true }, []);
+
+    expect(offeredCapabilities(statuses, false)).toEqual(['ai']);
+    expect(offeredCapabilities(statuses, true)).toEqual(['ai', 'tray']);
   });
 
   it('does not let a notify decision stand in for fetch', () => {

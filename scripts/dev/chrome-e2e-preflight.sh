@@ -172,6 +172,8 @@ source "${SCRIPT_DIR}/lib/chrome_e2e_preflight/mux_restart.sh"
 # shellcheck source=lib/chrome_e2e_preflight/mux_heal.sh
 source "${SCRIPT_DIR}/lib/chrome_e2e_preflight/mux_heal.sh"
 
+_require_mux_bin_deps
+
 # shellcheck source=lib/chrome_e2e_preflight/stage_attach_and_mux.sh
 source "${SCRIPT_DIR}/lib/chrome_e2e_preflight/stage_attach_and_mux.sh"
 

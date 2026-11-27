@@ -46,7 +46,7 @@ The reference is an opaque, non-empty string the business layer can resolve late
 The callback raises when it cannot store the audio; the engine then fails the generation.
 """
 
-SUPPORTED_TTS_PROVIDERS = frozenset({"openai", "elevenlabs", "volcengine"})
+SUPPORTED_TTS_PROVIDERS = frozenset({"elevenlabs", "volcengine"})
 """Provider ids the engine calls with the user's own key; any other id works only through the tool gateway."""
 
 logger = logging.getLogger(__name__)

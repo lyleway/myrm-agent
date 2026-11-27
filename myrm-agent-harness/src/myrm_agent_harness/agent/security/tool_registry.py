@@ -9,10 +9,7 @@ from myrm_agent_harness.core.security.tool_registry import (  # private symbols 
     _FAIL_CLOSED_DEFAULTS as _FAIL_CLOSED_DEFAULTS,
 )
 from myrm_agent_harness.core.security.tool_registry import (
-    _PTC_SAFETY_METADATA as _PTC_SAFETY_METADATA,
-)
-from myrm_agent_harness.core.security.tool_registry import (
-    _PTC_TOOL_FLAT_INDEX as _PTC_TOOL_FLAT_INDEX,
+    _PTC_TOOL_SAFETY as _PTC_TOOL_SAFETY,
 )
 from myrm_agent_harness.core.security.tool_registry import (
     _check_safety_coverage as _check_safety_coverage,

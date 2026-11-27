@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
+from myrm_agent_harness.toolkits.web_fetch.escalation.context import bind_web_fetch_escalation_context
+from myrm_agent_harness.toolkits.web_fetch.escalation.protocols import (
+    EscalationFetchResult,
+    FetchEscalationProvider,
+)
 from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetcherType
 from tests.toolkits.web_fetch._degradation_support import (
     RICH_HTML,
+    StubProvider,
     http_result,
     make_document,
+    pipeline_double,
     stub_fetchers,
 )
 
@@ -23,7 +29,7 @@ class TestCrawlWithDegradation:
         engine = FetchEngine()
         http = stub_fetchers(engine)
         http.fetch.return_value = http_result(RICH_HTML)
-        engine._pipeline.aprocess.return_value = make_document()
+        pipeline_double(engine).aprocess.return_value = make_document()
 
         doc, _result = await engine._crawl_with_degradation("http://example.com/page")
 
@@ -59,21 +65,10 @@ class TestCrawlWithDegradation:
         engine = FetchEngine()
         http = stub_fetchers(engine)
         http.fetch.return_value = None
-        engine._escalation_providers = [
-            SimpleNamespace(
-                provider_id="esc2",
-                fetch_url=AsyncMock(
-                    return_value=SimpleNamespace(
-                        content="# Last resort",
-                        is_markdown=True,
-                        url=None,
-                        title="",
-                    )
-                ),
-            )
-        ]
+        provider = StubProvider("esc2", EscalationFetchResult(url="", content="# Last resort", provider_id="esc2"))
 
-        doc, _result = await engine._crawl_with_degradation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=[provider]):
+            doc, _result = await engine._crawl_with_degradation("http://example.com/page")
 
         assert doc is not None
         assert doc.page_content == "# Last resort"
@@ -85,33 +80,18 @@ class TestCrawlWithDegradation:
         engine = FetchEngine()
         http = stub_fetchers(engine)
         http.fetch.return_value = None
-        engine._pipeline.aprocess.side_effect = [None, make_document("html escaped")]
-        engine._escalation_providers = [
-            SimpleNamespace(
-                provider_id="p1",
-                fetch_url=AsyncMock(
-                    return_value=SimpleNamespace(
-                        content="<p>raw one</p>",
-                        is_markdown=False,
-                        url=None,
-                        title="",
-                    )
-                ),
+        pipeline_double(engine).aprocess.side_effect = [None, make_document("html escaped")]
+        providers: list[FetchEscalationProvider] = [
+            StubProvider(
+                "p1", EscalationFetchResult(url="", content="<p>raw one</p>", provider_id="p1", is_markdown=False)
             ),
-            SimpleNamespace(
-                provider_id="p2",
-                fetch_url=AsyncMock(
-                    return_value=SimpleNamespace(
-                        content="<p>raw two</p>",
-                        is_markdown=False,
-                        url=None,
-                        title="",
-                    )
-                ),
+            StubProvider(
+                "p2", EscalationFetchResult(url="", content="<p>raw two</p>", provider_id="p2", is_markdown=False)
             ),
         ]
 
-        doc, _result = await engine._crawl_with_degradation("http://example.com/page")
+        with bind_web_fetch_escalation_context(providers=providers):
+            doc, _result = await engine._crawl_with_degradation("http://example.com/page")
 
         assert doc is not None
         assert doc.page_content == "html escaped"

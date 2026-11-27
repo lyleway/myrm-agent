@@ -76,11 +76,11 @@ describe('GeneratedMediaCards', () => {
   });
 
   it('plays stored speech in place with its model and duration', () => {
-    renderCards([{ kind: 'tts', media: 'media://media_speech', model: 'gpt-4o-mini-tts', duration_seconds: 2.5 }]);
+    renderCards([{ kind: 'tts', media: 'media://media_speech', model: 'eleven_multilingual_v2', duration_seconds: 2.5 }]);
 
     const player = screen.getByTestId('tts');
     expect(player.getAttribute('data-url')).toBe('media://media_speech');
-    expect(player.getAttribute('data-model')).toBe('gpt-4o-mini-tts');
+    expect(player.getAttribute('data-model')).toBe('eleven_multilingual_v2');
     expect(player.getAttribute('data-duration')).toBe('2.5');
   });
 

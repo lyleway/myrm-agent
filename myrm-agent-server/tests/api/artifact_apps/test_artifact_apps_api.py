@@ -2,65 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from pathlib import Path
-
 import httpx
 import pytest
-from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import delete, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.api.artifact_apps import router as artifact_apps_router
-from app.api.dependencies import get_workspace_root
-from app.database.connection import get_db
-from app.database.models import Artifact, ArtifactVersion, Base
+from app.database.models import Artifact, ArtifactVersion
 from app.services.artifact_apps import fetch_proxy
-from app.services.artifact_apps.rate_limit import FETCH_LIMITER
 
 _SHA = "a" * 64
 _NEWER_SHA = "b" * 64
 _PAGE_REQUEST = {"version_sha256": _SHA, "url": "https://api.weather.com/v1/now", "method": "GET"}
-
-
-@pytest.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as db:
-        db.add_all(
-            [
-                Artifact(id="clock", name="clock.html", chat_id="chat-1"),
-                Artifact(id="notes", name="notes.md"),
-            ]
-        )
-        db.add_all(
-            [
-                ArtifactVersion(id="v1", artifact_id="clock", vault_uri="vault://o1", sha256_hash=_SHA),
-                ArtifactVersion(id="v0", artifact_id="notes", vault_uri="vault://o2", sha256_hash=_SHA),
-            ]
-        )
-        await db.commit()
-    yield factory
-    await engine.dispose()
-
-
-@pytest.fixture
-async def client(session_factory: async_sessionmaker[AsyncSession], tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
-    app = FastAPI()
-    app.include_router(artifact_apps_router, prefix="/api/v1")
-
-    async def database() -> AsyncIterator[AsyncSession]:
-        async with session_factory() as db:
-            yield db
-
-    app.dependency_overrides[get_db] = database
-    app.dependency_overrides[get_workspace_root] = lambda: tmp_path
-    FETCH_LIMITER._starts.clear()
-    FETCH_LIMITER._in_flight.clear()
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://apps.test") as http:
-        yield http
 
 
 async def _install(client: httpx.AsyncClient, artifact_id: str = "clock") -> httpx.Response:
@@ -116,6 +68,34 @@ async def test_a_page_of_an_uninstalled_artifact_has_no_detail_grants_or_proxy(c
     assert (await client.post("/api/v1/artifact-apps/clock/fetch", json=_PAGE_REQUEST)).status_code == 404
 
 
+async def test_the_page_of_an_app_whose_artifact_was_deleted_is_not_found(
+    client: httpx.AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    await _install(client)
+    async with session_factory() as db:
+        await db.execute(update(Artifact).where(Artifact.id == "clock").values(is_deleted=True))
+        await db.commit()
+
+    response = await client.get("/api/v1/artifact-apps/clock")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Artifact not found"
+
+
+async def test_an_installed_artifact_without_any_version_has_no_page(
+    client: httpx.AsyncClient, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    await _install(client)
+    async with session_factory() as db:
+        await db.execute(delete(ArtifactVersion).where(ArtifactVersion.artifact_id == "clock"))
+        await db.commit()
+
+    response = await client.get("/api/v1/artifact-apps/clock")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Artifact has no version"
+
+
 async def test_the_list_shows_installed_apps_and_uninstall_removes_them(client: httpx.AsyncClient) -> None:
     await _install(client)
 
@@ -150,9 +130,36 @@ async def test_a_grant_is_stored_with_a_canonical_scope_and_shown_in_the_detail(
     assert [(g["capability"], g["decision"], g["scope"]) for g in detail["grants"]] == [("fetch", "allow", ["api.weather.com"])]
 
 
+async def test_the_desktop_capabilities_are_stored_with_a_canonical_scope(client: httpx.AsyncClient) -> None:
+    await _install(client)
+
+    tray = await _grant(client, "tray", "allow", [])
+    float_ = await _grant(client, "float", "deny", [])
+    shortcut = await _grant(client, "shortcut", "allow", ["shift+commandorcontrol+k", "CommandOrControl+Shift+K"])
+
+    assert [r.status_code for r in (tray, float_, shortcut)] == [200, 200, 200]
+    assert shortcut.json()["data"]["scope"] == ["CommandOrControl+Shift+K"]
+    detail = (await client.get("/api/v1/artifact-apps/clock")).json()["data"]
+    assert {(g["capability"], g["decision"]) for g in detail["grants"]} == {
+        ("tray", "allow"),
+        ("float", "deny"),
+        ("shortcut", "allow"),
+    }
+
+
 @pytest.mark.parametrize(
     ("capability", "scope"),
-    [("fetch", ["127.0.0.1"]), ("fetch", []), ("fetch", ["*.example.com"]), ("notify", ["api.weather.com"])],
+    [
+        ("fetch", ["127.0.0.1"]),
+        ("fetch", []),
+        ("fetch", ["*.example.com"]),
+        ("notify", ["api.weather.com"]),
+        ("tray", ["x.example.com"]),
+        ("float", ["x"]),
+        ("shortcut", []),
+        ("shortcut", ["K"]),
+        ("shortcut", ["Shift+K"]),
+    ],
 )
 async def test_a_scope_the_capability_cannot_carry_is_refused(
     client: httpx.AsyncClient, capability: str, scope: list[str]
@@ -249,6 +256,17 @@ async def test_the_host_reports_a_page_side_call_into_the_same_log(client: httpx
     assert reported.status_code == 204
     (entry,) = (await client.get("/api/v1/artifact-apps/clock/activity")).json()["data"]
     assert (entry["capability"], entry["outcome"], entry["version_sha256"]) == ("notify", "ok", _NEWER_SHA)
+
+
+async def test_the_host_cannot_report_activity_for_an_uninstalled_app(client: httpx.AsyncClient) -> None:
+    reported = await client.post(
+        "/api/v1/artifact-apps/clock/activity",
+        json={"version_sha256": _SHA, "capability": "notify", "outcome": "ok"},
+    )
+
+    assert reported.status_code == 404
+    assert (await _install(client)).json()["data"]["grants"] == []
+    assert (await client.get("/api/v1/artifact-apps/clock/activity")).json()["data"] == []
 
 
 async def test_a_malformed_version_hash_is_refused(client: httpx.AsyncClient) -> None:

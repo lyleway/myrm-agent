@@ -2,7 +2,7 @@
 
 [INPUT]
 - channels.routing.pipeline.hosts::RouterInboundHost (POS: typing protocol for the host attributes this mixin reads)
-- channels.routing.commands::is_explicit_approval_command, parse_approval_command (POS: approval shortcut parsing)
+- channels.routing.commands::is_explicit_approval_command, parse_approval_command, start_new_conversation (POS: approval shortcut parsing; the opening of a new conversation)
 - channels.routing.inbound_risk_gate::hold_risky_inbound (POS: risk screening of a sender's text before any agent reads it)
 - channels.routing.policy_resolver_support::is_admin_sender (POS: the owner rule for admin-only commands)
 - channels.routing.router_constants::_DEDUP_MAX_SIZE, _DEDUP_TTL (POS: dedup window limits)
@@ -13,7 +13,7 @@
 - channels.types::InboundMessage, OutboundMessage (POS: channel message envelopes)
 
 [OUTPUT]
-- RouterInboundMixin: ``_dispatch_inbound_message``, the sequence of steps one message passes (dedup, group activity, locale, then the steps that may claim it: ``_claim_approval_input``, ``_claim_command``, ``_claim_delegation``, ``_claim_delegated_task_steering``, with ``_fire_event_triggers`` between the commands and the delegation, then ``_divert_group_chatter``, and finally the session gate); the sender checks (``_check_admin_permission``, ``_is_sender_admitted``, ``_is_untrusted_event_sender``, all fail closed), ``_enrich_message_locale`` and ``_is_duplicate``
+- RouterInboundMixin: ``_dispatch_inbound_message``, the sequence of steps one message passes (dedup, group activity, locale, the new conversation a flagged message asks for (``_open_requested_conversation``), then the steps that may claim it: ``_claim_approval_input``, ``_claim_command``, ``_claim_delegation``, ``_claim_delegated_task_steering``, with ``_fire_event_triggers`` between the commands and the delegation, then ``_divert_group_chatter``, and finally the session gate); the sender checks (``_check_admin_permission``, ``_is_sender_admitted``, ``_is_untrusted_event_sender``, all fail closed), ``_enrich_message_locale`` and ``_is_duplicate``
 
 [POS]
 Inbound segment of ``AgentRouter``. Runs on the consume loop, one message at a time, so every check here must either finish fast or hand off to a task.
@@ -30,13 +30,13 @@ from myrm_agent_harness.utils.locale import resolve_locale
 
 from app.channels.delegation import is_delegation_intent
 from app.channels.i18n import get_text, resolve_message_locale
-from app.channels.routing.commands import is_explicit_approval_command, parse_approval_command
+from app.channels.routing.commands import is_explicit_approval_command, parse_approval_command, start_new_conversation
 from app.channels.routing.inbound_risk_gate import hold_risky_inbound
 from app.channels.routing.pipeline.hosts import RouterInboundHost
 from app.channels.routing.policy_resolver_support import is_admin_sender
 from app.channels.routing.router_constants import _DEDUP_MAX_SIZE, _DEDUP_TTL
 from app.channels.routing.router_keys import routing_state_key
-from app.channels.types import InboundMessage, OutboundMessage
+from app.channels.types import METADATA_NEW_CONVERSATION_KEY, InboundMessage, OutboundMessage
 from app.core.cron.adapters.inbound_event_dispatch import dispatch_cron_event_for_inbound_message
 
 logger = logging.getLogger("app.channels.routing.router")
@@ -63,6 +63,10 @@ class RouterInboundMixin:
 
         self._note_group_activity(msg)
         msg = await self._enrich_message_locale(msg)
+        opened = await self._open_requested_conversation(msg)
+        if opened is None:
+            return
+        msg = opened
 
         # NOTE: inbound ledger persistence is single-sourced in PolicyResolver
         # (group non-trigger / group trigger / DM trigger) with the resolved
@@ -217,6 +221,23 @@ class RouterInboundMixin:
             reply_to_id=(msg.message_id or str(msg.metadata.get("message_id", ""))) if quote_in_group and msg.is_group else None,
         )
         asyncio.create_task(self._bus.publish_outbound(reply))
+
+    async def _open_requested_conversation(self: RouterInboundHost, msg: InboundMessage) -> InboundMessage | None:
+        """Open the new conversation the control plane's ``/new`` asked for, before any step acts on this message.
+
+        The control plane answers ``/new`` itself and flags the sender's next message instead. The flag is spent here,
+        so no later step (command, gate, turn, journal replay) sees it, and it does not depend on that message becoming
+        a turn: the conversation is opened whatever happens to the message. ``None`` when it could not be opened: the
+        sender has been told, and the message ends here, because answering it in the conversation they left is the one
+        thing they asked not to happen.
+        """
+        if METADATA_NEW_CONVERSATION_KEY not in msg.metadata:
+            return msg
+        requested = bool(msg.metadata[METADATA_NEW_CONVERSATION_KEY])
+        msg = dataclasses.replace(msg, metadata={k: v for k, v in msg.metadata.items() if k != METADATA_NEW_CONVERSATION_KEY})
+        if requested and not await start_new_conversation(msg, self._bus):
+            return None
+        return msg
 
     async def _enrich_message_locale(self: RouterInboundHost, msg: InboundMessage) -> InboundMessage:
         """Inject resolved locale into inbound message metadata."""

@@ -4,6 +4,7 @@
 - myrm_agent_harness.toolkits.llms.video::VideoGenerationConfig, get_registry (POS: engine config and provider registry)
 - app.ai_agents.media_tools.task_results (POS: shared error, started-tasks and status results)
 - app.ai_agents.media_tools.video_schema::build_video_input_schema (POS: provider-pruned tool input model)
+- app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 - app.tasks.task_payload_crypto::seal_task_payload_secrets (POS: payload secret sealing)
 
 [OUTPUT]
@@ -11,9 +12,10 @@
 
 [POS]
 LangChain adapter of the video engine. ``generate`` enqueues one background task and answers with the task list;
-``status`` and ``list`` read the queue and the provider catalog. Reference files are resolved by the worker through
-the single input resolver, so a bad reference fails the task with its name in the message instead of generating
-something else.
+``status`` (optionally waiting for a running task) and ``list`` read the queue and the provider catalog. Reference
+files are resolved by the worker through the single input resolver, so a bad reference fails the task with its name in
+the message instead of generating something else. A finished video is also copied into the agent's workspace; the
+``status`` result names the copy in ``workspace_files``.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from app.ai_agents.media_tools.task_results import (
     tool_error,
 )
 from app.ai_agents.media_tools.video_schema import build_video_input_schema
+from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
 from app.tasks.task_payload_crypto import seal_task_payload_secrets
 
 logger = logging.getLogger(__name__)
@@ -43,8 +46,11 @@ _TOOL_DESCRIPTION = (
     "so never repeat its media:// address in your reply. "
     "action='generate': a clip from a text prompt, optionally steered by reference_images (image-to-video) or "
     "reference_videos (video-to-video, where the provider supports it). "
-    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier video. "
-    "action='list': the available providers and models and what they support."
+    "action='status': state and result of a task_id, which is also how to get the media:// address of an earlier video; "
+    "wait_seconds waits for a task that is still running. "
+    "action='list': the available providers and models and what they support. "
+    "A finished video is also copied into the workspace for bash and file tools: `workspace_files` in the `result` of "
+    "status lists its path; without that field there is no copy."
 )
 
 
@@ -58,8 +64,10 @@ def create_video_generation_tool(
 ) -> BaseTool:
     """Build ``video_tool`` for the provider and model in ``config``.
 
-    ``allowed_roots`` are the workspace folders the agent's file references may point into.
+    ``allowed_roots`` are the workspace folders the agent's file references may point into; the first one also receives
+    the copies of the finished videos.
     """
+    exporter = WorkspaceExporter.for_workspace(allowed_roots, user_id=task_user_id, chat_id=chat_id)
     lister = VideoGenerationTools(config)
     active_provider = get_registry().get(config.provider)
     input_schema = build_video_input_schema(active_provider.capabilities if active_provider else None)
@@ -130,12 +138,13 @@ def create_video_generation_tool(
         negative_prompt: str | None = None,
         seed: int | None = None,
         task_id: str | None = None,
+        wait_seconds: int | None = None,
     ) -> str:
         """Generate, poll the status of, or list videos."""
         if action == "list":
             return lister.list_providers()
         if action == "status":
-            return await media_task_status_result(task_id)
+            return await media_task_status_result(task_id, wait_seconds, exporter=exporter)
         return await _generate(
             prompt,
             provider=provider,

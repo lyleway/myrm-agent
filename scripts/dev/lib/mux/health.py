@@ -1,13 +1,14 @@
-"""Mux daemon health SSOT — zombie/dead/corrupt detection, reap, restart policy (UBDP-6).
+"""Mux daemon health SSOT — zombie/dead/corrupt detection, reap, restart policy.
 
 [INPUT]
 - cdmcp-mux state dir (daemon.lock, daemon.pid, Unix socket)
-- mux.load.read_mux_status (parallel context / wave lease counts)
+- mux.load.read_mux_status (parallel context / wave lease counts; None when the status cannot be read)
 
 [OUTPUT]
 - evaluate_mux_health() -> MuxHealthVerdict
 - reap_unhealthy_mux_daemon() -> MuxReapReceipt
 - should_allow_mux_restart() -> bool
+- parallel_load_blocks_mux_restart() -> bool: True while a healthy daemon is in parallel use or its load is unreadable
 
 [POS]
 Dev Gate infra layer. Consumed by plane_health, chrome-e2e-preflight, doctor.
@@ -414,9 +415,17 @@ def should_allow_mux_restart(
 
 
 def parallel_load_blocks_mux_restart() -> bool:
-    """Shell helper: exit 0 when restart must be blocked, 1 when allowed."""
+    """Whether a restart must be blocked.
+
+    A healthy daemon is protected while parallel contexts or wave leases are active and while
+    its load cannot be read; an unhealthy one may always be restarted.
+    """
     verdict = evaluate_mux_health()
     status = read_mux_status(force=True)
+    if verdict.state is MuxDaemonState.HEALTHY and status is None:
+        # A responsive daemon whose load cannot be read may be serving parallel
+        # Agents: unreadable is not idle.
+        return True
     contexts = mux_context_count(status)
     leases = wave_lease_count(status)
     allow = should_allow_mux_restart(verdict, wave_leases=leases, mux_contexts=contexts)
@@ -424,7 +433,7 @@ def parallel_load_blocks_mux_restart() -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Mux daemon health SSOT (UBDP-6)")
+    parser = argparse.ArgumentParser(description="Mux daemon health SSOT")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("evaluate", help="Print JSON MuxHealthVerdict")

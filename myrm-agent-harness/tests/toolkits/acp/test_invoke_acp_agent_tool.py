@@ -14,10 +14,14 @@ from myrm_agent_harness.toolkits.acp.acp_agent_tools import (
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
+    PermissionRequest,
+    PermissionVerdict,
     RuntimeConfig,
     RuntimeEventType,
     create_event,
 )
+
+_WORKSPACE = "/workspace"
 
 
 def _make_pool(backends: dict[str, RuntimeConfig] | None = None) -> MagicMock:
@@ -42,8 +46,8 @@ class TestStableDelegateSchema:
     def test_description_identical_regardless_of_pool_backends(self) -> None:
         pool_empty = _make_pool()
         pool_many = _make_pool({"claude": _cfg("Claude"), "codex": _cfg("Codex")})
-        desc_empty = create_invoke_acp_agent_tool(pool_empty, cwd="/workspace").description
-        desc_many = create_invoke_acp_agent_tool(pool_many, cwd="/workspace").description
+        desc_empty = create_invoke_acp_agent_tool(pool_empty, workspace=_WORKSPACE).description
+        desc_many = create_invoke_acp_agent_tool(pool_many, workspace=_WORKSPACE).description
         assert desc_empty == desc_many
         assert "Available agents" not in desc_empty
 
@@ -56,16 +60,63 @@ class TestStableDelegateSchema:
             yield  # type: ignore[misc]
 
         pool.run_turn = raise_key_error
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "nope", "task": "test", "mode": "persistent"})
         assert "Unknown backend" in result
         assert "Available backends: claude, codex" in result
 
 
+class TestDelegationWorkspace:
+    @pytest.mark.asyncio
+    async def test_the_pool_is_told_the_workspace_and_the_task_goes_through_as_written(self) -> None:
+        pool = _make_pool({"claude": _cfg()})
+        seen: list[tuple[str, str]] = []
+
+        async def capture(name, task, session_id, *, workspace, mode="persistent", permissions=None):
+            seen.append((task, workspace))
+            yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+
+        pool.run_turn = capture
+        tool_func = create_invoke_acp_agent_tool(pool, workspace="/work/repo/")
+        await tool_func.ainvoke({"agent_name": "claude", "task": "fix the bug", "mode": "persistent"})
+
+        # The directory is an argument of the turn; the model's task is not rewritten to carry it.
+        assert seen == [("fix the bug", "/work/repo")]
+
+    def test_a_relative_workspace_is_refused_when_the_tool_is_created(self) -> None:
+        with pytest.raises(ValueError, match="absolute path"):
+            create_invoke_acp_agent_tool(_make_pool(), workspace="repo")
+
+
+class TestDelegationPermissions:
+    @pytest.mark.asyncio
+    async def test_the_hosts_permission_broker_goes_to_the_pool_with_every_turn(self) -> None:
+        pool = _make_pool({"claude": _cfg()})
+        seen: list[object] = []
+
+        async def capture(name, task, session_id, *, workspace, mode="persistent", permissions=None):
+            seen.append(permissions)
+            yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+
+        class _Broker:
+            async def decide(self, request: PermissionRequest) -> PermissionVerdict:
+                return PermissionVerdict(allowed=True)
+
+        broker = _Broker()
+        pool.run_turn = capture
+
+        with_broker = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE, permissions=broker)
+        without_broker = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
+        await with_broker.ainvoke({"agent_name": "claude", "task": "a", "mode": "persistent"})
+        await without_broker.ainvoke({"agent_name": "claude", "task": "b", "mode": "persistent"})
+
+        assert seen == [broker, None]
+
+
 class TestCreateDelegateTool:
     def test_returns_tool_function(self) -> None:
         pool = _make_pool({"claude": _cfg()})
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         assert tool_func.name == "invoke_acp_agent_tool"
         assert "Available agents" not in tool_func.description
         assert "configured backend" in tool_func.description
@@ -75,7 +126,7 @@ class TestCreateDelegateTool:
         from pydantic import ValidationError
 
         pool = _make_pool({"claude": _cfg()})
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         with pytest.raises(ValidationError) as exc_info:
             await tool_func.ainvoke({"agent_name": "claude", "task": "test", "mode": "bad"})
         assert "Input should be 'persistent' or 'oneshot'" in str(exc_info.value)
@@ -83,7 +134,7 @@ class TestCreateDelegateTool:
     @pytest.mark.asyncio
     async def test_task_too_large(self) -> None:
         pool = _make_pool({"claude": _cfg()})
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         huge_task = "x" * (MAX_TASK_BYTES + 100)
         result = await tool_func.ainvoke({"agent_name": "claude", "task": huge_task, "mode": "persistent"})
         assert "[error]" in result
@@ -93,12 +144,14 @@ class TestCreateDelegateTool:
     async def test_successful_delegation(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name: str, task: str, session_id: str, mode: str = "persistent"):
+        async def fake_run_turn(
+            name: str, task: str, session_id: str, *, workspace: str, mode: str = "persistent", permissions=None
+        ):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="response text")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "claude", "task": "write tests", "mode": "persistent"})
         assert "response text" in result
         assert "[Delegation:" in result
@@ -113,7 +166,7 @@ class TestCreateDelegateTool:
 
         pool.run_turn = raise_key_error
         pool.get_config = MagicMock(return_value=None)
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "nope", "task": "test", "mode": "persistent"})
         assert "Unknown backend" in result
 
@@ -126,7 +179,7 @@ class TestCreateDelegateTool:
             yield  # type: ignore[misc]
 
         pool.run_turn = raise_error
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "claude", "task": "test", "mode": "persistent"})
         assert "[error]" in result
         assert "boom" in result
@@ -136,7 +189,7 @@ class TestCreateDelegateTool:
         pool = _make_pool({"claude": _cfg()})
         call_count = 0
 
-        async def fail_then_succeed(name, task, session_id, mode="persistent"):
+        async def fail_then_succeed(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -147,7 +200,7 @@ class TestCreateDelegateTool:
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fail_then_succeed
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "claude", "task": "test", "mode": "persistent"})
         assert "ok" in result
         assert call_count == 2
@@ -156,14 +209,14 @@ class TestCreateDelegateTool:
     async def test_retryable_error_exhausts_retries(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def always_fail(name, task, session_id, mode="persistent"):
+        async def always_fail(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             exc = RuntimeError("always transient")
             exc.retryable = True  # type: ignore[attr-defined]
             raise exc
             yield  # type: ignore[misc]
 
         pool.run_turn = always_fail
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         result = await tool_func.ainvoke({"agent_name": "claude", "task": "test", "mode": "persistent"})
         assert "[error]" in result
         assert "always transient" in result
@@ -174,13 +227,13 @@ class TestRunTurnAndCollect:
     async def test_text_collection(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="hello ")
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="world")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        result, meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        result, meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert result == "hello world"
         assert meta["tool_calls"] == 0
         assert meta["errors"] == 0
@@ -189,14 +242,14 @@ class TestRunTurnAndCollect:
     async def test_tool_start_counting(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="bash")
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="read")
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="done")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        _result, meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        _result, meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert meta["tool_calls"] == 2
 
     @pytest.mark.asyncio
@@ -204,13 +257,13 @@ class TestRunTurnAndCollect:
         """A CLI without a native turn limit is stopped once its tool calls reach the configured limit."""
         pool = _make_pool({"codex": _cfg(max_turns=2, command="codex")})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="bash")
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="read")
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="write")
 
         pool.run_turn = fake_run_turn
-        result, _meta = await _run_turn_and_collect(pool, "codex", "task", mode="persistent")
+        result, _meta = await _run_turn_and_collect(pool, "codex", "task", workspace=_WORKSPACE, mode="persistent")
         assert "max turns limit reached (2/2)" in result
         pool.cancel.assert_awaited()
 
@@ -218,13 +271,13 @@ class TestRunTurnAndCollect:
     async def test_usage_tracking(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.USAGE_UPDATE, session_id, input_tokens=100, output_tokens=50)
             yield create_event(RuntimeEventType.USAGE_UPDATE, session_id, input_tokens=200, output_tokens=100)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        _result, meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        _result, meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert "usage" in meta
         assert meta["usage"]["input_tokens"] == 300
         assert meta["usage"]["output_tokens"] == 150
@@ -235,7 +288,7 @@ class TestRunTurnAndCollect:
         """Non-fatal item warning must increment errors in meta and allow text to complete."""
         pool = _make_pool({"codex": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(
                 RuntimeEventType.STATUS_UPDATE,
                 session_id,
@@ -246,7 +299,7 @@ class TestRunTurnAndCollect:
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        result, meta = await _run_turn_and_collect(pool, "codex", "task", mode="persistent")
+        result, meta = await _run_turn_and_collect(pool, "codex", "task", workspace=_WORKSPACE, mode="persistent")
         assert result == "analysis completed"
         assert meta["errors"] == 1
 
@@ -254,7 +307,7 @@ class TestRunTurnAndCollect:
     async def test_error_event_raises(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(
                 RuntimeEventType.ERROR,
                 session_id,
@@ -263,7 +316,7 @@ class TestRunTurnAndCollect:
 
         pool.run_turn = fake_run_turn
         with pytest.raises(RuntimeError, match="API error"):
-            await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+            await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
 
     @pytest.mark.asyncio
     async def test_cancellation_propagation(self) -> None:
@@ -272,12 +325,12 @@ class TestRunTurnAndCollect:
         class FakeCancelToken:
             is_cancelled = True
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="partial")
 
         pool.run_turn = fake_run_turn
         with patch("myrm_agent_harness.toolkits.acp.acp_agent_tools.get_cancel_token", return_value=FakeCancelToken()):
-            result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+            result, _meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert "cancelled" in result
         pool.cancel.assert_awaited()
 
@@ -286,13 +339,15 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         sink = AsyncMock()
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.REASONING_DELTA, session_id, content="thinking...")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
         with patch("myrm_agent_harness.toolkits.acp.acp_agent_tools.get_tool_progress_sink", return_value=sink):
-            _result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+            _result, _meta = await _run_turn_and_collect(
+                pool, "claude", "task", workspace=_WORKSPACE, mode="persistent"
+            )
         sink.emit.assert_awaited()
 
     @pytest.mark.asyncio
@@ -300,13 +355,15 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         sink = AsyncMock()
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting", message="boot")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
         with patch("myrm_agent_harness.toolkits.acp.acp_agent_tools.get_tool_progress_sink", return_value=sink):
-            _result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+            _result, _meta = await _run_turn_and_collect(
+                pool, "claude", "task", workspace=_WORKSPACE, mode="persistent"
+            )
         sink.emit.assert_awaited()
 
     @pytest.mark.asyncio
@@ -314,13 +371,15 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         sink = AsyncMock()
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TOOL_START, session_id, tool_name="bash")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
         with patch("myrm_agent_harness.toolkits.acp.acp_agent_tools.get_tool_progress_sink", return_value=sink):
-            _result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+            _result, _meta = await _run_turn_and_collect(
+                pool, "claude", "task", workspace=_WORKSPACE, mode="persistent"
+            )
         sink.emit.assert_awaited()
 
     @pytest.mark.asyncio
@@ -328,13 +387,13 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         captured_sessions: list[str] = []
 
-        async def capture_session(name, task, session_id, mode="persistent"):
+        async def capture_session(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             captured_sessions.append(session_id)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = capture_session
-        await _run_turn_and_collect(pool, "claude", "t1", mode="oneshot")
-        await _run_turn_and_collect(pool, "claude", "t2", mode="oneshot")
+        await _run_turn_and_collect(pool, "claude", "t1", workspace=_WORKSPACE, mode="oneshot")
+        await _run_turn_and_collect(pool, "claude", "t2", workspace=_WORKSPACE, mode="oneshot")
         assert len(captured_sessions) == 2
         assert captured_sessions[0] != captured_sessions[1]
         assert "oneshot" in captured_sessions[0]
@@ -344,13 +403,13 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         captured_sessions: list[str] = []
 
-        async def capture_session(name, task, session_id, mode="persistent"):
+        async def capture_session(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             captured_sessions.append(session_id)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = capture_session
-        await _run_turn_and_collect(pool, "claude", "t1", mode="persistent")
-        await _run_turn_and_collect(pool, "claude", "t2", mode="persistent")
+        await _run_turn_and_collect(pool, "claude", "t1", workspace=_WORKSPACE, mode="persistent")
+        await _run_turn_and_collect(pool, "claude", "t2", workspace=_WORKSPACE, mode="persistent")
         assert captured_sessions[0] == captured_sessions[1]
         assert "default" in captured_sessions[0]
 
@@ -359,7 +418,7 @@ class TestRunTurnAndCollect:
         pool = _make_pool({"claude": _cfg()})
         captured_sessions: list[str] = []
 
-        async def capture_session(name, task, session_id, mode="persistent"):
+        async def capture_session(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             captured_sessions.append(session_id)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
@@ -368,6 +427,7 @@ class TestRunTurnAndCollect:
             pool,
             "claude",
             "t1",
+            workspace=_WORKSPACE,
             mode="persistent",
             session_scope="chat-abc",
         )
@@ -377,37 +437,37 @@ class TestRunTurnAndCollect:
     async def test_text_delta_non_string_content_skipped(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content=None)
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="real text")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        result, _meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert result == "real text"
 
     @pytest.mark.asyncio
     async def test_no_usage_when_zero_tokens(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="result")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        _result, meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        _result, meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert "usage" not in meta
 
     @pytest.mark.asyncio
     async def test_truncation_applied(self) -> None:
         pool = _make_pool({"claude": _cfg()})
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="x" * 100_000)
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        result, _meta = await _run_turn_and_collect(pool, "claude", "task", mode="persistent")
+        result, _meta = await _run_turn_and_collect(pool, "claude", "task", workspace=_WORKSPACE, mode="persistent")
         assert len(result) <= 50_100
 
 
@@ -417,13 +477,13 @@ class TestDelegateToolWithUsageEmit:
         pool = _make_pool({"claude": _cfg()})
         sink = AsyncMock()
 
-        async def fake_run_turn(name, task, session_id, mode="persistent"):
+        async def fake_run_turn(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.USAGE_UPDATE, session_id, input_tokens=100, output_tokens=50)
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="done")
             yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
 
         pool.run_turn = fake_run_turn
-        tool_func = create_invoke_acp_agent_tool(pool, cwd="/workspace")
+        tool_func = create_invoke_acp_agent_tool(pool, workspace=_WORKSPACE)
         with patch("myrm_agent_harness.toolkits.acp.acp_agent_tools.get_tool_progress_sink", return_value=sink):
             result = await tool_func.ainvoke({"agent_name": "claude", "task": "test", "mode": "persistent"})
         assert "tokens=" in result

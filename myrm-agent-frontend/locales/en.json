@@ -1,23 +1,4 @@
 {
-  "extensionWidgets": {
-    "nanoContextTitle": "Nano-Context Usage",
-    "turns": "turns",
-    "todoTitle": "Quick Task Checklist",
-    "newTodoPlaceholder": "Add a quick task...",
-    "copyContent": "Copy Content",
-    "openExternal": "Open in new tab",
-    "download": "Download File",
-    "close": "Close",
-    "noImageSource": "No image source provided",
-    "pdfFallback": "PDF embedded preview not supported in this container",
-    "downloadPdf": "Download PDF to view directly",
-    "noPdfSource": "No PDF source URL available",
-    "unsupportedFormat": "Preview not available for this file type",
-    "testLatency": "Test Latency & Health",
-    "testing": "Testing...",
-    "retest": "Retest",
-    "unreachable": "Endpoint Unreachable"
-  },
   "curtain": {
     "board": {
       "primary": "AI is working — screen protected",
@@ -3942,6 +3923,8 @@
     "delegation_session_expired": "Earlier conversation could not be continued — {agentName} started a new one",
     "delegation_session_workspace_changed": "Working folder changed — {agentName} started a new conversation",
     "delegation_turn_limit": "{agentName} stopped at its turn limit — send a message to continue",
+    "delegation_max_tokens": "{agentName} reached its reply length limit — the answer may be incomplete, send a message to continue",
+    "delegation_refusal": "{agentName} declined to continue with this request",
     "delegation_images_not_sent": "{agentName} can't take images directly — it was only told where the image is",
     "system_step": "System Step",
     "tool_execution": "Tool Execution",
@@ -3953,6 +3936,14 @@
     "cancelledDefault": "Tool execution was cancelled",
     "runCancelled": "Cancelled",
     "runTerminated": "Terminated",
+    "itemTokensSaved": "Tokens saved: {tokens}",
+    "moaTriggerToolFailures": "Adaptive execution advisors",
+    "moaTriggerLoopGuard": "Loop optimization advisors",
+    "moaTriggerMultiToolFailures": "Multi-factor diagnosis advisors",
+    "moaTriggerDefault": "Advisor decision",
+    "moaSkipTimeout": "Advisors timed out, fell back",
+    "moaSkipBudgetPressure": "Token budget protection",
+    "moaSkipInsufficientRefs": "Reference models not ready",
     "model_failover": "Switched to backup model",
     "model_failover_rate_limit": "Rate limited, switched to backup model",
     "model_failover_overloaded": "Service overloaded, switched to backup model",
@@ -6722,17 +6713,6 @@
       "revisionOutside": "Revision also touched unmarked lines: {lines}",
       "revisionLocal": "Revision stayed inside the marked areas."
     },
-    "hub": {
-      "originSession": "Origin Chat",
-      "subtitle": "Centralized cross-session assets repository with bidirectional provenance to originating chats",
-      "searchPlaceholder": "Search artifacts by title, description or extension...",
-      "navToSession": "Go to Source Chat",
-      "emptyTitle": "No artifacts found",
-      "title": "Artifacts Provenance Hub",
-      "download": "Download",
-      "exportZip": "Export as ZIP Bundle",
-      "emptyDesc": "Deliverables and files generated during agent conversations will automatically appear here"
-    },
     "architecture": {
       "jsonCopied": "JSON Copied",
       "jsonCopiedDesc": "Architecture IR copied to clipboard",
@@ -6820,11 +6800,18 @@
         "saveFailed": "Couldn't save your choice. Try again.",
         "notify": {
           "title": "Notifications",
-          "description": "Show notifications on this device."
+          "description": "Show notifications on this device.",
+          "destination": "Shown by your device. The text goes no further."
         },
         "fetch": {
           "title": "Network access",
-          "description": "Exchange data with these sites only:"
+          "description": "Let the app request data from these sites:",
+          "destination": "Your Myrm server sends the requests, not the page, and the replies go back to the app. The page can still show images from any site."
+        },
+        "ai": {
+          "title": "Ask your AI model",
+          "description": "Let the app send text to the AI model you set up and read the answer.",
+          "destination": "Your Myrm server sends only that text to your model provider. The app can't see your conversations or files. It uses your model quota: every call counts toward your budget, and each app has its own daily limit."
         },
         "activity": {
           "title": "Recent activity",
@@ -6834,8 +6821,45 @@
             "denied": "Blocked",
             "rate_limited": "Too frequent",
             "error": "Failed"
+          },
+          "reason": {
+            "permission_denied": "Not allowed",
+            "rate_limited": "Too many calls",
+            "budget_exceeded": "Budget used up",
+            "unavailable": "No usable model",
+            "upstream_error": "Model error",
+            "timeout": "Model too slow",
+            "risk_held": "Held by risk rules"
           }
+        },
+        "desktopOnly": "This app also asks for features that only the desktop app offers: menu bar item, keyboard shortcuts and floating.",
+        "tray": {
+          "title": "Menu bar item",
+          "description": "A small icon in the menu bar or system tray, with a short status text.",
+          "destination": "While it is on, closing the window only hides it. Quit the app from the icon's menu."
+        },
+        "shortcut": {
+          "title": "Keyboard shortcuts",
+          "description": "Key combinations that work in any program:",
+          "destination": "Pressing one tells this app, wherever you are. A combination another program already uses is refused."
+        },
+        "float": {
+          "title": "Float over other windows",
+          "description": "Let the app keep its window above other windows.",
+          "destination": "You can also switch this yourself in the app menu."
+        },
+        "notes": {
+          "unreviewed": "Nobody has reviewed this app's code. A permission covers this version of it only.",
+          "notFromConversation": "This file did not come from one of your conversations. Only allow what you expect it to do.",
+          "scripts": "Loads scripts from: {hosts}.",
+          "drift": "These scripts can change without asking you again: {hosts}."
         }
+      },
+      "launcher": {
+        "menu": "Add to system launcher",
+        "added": "Added. Find it in Spotlight, the Start menu or your application menu.",
+        "removed": "Launcher removed",
+        "failed": "Couldn't change the launcher. Try again."
       }
     }
   },
@@ -9342,6 +9366,7 @@
     "sttApiKey": "API Key",
     "sttApiKeyPlaceholder": "Enter API key",
     "sttModel": "Model",
+    "sttModelPlaceholder": "Provider default",
     "sttLocalHint": "Free, no API key required. Audio stays on your device.",
     "sttLocalModel": "Model Size",
     "sttLocalDevice": "Device",
@@ -9369,7 +9394,6 @@
     "ttsApiKey": "API Key",
     "ttsApiKeyPlaceholder": "Enter API key (not required for Edge TTS)",
     "ttsBaseUrl": "API Base URL",
-    "ttsBaseUrlPlaceholder": "https://api.openai.com/v1",
     "ttsVoice": "Voice",
     "ttsVoicePlaceholder": "Default voice",
     "ttsSpeed": "Speech Speed",
@@ -9622,6 +9646,24 @@
     "noContent": "No content to preview",
     "mcpElicitationTitle": "MCP Server Confirmation",
     "mcpElicitationServer": "Server",
+    "externalAgentPermission": {
+      "drawerTitle": "An external agent needs your decision",
+      "title": "{agent} asks for permission",
+      "kinds": {
+        "execute": "Run a command",
+        "edit": "Change files",
+        "delete": "Delete files",
+        "move": "Move files",
+        "fetch": "Reach the network",
+        "read": "Read files",
+        "search": "Search files",
+        "other": "Take an action"
+      },
+      "paths": "Files",
+      "workspace": "Workspace",
+      "details": "What the agent passed along",
+      "refuseHint": "If you refuse, agents that accept a reason (Claude Code does) get your comment; the others only learn that you refused."
+    },
     "payloadData": "Payload Data",
     "commentsOptional": "Comments (optional)",
     "addCommentPlaceholder": "Add a comment for this approval...",
@@ -9922,6 +9964,7 @@
     "subagentStale": "Subagent stalled",
     "viewAgent": "View",
     "approvalRequired": "Agent requires approval: {actionType}",
+    "externalAgentPermissionRequired": "{agent} is waiting for your permission",
     "approvalsRecovered": "Recovered {count} pending approval(s)",
     "jumpToChat": "Open chat",
     "jumpToChatAria": "Jump to the chat that triggered this approval",
@@ -9982,6 +10025,9 @@
     "cloudSyncFailureTitle": "Cloud backup isn't working",
     "cloudSyncFailureBody": "Your recent automatic cloud backups failed, so your memories may not be protected. Check your storage connection and free space.",
     "viewCloudSyncSettings": "Cloud backup settings",
+    "webPushFailureTitle": "Push notifications aren't getting through",
+    "webPushFailureBody": "Push notifications couldn't be delivered to any of your devices, so you may miss alerts while the app is closed. Send a test notification to see why.",
+    "viewWebPushSettings": "Push settings",
     "healthAlertTip": "Tip: {tip}",
     "budgetRemaining": "{dimension} — ${remaining} remaining",
     "subagentStaleDescription": "No progress for {minutes} min · {tokens, number} tokens",
@@ -14162,48 +14208,6 @@
       "resizeSuccess": "Terminal size updated"
     }
   },
-  "mobileCockpit": {
-    "voiceStagedInput": {
-      "title": "Voice Staged Review",
-      "listening": "Listening...",
-      "tapToSpeak": "Tap microphone to dictate requirements",
-      "reviewHint": "Speech staged. Review or adjust with one hand before sending",
-      "placeholder": "Transcribed voice text will appear here...",
-      "retry": "Redictate",
-      "clear": "Clear",
-      "send": "Send Voice Message",
-      "cancel": "Dismiss",
-      "unsupported": "Voice recognition not supported in this browser"
-    },
-    "hitlApproval": {
-      "title": "Approval Needed",
-      "riskLevel": "Risk Level",
-      "riskLow": "Low Risk",
-      "riskMedium": "Medium Risk",
-      "riskHigh": "High Risk (Sensitive)",
-      "riskCritical": "Critical Risk (Destructive)",
-      "commandOrAction": "Action to Execute",
-      "affectedScope": "Scope Impact",
-      "approveYes": "Approve (Yes)",
-      "rejectNo": "Reject (No)",
-      "steerGuide": "Intervene (Steer)",
-      "steerPlaceholder": "Type correction instruction or guidance...",
-      "steerSubmit": "Send Guidance & Continue",
-      "rejectReasonPlaceholder": "Optional: reason for rejection...",
-      "rejectConfirm": "Confirm Rejection",
-      "processing": "Processing..."
-    }
-  },
-  "skillAlignment": {
-    "title": "Pre-Flight Preference Alignment",
-    "subtitle": "Align key design palettes, layouts, and interaction patterns before the Agent streams code to eliminate rework",
-    "planFirstTitle": "Plan Before Execute",
-    "planFirstDesc": "Enforce Agent to stream a structured wireframe plan first, awaiting your confirmation before coding",
-    "customPlaceholder": "Enter custom design requirements or additional preferences...",
-    "confirm": "Confirm Alignment & Start",
-    "cancel": "Skip & Generate Directly",
-    "previewPrompt": "Structured Prompt Constraints"
-  },
   "settings": {
     "providerBalance": {
       "statusHealthy": "Healthy",
@@ -14867,15 +14871,17 @@
         "type": "Type",
         "typeCli": "CLI (spawn process)",
         "typeAcp": "ACP (JSON-RPC bridge)",
+        "typeAppServer": "App server (resident process)",
+        "typeFixedHint": "This agent type is set automatically.",
         "command": "Command",
         "commandPlaceholder": "e.g. claude",
         "args": "Arguments",
         "argsPlaceholder": "e.g. --verbose (one per line)",
         "permissionMode": "Permission Mode",
         "permissionAllowAll": "Full Autonomy",
-        "permissionSafe": "Read-only",
-        "permissionHintCli": "Applies fixed command-line flags when the CLI starts. Full Autonomy lets it act unattended; Read-only blocks every file change.",
-        "permissionHintAcp": "The bridge answers the external agent's permission requests for you. Full Autonomy approves them; Read-only allows read operations only.",
+        "permissionSafe": "Ask first",
+        "permissionHintAsk": "It asks you before it changes files, runs commands or reaches the network, as an approval in the chat. Full Autonomy approves everything for it.",
+        "permissionHintUnrestricted": "This program is not one we can restrict, so it keeps its own permission behavior in either mode.",
         "enabled": "Enabled",
         "save": "Save",
         "cancel": "Cancel",
@@ -14888,6 +14894,7 @@
         "preset_claude": "Claude Code",
         "preset_codex": "Codex CLI",
         "preset_gemini": "Gemini CLI",
+        "preset_qwen": "Qwen Code",
         "descriptionLabel": "Description",
         "descriptionPlaceholder": "Describe this agent's capabilities (helps LLM choose the right agent)",
         "maxTurns": "Max Turns",
@@ -14896,6 +14903,22 @@
         "authModeSubscription": "Subscription",
         "authModeApiKey": "API Key",
         "authModeHint": "Subscription uses the agent's own login (ChatGPT Plus, Claude Max, etc.) — no API key needed. API Key passes the key you add under Environment variables.",
+        "authModeHostedHint": "This workspace is hosted, so agents run on your own API key. Subscription sign-in is only available when Myrm runs on your own computer.",
+        "account": "Account",
+        "accountDefault": "Default login on this machine",
+        "accountNew": "New account…",
+        "accountHint": "Each account keeps its own login, settings and history, so a work and a personal subscription never mix.",
+        "accountNameLabel": "Account name",
+        "accountNamePlaceholder": "e.g. work",
+        "accountNameHint": "Lowercase letters, digits, - and _, up to 32 characters, starting with a letter or digit.",
+        "accountCreate": "Create",
+        "accountExists": "An account with this name already exists.",
+        "accountCreateFailed": "Could not create the account.",
+        "accountDelete": "Delete account",
+        "accountDeleteConfirm": "Delete the account “{name}”? Its login, settings and history are removed, and agents that use it go back to the default login.",
+        "accountDeleted": "Account deleted",
+        "accountDeleteFailed": "Could not delete the account.",
+        "accountDeleteKept": "Could not remove this account's login, so the account was kept.",
         "env": "Environment variables",
         "envAdd": "Add variable",
         "envRemove": "Remove variable",
@@ -14909,6 +14932,7 @@
         "login": "Log in",
         "logout": "Log out",
         "loginTitle": "Log in to {backend}",
+        "loginTitleAccount": "Log in to {backend} ({account})",
         "loginConnecting": "Starting login…",
         "loginSuccess": "Logged in successfully",
         "loginFailed": "Login failed",
@@ -14925,12 +14949,14 @@
         "import": "Import",
         "importSuccess": "Credential imported",
         "logoutSuccess": "Logged out",
+        "logoutIncomplete": "Could not log out: the login is still active.",
         "badgeLoggedIn": "Logged in",
         "badgeLoggedOut": "Not logged in",
-        "badgeCliReady": "CLI ready",
         "badgeInstalled": "Installed",
         "install": "Install",
         "installInProgress": "Installing…",
+        "installRetry": "Retry",
+        "installClose": "Close",
         "installSuccess": "Installed successfully",
         "installing": "Installing {backend}",
         "installingDesc": "This may take a few minutes. The installation log appears below.",
@@ -19220,8 +19246,6 @@
       "providerDesc": "Choose the text-to-speech service for reading messages aloud",
       "browser": "Browser Built-in",
       "browserDesc": "Uses native browser speech synthesis at no cost",
-      "openai": "OpenAI TTS",
-      "openaiDesc": "High-quality voices, requires API Key configured in Voice settings",
       "elevenlabs": "ElevenLabs",
       "elevenlabsDesc": "Ultra-realistic voices with multilingual and emotional expression",
       "fishAudio": "Fish Audio",

@@ -1,11 +1,11 @@
-"""What the real claude and codex binaries say when their model API refuses a request, and what ``CliRuntime`` makes of it.
+"""What the real claude binary says when its model API refuses a request, and what ``CliRuntime`` makes of it.
 
 A local stub API answers every request with one canned failure, so nothing here needs a login, a network or a model
 (and no model is billed). These guard against drift in the failure frames the classifier reads: Claude's
-``authentication_failed`` category and HTTP status, Codex's ``turn.failed`` text and the retry notices it prints
-before giving up. The CLIs run through the production runtime with the production argv and environment rules.
-Most tests turn the CLIs' own retries off so a failure comes back at once; the ones about a rejected key leave them at
-their defaults, which is what a user's CLI does (it retries a 401 for minutes unless the runtime stops it).
+``authentication_failed`` category and HTTP status. The CLI runs through the production runtime with the production
+argv and environment rules. Most tests turn the CLI's own retries off so a failure comes back at once; the one about a
+rejected key leaves them at their default, which is what a user's CLI does (it retries a 401 for minutes unless the
+runtime stops it).
 Run with ``-m integration``; a CLI that is not installed skips its tests.
 """
 
@@ -34,15 +34,12 @@ from myrm_agent_harness.toolkits.acp.types import (
 pytestmark = pytest.mark.integration
 
 _CLAUDE = shutil.which("claude")
-_CODEX = shutil.which("codex")
 
 needs_claude = pytest.mark.skipif(_CLAUDE is None, reason="claude CLI not installed")
-needs_codex = pytest.mark.skipif(_CODEX is None, reason="codex CLI not installed")
 
 _AUTH_BODY = {"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}}
 _FORBIDDEN_BODY = {"type": "error", "error": {"type": "permission_error", "message": "Request not allowed"}}
 _RATE_LIMIT_BODY = {"type": "error", "error": {"type": "rate_limit_error", "message": "rate limit reached"}}
-_OPENAI_ERROR = {"error": {"message": "stub failure", "type": "server_error", "code": None}}
 
 ServeFailure = Callable[[int, dict[str, object]], str]
 
@@ -110,45 +107,11 @@ def _claude(
         command=str(_CLAUDE),
         args=cli_launch_args("claude"),
         env=env,
-        cwd=str(tmp_path),
         permission_mode="safe",
         auth_mode="api_key",
         timeout_seconds=60,
     )
-    return CliRuntime("claude", config)
-
-
-def _codex(tmp_path: Path, base_url: str, *, retries: int | None = 0) -> CliRuntime:
-    """A codex whose only model provider is the stub (set in its own ``config.toml``, as a user would).
-
-    ``retries`` is the provider's request and stream retry count; None leaves the CLI's defaults.
-    """
-    home = tmp_path / "home"
-    home.mkdir()
-    codex_home = home / ".codex"
-    codex_home.mkdir()
-    retry_settings = "" if retries is None else f"request_max_retries = {retries}\nstream_max_retries = {retries}\n"
-    (codex_home / "config.toml").write_text(
-        f"""model_provider = "stub"
-
-[model_providers.stub]
-name = "stub"
-base_url = "{base_url}/v1"
-env_key = "STUB_KEY"
-wire_api = "responses"
-{retry_settings}"""
-    )
-    config = RuntimeConfig(
-        backend_type="cli",
-        command=str(_CODEX),
-        args=cli_launch_args("codex"),
-        env={"HOME": str(home), "CODEX_HOME": str(codex_home), "STUB_KEY": "stub-key"},
-        cwd=str(tmp_path),
-        permission_mode="safe",
-        auth_mode="api_key",
-        timeout_seconds=60,
-    )
-    return CliRuntime("codex", config)
+    return CliRuntime("claude", config, workspace=str(tmp_path))
 
 
 async def _errors_of(runtime: CliRuntime) -> tuple[list[RuntimeEvent], list[AcpError]]:
@@ -186,7 +149,7 @@ async def test_claude_without_any_credentials_is_an_auth_failure(serve_failure: 
     assert [error.code for error in errors] == [AcpErrorCode.AUTH_FAILED]
 
 
-# What a user waits for when the CLI is left to retry a rejected key by itself (measured: claude 183 s, codex 30-58 s).
+# What a user waits for when the CLI is left to retry a rejected key by itself (measured: claude 183 s).
 _REJECTED_KEY_SECONDS = 40
 
 
@@ -201,47 +164,3 @@ async def test_claude_rejected_key_is_reported_within_seconds_although_the_cli_r
     assert [error.code for error in errors] == [AcpErrorCode.AUTH_FAILED]
     assert "401" in errors[0].message
     assert time.monotonic() - started < _REJECTED_KEY_SECONDS
-
-
-@needs_codex
-async def test_codex_rejected_key_is_reported_within_seconds_although_the_cli_retries_for_minutes(
-    serve_failure: ServeFailure, tmp_path: Path
-) -> None:
-    started = time.monotonic()
-
-    # The built-in provider retries a 401 over two transports for up to a minute; a patient stub provider does the same.
-    _, errors = await _errors_of(_codex(tmp_path, serve_failure(401, _OPENAI_ERROR), retries=10))
-
-    assert [error.code for error in errors] == [AcpErrorCode.AUTH_FAILED]
-    assert "401" in errors[0].message
-    assert time.monotonic() - started < _REJECTED_KEY_SECONDS
-
-
-@needs_codex
-async def test_codex_rejected_key_is_an_auth_failure(serve_failure: ServeFailure, tmp_path: Path) -> None:
-    _, errors = await _errors_of(_codex(tmp_path, serve_failure(401, _OPENAI_ERROR)))
-
-    assert [error.code for error in errors] == [AcpErrorCode.AUTH_FAILED]
-    assert "401" in errors[0].message
-
-
-@needs_codex
-@pytest.mark.parametrize("status", [403, 429], ids=["forbidden", "quota"])
-async def test_codex_failures_other_than_a_rejected_key_are_not_auth_failures(
-    serve_failure: ServeFailure, tmp_path: Path, status: int
-) -> None:
-    # A 403 can be a region or plan limit and a 429 a quota: the key itself was fine, so the user must not be told to sign in.
-    _, errors = await _errors_of(_codex(tmp_path, serve_failure(status, _OPENAI_ERROR)))
-
-    assert len(errors) == 1
-    assert errors[0].code is not AcpErrorCode.AUTH_FAILED
-    assert errors[0].message.strip() not in {"", "{}"}
-
-
-@needs_codex
-async def test_codex_retries_are_not_reported_as_failures(serve_failure: ServeFailure, tmp_path: Path) -> None:
-    # Codex prints one `error` line per reconnect attempt and then fails the turn once: only the last is a failure.
-    _, errors = await _errors_of(_codex(tmp_path, serve_failure(500, _OPENAI_ERROR), retries=2))
-
-    assert len(errors) == 1
-    assert not errors[0].message.startswith("Reconnecting")

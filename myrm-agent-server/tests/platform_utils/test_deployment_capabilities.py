@@ -28,6 +28,7 @@ def test_local_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
     assert caps.is_sandbox_instance is False
     assert caps.uses_platform_budget is False
     assert caps.default_metrics_enabled is False
+    assert caps.allows_subscription_login is True
 
 
 def test_sandbox_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,6 +39,7 @@ def test_sandbox_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:
     assert caps.uses_platform_budget is True
     assert caps.validates_mcp_response_size is True
     assert caps.runs_sandbox_startup_validation is True
+    assert caps.allows_subscription_login is False
 
 
 def test_sandbox_capabilities_explicitly_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,6 +55,28 @@ def test_tauri_treated_as_local(monkeypatch: pytest.MonkeyPatch) -> None:
     caps = get_deployment_capabilities()
     assert caps.allows_local_skills is True
     assert caps.is_sandbox_instance is False
+    assert caps.allows_subscription_login is True
+
+
+@pytest.mark.parametrize("webui_remote", ["false", "true"])
+def test_a_webui_on_the_users_own_machine_keeps_subscription_login(monkeypatch: pytest.MonkeyPatch, webui_remote: str) -> None:
+    monkeypatch.setenv("DEPLOY_MODE", "local")
+    monkeypatch.setenv("WEBUI_MODE", "true")
+    monkeypatch.setenv("WEBUI_REMOTE_MODE", webui_remote)
+
+    assert get_deployment_capabilities().allows_subscription_login is True
+
+
+@pytest.mark.parametrize("override", ["1", "true", "yes", "on"])
+def test_a_sandbox_never_allows_subscription_login_whatever_else_is_configured(
+    monkeypatch: pytest.MonkeyPatch, override: str
+) -> None:
+    monkeypatch.setenv("DEPLOY_MODE", "sandbox")
+    monkeypatch.setenv("MYRM_ALLOW_LOCAL_SKILLS", override)
+    monkeypatch.setenv("WEBUI_MODE", "true")
+    monkeypatch.setenv("WEBUI_REMOTE_MODE", "true")
+
+    assert get_deployment_capabilities().allows_subscription_login is False
 
 
 def test_require_local_skills_capability_allowed(monkeypatch: pytest.MonkeyPatch) -> None:

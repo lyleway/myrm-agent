@@ -310,6 +310,7 @@ const SecurityPolicySection = memo(() => {
               </p>
             </div>
             <Switch
+              data-testid="security-yolo-switch"
               checked={policy.yoloModeEnabled}
               onCheckedChange={policy.handleYoloModeToggle}
               disabled={policy.managedDisableYolo}

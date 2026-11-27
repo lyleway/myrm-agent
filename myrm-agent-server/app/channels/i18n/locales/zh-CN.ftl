@@ -196,6 +196,7 @@ cron_notice_interrupted_message =
     运行期间应用停止了，这次执行没有完成。
 cron_system_job_heartbeat = Agent 自动巡检
 new_session_started =  新对话已开始，下一条消息将开启新会话。
+new_session_failed =  无法开启新对话，请再发送一次 /new 重试。
 compact_not_configured = ℹ 未配置压缩功能。
 compact_success =  上下文已压缩：{ $message_count } 条消息已摘要，约节省 { $tokens_saved } tokens。{ $topic_hint }
 compact_topic_hint = （聚焦主题：{ $topic }）
@@ -323,6 +324,7 @@ knowledge_patch_review_reason = 会话盲点知识转正建议: { $title }
 approval_card_title = ⚠️ **需要审批：{ $action }**
 approval_card_severity = 级别：`{ $severity }`
 approval_card_open_app = 请打开 Myrm AI 应用查看并处理。
+approval_permission_title = 🔐 **外部 Agent 请求你的许可**
 approval_draft_title = ✏️ **有一条回复等待你审核**
 approval_draft_incoming = **收到的消息**
 approval_draft_reply = **待发送的回复**

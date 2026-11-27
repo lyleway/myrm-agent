@@ -3,35 +3,10 @@ use std::time::Duration;
 use super::capability::REGISTERED_COMMANDS;
 use super::confirmation::{
     build_confirmation_message, build_confirmation_request, classify_confirmation_error,
-    confirmation_copy, execute_confirmation_request, parse_confirmation_locale, ConfirmationLocale,
-    ConfirmationOutcome,
+    confirmation_copy, execute_confirmation_request, ConfirmationLocale, ConfirmationOutcome,
 };
 use super::policy::{authorize_request, CommandRisk, DeniedInvoke, DenyMode};
 use super::ticket_store::{SensitiveAction, TicketStore, MAX_PENDING_SENSITIVE_TICKETS};
-
-#[test]
-fn parses_confirmation_locale_variants() {
-    assert_eq!(
-        parse_confirmation_locale(Some("zh-CN")),
-        ConfirmationLocale::ZhHans
-    );
-    assert_eq!(
-        parse_confirmation_locale(Some("zh_Hant_TW")),
-        ConfirmationLocale::ZhHans
-    );
-    assert_eq!(
-        parse_confirmation_locale(Some("en-US")),
-        ConfirmationLocale::En
-    );
-    assert_eq!(
-        parse_confirmation_locale(Some("ja-JP")),
-        ConfirmationLocale::En
-    );
-    assert_eq!(
-        parse_confirmation_locale(Some("unknown")),
-        ConfirmationLocale::En
-    );
-}
 
 #[test]
 fn localizes_confirmation_copy_and_message_for_zh_hans() {
@@ -180,6 +155,14 @@ fn app_window_may_read_and_control_itself_but_change_nothing_else() {
         "check_backend_health",
         "close_app_window",
         "set_app_window_always_on_top",
+        "set_app_window_title",
+        "set_app_tray",
+        "clear_app_tray",
+        "register_app_shortcut",
+        "unregister_app_shortcut",
+        "has_app_launcher",
+        "create_app_launcher",
+        "remove_app_launcher",
     ] {
         assert!(authorize_request(command, "app-art-1").is_ok(), "{command}");
     }
@@ -199,11 +182,42 @@ fn app_window_may_read_and_control_itself_but_change_nothing_else() {
 
 #[test]
 fn commands_that_act_on_the_calling_window_are_app_only() {
-    for command in ["close_app_window", "set_app_window_always_on_top"] {
+    for command in [
+        "close_app_window",
+        "set_app_window_always_on_top",
+        "set_app_window_title",
+        "set_app_tray",
+        "clear_app_tray",
+        "register_app_shortcut",
+        "unregister_app_shortcut",
+    ] {
         for label in ["main", "session-123", "pet-surface", "privacy-curtain-1-0"] {
             let denied = authorize_request(command, label).expect_err(label);
             assert_eq!(
                 denied.reason_code, "app_only_command",
+                "{command} @ {label}"
+            );
+        }
+    }
+}
+
+#[test]
+fn launchers_are_managed_from_the_main_window_and_the_app_window_only() {
+    for command in [
+        "has_app_launcher",
+        "create_app_launcher",
+        "remove_app_launcher",
+    ] {
+        for label in ["main", "app-art-1"] {
+            assert!(
+                authorize_request(command, label).is_ok(),
+                "{command} @ {label}"
+            );
+        }
+        for label in ["session-123", "pet-surface", "privacy-curtain-1-0"] {
+            let denied = authorize_request(command, label).expect_err(label);
+            assert_eq!(
+                denied.reason_code, "main_or_app_command",
                 "{command} @ {label}"
             );
         }

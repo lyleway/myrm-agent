@@ -24,6 +24,8 @@ describe('getStepTitle delegation steps', () => {
     ['delegation_claude_session_workspace_changed', 'delegation_session_workspace_changed|claude'],
     ['delegation_claude_images_not_sent', 'delegation_images_not_sent|claude'],
     ['delegation_claude_turn_limit', 'delegation_turn_limit|claude'],
+    ['delegation_claude_max_tokens', 'delegation_max_tokens|claude'],
+    ['delegation_claude_refusal', 'delegation_refusal|claude'],
   ])('words the title-only notice %s from its step key alone', (stepKey, title) => {
     expect(getStepTitle(delegationStep(stepKey, { items: [] }), t)).toBe(title);
   });
@@ -39,6 +41,9 @@ describe('getStepTitle delegation steps', () => {
     );
     expect(getStepTitle(delegationStep('delegation_my_status_images_not_sent'), t)).toBe(
       'delegation_images_not_sent|my_status',
+    );
+    expect(getStepTitle(delegationStep('delegation_code_review_max_tokens'), t)).toBe(
+      'delegation_max_tokens|code_review',
     );
   });
 
