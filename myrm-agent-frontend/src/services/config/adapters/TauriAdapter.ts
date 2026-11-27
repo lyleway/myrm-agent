@@ -1,9 +1,10 @@
 /**
  * [INPUT]
- * - `@/lib/deploy-mode` (`getApiBaseUrl`)
+ * - `@/lib/deploy-mode` (`getApiBaseUrl`) (POS: the API base address of the current deploy mode)
  * - `@/lib/backend-health` (`markLocalBackendUnreachable`) (POS: tells the app the local backend is down)
  * - `@/lib/platform-readiness` (`whenDatabaseReady`) (POS: whether the local database is up)
- * - `./BaseAdapter` BaseConfigAdapter / BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer (POS: the failure answer and the deadline-bound request both adapters share)
+ * - `./BaseAdapter` BaseConfigAdapter / BACKEND_NOT_AVAILABLE_ERROR / backendUnavailableSyncResult / isTransportFailure / fetchWithDeadlines / isLostAnswer / DeadlineInit / DeadlineAnswer / ReadJson (POS: the failure answer and the deadline-bound request both adapters share)
+ * - `../types` ConfigSyncError / record, change and sync-result shapes (POS: adapter contract)
  *
  * [OUTPUT]
  * - `TauriConfigAdapter`: local/Tauri 配置 HTTP 适配（含 Next 代理 5xx → offline 语义）
@@ -84,8 +85,9 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
    * 统一 fetch，自动携带 Cookie 以兼容 WebUI Remote 模式的 JWT 认证。
    * 非 Remote 模式下后端跳过认证，Cookie 虽携带但无影响。
    * 响应头与应答体各有期限，到期即取消请求（`fetchWithDeadlines`），后端卡死时这个请求既不无限等待，也不占着连接。
-   * 请求前的就绪门（`whenDatabaseReady`）不在这两道期限内：它探测后端时没有自己的期限，后端不应答时重试停在门口，
-   * 直到后端重新应答。
+   * 请求前的就绪门（`whenDatabaseReady`）不在这两道期限内：门里探测后端的 `fetch`（`/health`、`/health/ready`）没有自己的
+   * 期限，后端接收连接却不应答时，重试停在门口，直到后端重新应答；桌面壳里 `/health` 例外，它经 Tauri 命令探测，由 Rust
+   * 侧限时 2 秒，门按尝试次数放弃，放弃后按后端不可用处理。
    */
   private async localFetch(url: string, init?: DeadlineInit): Promise<DeadlineAnswer> {
     const ready = await whenDatabaseReady();
