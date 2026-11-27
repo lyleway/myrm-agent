@@ -186,6 +186,45 @@ async def test_a_command_queued_on_a_shell_that_was_replaced_runs_on_the_shell_t
         await old.close()
 
 
+async def test_a_command_that_arrives_while_the_executor_closes_runs_on_a_new_shell_that_stays_registered(
+    executor: LocalExecutor, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closing the executor of a pooled chat can overlap a command of that chat: it is neither lost nor left running
+    in a shell the registry no longer lists, because its new shell starts only after the old one's close returned."""
+    busy = await _busy_shell(executor, tmp_path)
+    closing, finish_close = asyncio.Event(), asyncio.Event()
+    close_session = LocalPersistentSession.close
+
+    async def held_close(self: LocalPersistentSession) -> None:
+        closing.set()
+        await finish_close.wait()
+        await close_session(self)
+
+    monkeypatch.setattr(LocalPersistentSession, "close", held_close)
+    closing_all = asyncio.create_task(executor.close())
+    await asyncio.wait_for(closing.wait(), _SETTLE_S)
+
+    late_context = ExecutionContext(
+        code="echo late", work_dir=str(tmp_path), workspace_root=str(tmp_path), session_id="busy", timeout=30
+    )
+    late = asyncio.create_task(executor.execute_bash(late_context))
+    await wait_until(lambda: busy.session._commands_waiting == 1)
+    assert not late.done(), "the command did not wait for the close to return"
+
+    finish_close.set()
+    async with asyncio.timeout(_SETTLE_S):
+        await closing_all
+        result = await late
+        await busy.running
+    shells = list(executor._bash_sessions.values())
+    try:
+        assert result.success and result.stdout == "late"
+        assert len(shells) == 1 and shells[0] is not busy.session and shells[0].is_alive
+    finally:
+        for shell in shells:
+            await shell.close()
+
+
 async def test_a_command_the_registry_hands_a_closed_shell_twice_comes_back_as_the_refusal(
     executor: LocalExecutor, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

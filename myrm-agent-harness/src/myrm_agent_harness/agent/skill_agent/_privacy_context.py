@@ -9,7 +9,7 @@ last run context, and restores the previous values afterwards.
 [INPUT]
 - agent.middlewares._session_context::set/get_security_config/pseudonym_store (POS: session-scoped security ContextVars)
 - core.security.persistence.content_scan::set/get_pii_pseudonymizer (POS: context-local regex PII closure)
-- agent._internals.run_lifecycle::_init_pseudonym_store (POS: context-local PseudonymStore + closure init)
+- agent._internals.pseudonym_context::init_pseudonym_store (POS: context-local PseudonymStore + closure init)
 
 [OUTPUT]
 - reestablish_privacy_context(agent): rebuild the privacy context, snapshotting previous values
@@ -80,8 +80,8 @@ def reestablish_privacy_context(agent: object) -> PrivacyContextRestore:
         logger.warning("Privacy context not re-established: workspace_path missing from last run context")
         return PrivacyContextRestore(restored=False)
 
-    from myrm_agent_harness.agent._internals.run_lifecycle import (
-        _init_pseudonym_store,
+    from myrm_agent_harness.agent._internals.pseudonym_context import (
+        init_pseudonym_store,
     )
 
     prev_security = get_security_config()
@@ -89,7 +89,7 @@ def reestablish_privacy_context(agent: object) -> PrivacyContextRestore:
     prev_pseudonymizer = get_pii_pseudonymizer()
     set_security_config(security_config)
     try:
-        _init_pseudonym_store(str(workspace_path))
+        init_pseudonym_store(str(workspace_path))
     except Exception as exc:
         logger.warning("Pseudonym store re-init failed: %s", exc)
         set_pseudonym_store(prev_store)

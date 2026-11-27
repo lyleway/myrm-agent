@@ -95,6 +95,9 @@ from myrm_agent_harness.agent.skill_agent.context import (
 )
 from myrm_agent_harness.agent.streaming.step_builder import build_step_data
 from myrm_agent_harness.core.security.detection.pseudonym_store import (
+    PseudonymStore,
+)
+from myrm_agent_harness.core.security.detection.pseudonym_store import (
     get_pseudonym_store as build_pseudonym_store,
 )
 from myrm_agent_harness.core.security.guards.privacy_tracker import (
@@ -169,7 +172,7 @@ def set_workspace_root(path: str) -> None:
     return _set_workspace_root(path)
 
 
-def install_memory_pseudonymizer(policy: object, store: object) -> PseudonymizeFn | None:
+def install_memory_pseudonymizer(policy: object, store: PseudonymStore | None) -> PseudonymizeFn | None:
     """Install the memory-write PII pseudonymizer for a background task context.
 
     Uses the same closure builder as the agent-run path so regex-level S2/S3
@@ -177,12 +180,12 @@ def install_memory_pseudonymizer(policy: object, store: object) -> PseudonymizeF
     extraction retries). Returns the previously installed pseudonymizer (or None)
     so the caller can restore it via :func:`restore_memory_pseudonymizer`.
     """
-    from myrm_agent_harness.agent._internals.run_lifecycle import (
-        _register_pii_pseudonymizer,
+    from myrm_agent_harness.agent._internals.pseudonym_context import (
+        register_pii_pseudonymizer,
     )
 
     previous = get_pii_pseudonymizer()
-    _register_pii_pseudonymizer(policy, store)
+    register_pii_pseudonymizer(policy, store)
     return previous
 
 

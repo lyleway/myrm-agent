@@ -64,7 +64,8 @@ async def test_local_executor_close_idempotency() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stashed_executor_clear_removes_it_and_closes_it_in_the_background() -> None:
+async def test_stashed_executor_clear_drops_the_entry_and_leaves_the_executor_open() -> None:
+    """The stash only lets tools find a run's executor; whoever built the executor closes it."""
     executor = _DummyExecutor()
     session_id = "test-session-clear"
 
@@ -74,8 +75,8 @@ async def test_stashed_executor_clear_removes_it_and_closes_it_in_the_background
     clear_stashed_executor(session_id)
     assert get_stashed_executor(session_id) is None
 
-    await asyncio.sleep(0)  # one loop turn runs the scheduled close task to completion
-    assert executor.closed
+    await asyncio.sleep(0)  # one loop turn would run a close the clear had scheduled
+    assert not executor.closed
 
 
 def test_sandbox_providers_cleanup_protocol() -> None:

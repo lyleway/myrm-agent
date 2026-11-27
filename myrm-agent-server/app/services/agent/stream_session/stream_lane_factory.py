@@ -7,7 +7,7 @@
 - myrm_agent_harness.utils.runtime.cancellation::CancellationToken (POS: request-level cancellation)
 
 [OUTPUT]
-- create_dynamic_workflow_stream: Dynamic Workflow SSE lane
+- create_dynamic_workflow_stream: Dynamic Workflow SSE lane; closes the agent it built (executor and shell included) when the stream ends
 - create_fast_lane_stream: Fast Search SSE lane
 - archive_restore_error_response: 422 response for an invalid archive restore request
 - _inject_wu_consumed: platform work-unit accounting on MESSAGE_END
@@ -74,7 +74,8 @@ async def create_dynamic_workflow_stream(
 
     Creates a full GeneralAgent (same as the normal agent path) so that
     sub-agents spawned by the DW engine inherit the complete tool registry,
-    catalog, budget, and security policies.
+    catalog, budget, and security policies. The agent serves this one message,
+    so the stream's end closes it, however the stream ends.
     """
     from myrm_agent_harness.agent.dynamic_workflow import (
         WorkflowPlanReview,
@@ -248,6 +249,9 @@ async def create_dynamic_workflow_stream(
             yield chunk
     finally:
         reset_token_tracker()
+        # The lane never pools its agent, and the workflow's sub-agents share the agent's executor: the lane's own end
+        # is the only place that executor and its shell are closed.
+        await agent_wrapper.close()
 
 
 async def create_fast_lane_stream(

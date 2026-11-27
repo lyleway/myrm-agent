@@ -23,7 +23,7 @@ async def _reset_execution_cache_singleton() -> None:
 
 
 def _make_unit(name: str = "unit") -> BuiltExecutionUnit:
-    skill_agent = MagicMock()
+    skill_agent = MagicMock(executor=None)
     skill_agent.close = AsyncMock()
     return BuiltExecutionUnit(skill_agent=skill_agent)
 

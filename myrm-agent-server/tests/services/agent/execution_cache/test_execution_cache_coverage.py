@@ -91,7 +91,7 @@ async def test_built_execution_unit_teardown_closes_all_resources() -> None:
     browser.close = AsyncMock(side_effect=RuntimeError("browser boom"))
     desktop = MagicMock()
     desktop.close = MagicMock(return_value=None)
-    skill_agent = MagicMock()
+    skill_agent = MagicMock(executor=None)
     skill_agent.close = AsyncMock()
 
     unit = BuiltExecutionUnit(
@@ -112,7 +112,7 @@ async def test_built_execution_unit_teardown_closes_all_resources() -> None:
 async def test_built_execution_unit_teardown_desktop_close_raises() -> None:
     desktop = MagicMock()
     desktop.close = AsyncMock(side_effect=RuntimeError("desktop boom"))
-    skill_agent = MagicMock()
+    skill_agent = MagicMock(executor=None)
     skill_agent.close = AsyncMock()
 
     unit = BuiltExecutionUnit(skill_agent=skill_agent, desktop_session=desktop)
@@ -127,7 +127,7 @@ async def test_registry_idle_eviction() -> None:
     registry = ChatAgentExecutionCache(idle_seconds=0.01)
 
     async def build_unit() -> BuiltExecutionUnit:
-        skill = MagicMock()
+        skill = MagicMock(executor=None)
         skill.close = AsyncMock()
         return BuiltExecutionUnit(skill_agent=skill)
 
@@ -144,7 +144,7 @@ async def test_registry_proactively_evicts_idle_units_without_new_acquire() -> N
     registry = ChatAgentExecutionCache(idle_seconds=0.02)
 
     async def build_unit() -> BuiltExecutionUnit:
-        skill = MagicMock()
+        skill = MagicMock(executor=None)
         skill.close = AsyncMock()
         return BuiltExecutionUnit(skill_agent=skill)
 
@@ -161,7 +161,7 @@ async def test_registry_idle_reaper_preserves_active_turn() -> None:
     registry = ChatAgentExecutionCache(idle_seconds=0.02)
 
     async def build_unit() -> BuiltExecutionUnit:
-        skill = MagicMock()
+        skill = MagicMock(executor=None)
         skill.close = AsyncMock()
         return BuiltExecutionUnit(skill_agent=skill)
 
@@ -181,7 +181,7 @@ async def test_registry_close_all_stops_idle_reaper() -> None:
     registry = ChatAgentExecutionCache(idle_seconds=60.0)
 
     async def build_unit() -> BuiltExecutionUnit:
-        skill = MagicMock()
+        skill = MagicMock(executor=None)
         skill.close = AsyncMock()
         return BuiltExecutionUnit(skill_agent=skill)
 
@@ -198,7 +198,7 @@ async def test_registry_close_all_stops_idle_reaper() -> None:
 @pytest.mark.asyncio
 async def test_registry_defer_replace_during_active_turn() -> None:
     registry = ChatAgentExecutionCache(idle_seconds=3600.0)
-    skill = MagicMock()
+    skill = MagicMock(executor=None)
     skill.close = AsyncMock()
     unit = BuiltExecutionUnit(skill_agent=skill)
     build_count = 0
@@ -236,8 +236,8 @@ async def test_registry_defer_replace_during_active_turn() -> None:
 async def test_registry_guard_holder_replaces_the_unit_it_is_about_to_use() -> None:
     """Inside its own guard a caller cannot tell it is the active turn; ``holds_turn_guard`` says so."""
     registry = ChatAgentExecutionCache(idle_seconds=3600.0)
-    old_unit = BuiltExecutionUnit(skill_agent=MagicMock(close=AsyncMock()))
-    new_unit = BuiltExecutionUnit(skill_agent=MagicMock(close=AsyncMock()))
+    old_unit = BuiltExecutionUnit(skill_agent=MagicMock(executor=None, close=AsyncMock()))
+    new_unit = BuiltExecutionUnit(skill_agent=MagicMock(executor=None, close=AsyncMock()))
     build_new = AsyncMock(return_value=new_unit)
     await registry.acquire("chat-4:default", "fp-a", AsyncMock(return_value=old_unit))
 
@@ -255,7 +255,7 @@ async def test_registry_guard_holder_replaces_the_unit_it_is_about_to_use() -> N
 @pytest.mark.asyncio
 async def test_registry_guard_holder_reuses_the_unit_when_the_config_is_unchanged() -> None:
     registry = ChatAgentExecutionCache(idle_seconds=3600.0)
-    unit = BuiltExecutionUnit(skill_agent=MagicMock(close=AsyncMock()))
+    unit = BuiltExecutionUnit(skill_agent=MagicMock(executor=None, close=AsyncMock()))
     build = AsyncMock(return_value=unit)
     await registry.acquire("chat-5:default", "fp-a", build)
 
@@ -281,7 +281,7 @@ async def test_close_execution_cache_helpers() -> None:
     cache = get_execution_cache()
 
     async def build_unit() -> BuiltExecutionUnit:
-        skill = MagicMock()
+        skill = MagicMock(executor=None)
         skill.close = AsyncMock()
         return BuiltExecutionUnit(skill_agent=skill)
 
