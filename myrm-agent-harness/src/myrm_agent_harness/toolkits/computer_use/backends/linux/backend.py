@@ -3,7 +3,7 @@
 Covers both native Linux desktops and SaaS sandbox environments (which run Linux).
 
 [INPUT]
-- types::ScreenInfo, ScreenContext, ActionResult, WindowTextResult (POS: shared type definitions)
+- types::ScreenInfo, ScreenContext, ActionResult (POS: shared type definitions)
 - linux.probes::detect_linux_resolution, read_screen_context, linux_permission_status (POS: read-only screen and environment probes)
 - linux.text_io::X11TextInput (POS: text bridge of the Linux backend)
 
@@ -38,7 +38,6 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     ScreenContext,
     ScreenInfo,
     ScreenLockState,
-    WindowTextResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -284,67 +283,6 @@ class LinuxBackend:
 
     def screen_context(self) -> ScreenContext:
         return read_screen_context(self._subprocess_env())
-
-    async def window_text(self) -> WindowTextResult:
-        """Extract text from frontmost window via xdotool + xprop.
-
-        Linux lacks a unified accessibility text API like macOS AX.
-        Falls back to window name + WM class as minimal context.
-        """
-        try:
-            result = await self._run_cmd("xdotool getactivewindow getwindowname")
-            win_title = result[0].strip() if result[2] == 0 else ""
-
-            wm_class = ""
-            try:
-                result2 = await self._run_cmd("xdotool getactivewindow")
-                win_id = result2[0].strip()
-                if win_id:
-                    result3 = await self._run_cmd(f"xprop -id {win_id} WM_CLASS")
-                    wm_class = result3[0].strip()
-            except Exception:
-                pass
-
-            return WindowTextResult(
-                window_title=win_title,
-                app_name=wm_class,
-                text="",
-                success=True,
-            )
-        except Exception as e:
-            logger.warning("Linux window text extraction failed: %s", e)
-            return WindowTextResult(success=False)
-
-    async def has_blocking_dialog(self, target_app_names: list[str] | None = None) -> bool:
-        """Check if there is an OS-level dialog window blocking the target application.
-
-        On Linux (X11), we check if the active window has _NET_WM_WINDOW_TYPE_DIALOG.
-        """
-        try:
-            result = await self._run_cmd("xdotool getactivewindow")
-            win_id = result[0].strip()
-            if not win_id:
-                return False
-
-            result2 = await self._run_cmd(f"xprop -id {win_id} _NET_WM_WINDOW_TYPE")
-            prop_out = result2[0].strip()
-
-            has_dialog = "_NET_WM_WINDOW_TYPE_DIALOG" in prop_out
-            if not has_dialog:
-                return False
-
-            if target_app_names:
-                # We need to check if the dialog belongs to the target app
-                # This is an approximation based on WM_CLASS
-                result3 = await self._run_cmd(f"xprop -id {win_id} WM_CLASS")
-                wm_class = result3[0].strip().lower()
-                if not any(target.lower() in wm_class for target in target_app_names):
-                    return False
-
-            return True
-        except Exception as e:
-            logger.debug("Linux has_blocking_dialog check failed: %s", e)
-            return False
 
     async def is_browser_active(self) -> bool:
         """Check if the currently active (frontmost) window is a web browser."""

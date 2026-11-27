@@ -4,7 +4,7 @@
 - (none)
 
 [OUTPUT]
-- ComputerAction, DesktopInteractAction, DESKTOP_TEXT_ACTIONS, DesktopVisionAction, ScrollDirection, ModifierKey, ScreenInfo, ScreenContext, ScreenLockState, ActionResult, WindowTextResult, ImageConstraints, PermissionStatus, ExecutionMode, ForegroundPermissionScope, ForegroundPermissionResult, ForegroundPermissionCallback, ScreenUnlockCallback, ComputerUseConfig
+- ComputerAction, DesktopInteractAction, DESKTOP_TEXT_ACTIONS, DesktopVisionAction, ScrollDirection, ModifierKey, ScreenInfo, ScreenContext, ScreenLockState, ActionResult, ImageConstraints, PermissionStatus, ExecutionMode, ForegroundPermissionScope, ForegroundPermissionResult, ForegroundPermissionCallback, ScreenUnlockCallback, ComputerUseConfig
 
 [POS]
 Shared type definitions consumed by all computer_use submodules.
@@ -112,17 +112,6 @@ class ScreenContext:
     active_window: str = ""
     mouse_x: int = 0
     mouse_y: int = 0
-
-
-@dataclass(frozen=True)
-class WindowTextResult:
-    """Result of extracting text from the frontmost window via Accessibility API."""
-
-    window_title: str = ""
-    app_name: str = ""
-    text: str = ""
-    success: bool = True
-    needs_permission: bool = False
 
 
 @dataclass(frozen=True)

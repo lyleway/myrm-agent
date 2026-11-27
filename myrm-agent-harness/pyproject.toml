@@ -109,7 +109,7 @@ image-processing = [
 computer-use = [
   "pyautogui>=0.9.54; sys_platform == 'win32'",  # Windows 键鼠输入模拟 (ctypes, 无 rubicon-objc)
   "mss>=10.2.0; sys_platform == 'win32'",  # Windows 屏幕截图 (backends/windows/backend.py、backends/windows/background.py)
-  "uiautomation>=2.0.29; sys_platform == 'win32'",  # Windows UI Automation 无障碍树与窗口文本 (perception/windows_ax.py、backends/windows/text_io.py)
+  "uiautomation>=2.0.29; sys_platform == 'win32'",  # Windows UI Automation 无障碍树 (perception/windows_ax.py)
   "pyobjc-framework-Quartz>=13.0; sys_platform == 'darwin'",  # macOS 原生 CGEvent（绕开 rubicon-objc arm64 缺陷）
 ]
 # toolkits/web_fetch/ - L1 HTTP 爬取 + YouTube 字幕快路径

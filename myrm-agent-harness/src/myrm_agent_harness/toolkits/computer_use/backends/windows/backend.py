@@ -1,8 +1,8 @@
-"""Windows backend — mss + pyautogui + ctypes/uiautomation.
+"""Windows backend — mss + pyautogui + ctypes/user32.
 
 [INPUT]
-- types::ScreenInfo, ScreenContext, ActionResult, WindowTextResult (POS: shared type definitions)
-- windows.text_io::type_unicode_text, extract_window_text (POS: Windows Unicode typing and UI Automation text bridges)
+- types::ScreenInfo, ScreenContext, ActionResult (POS: shared type definitions)
+- windows.text_io::type_unicode_text (POS: Windows Unicode typing bridge)
 [OUTPUT]
 - WindowsBackend: ComputerBackend implementation for Windows
 [POS]
@@ -13,16 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import logging
 
 from myrm_agent_harness.toolkits.computer_use.backends.windows.background import (
     _capture_screen_excluding_titles,
     _lowest_overlay_hwnd,
 )
-from myrm_agent_harness.toolkits.computer_use.backends.windows.text_io import (
-    extract_window_text,
-    type_unicode_text,
-)
+from myrm_agent_harness.toolkits.computer_use.backends.windows.text_io import type_unicode_text
 from myrm_agent_harness.toolkits.computer_use.capture_title_contracts import (
     SNAPSHOT_ONLY_EXCLUDED_CAPTURE_TITLES,
 )
@@ -33,10 +29,7 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     ScreenContext,
     ScreenInfo,
     ScreenLockState,
-    WindowTextResult,
 )
-
-logger = logging.getLogger(__name__)
 
 _POINTER_OCCLUDED_ERROR = (
     "Safety: A screen overlay is covering the desktop, so coordinate-based pointer input "
@@ -263,14 +256,6 @@ class WindowsBackend:
             mouse_y=pos.y,
         )
 
-    async def window_text(self) -> WindowTextResult:
-        """Extract text from foreground window via Windows UI Automation."""
-        return await asyncio.to_thread(extract_window_text)
-
-    async def has_blocking_dialog(self, target_app_names: list[str] | None = None) -> bool:
-        """Return True when the foreground window is a blocking OS dialog."""
-        return await asyncio.to_thread(_has_blocking_dialog_win, target_app_names)
-
     async def is_browser_active(self) -> bool:
         """Check if the currently active (frontmost) window is a web browser."""
         return await asyncio.to_thread(_is_browser_active_win)
@@ -397,38 +382,3 @@ def _is_browser_active_win() -> bool:
 
     app_name = _get_active_window_title().lower()
     return any(browser in app_name for browser in KNOWN_BROWSER_NAMES)
-
-
-def _has_blocking_dialog_win(target_app_names: list[str] | None = None) -> bool:
-    """Check if the foreground window is a dialog."""
-    try:
-        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-        hwnd = user32.GetForegroundWindow()
-        if not hwnd:
-            return False
-
-        # Get window class name
-        buf = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, buf, 256)
-        class_name = buf.value
-
-        # #32770 is the standard Windows dialog box class
-        has_dialog = class_name == "#32770"
-
-        if not has_dialog:
-            return False
-
-        if target_app_names:
-            # We can't easily get the process name just from hwnd without psutil or more ctypes
-            # So we fallback to checking the window title
-            win_title = _get_active_window_title().lower()
-            # If the dialog belongs to the browser, it might not have the browser name in the title
-            # This is a limitation on Windows without heavier dependencies.
-            if not any(target.lower() in win_title for target in target_app_names):
-                # We'll just return True if it's a dialog and we don't strictly enforce target_app_names
-                pass
-
-        return True
-    except Exception as e:
-        logger.debug("Windows has_blocking_dialog check failed: %s", e)
-        return False

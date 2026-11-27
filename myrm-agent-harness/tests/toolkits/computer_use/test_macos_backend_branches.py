@@ -137,17 +137,6 @@ class TestPasteTextDelegation:
 
 class TestPlatformDelegation:
     @pytest.mark.asyncio()
-    async def test_window_text_delegates(self, backend: MacOSBackend) -> None:
-        expected = MagicMock()
-        with patch("asyncio.to_thread", AsyncMock(return_value=expected)):
-            assert await backend.window_text() is expected
-
-    @pytest.mark.asyncio()
-    async def test_has_blocking_dialog_delegates(self, backend: MacOSBackend) -> None:
-        with patch("asyncio.to_thread", AsyncMock(return_value=True)):
-            assert await backend.has_blocking_dialog(["Safari"]) is True
-
-    @pytest.mark.asyncio()
     async def test_is_browser_active_delegates(self, backend: MacOSBackend) -> None:
         with patch("asyncio.to_thread", AsyncMock(return_value=False)):
             assert await backend.is_browser_active() is False
@@ -217,18 +206,6 @@ class TestDpiScaleDetection:
     def test_all_probes_fail_defaults_to_one(self) -> None:
         with patch("subprocess.run", side_effect=OSError("no tools")):
             assert _detect_dpi_scale_quartz(1440) == 1.0
-
-
-class TestBlockingDialogParsing:
-    def test_malformed_output_is_false(self) -> None:
-        with patch("subprocess.run") as run:
-            run.return_value = MagicMock(returncode=0, stdout="single-field-only")
-            assert macos_mod._has_blocking_dialog(["Safari"]) is False
-
-    def test_nonzero_exit_is_false(self) -> None:
-        with patch("subprocess.run") as run:
-            run.return_value = MagicMock(returncode=1, stdout="Safari|||true")
-            assert macos_mod._has_blocking_dialog(["Safari"]) is False
 
 
 class TestCaptureProbe:

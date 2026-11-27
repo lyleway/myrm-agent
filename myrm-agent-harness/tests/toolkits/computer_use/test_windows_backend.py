@@ -5,7 +5,7 @@ Covers:
 - click/scroll/drag with modifier key handling (keyDown/keyUp guarantee)
 - type_text() ASCII and non-ASCII (SendInput Unicode, never the clipboard)
 - key() single and combo keys
-- mouse_move(), wait(), screen_info(), screen_context(), window_text()
+- mouse_move(), wait(), screen_info(), screen_context(), is_browser_active()
 - Factory function: create_computer_session routes to WindowsBackend
 """
 
@@ -21,7 +21,6 @@ from myrm_agent_harness.toolkits.computer_use.backends.windows import text_io as
 from myrm_agent_harness.toolkits.computer_use.types import (
     ScreenContext,
     ScreenInfo,
-    WindowTextResult,
 )
 
 
@@ -41,7 +40,6 @@ _MOCK_MODULES_BASE = {
     "mss": MagicMock(),
     "mss.tools": MagicMock(),
     "mouseinfo": MagicMock(),
-    "uiautomation": MagicMock(),
     "rubicon": MagicMock(),
     "rubicon.objc": MagicMock(),
     "rubicon.objc.api": MagicMock(),
@@ -367,86 +365,13 @@ class TestWindowsBackendScreenContext:
         assert ctx.mouse_y == 400
 
 
-class TestWindowsBackendWindowText:
-    """window_text() via uiautomation."""
+class TestWindowsBackendBrowserDetection:
+    """is_browser_active() via the foreground window title."""
 
     @pytest.fixture
     def backend(self, _mock_windows_env):
         win_mod, _, _ = _mock_windows_env
         return win_mod.WindowsBackend()
-
-    @pytest.mark.asyncio
-    async def test_window_text_success(self, backend) -> None:
-        with patch(
-            "asyncio.to_thread",
-            return_value=WindowTextResult(
-                app_name="Notepad",
-                window_title="Notepad",
-                text="Hello",
-                success=True,
-            ),
-        ):
-            result = await backend.window_text()
-
-        assert result.success is True
-        assert result.app_name == "Notepad"
-
-    @pytest.mark.asyncio
-    async def test_window_text_failure(self, backend) -> None:
-        with patch("asyncio.to_thread", return_value=WindowTextResult(success=False)):
-            result = await backend.window_text()
-
-        assert result.success is False
-
-    @pytest.mark.asyncio
-    async def test_has_blocking_dialog_true(self, backend, _mock_windows_env) -> None:
-        _win_mod, _, mock_windll = _mock_windows_env
-        mock_windll.user32.GetForegroundWindow.return_value = 12345
-
-        def mock_get_class_name(hwnd, buf, size):
-            buf.value = "#32770"
-            return len("#32770")
-
-        mock_windll.user32.GetClassNameW.side_effect = mock_get_class_name
-
-        def mock_get_window_text_length(hwnd):
-            return len("Google Chrome")
-
-        mock_windll.user32.GetWindowTextLengthW.side_effect = mock_get_window_text_length
-
-        def mock_get_window_text(hwnd, buf, size):
-            buf.value = "Google Chrome"
-            return len("Google Chrome")
-
-        mock_windll.user32.GetWindowTextW.side_effect = mock_get_window_text
-
-        with patch("asyncio.to_thread", side_effect=lambda fn, *args: fn(*args)):
-            result = await backend.has_blocking_dialog(["Google Chrome"])
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_has_blocking_dialog_false(self, backend, _mock_windows_env) -> None:
-        _win_mod, _, mock_windll = _mock_windows_env
-        mock_windll.user32.GetForegroundWindow.return_value = 12345
-
-        def mock_get_class_name(hwnd, buf, size):
-            buf.value = "Chrome_WidgetWin_1"
-            return len("Chrome_WidgetWin_1")
-
-        mock_windll.user32.GetClassNameW.side_effect = mock_get_class_name
-
-        with patch("asyncio.to_thread", side_effect=lambda fn, *args: fn(*args)):
-            result = await backend.has_blocking_dialog(["Google Chrome"])
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_has_blocking_dialog_exception(self, backend, _mock_windows_env) -> None:
-        _win_mod, _, mock_windll = _mock_windows_env
-        mock_windll.user32.GetForegroundWindow.side_effect = Exception("error")
-
-        with patch("asyncio.to_thread", side_effect=lambda fn, *args: fn(*args)):
-            result = await backend.has_blocking_dialog(["Google Chrome"])
-        assert result is False
 
     @pytest.mark.asyncio
     async def test_is_browser_active_true(self, backend, _mock_windows_env) -> None:
@@ -764,38 +689,6 @@ class TestWindowsBackendDetectScreenInfo:
         assert w == 2560
         assert h == 1440
         assert scale == 1.0
-
-
-class TestWindowsBackendWindowTextExtraction:
-    """extract_window_text with recursive text collection."""
-
-    def test_import_error_returns_failure(self, _mock_windows_env) -> None:
-        with (
-            patch.dict("sys.modules", {"uiautomation": None}),
-            patch("builtins.__import__", side_effect=ImportError("no module")),
-        ):
-            result = windows_text_io.extract_window_text()
-        assert result.success is False
-
-    def test_no_foreground_control(self, _mock_windows_env) -> None:
-        mock_auto = MagicMock()
-        mock_auto.GetForegroundControl.return_value = None
-        with patch.dict("sys.modules", {"uiautomation": mock_auto}):
-            result = windows_text_io.extract_window_text()
-        assert result.success is False
-
-    def test_collect_text_recursive_depth_limit(self, _mock_windows_env) -> None:
-        text_parts: list[str] = []
-        mock_control = MagicMock()
-        mock_control.GetChildren.return_value = []
-        windows_text_io._collect_text_recursive(mock_control, text_parts, max_depth=0, max_elements=100)
-        assert text_parts == []
-
-    def test_collect_text_recursive_max_elements(self, _mock_windows_env) -> None:
-        text_parts = ["x"] * 500
-        mock_control = MagicMock()
-        windows_text_io._collect_text_recursive(mock_control, text_parts, max_depth=5, max_elements=500)
-        assert len(text_parts) == 500
 
 
 class TestModifierMapping:

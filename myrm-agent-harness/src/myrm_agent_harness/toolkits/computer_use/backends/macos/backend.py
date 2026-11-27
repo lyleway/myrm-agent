@@ -7,11 +7,10 @@ arm64 (Apple Silicon) due to a missing `objc_msgSendSuper_stret` symbol
 (upstream rubicon-objc bug, unfixed in 0.5.6).
 
 [INPUT]
-- types::ScreenInfo, ScreenContext, ActionResult, WindowTextResult (POS: shared type definitions)
+- types::ScreenInfo, ScreenContext, ActionResult (POS: shared type definitions)
 - backends.macos.input (POS: Quartz CGEvent keyboard/mouse primitives, global HID unless a target pid is set)
 - backends.macos.pasteboard (POS: NSPasteboard snapshot, temporary text write and guarded restore for clipboard-paste typing)
 - backends.macos.background (POS: window targeting, window-only capture, foreground guard, event-post permission, overlay-window probe)
-- backends.macos.ax_scripts (POS: AppleScript sources of the accessibility probes)
 - backends.macos.permissions (POS: TCC permission probes — Accessibility, Screen Recording, capture usability)
 
 [OUTPUT]
@@ -26,14 +25,12 @@ pointer actions on the global HID path are refused: they would hit the overlay, 
 from __future__ import annotations
 
 import asyncio
-import logging
 import subprocess
 import tempfile
 from pathlib import Path
 
 from myrm_agent_harness.toolkits.computer_use.backends.macos import input as macos_input
 from myrm_agent_harness.toolkits.computer_use.backends.macos import pasteboard as macos_pasteboard
-from myrm_agent_harness.toolkits.computer_use.backends.macos.ax_scripts import AX_DIALOG_SCRIPT, AX_TEXT_SCRIPT
 from myrm_agent_harness.toolkits.computer_use.backends.macos.background import (
     _capture_screen_excluding_titles,
     _capture_window_png,
@@ -50,10 +47,7 @@ from myrm_agent_harness.toolkits.computer_use.types import (
     PermissionStatus,
     ScreenContext,
     ScreenInfo,
-    WindowTextResult,
 )
-
-logger = logging.getLogger(__name__)
 
 # Cmd+V 投递后留给目标应用读取剪贴板的时间，之后才还原用户剪贴板。
 _PASTE_SETTLE_SECONDS = 0.1
@@ -296,14 +290,6 @@ class MacOSBackend:
             mouse_y=pos.y,
         )
 
-    async def window_text(self) -> WindowTextResult:
-        """Extract text from frontmost window via Accessibility API (AppleScript)."""
-        return await asyncio.to_thread(_extract_window_text)
-
-    async def has_blocking_dialog(self, target_app_names: list[str] | None = None) -> bool:
-        """Check if there is an OS-level dialog window blocking the target application."""
-        return await asyncio.to_thread(_has_blocking_dialog, target_app_names)
-
     async def is_browser_active(self) -> bool:
         """Check if the currently active (frontmost) window is a web browser."""
         return await asyncio.to_thread(_is_browser_active)
@@ -324,46 +310,6 @@ class MacOSBackend:
     async def check_permissions(self, *, probe_capture: bool = False) -> PermissionStatus:
         """Probe macOS Accessibility and Screen Recording TCC permissions."""
         return await asyncio.to_thread(_check_macos_permissions, probe_capture)
-
-
-def _extract_window_text() -> WindowTextResult:
-    """Blocking call to extract window text via AppleScript AXValue traversal."""
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", AX_TEXT_SCRIPT],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            if "不允许辅助访问" in stderr or "not allowed assistive" in stderr.lower():
-                app_name = _get_active_window_title()
-                return WindowTextResult(
-                    app_name=app_name,
-                    success=False,
-                    needs_permission=True,
-                )
-            return WindowTextResult(success=False)
-
-        output = result.stdout.strip()
-        parts = output.split("|||", 2)
-        app_name = parts[0] if len(parts) > 0 else ""
-        win_title = parts[1] if len(parts) > 1 else ""
-        text = parts[2] if len(parts) > 2 else ""
-
-        return WindowTextResult(
-            app_name=app_name,
-            window_title=win_title,
-            text=text,
-            success=True,
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning("Window text extraction timed out")
-        return WindowTextResult(success=False)
-    except Exception as e:
-        logger.warning("Window text extraction failed: %s", e)
-        return WindowTextResult(success=False)
 
 
 def _detect_dpi_scale_quartz(logical_width: int) -> float:
@@ -426,37 +372,3 @@ def _is_browser_active() -> bool:
 
     app_name = _get_active_window_title().lower()
     return any(browser in app_name for browser in KNOWN_BROWSER_NAMES)
-
-
-def _has_blocking_dialog(target_app_names: list[str] | None = None) -> bool:
-    """Check if the frontmost app has a blocking dialog (AXDialog or AXSheet)."""
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", AX_DIALOG_SCRIPT],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return False
-
-        output = result.stdout.strip()
-        parts = output.split("|||")
-        if len(parts) != 2:
-            return False
-
-        app_name = parts[0]
-        has_dialog = parts[1] == "true"
-
-        if not has_dialog:
-            return False
-
-        if target_app_names:
-            app_name_lower = app_name.lower()
-            if not any(target.lower() in app_name_lower for target in target_app_names):
-                return False
-
-        return True
-    except Exception as e:
-        logger.debug("Failed to check for blocking dialog: %s", e)
-        return False
