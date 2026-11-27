@@ -10,11 +10,12 @@
 |------|------|------|-------|
 | `__init__.py` | 入口 | 包导出 Registry / Facade | — |
 | `accounts.py` | 核心 | 命名账号的位置与 Agent 跑在哪个 home：`account_store()`（状态根 `resolve_workspace_state_dir()` 下的 `external-agents/accounts`，每次现建、根跟随 `MYRM_DATA_DIR` 且总是绝对路径）与 `agent_home(command, account)`（托管部署 → 稳定的 api_key 目录；否则该 Agent 指名的账号目录，不存在就创建；没有指名 → `None` = CLI 自己的 home；自定义命令不是已知 Agent，无法被重定向，忽略 `account` 并记 WARNING）。harness 只管怎么把 CLI 搬进一个 home，这里决定搬进哪个 | ✅ |
+| `memory_grants.py` | 核心 | 外部 Agent 的只读记忆凭据：`MemoryGrants.issue(owner, agent_id=…, external_agent=…)` 为一个池（`owner`）里的一个外部 Agent 签发令牌（`myrm_dlg_…`，只存摘要）；`/mcp` 中间件用 `resolve` 认出它（同时记下 Agent 已连上），`revoke(owner)` 在池关闭时收回，池被回收也会随 `weakref.finalize` 自动失效。`memory_server_for` 给出交给 harness 的 `HttpMcpServer`（`myrm-memory`，本机 `/mcp/` 地址，`Authorization: Bearer`，`read_only`），`memory_connected(config)` 在回合结束时判断 Agent 有没有连上它（等最多 2 秒，只对交出了记忆的 Agent 才付这笔等待） | ✅ |
 | `logout.py` | 核心 | `log_out_of_home(backend, env)`：让本机检测到的该 CLI 在 `env` 指向的 home 里自己登出，再清凭据文件，返回 CLI 事后自报的登录态（没装 CLI 就只清文件）。退出登录接口与删除账号共用：放在钥匙串里的登录只有 CLI 自己能移除，删文件或删目录都够不着 | ✅ |
 | `cli_session_store.py` | 核心 | `ChatCliSessionStore`：harness `CliSessionStore` 协议的 chat 行实现。`load` / `save` 经 `ChatCliSessionRepository` 读写 `chats.external_cli_sessions`（`save` 在 SQLite 写锁内读后写，并发的两个后端各自写自己的 session 名互不覆盖；不触碰 `updated_at`；不存在的 chat 与无痕 chat 不落库）；损坏的条目按“无会话”读出。异常原样上抛，由 harness 降级为新会话 | ✅ |
 | `permission_broker.py` | 核心 | `ChatPermissionBroker`（harness `PermissionBroker` 的聊天实现，冻结 dataclass：`agent_id` / `chat_id` / `workspace` / `ttl_seconds`）：外部 Agent 回合里每一次权限请求变成该聊天的一条 `external_agent_permission` 审批（severity：`execute` / `delete` / `move` 为 `high`，其余 `warning`；`reason` 是「Agent 名: 标题」；`expires_at` = 现在 + 600 s），回合在 `PendingPermissionAnswers` 的 future 上等人决定。**所有展示给人的内容先脱敏再截断**（`permission_payload`：在 20 000 字符窗口上脱敏、不可见字符转成可见转义，再截到 2 000 字符；路径最多 20 条、每条 500 字符；`command` 提到载荷顶层供批量风控与卡片读取）。四种结局：批准 / 拒绝（拒绝带人写的理由）→ 注册表 `resolve_approval` 经 `settle` 唤醒；无人应答 → 600 s 后以 `NO_ANSWER_MESSAGE` 拒绝并 `withdraw`（`TIMEOUT`）；回合先结束（停止、整体超时）→ 取消 `decide` 时 `withdraw`（`CANCELLED`，shield 内完成，卡片在所有设备上关闭）；创建审批本身失败 → 异常上抛，harness 按拒绝处理（fail-closed）。登记等待前的一次读回处理「公告期间已被决定」的竞态。回合自己的超时在等人期间由 harness 暂停，等多久是这里的规则 | ✅ |
 | `delegation/` | 核心 | 直连委托（`force_external_agent`）的业务层子包：用户回合 → 外部 CLI 的提示词、CLI 的回合 → 前端 SSE 事件、失败 → 用户能处置的指引。外部只从子包门面导入。见 [delegation/_ARCH.md](delegation/_ARCH.md) | ✅ |
-| `runtime_pool_registry.py` | 核心 | `ChatRuntimePoolRegistry` + `ChatScopedRuntimePoolFacade`（只暴露 harness `DelegationPool` 协议的 4 个成员，不做 `__getattr__` 透传：`prompt` / `get` 一旦透传就会让 registry 看不到在途 turn；`run_turn` 以 `aclosing` 包住池的回合，把回合的 `permissions`（权限裁决者）原样交给池，关闭 facade 的生成器会先关掉池的回合再结束在途计数）+ `close_external_agent_pool_for_chat`：acquire/release、per-chat 在途 turn 计数（`track_turn`；不做串行，串行由池按后端负责，cancel 不计入）、fingerprint 变更 defer、idle 回收（只释放常驻 ACP 进程，池与 CLI `--resume` 会话 id 保留；有在途委托的 chat 不回收，`track_turn` 退出重置 idle 计时）、`ensure_tracked`（facade 每个委托 turn 先确认自己的池仍登记在册，被 close 摘出则重新登记）、删 chat 即时 close、服务关闭 `close_all`；所有 pool 关闭 / 释放带上限（带上限、不抛，`close_all` / idle 回收并发执行） | ✅ |
+| `runtime_pool_registry.py` | 核心 | `ChatRuntimePoolRegistry` + `ChatScopedRuntimePoolFacade`（只暴露 harness `DelegationPool` 协议的 4 个成员，不做 `__getattr__` 透传：`prompt` / `get` 一旦透传就会让 registry 看不到在途 turn；`run_turn` 以 `aclosing` 包住池的回合，把回合的 `permissions`（权限裁决者）原样交给池，关闭 facade 的生成器会先关掉池的回合再结束在途计数）+ `close_external_agent_pool_for_chat`：acquire/release、per-chat 在途 turn 计数（`track_turn`；不做串行，串行由池按后端负责，cancel 不计入）、fingerprint 变更 defer、idle 回收（只释放常驻 ACP 进程，池与 CLI `--resume` 会话 id 保留；有在途委托的 chat 不回收，`track_turn` 退出重置 idle 计时）、`ensure_tracked`（facade 每个委托 turn 先确认自己的池仍登记在册，被 close 摘出则重新登记）、删 chat 即时 close、服务关闭 `close_all`；所有 pool 关闭 / 释放带上限（带上限、不抛，`close_all` / idle 回收并发执行）；关闭池之前先收回它的记忆凭据 | ✅ |
 
 ## 账号与 api_key 通道
 
@@ -22,6 +23,14 @@
 - **Agent 配置的 `account`**：`external_agents` 配置条目里的可选字段，空表示 CLI 自己的 home（用户在本机已有的登录）。`external_agents_runtime_config` 归一化时校验名字（不合法的名字让该 Agent 被丢弃并记 WARNING，名字不会走到路径上）、把它纳入池指纹（换账号即换池）、注册时经 `agent_home` 取家目录；家目录建不出来（磁盘权限、同名文件挡路）只丢该 Agent，其余 Agent 照常注册。
 - **托管通道**（`allows_subscription_login` 为假）：每个已知 Agent 跑在稳定的 api_key 目录 `<根>/_api_key/<后端>` 里。该目录从不被登录、不是账号、不会被列出，磁盘上遗留的订阅登录因此不会被一次按 key 计费的运行读到；该部署下 `account` 配置被忽略。本机的 api_key 模式不隔离（那是用户自己的机器与自己的选择）。
 - **换账号**：账号隔离的也是 CLI 的会话历史，同一聊天里把 Agent 换到另一个账号后，先前记下的 CLI 会话 id 在新账号里不存在，走既有的“会话失效”重试路径（改开新会话并给出一条提示），不需要另存会话与账号的绑定。
+
+## 记忆随行（只读凭据）
+
+- **同意在用户手里**：外部 Agent 配置的 `shareMemory` 只有显式的 `true` 才算同意；缺省、`false`、字符串 `"true"` 等一律不算，自动探测出的 Agent 从不带这一项。给了同意的 Agent 才会拿到记忆服务器，其余 Agent 与以前完全一样。
+- **谁的记忆**：池所属的 Myrm Agent（`agent_id`，缺省 `default`）。池指纹把这位 Agent 纳入（仅对分享记忆的 Agent），所以换 Agent 或换同意都会换池，旧池关闭时凭据一并收回。
+- **凭据的寿命 = 池的寿命**：每个池里的每个外部 Agent 一枚令牌，`close_runtime_pool_bounded` 先收回凭据再关池（即使关池卡住，已收回的凭据也不再能读记忆）；idle 回收只释放常驻进程，不收回凭据——下一回合重新拉起的进程还用同一枚。
+- **只读范围**：`/mcp` 上的委托凭据只能列出、调用 `memory_recall`、`memory_list` 与（档案启用 wiki 时）`wiki_query_tool`（见 `api/mcp/delegation_scope.py`）。
+- **如实告知**：harness 没有把记忆服务器交给 Agent（该 Agent 不支持接入）→ 回合内一条 `mcp_not_attached` 通知；交出了但回合结束时 Agent 从未连上 → `mcp_not_connected` 通知（失败与被停止的回合不加这条）。
 
 ## 删 chat 接线
 

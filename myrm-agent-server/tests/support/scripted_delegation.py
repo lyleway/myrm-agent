@@ -8,9 +8,10 @@ events it produced.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Sequence
 
 from myrm_agent_harness.api import AgentEventType
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -37,9 +38,15 @@ TurnScript = Callable[["ScriptedPool"], AsyncGenerator[RuntimeEvent]]
 class ScriptedPool:
     """A ``DelegationPool`` whose turn plays a script and records how the stream drove it."""
 
-    def __init__(self, turn: TurnScript, *, auth_mode: AuthMode | None = "subscription") -> None:
+    def __init__(
+        self,
+        turn: TurnScript,
+        *,
+        auth_mode: AuthMode | None = "subscription",
+        mcp_servers: Sequence[McpServerConfig] = (),
+    ) -> None:
         self._turn = turn
-        self._config = RuntimeConfig(backend_type="cli", auth_mode=auth_mode) if auth_mode else None
+        self._config = RuntimeConfig(backend_type="cli", auth_mode=auth_mode, mcp_servers=mcp_servers) if auth_mode else None
         self.turns: list[tuple[str, str, str]] = []
         self.turn_workspaces: list[str] = []
         self.turn_images: list[list[str] | None] = []

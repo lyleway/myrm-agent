@@ -17,7 +17,8 @@
 LangChain tool integration layer for Wiki toolkit. Wraps WikiCompiler and
 WikiQueryEngine into agent-facing StructuredTools for Agent use. Provides end-to-end
 automation: ingest triggers compilation, query archives high-value results for knowledge
-compounding, and ingestion sources are loaded by source_loader (FetchEngine for URLs, file parsers for files); a
+compounding (unless the tools are built with ``archive_queries=False``: then query is read only), and
+ingestion sources are loaded by source_loader (FetchEngine for URLs, file parsers for files); a
 source that has no readable text is refused, never written to raw/.
 Query metadata forwards layered citations, asset hit metadata, and read-time evidence snapshot_status for Chat/Settings UI.
 """
@@ -87,8 +88,13 @@ def create_wiki_agent_tools(
     *,
     wiki_scope_id: str | None = None,
     locale: str | None = None,
+    archive_queries: bool = True,
 ) -> list[BaseTool]:
-    """Create LangChain tools exposed to the agent at Turn1."""
+    """Create LangChain tools exposed to the agent at Turn1.
+
+    ``archive_queries=False`` makes the query tool read only. An archived answer is written into ``raw/`` together with
+    the caller's question verbatim, so a caller that must not write to the wiki cannot be given the filing query.
+    """
 
     @tool("wiki_ingest_tool", description=resolve_wiki_ingest_description(locale))
     async def wiki_ingest(
@@ -285,7 +291,7 @@ def create_wiki_agent_tools(
             )
 
             # Archive only when high confidence and verified source snippets exist to prevent synthetic contamination
-            if result.should_archive and result.confidence_score >= 0.8 and result.source_snippets:
+            if archive_queries and result.should_archive and result.confidence_score >= 0.8 and result.source_snippets:
                 try:
                     await _archive_query_result(structure, compiler, question, result.answer)
                 except Exception as archive_err:

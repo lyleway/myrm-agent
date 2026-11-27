@@ -343,7 +343,6 @@ acp/
 │   ├── process.py          # ManagedProcess / spawn_managed_process：逐行 stdout（静默满一个周期产出 None 供心跳）、有界 stderr 尾部、唯一的停止入口（SIGTERM → SIGKILL）；程序不存在抛 ProcessLaunchError
 │   ├── session_book.py     # 会话记录簿 CliSessionBook（Claude 会话 id、Codex 线程 id、ACP 会话 id；内存优先 + 写穿到宿主 CliSessionStore）
 │   ├── image_blocks.py     # 回合图片文件 → base64 块（ImageBlock）：按文件头判定格式，读不了或不是图片的略去并记 WARNING；各运行时共用
-│   ├── mcp_status.py       # mcp_not_attached 状态更新：告诉宿主它提供的哪些 MCP Server 没有交到 agent 手里
 │   ├── pool.py             # RuntimePool
 │   ├── turn_permissions.py # TurnPermissions：回合内的权限请求守卫（broker 出错按拒绝、等人时暂停时间上限、回合结束撤销等待）
 │   ├── acp/                # ACP 后端子包

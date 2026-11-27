@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from myrm_agent_harness.api import AgentEventType
-from myrm_agent_harness.toolkits.acp.types import RuntimeEventType
+from myrm_agent_harness.toolkits.acp.types import RuntimeConfig, RuntimeEventType
 from myrm_agent_harness.utils import CancellationToken
 
 from app.ai_agents.general_agent.external_agents import ExternalAgentsMixin
@@ -31,8 +31,8 @@ class _RecordingPool:
         self.turn_closed = asyncio.Event()
         self._endless = endless
 
-    def get_config(self, name: str) -> SimpleNamespace:
-        return SimpleNamespace(auth_mode="api_key", command="claude")
+    def get_config(self, name: str) -> RuntimeConfig:
+        return RuntimeConfig(backend_type="cli", command="claude", auth_mode="api_key")
 
     async def cancel(self, name: str, session_id: str) -> None:
         return None

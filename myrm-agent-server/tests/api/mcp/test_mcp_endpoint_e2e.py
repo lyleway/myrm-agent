@@ -97,8 +97,8 @@ class TestMCPEndpointFullPipelineE2E:
         assert response.status_code == 401
         assert "Missing or invalid Authorization header" in response.json()["error"]
 
-    @patch("app.api.mcp.endpoint._is_desktop_control_enabled_for_agent", new_callable=AsyncMock)
-    @patch("app.api.mcp.endpoint._wiki_boundary_enabled_for_agent", new_callable=AsyncMock)
+    @patch("app.api.mcp.endpoint.is_desktop_control_enabled_for_agent", new_callable=AsyncMock)
+    @patch("app.api.mcp.endpoint.wiki_boundary_enabled_for_agent", new_callable=AsyncMock)
     @patch("app.api.mcp.endpoint._memory_manager_for_agent", new_callable=AsyncMock)
     @patch("app.services.connect.get_connect_service")
     def test_e2e_legitimate_webui_and_connect_token_passes(

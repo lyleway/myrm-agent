@@ -9,12 +9,13 @@
 - app.services.external_agents.accounts::agent_home (POS: The home an external agent's CLI is run in)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
 - app.config.settings::settings (POS: Gateway wall-clock ceiling that bounds a delegated turn)
+- app.services.external_agents.memory_grants::memory_server_for (POS: The MCP server entry that gives an external agent the memory of a Myrm agent) [lazy]
 
 [OUTPUT]
-- _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
-- _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields (the account an agent runs as included)
+- _auth_mode / _permission_mode / _share_memory / _cfg_int / _turn_timeout: Config parsing helpers (the memory of the user is shared with an agent only when its config says ``shareMemory: true``, exactly; a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
+- _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields (the account an agent runs as included, and whose memory it is given)
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
-- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted; an agent runs in the home of its account, or in the one a deployment without subscription logins gives every agent)
+- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted; an agent runs in the home of its account, or in the one a deployment without subscription logins gives every agent; an agent that shares memory is handed the read-only memory server of the Myrm agent the pool belongs to)
 
 [POS]
 GeneralAgent 外部 Agent 配置归一化与探测装配层。确保 RuntimePool 指纹与注册字段同源，
@@ -67,6 +68,11 @@ def _permission_mode(cfg: dict[str, object]) -> PermissionMode:
         case other:
             logger.warning("Unknown external agent permissionMode %r; using 'safe'", other)
             return "safe"
+
+
+def _share_memory(cfg: dict[str, object]) -> bool:
+    """Whether the user chose to share their memory with this agent: only an explicit ``true`` counts (a consent)."""
+    return cfg.get("shareMemory") is True
 
 
 def _cfg_int(cfg: dict[str, object], key: str, default: int) -> int:
@@ -141,6 +147,7 @@ class _NormalizedRuntimeCfg:
     auth_mode: AuthMode
     max_turns: int
     description: str
+    share_memory: bool
 
 
 def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | None:
@@ -177,11 +184,21 @@ def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | No
         auth_mode=_auth_mode(cfg),
         max_turns=_cfg_int(cfg, "maxTurns", 25),
         description=str(cfg.get("description", "")),
+        share_memory=_share_memory(cfg),
     )
 
 
-def _config_fingerprint(agent_cfgs: list[dict[str, object]]) -> str:
-    """Stable hash of enabled external agent configs for pool invalidation."""
+def _memory_owner(cfg: _NormalizedRuntimeCfg, memory_agent_id: str | None) -> str | None:
+    """The Myrm agent whose memory ``cfg``'s agent is given: none unless the user shared it and the pool has an owner."""
+    return memory_agent_id if cfg.share_memory else None
+
+
+def _config_fingerprint(agent_cfgs: list[dict[str, object]], *, memory_agent_id: str | None = None) -> str:
+    """Stable hash of enabled external agent configs for pool invalidation.
+
+    ``memory_agent_id`` is the Myrm agent the pool belongs to: its memory is what an agent that shares memory is given,
+    so a pool built for another agent's memory is a different pool.
+    """
     normalized: list[dict[str, object]] = []
     for cfg in agent_cfgs:
         if not cfg.get("enabled", True):
@@ -203,6 +220,7 @@ def _config_fingerprint(agent_cfgs: list[dict[str, object]]) -> str:
                 "permissionMode": runtime_cfg.permission_mode,
                 "maxTurns": runtime_cfg.max_turns,
                 "description": runtime_cfg.description,
+                "memory": _memory_owner(runtime_cfg, memory_agent_id),
             }
         )
     normalized.sort(
@@ -266,10 +284,18 @@ def _backend_type(value: str) -> BackendType | None:
     return next((kind for kind in get_args(BackendType) if kind == value), None)
 
 
-def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, object]]) -> None:
+def _register_backends_on_pool(
+    pool: RuntimePool, agent_cfgs: list[dict[str, object]], *, memory_agent_id: str | None = None
+) -> None:
+    """Register every usable entry of ``agent_cfgs`` on ``pool``.
+
+    An agent whose config shares memory is given the read-only memory server of ``memory_agent_id``, with a credential
+    that is issued to this pool and ends with it.
+    """
     from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 
     from app.services.external_agents.accounts import agent_home
+    from app.services.external_agents.memory_grants import memory_server_for
 
     for cfg in agent_cfgs:
         if not cfg.get("enabled", True):
@@ -295,6 +321,7 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             logger.warning("Skipping external agent '%s': its account home is unusable: %s", normalized_cfg.name, exc)
             continue
 
+        memory_owner = _memory_owner(normalized_cfg, memory_agent_id)
         runtime_cfg = RuntimeConfig(
             backend_type=backend_type,
             command=normalized_cfg.command,
@@ -307,6 +334,11 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             auth_mode=normalized_cfg.auth_mode,
             max_turns=normalized_cfg.max_turns,
             description=normalized_cfg.description,
+            mcp_servers=(
+                (memory_server_for(pool, agent_id=memory_owner, external_agent=normalized_cfg.name),)
+                if memory_owner is not None
+                else ()
+            ),
         )
         pool.register(normalized_cfg.name, runtime_cfg)
         logger.info("Registered external agent: %s (%s)", normalized_cfg.name, backend_type)

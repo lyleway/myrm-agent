@@ -5,6 +5,7 @@
 - myrm_agent_harness.toolkits.acp.types (POS: 外部 Agent 委托协议：运行时事件、错误码、委托池)
 - myrm_agent_harness.toolkits.acp.auth::profile_for (POS: 外部 Agent 的认证档案；API Key 模式读取的环境变量名)
 - app.services.external_agents.delegation.errors::delegate_error_event (POS: 直连委托失败的用户指引)
+- app.services.external_agents.memory_grants::MEMORY_SERVER_NAME, memory_connected (POS: 外部 Agent 的只读记忆凭据，及它有没有连上记忆)
 
 [OUTPUT]
 - stream_direct_delegate: harness RuntimeEvent 流 → 前端 SSE 事件流
@@ -12,8 +13,8 @@
 [POS]
 绕过 LangChain Agent 的外部 Agent 直连路由的事件翻译层。每次外部工具调用是一个带 tool_call_id 的独立步骤
 （开始与结果落在同一步）。状态步骤的措辞由前端按当前语言给出，这里只带 CLI 自己给的内容（已运行时长、CLI 的
-警告原文）；会话没有被续接、图片没有直接交给外部 Agent、回合在中途结束（停在轮数上限、输出被截断、Agent 拒绝继续），
-都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
+警告原文）；会话没有被续接、图片没有直接交给外部 Agent、记忆没有交到外部 Agent 手里（它不支持，或宿主给了它却始终没连上）、
+回合在中途结束（停在轮数上限、输出被截断、Agent 拒绝继续），都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
 终止外部进程，外部 Agent 静默时同样即时生效。失败时：用户能自己处置的（未登录、未安装、超时）给带处置步骤的
 错误事件（API Key 被拒时点名该 Agent 读取的环境变量），CLI 的原话改记 WARNING 日志（脱敏并截断）；其余保持 CLI 的原话。
 """
@@ -29,6 +30,7 @@ from myrm_agent_harness.api import AgentEventType, on_token_cancelled, redact_se
 from myrm_agent_harness.toolkits.acp.auth import profile_for
 from myrm_agent_harness.toolkits.acp.types import (
     IMAGES_NOT_SENT_STATUS,
+    MCP_NOT_ATTACHED_STATUS,
     AcpError,
     AcpErrorCode,
     ContinuityStatus,
@@ -37,6 +39,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 
 from app.services.external_agents.delegation.errors import delegate_error_event
+from app.services.external_agents.memory_grants import MEMORY_SERVER_NAME, memory_connected
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Mapping
@@ -56,6 +59,10 @@ _MAX_LOGGED_FAILURE_CHARS = 500
 # Statuses whose message the CLI itself supplies and the user can read as is: how long a silent turn has run, and
 # the CLI's own warning. Every other status (``starting``, ...) is only the step's running state.
 _STATUSES_WITH_BODY = frozenset({"working", "warning"})
+
+# Said of an agent that was handed the user's memory and never connected to it: only the server it connects to can
+# see that, so it is checked when the turn ends.
+_MEMORY_NOT_CONNECTED = "mcp_not_connected"
 
 
 class _Outcome(StrEnum):
@@ -89,6 +96,8 @@ class _TurnTranslator:
         self._source = f"delegate:{agent_name}"
         self._tool_lines: dict[str, str] = {}
         self.outcome = _Outcome.COMPLETED
+        # True once the turn said the user's memory was not handed to the agent (the user is told once, there).
+        self.memory_withheld = False
 
     def connecting(self) -> SseEvent:
         return self._status_step()
@@ -124,16 +133,17 @@ class _TurnTranslator:
             case _:
                 return []
 
-    def closing(self) -> list[SseEvent]:
-        """The final status line and the end of the message (a cancelled turn has neither)."""
+    def closing(self, *, memory_not_connected: bool = False) -> list[SseEvent]:
+        """The final status line, what the turn has still to say, and the end of the message (a cancelled turn has none)."""
         end: SseEvent = {"type": AgentEventType.MESSAGE_END.value, "data": ""}
+        unconnected = [self._notice(_MEMORY_NOT_CONNECTED)] if memory_not_connected else []
         match self.outcome:
             case _Outcome.TURN_LIMIT:
-                return [self._status_step(state="completed"), self._notice("turn_limit"), end]
+                return [self._status_step(state="completed"), self._notice("turn_limit"), *unconnected, end]
             case _Outcome.FAILED:
                 return [self._status_step(state="error"), end]
             case _:
-                return [self._status_step(state="completed"), end]
+                return [self._status_step(state="completed"), *unconnected, end]
 
     def _status_step(self, text: str = "", *, state: str | None = None) -> SseEvent:
         """The delegation's status line. The frontend words its title; ``text`` is only what the CLI itself said."""
@@ -199,6 +209,13 @@ class _TurnTranslator:
             return self._notice(continuity)
         if status == IMAGES_NOT_SENT_STATUS:
             return self._notice(status)
+        if status == MCP_NOT_ATTACHED_STATUS:
+            # The sentence is about the user's memory, so only the memory server being withheld is worth saying.
+            servers = data.get("servers")
+            if isinstance(servers, list) and MEMORY_SERVER_NAME in servers:
+                self.memory_withheld = True
+                return self._notice(status)
+            return self._status_step()
         message = data.get("message")
         if status in _STATUSES_WITH_BODY and isinstance(message, str):
             return self._status_step(message)
@@ -316,5 +333,10 @@ async def stream_direct_delegate(
     if turn.outcome is _Outcome.CANCELLED or (cancel_token is not None and cancel_token.is_cancelled):
         yield {"type": AgentEventType.CANCELLED.value}
         return
-    for sse_event in turn.closing():
+    # A failed turn shows its own error, and a turn that already said the memory was withheld has said it. Only an agent
+    # that was handed the memory and never connected is reported here; the short wait is paid by that agent alone.
+    memory_not_connected = (
+        turn.outcome is not _Outcome.FAILED and not turn.memory_withheld and await memory_connected(config) is False
+    )
+    for sse_event in turn.closing(memory_not_connected=memory_not_connected):
         yield sse_event

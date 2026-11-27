@@ -14,9 +14,9 @@ from acp.schema import McpServerStdio
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabilities
 from myrm_agent_harness.toolkits.acp.runtime.acp.sessions import AgentSessions, acp_mcp_servers
-from myrm_agent_harness.toolkits.acp.runtime.mcp_status import MCP_NOT_ATTACHED_STATUS
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
+    MCP_NOT_ATTACHED_STATUS,
     CliSessionRecord,
     PermissionBroker,
     PermissionRequest,

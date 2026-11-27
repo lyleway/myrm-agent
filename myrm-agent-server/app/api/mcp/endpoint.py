@@ -4,6 +4,10 @@
 - myrm_agent_harness.toolkits.memory.agent_surface.mcp_server::MemoryMCPServer (POS: MCP server adapter that lets external AI agents access the memory system via standard MCP protocol)
 - myrm_agent_harness.toolkits.wiki.mcp_server::register_wiki_mcp_tools (POS: MCP adapter exposing wiki knowledge base tools to external agents)
 - app.services.connect::get_connect_service (POS: Token verification)
+- app.services.external_agents.memory_grants::get_memory_grants (POS: The memory credentials of delegated external agents) [lazy]
+- app.api.mcp.delegation_scope::read_only_request, readable_only, require_readable (POS: The write guard of a delegated agent's credential)
+- app.api.mcp.desktop_scope::desktop_session_for_agent, is_desktop_control_enabled_for_agent, set_request_desktop_enabled (POS: Desktop control tools on the endpoint)
+- app.api.mcp.wiki_scope::wiki_boundary_enabled_for_agent, wiki_tools_for_agent (POS: Wiki on the endpoint: the profile's flag and its tool bundle)
 - app.core.memory.adapters.setup::create_memory_manager, resolve_context_binding (POS: MemoryManager factory)
 
 [OUTPUT]
@@ -13,7 +17,9 @@
 [POS]
 Exposes the memory system and wiki knowledge base as a stateless Streamable HTTP
 MCP endpoint that external agents (Claude Code, Cursor, etc.) can connect to.
-Each Bearer token carries an agent_id; middleware dynamically binds the
+Each Bearer token carries an agent_id: a Connect token (an external client the user connected, full tool set) or a
+delegation credential (an external agent Myrm itself delegated to, which only reads: its listing and its calls are
+held to the read-only tools). Middleware dynamically binds the
 MemoryManager and the wiki tool bundle to the target Agent Profile + SharedContext
 via ContextVar, and sets wiki boundary rejection for memory_store when the agent
 profile enables wiki. Wiki tools are visible only when the profile enables wiki;
@@ -34,120 +40,35 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.api.mcp.delegation_scope import read_only_request, readable_only, require_readable
+from app.api.mcp.desktop_scope import (
+    clear_mcp_desktop_sessions,
+    desktop_session_for_agent,
+    get_request_desktop_enabled,
+    is_desktop_control_enabled_for_agent,
+    reset_request_desktop_enabled,
+    set_request_desktop_enabled,
+)
+from app.api.mcp.wiki_scope import wiki_boundary_enabled_for_agent, wiki_tools_for_agent
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fastapi import FastAPI
-    from langchain_core.tools import BaseTool
-    from mcp.types import Tool
-    from myrm_agent_harness.toolkits.computer_use.desktop_session import DesktopSession
+    from mcp.server.mcpserver import Context
+    from mcp.types import CallToolResult, InputRequiredResult, Tool
     from myrm_agent_harness.toolkits.memory.manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
 _session_manager_task: asyncio.Task[None] | None = None
 _session_manager_ready = asyncio.Event()
-_mcp_desktop_sessions: dict[str, DesktopSession] = {}
-
-_request_desktop_enabled: ContextVar[bool] = ContextVar(
-    "myrm_mcp_request_desktop_enabled",
-    default=False,
-)
-
-
-def set_request_desktop_enabled(enabled: bool) -> Token[bool]:
-    """Bind whether desktop tools are exposed for the current MCP request."""
-    return _request_desktop_enabled.set(enabled)
-
-
-def reset_request_desktop_enabled(token: Token[bool]) -> None:
-    """Restore previous desktop tools exposed flag."""
-    _request_desktop_enabled.reset(token)
-
-
-def get_request_desktop_enabled() -> bool:
-    """Return whether desktop tools are exposed for the current MCP request."""
-    return _request_desktop_enabled.get()
-
-
-def clear_mcp_desktop_sessions() -> None:
-    """Clear cached external MCP desktop sessions (used in testing and shutdown)."""
-    global _mcp_desktop_sessions
-    _mcp_desktop_sessions.clear()
-
-
-async def _wiki_boundary_enabled_for_agent(agent_id: str) -> bool:
-    from app.services.agent.profile.profile_resolver import (
-        get_agent_profile_resolver,
-        resolve_builtin_tool_flags,
-    )
-
-    resolved = await get_agent_profile_resolver().resolve(agent_id)
-    if resolved is None:
-        return False
-    flags = resolve_builtin_tool_flags(resolved.enabled_builtin_tools)
-    return bool(flags["enable_wiki"])
-
-
-async def _is_desktop_control_enabled_for_agent(agent_id: str) -> bool:
-    try:
-        from app.config.computer_use_deploy import is_computer_use_deploy_supported
-
-        if not is_computer_use_deploy_supported():
-            return False
-        from app.services.agent.profile.profile_resolver import (
-            get_agent_profile_resolver,
-            resolve_builtin_tool_flags,
-        )
-
-        resolved = await get_agent_profile_resolver().resolve(agent_id)
-        if resolved is None:
-            return False
-        flags = resolve_builtin_tool_flags(resolved.enabled_builtin_tools)
-        return bool(flags.get("enable_computer_use"))
-    except Exception as exc:
-        logger.debug("Desktop control check failed for agent=%s: %s", agent_id, exc)
-        return False
-
-
-def _desktop_session_for_agent(agent_id: str) -> DesktopSession | None:
-    try:
-        from app.services.agent.gateway import get_agent_gateway
-
-        gateway = get_agent_gateway()
-        active_session = gateway.get_active_desktop_session()
-        if active_session is not None and hasattr(active_session, "desktop_snapshot"):
-            return active_session
-    except Exception:
-        pass
-
-    global _mcp_desktop_sessions
-    if agent_id not in _mcp_desktop_sessions:
-        try:
-            from myrm_agent_harness.toolkits.computer_use import create_desktop_session
-            from myrm_agent_harness.toolkits.computer_use.types import (
-                ComputerUseConfig,
-                ExecutionMode,
-            )
-
-            from app.ai_agents.desktop_control.gate import DesktopControlGate
-            from app.config.computer_use_deploy import is_computer_use_deploy_supported
-            from app.config.deploy_mode import is_local_mode, is_sandbox
-
-            auto_grant = is_sandbox() and is_computer_use_deploy_supported() and not is_local_mode()
-            execution_mode = ExecutionMode.background_strict if is_local_mode() else ExecutionMode.background_best_effort
-            gate = DesktopControlGate(workspace_root=None, auto_grant=auto_grant)
-            config = ComputerUseConfig(execution_mode=execution_mode)
-            _mcp_desktop_sessions[agent_id] = create_desktop_session(config=config, permission_callback=gate)
-        except Exception as exc:
-            logger.warning("Failed to create MCP desktop session for agent=%s: %s", agent_id, exc)
-            return None
-    return _mcp_desktop_sessions.get(agent_id)
 
 
 async def _memory_manager_for_agent(agent_id: str) -> MemoryManager:
@@ -177,87 +98,12 @@ async def _memory_manager_for_agent(agent_id: str) -> MemoryManager:
     )
 
 
-async def _wiki_tools_for_agent(agent_id: str, *, wiki_enabled: bool) -> dict[str, BaseTool] | None:
-    """Build the wiki tool bundle for an agent (None when wiki is not enabled).
-
-    Uses the same vault resolution functions and engine factories as the
-    in-process agent path (factory.py wiki_base_dir wiring) so scope isolation
-    is identical for external MCP callers. Construction failures degrade to
-    None (tools hidden for that request) instead of failing the request.
-    """
-    if not wiki_enabled:
-        return None
-    try:
-        from myrm_agent_harness.toolkits.wiki import (
-            WikiCompiler,
-            WikiConfig,
-            WikiQueryEngine,
-            WikiStructure,
-            create_wiki_agent_tools,
-        )
-        from myrm_agent_harness.toolkits.wiki.retrieval.indexer import WikiIndexer
-
-        from app.services.agent.platform_config import load_platform_llm
-        from app.services.memory.shared_context.shared_context import (
-            resolve_shared_context_ids,
-        )
-        from app.services.wiki.vault import (
-            resolve_agent_wiki_vault_path,
-            resolve_shared_wiki_vault_labels,
-            resolve_shared_wiki_vault_paths,
-        )
-
-        shared_context_ids = await resolve_shared_context_ids(agent_id=agent_id)
-        structure = WikiStructure(
-            resolve_agent_wiki_vault_path(agent_id),
-            public_dirs=[str(p) for p in resolve_shared_wiki_vault_paths(shared_context_ids)],
-            public_dir_labels=resolve_shared_wiki_vault_labels(shared_context_ids),
-        )
-        structure.ensure_structure()
-        config = WikiConfig()
-        llm = await load_platform_llm()
-        # Same vault, same naming system: route MCP-ingested concepts through
-        # the same four-dimension extract prompt the in-process memory→wiki
-        # archive path uses, so concepts ingested from either surface converge
-        # on identical names (cross-document mention aggregation depends on
-        # it) instead of forking the vault taxonomy per surface.
-        from myrm_agent_harness.toolkits.wiki.core.config import WikiCompileConfig
-
-        from app.services.wiki.daily_review.prompts import FOUR_DIMENSION_EXTRACT_PROMPT
-
-        # Shared indexer so compilation writes the same FTS5 index the query
-        # engine reads — mirrors the in-process agent path (memory_to_wiki
-        # indexer wiring). Without it, MCP ingest compiles concepts but never
-        # indexes them, so queries keep refusing with "no verified basis".
-        indexer = WikiIndexer(structure, config)
-        compiler = WikiCompiler(
-            llm,
-            structure,
-            config,
-            compile_config=WikiCompileConfig(
-                extract_concepts_prompt_template=FOUR_DIMENSION_EXTRACT_PROMPT,
-            ),
-            indexer=indexer,
-        )
-        query_engine = WikiQueryEngine(llm, structure, config, indexer=indexer)
-        tools = create_wiki_agent_tools(
-            compiler,
-            query_engine,
-            structure,
-            wiki_scope_id=agent_id,
-        )
-        return {t.name: t for t in tools}
-    except Exception as exc:
-        logger.warning(
-            "Wiki tools unavailable for MCP agent=%s: %s",
-            agent_id,
-            exc,
-        )
-        return None
-
-
 class _MCPTokenAuthMiddleware:
-    """ASGI middleware validating Bearer tokens for MCP requests."""
+    """ASGI middleware validating Bearer tokens for MCP requests.
+
+    A Connect token opens the whole endpoint to the client the user connected. A delegation credential opens the
+    memory of the agent it was issued for, read only, to the external agent Myrm delegated a turn to.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -280,6 +126,19 @@ class _MCPTokenAuthMiddleware:
 
         token = auth_header[7:]
         from app.services.connect import get_connect_service
+        from app.services.external_agents.memory_grants import get_memory_grants
+
+        grant = get_memory_grants().resolve(token)
+        if grant is not None:
+            await self._serve(
+                scope,
+                receive,
+                send,
+                label=f"delegation:{grant.external_agent}",
+                agent_id=grant.agent_id,
+                read_only=True,
+            )
+            return
 
         service = get_connect_service()
         resolved = service.resolve_token(token)
@@ -291,6 +150,29 @@ class _MCPTokenAuthMiddleware:
             await response(scope, receive, send)
             return
 
+        await self._serve(
+            scope,
+            receive,
+            send,
+            label=resolved.profile_id,
+            agent_id=resolved.agent_id,
+            expose_desktop=getattr(resolved, "expose_desktop", False),
+            on_ready=lambda: service.mark_ready(resolved.profile_id),
+        )
+
+    async def _serve(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        *,
+        label: str,
+        agent_id: str,
+        read_only: bool = False,
+        expose_desktop: bool = False,
+        on_ready: Callable[[], None] | None = None,
+    ) -> None:
+        """Run the MCP app with the memory, wiki and desktop scope of ``agent_id`` bound to this request."""
         from myrm_agent_harness.toolkits.memory.agent_surface.mcp_server import (
             reset_request_memory_manager,
             reset_request_wiki_boundary_enabled,
@@ -303,8 +185,8 @@ class _MCPTokenAuthMiddleware:
         )
 
         scope["state"] = scope.get("state", {})
-        scope["state"]["mcp_profile_id"] = resolved.profile_id
-        scope["state"]["mcp_agent_id"] = resolved.agent_id
+        scope["state"]["mcp_profile_id"] = label
+        scope["state"]["mcp_agent_id"] = agent_id
 
         ctx_token = None
         wiki_token = None
@@ -312,31 +194,35 @@ class _MCPTokenAuthMiddleware:
         desktop_token = None
         desktop_enabled_token = None
         try:
-            manager = await _memory_manager_for_agent(resolved.agent_id)
+            manager = await _memory_manager_for_agent(agent_id)
             ctx_token = set_request_memory_manager(manager)
-            wiki_enabled = await _wiki_boundary_enabled_for_agent(resolved.agent_id)
+            wiki_enabled = await wiki_boundary_enabled_for_agent(agent_id)
             wiki_token = set_request_wiki_boundary_enabled(wiki_enabled)
-            wiki_tools_token = set_request_wiki_tools(await _wiki_tools_for_agent(resolved.agent_id, wiki_enabled=wiki_enabled))
+            wiki_tools_token = set_request_wiki_tools(
+                await wiki_tools_for_agent(agent_id, wiki_enabled=wiki_enabled, read_only=read_only)
+            )
 
             from myrm_agent_harness.toolkits.computer_use.mcp_server import (
                 reset_request_desktop_session,
                 set_request_desktop_session,
             )
 
-            desktop_eligible = await _is_desktop_control_enabled_for_agent(resolved.agent_id)
-            allow_desktop = desktop_eligible and getattr(resolved, "expose_desktop", False)
+            desktop_eligible = await is_desktop_control_enabled_for_agent(agent_id)
+            allow_desktop = desktop_eligible and expose_desktop
             desktop_enabled_token = set_request_desktop_enabled(allow_desktop)
             if allow_desktop:
-                desktop_session = _desktop_session_for_agent(resolved.agent_id)
+                desktop_session = desktop_session_for_agent(agent_id)
                 desktop_token = set_request_desktop_session(desktop_session)
 
-            service.mark_ready(resolved.profile_id)
-            await self.app(scope, receive, send)
+            if on_ready is not None:
+                on_ready()
+            with read_only_request(read_only):
+                await self.app(scope, receive, send)
         except Exception:
             logger.exception(
                 "MCP scope resolution failed for profile=%s agent=%s",
-                resolved.profile_id,
-                resolved.agent_id,
+                label,
+                agent_id,
             )
             response = JSONResponse(
                 {"error": "Memory scope unavailable"},
@@ -386,6 +272,7 @@ async def setup_mcp_endpoint(app: FastAPI) -> None:
         register_wiki_mcp_tools(mcp_server.mcp, get_request_wiki_tools)
 
         orig_list_tools = mcp_server.mcp.list_tools
+        orig_call_tool = mcp_server.mcp.call_tool
 
         async def _filtered_list_tools() -> list[Tool]:
             tools = await orig_list_tools()
@@ -393,11 +280,21 @@ async def setup_mcp_endpoint(app: FastAPI) -> None:
                 tools = [t for t in tools if not getattr(t, "name", "").startswith("desktop_")]
             if get_request_wiki_tools() is None:
                 tools = [t for t in tools if not getattr(t, "name", "").startswith("wiki_")]
-            return tools
+            return readable_only(tools)
+
+        async def _guarded_call_tool(
+            name: str,
+            arguments: dict[str, object],
+            context: Context[object, object] | None = None,
+        ) -> CallToolResult | InputRequiredResult:
+            # A client can call a tool it was never listed, so hiding it from the listing is not the guard.
+            require_readable(name)
+            return await orig_call_tool(name, arguments, context)
 
         from mcp.server.transport_security import TransportSecuritySettings
 
         mcp_server.mcp.list_tools = _filtered_list_tools  # type: ignore[method-assign]
+        mcp_server.mcp.call_tool = _guarded_call_tool  # type: ignore[method-assign]
         mcp_asgi_app = mcp_server.get_streamable_http_app(
             streamable_http_path="/",
             transport_security=TransportSecuritySettings(

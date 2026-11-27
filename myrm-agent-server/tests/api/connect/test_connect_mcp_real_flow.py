@@ -19,8 +19,8 @@ from fastapi.testclient import TestClient
 from myrm_agent_harness.toolkits.computer_use.desktop_session import DesktopSession
 
 from app.api.connect.router import router as connect_router
+from app.api.mcp.desktop_scope import clear_mcp_desktop_sessions
 from app.api.mcp.endpoint import (
-    clear_mcp_desktop_sessions,
     setup_mcp_endpoint,
     shutdown_mcp_endpoint,
 )
@@ -103,7 +103,7 @@ async def test_connect_wizard_and_mcp_desktop_flow(tmp_path: Path) -> None:
             return_value=True,
         ),
         patch(
-            "app.api.mcp.endpoint._desktop_session_for_agent",
+            "app.api.mcp.endpoint.desktop_session_for_agent",
             return_value=mock_desktop_session,
         ),
     ):

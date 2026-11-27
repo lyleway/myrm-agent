@@ -16,6 +16,7 @@ depend on this module.
 - ContinuityStatus: status_update statuses for an agent conversation that could not be continued
 - StopReason: how an agent ended a turn (the ``stop_reason`` of ``done``), in the vocabulary of ACP, and the notice each unfinished ending earns
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
+- MCP_NOT_ATTACHED_STATUS, mcp_not_attached_event: the status_update naming the MCP servers a host offered a turn that the agent was not given
 - BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
 - RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace; the home of a named account is)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
@@ -130,6 +131,12 @@ _STOP_NOTICES: dict[StopReason, str] = {
 # The ``status_update`` status of a turn whose images were not handed to the agent (its backend or the agent itself
 # takes none); the agent still has the image's location in the prompt.
 IMAGES_NOT_SENT_STATUS = "images_not_sent"
+
+# The ``status_update`` status of a turn that ran without MCP servers its host offered: an ACP agent without
+# ``mcpCapabilities.http`` cannot connect to an HTTP server, and a CLI that is not Claude Code reads no MCP
+# configuration. The update names the servers, so a host tells its user instead of letting an answer silently
+# lack what the server would have given.
+MCP_NOT_ATTACHED_STATUS = "mcp_not_attached"
 
 # ``safe``: the agent reads freely and asks before anything else (an edit, a command, a download); where nobody can
 # answer it, it may only read. ``allow_all``: the agent acts without asking.
@@ -396,3 +403,10 @@ def create_event(
 def images_not_sent_event(session_id: str, images: int) -> RuntimeEvent:
     """The notice that the ``images`` image files of a turn were not handed to the agent."""
     return create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=IMAGES_NOT_SENT_STATUS, images=images)
+
+
+def mcp_not_attached_event(session_id: str, servers: Sequence[str]) -> RuntimeEvent:
+    """The notice that the MCP servers named ``servers`` were not handed to the agent."""
+    return create_event(
+        RuntimeEventType.STATUS_UPDATE, session_id, status=MCP_NOT_ATTACHED_STATUS, servers=list(servers)
+    )

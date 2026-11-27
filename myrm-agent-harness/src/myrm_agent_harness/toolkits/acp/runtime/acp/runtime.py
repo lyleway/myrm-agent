@@ -5,8 +5,7 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
 - toolkits.acp.mcp_servers::McpServerConfig, read_only_names (POS: The MCP servers a host hands a delegated agent)
-- toolkits.acp.runtime.mcp_status::mcp_not_attached_event (POS: The status update naming the MCP servers an agent was not given)
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, PermissionBroker, images_not_sent_event, mcp_not_attached_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
 - toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
@@ -68,7 +67,6 @@ from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabi
 from myrm_agent_harness.toolkits.acp.runtime.acp.sessions import AUTH_REQUIRED_CODE, AgentSessions, OpenedSession
 from myrm_agent_harness.toolkits.acp.runtime.acp.stalled_agent import cancel_session, leave_transport
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock, load_image_blocks
-from myrm_agent_harness.toolkits.acp.runtime.mcp_status import mcp_not_attached_event
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -81,6 +79,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     create_event,
     images_not_sent_event,
+    mcp_not_attached_event,
 )
 
 if TYPE_CHECKING:

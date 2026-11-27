@@ -7,8 +7,7 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 [INPUT]
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
 - toolkits.acp.mcp_servers::McpServerConfig (POS: The MCP servers a host hands a delegated agent)
-- toolkits.acp.runtime.mcp_status::mcp_not_attached_event (POS: The status update naming the MCP servers an agent was not given)
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus, StopReason (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus, StopReason, mcp_not_attached_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 - toolkits.acp.runtime.cli.permission_bridge::PermissionBridge (POS: Loopback MCP endpoint through which Claude Code puts its permission prompts to the host)
@@ -50,7 +49,6 @@ from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import load_image_blocks
-from myrm_agent_harness.toolkits.acp.runtime.mcp_status import mcp_not_attached_event
 from myrm_agent_harness.toolkits.acp.runtime.process import ManagedProcess, ProcessLaunchError, spawn_managed_process
 from myrm_agent_harness.toolkits.acp.runtime.session_book import CliSessionBook
 from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
@@ -67,6 +65,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     StopReason,
     create_event,
+    mcp_not_attached_event,
 )
 
 if TYPE_CHECKING:

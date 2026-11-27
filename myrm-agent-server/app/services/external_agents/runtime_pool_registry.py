@@ -2,12 +2,13 @@
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.runtime.pool::RuntimePool (POS: runtime pool management layer)
+- app.services.external_agents.memory_grants::get_memory_grants (POS: The memory credentials of delegated agents, each valid as long as its pool)
 
 [OUTPUT]
 - ChatRuntimePoolRegistry: reuse RuntimePool per conversation for CLI --resume across messages
 - ChatScopedRuntimePoolFacade: the DelegationPool a chat's delegation entries share; counts its turns as in flight and keeps its pool registered
 - get_chat_runtime_pool_registry(): process-wide singleton accessor
-- close_runtime_pool_bounded(): close a RuntimePool within a hard time limit, never raising
+- close_runtime_pool_bounded(): revoke a RuntimePool's memory credentials, then close it within a hard time limit, never raising
 
 [POS]
 Server 业务层外部 Agent 运行时池生命周期。按 chat 复用 harness RuntimePool；同一后端（agent + 工作区）的 turn 由 RuntimePool 串行，
@@ -18,6 +19,7 @@ idle 超时只释放池里的常驻进程（ACP），池本身与 CLI 后端的 
 关闭后仍握着该池的旧 facade 再委托时，已关闭的 RuntimePool 会懒重建后端；facade 每个委托 turn 先
 ensure_tracked 把池重新登记，这些后端才会被 close_chat / close_all 收尾而不是变成孤儿进程。
 所有 pool 关闭 / 释放都带上限（_bounded），失联的外部 agent 不会拖死持锁的 registry。
+池一关闭，它发给外部 agent 的记忆凭据随即作废（idle 释放不关池，凭据不受影响）；关闭后被重新登记的旧池里的 agent 连不上记忆，回合末会如实告知用户。
 """
 
 from __future__ import annotations
@@ -29,6 +31,8 @@ from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
+
+from app.services.external_agents.memory_grants import get_memory_grants
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
@@ -74,7 +78,11 @@ async def _bounded(operation: Callable[[], Awaitable[None]], *, action: str, sco
 
 
 async def close_runtime_pool_bounded(pool: RuntimePool, *, scope: str) -> None:
-    """Close a pool within the teardown bound (``RuntimePool.close_all`` has none of its own)."""
+    """Close a pool within the teardown bound (``RuntimePool.close_all`` has none of its own).
+
+    The pool's memory credentials end first: whatever it ran must not reach the user's memory while it is closing.
+    """
+    get_memory_grants().revoke(pool)
     await _bounded(pool.close_all, action="close", scope=scope)
 
 

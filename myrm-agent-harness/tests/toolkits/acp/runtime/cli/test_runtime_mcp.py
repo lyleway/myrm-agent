@@ -13,8 +13,8 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
-from myrm_agent_harness.toolkits.acp.runtime.mcp_status import MCP_NOT_ATTACHED_STATUS
 from myrm_agent_harness.toolkits.acp.types import (
+    MCP_NOT_ATTACHED_STATUS,
     PermissionBroker,
     PermissionRequest,
     PermissionVerdict,
