@@ -188,6 +188,41 @@ async def test_the_pipeline_persist_stores_the_summary_when_another_writer_commi
 
 
 @pytest.mark.asyncio
+async def test_the_pipeline_persist_stores_a_summary_handed_over_as_plain_text(policy_db: PolicyDb, chat_id: str) -> None:
+    await _seed_chat(policy_db, chat_id)
+
+    with patch("app.services.chat.compact.persist.ConversationRecallIndexService.rebuild_chat", AsyncMock()):
+        await persist_compaction(chat_id, _SUMMARY, f"msg-{chat_id}-{_MESSAGES - 1}", 100)
+
+    assert (await _stored_chat(policy_db, chat_id)).compacted_summary == _SUMMARY
+
+
+@pytest.mark.asyncio
+async def test_the_pipeline_persist_stores_nothing_for_a_boundary_that_is_no_longer_an_active_message(
+    policy_db: PolicyDb, chat_id: str
+) -> None:
+    await _seed_chat(policy_db, chat_id)
+
+    await persist_compaction(chat_id, _SUMMARY, f"msg-{chat_id}-gone", 100)
+
+    stored = await _stored_chat(policy_db, chat_id)
+    assert (stored.compacted_summary, stored.compacted_before_id) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_pipeline_persist_is_logged_and_does_not_reach_the_turn(
+    policy_db: PolicyDb, chat_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    await _seed_chat(policy_db, chat_id)
+
+    with patch("app.services.chat.compact.persist.do_persist_to_db", AsyncMock(side_effect=RuntimeError("database down"))):
+        await persist_compaction(chat_id, _SUMMARY, f"msg-{chat_id}-{_MESSAGES - 1}", 100)
+
+    assert (await _stored_chat(policy_db, chat_id)).compacted_summary is None
+    assert "Unexpected error" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_a_finished_compaction_stores_its_streak_and_leaves_nothing_pending_on_the_session(
     policy_db: PolicyDb, chat_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -10,6 +10,7 @@ running total of saved tokens is measured as ``compact_chat`` measures it, so a 
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -17,7 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from myrm_agent_harness.utils.text_utils import get_token_count
 from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
 from sqlalchemy import select, update
@@ -26,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.dto import MessageDTO
 from app.database.models import Chat
 from app.database.repositories.chat_repo import ChatRepository
-from app.services.chat.chat_compaction import _ChatCompactionMixin
+from app.services.chat.chat_compaction import _ChatCompactionMixin, _to_langchain
 from tests.support.privacy_wire import wire_llm
 
 CHAT_ID = "chat-drain"
@@ -60,9 +61,9 @@ def _model_run(llm: object, archive: AsyncMock) -> Iterator[None]:
 LONG_AGO = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
 
 
-def _row(row_id: str, role: str, content: str, second: int) -> SimpleNamespace:
+def _row(row_id: str, role: str, content: str, second: int, extra_data: dict[str, str] | None = None) -> SimpleNamespace:
     return SimpleNamespace(
-        id=row_id, role=role, content=content, extra_data=None, created_at=LONG_AGO + timedelta(seconds=second)
+        id=row_id, role=role, content=content, extra_data=extra_data, created_at=LONG_AGO + timedelta(seconds=second)
     )
 
 
@@ -76,7 +77,8 @@ class _Run:
         self.archive = AsyncMock(side_effect=self._archive)
         self.boundary_removed = False
         self.rows = [_row("m1", "user", "question", 0), _row(SNAPSHOT_ID, "assistant", "answer", 1)]
-        self.newest = self.rows[-1]
+        self.newest: SimpleNamespace | None = self.rows[-1]
+        self.chat: SimpleNamespace | None = SimpleNamespace(compacted_before_id=None, compacted_summary=None)
 
     async def _persist(self, *_args: object) -> str:
         self.calls.append("persist")
@@ -95,7 +97,7 @@ def run() -> Iterator[_Run]:
     drain = _Run(sent)
     repo = SimpleNamespace(
         get_latest_message=AsyncMock(side_effect=lambda _chat_id: drain.newest),
-        get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None, compacted_summary=None)),
+        get_chat_by_id=AsyncMock(side_effect=lambda _chat_id, **_kwargs: drain.chat),
         get_all_messages=AsyncMock(side_effect=lambda _chat_id: drain.rows),
     )
 
@@ -160,6 +162,94 @@ async def test_rows_written_after_the_gate_stay_out_of_the_summary(run: _Run) ->
 
     assert run.persist.await_args.args[3] == SNAPSHOT_ID
     assert not any("LATER-ROW" in text for text in run.sent)
+
+
+@pytest.mark.parametrize("missing", ["message", "chat"])
+async def test_a_chat_without_a_newest_message_or_a_row_of_its_own_is_left_alone(run: _Run, missing: str) -> None:
+    setattr(run, "newest" if missing == "message" else "chat", None)
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.calls == [] and run.sent == []
+
+
+async def test_a_chat_whose_newest_row_is_still_warm_is_not_summarized(run: _Run) -> None:
+    run.newest = _row("m3", "assistant", "just now", 0)
+    run.newest.created_at = datetime.now(UTC).replace(tzinfo=None)
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.calls == [] and run.sent == [], "a warm prompt cache is not worth a summary yet"
+
+
+async def test_a_failing_archive_does_not_void_the_stored_summary(run: _Run) -> None:
+    run.archive.side_effect = RuntimeError("archive down")
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.calls == ["persist", "commit"]
+
+
+async def test_an_unexpected_failure_is_logged_and_does_not_escape(run: _Run, caplog: pytest.LogCaptureFixture) -> None:
+    run.persist.side_effect = RuntimeError("database down")
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.calls == []
+    assert "Background drain failed" in caplog.text
+
+
+class TestTheSummaryModel:
+    @staticmethod
+    def _providers() -> SimpleNamespace:
+        lite = {"primary": {"providerId": "lite-provider", "model": "lite-model"}}
+        return SimpleNamespace(providers_dict={"defaultModelConfig": {"liteModel": lite}}, personal_settings_dict={})
+
+    async def test_the_users_lite_model_summarizes_when_one_is_configured(self, run: _Run) -> None:
+        resolve = AsyncMock(return_value=SimpleNamespace(max_context_tokens=4000, api_keys=None))
+        with (
+            patch("app.core.channel_bridge.config_loader.load_user_configs", new=AsyncMock(return_value=self._providers())),
+            patch("app.services.agent.params.model_config._resolve_model_config", new=resolve),
+        ):
+            await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+        selection = resolve.await_args.args[0]
+        assert (selection.provider_id, selection.model) == ("lite-provider", "lite-model")
+        assert run.calls == ["persist", "commit", "archive"]
+
+    async def test_a_lite_model_that_cannot_be_resolved_falls_back_to_the_default_model(self, run: _Run) -> None:
+        with (
+            patch("app.core.channel_bridge.config_loader.load_user_configs", new=AsyncMock(return_value=self._providers())),
+            patch(
+                "app.services.agent.params.model_config._resolve_model_config", new=AsyncMock(side_effect=RuntimeError("no key"))
+            ),
+        ):
+            await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+        assert run.calls == ["persist", "commit", "archive"]
+
+
+class TestWhatTheSummarizerReads:
+    def test_tool_results_are_read_with_the_call_they_answer(self) -> None:
+        rows = [
+            _row("t1", "user", "question", 0),
+            _row("t2", "assistant", "calling", 1),
+            _row("t3", "tool", "result", 2, {"tool_call_id": "call-1"}),
+            _row("t4", "tool", "orphan result", 3),
+            _row("t5", "system", "not part of the conversation", 4),
+        ]
+
+        messages = _to_langchain(rows)
+
+        assert [type(message) for message in messages] == [HumanMessage, AIMessage, ToolMessage, ToolMessage]
+        assert [message.tool_call_id for message in messages if isinstance(message, ToolMessage)] == ["call-1", ""]
+
+    async def test_a_drain_scheduled_in_the_background_runs_for_its_chat(self) -> None:
+        with patch.object(_ChatCompactionMixin, "flush_compaction_debt", new=AsyncMock()) as flush:
+            _ChatCompactionMixin.schedule_background_drain(CHAT_ID)
+            await asyncio.sleep(0)
+
+        flush.assert_awaited_once_with(CHAT_ID)
 
 
 async def test_the_running_total_counts_what_the_stored_summary_did_not_already_cover(db_session: AsyncSession) -> None:

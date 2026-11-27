@@ -297,6 +297,26 @@ class TestACompactionThatPickedItsBoundaryBeforeAChange:
         assert stored == "a1"
         assert (await _compaction(db_session))[:2] == (SUMMARY, "a1")
 
+    async def test_a_newer_stored_boundary_is_kept_and_the_older_summary_is_not_written_over_it(
+        self, db_session: AsyncSession
+    ) -> None:
+        await _seed(db_session)
+        await _store_summary(db_session, _at(10))
+
+        stored = await do_persist_to_db(db_session, CHAT_ID, "OLDER SUMMARY", "a1", TOKENS_SAVED)
+
+        assert stored == "a1"
+        assert await _compaction(db_session) == (SUMMARY, "a2", _at(10), TOKENS_SAVED)
+
+    async def test_an_older_stored_boundary_is_replaced_and_the_saved_tokens_accumulate(self, db_session: AsyncSession) -> None:
+        await _seed(db_session)
+        await do_persist_to_db(db_session, CHAT_ID, "FIRST", "a1", TOKENS_SAVED)
+
+        await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "a2", TOKENS_SAVED)
+
+        summary, boundary, _written_at, saved = await _compaction(db_session)
+        assert (summary, boundary, saved) == (SUMMARY, "a2", 2 * TOKENS_SAVED)
+
     async def test_without_a_boundary_the_newest_row_is_used(self, db_session: AsyncSession) -> None:
         await _seed(db_session)
 
