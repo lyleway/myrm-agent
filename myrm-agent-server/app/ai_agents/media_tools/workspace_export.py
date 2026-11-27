@@ -17,10 +17,10 @@ as ``media://`` references that code tools cannot open. A copy (never a link) is
 cannot reach the media library's original, and a ``.gitignore`` keeps the copies out of the user's repository. The
 server writes into a folder the agent's sandbox can also write, so the folder is opened once without following a link,
 and the folder's ``.gitignore`` and every temporary file are created through that open folder: swapping its name for a
-link afterwards redirects none of them. Calls on one workspace take turns while that folder is made, so none finds a
-folder that another is still giving its rule. Names are looked up again only to see whether a copy exists, to publish a
-copy by rename and to remove a folder left empty after a failure; a swapped folder holds no temporary file for the
-rename, so nothing is published.
+link afterwards redirects none of them. Calls on one workspace within this process take turns while that folder is made,
+so none of them finds a folder that another is still giving its rule; a call in another server process is not held back.
+Names are looked up again only to see whether a copy exists, to publish a copy by rename and to remove a folder left
+empty after a failure; a swapped folder holds no temporary file for the rename, so nothing is published.
 """
 
 from __future__ import annotations
@@ -61,9 +61,9 @@ class _ExportError(Exception):
     """A media item that could not be copied; the message says why, in words meant for the model."""
 
 
-# Calls on one workspace take turns while its folder is found, made and given its ignore rule or removed again, so none
-# meets a folder that another is in the middle of. Calls on other workspaces never wait for them, and an entry vanishes
-# once nobody holds its lock.
+# Calls on one workspace within this process take turns while its folder is found, made and given its ignore rule or
+# removed again, so none meets a folder that another is in the middle of; a call in another process is not held back.
+# Calls on other workspaces never wait for them, and an entry vanishes once nobody holds its lock.
 _FOLDER_LOCKS: weakref.WeakValueDictionary[Path, threading.Lock] = weakref.WeakValueDictionary()
 _FOLDER_LOCKS_GUARD = threading.Lock()
 
@@ -77,8 +77,8 @@ def _open_folder(workspace_root: Path) -> ConfinedDirectory:
     """Open the folder of the copies, creating it with its git-ignore rule when it is absent; the caller closes it.
 
     A link in place of the folder is refused. A folder that exists is left alone, and one that could not be given
-    its ignore rule is removed again unless something else lives in it. Calls on the same workspace take turns here,
-    so none finds a folder that another is still giving its rule or removing.
+    its ignore rule is removed again unless something else lives in it. Calls on the same workspace within this process
+    take turns here, so none of them finds a folder that another is still giving its rule or removing.
     """
     with _folder_lock(workspace_root):
         try:
