@@ -28,7 +28,6 @@ from typing import Final
 from myrm_agent_harness.toolkits.code_execution.security.blacklist import (
     DANGEROUS_ENV_PREFIXES,
     DANGEROUS_ENV_VARS,
-    DANGEROUS_ENV_WILDCARDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,8 +36,6 @@ logger = logging.getLogger(__name__)
 _NORMALIZED_DANGEROUS_KEYS: Final[frozenset[str]] = frozenset(k.upper() for k in DANGEROUS_ENV_VARS)
 
 _NORMALIZED_DANGEROUS_PREFIXES: Final[tuple[str, ...]] = tuple(p.upper() for p in DANGEROUS_ENV_PREFIXES)
-
-_NORMALIZED_DANGEROUS_WILDCARDS: Final[tuple[str, ...]] = tuple(w.upper() for w in DANGEROUS_ENV_WILDCARDS)
 
 # Explicitly allowed spec-reserved variables that should never be blocked as false positives
 _RESERVED_SPEC_VARS: Final[frozenset[str]] = frozenset({"PLUGIN_ROOT", "PLUGIN_DATA"})
@@ -76,7 +73,8 @@ def is_dangerous_env_key(key: str) -> tuple[bool, str]:
         if normalized.startswith(prefix):
             return True, f"Environment variable '{key}' matches prohibited prefix '{prefix}'"
 
-    # 3. Dangerous wildcard/token match for credential vault master keys or sensitive credentials
+    # 3. A name carrying the vault master key, wherever it sits in the name. Other credential-shaped names
+    # (``GITHUB_TOKEN``, ``API_KEY``) stay allowed: an MCP server's credentials reach it through this environment.
     if "VAULT_MASTER_KEY" in normalized:
         return True, f"Environment variable '{key}' targets sensitive master key"
 
