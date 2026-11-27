@@ -9,9 +9,8 @@
 - channels.voice.handler::maybe_tts (POS: spoken reply when the inbound message was a voice message)
 - channels.types.notification::with_final_notify (POS: final-reply notification flag)
 - channels.i18n::channel_t, get_text, resolve_message_locale (POS: localized channel copy)
-- core.channel_bridge.command_session::resolve_command_session_key (POS: the conversation of the chat a message came from, as commands and turns resolve it)
+- channels.types.session::METADATA_STORED_CHAT_KEY (POS: the reply metadata key naming the stored chat a reply was produced in)
 - remote_access.mobile_deep_link::resolve_web_handoff_components (POS: channel-to-frontend deep links; the browser handoff button row of a chat)
-- services.chat.chat_service::ChatService (POS: chat business facade; channel chat lookup by session key)
 
 [OUTPUT]
 - RouterDeliveryMixin: ``_setup_message_effects`` (deferred placeholder, typing, cleanup registration), ``_deliver_agent_result`` (silent filter, web handoff button, TTS, draft review hold, placeholder edit or new message, data-plane record), ``_create_outbound_draft`` (held reply as an approval), ``_cleanup_effects``, ``_register_cleanup`` (TTL janitor closure), ``_resolve_live_placeholder_id`` and ``_attach_web_handoff``
@@ -39,6 +38,7 @@ from app.channels.routing.router_constants import (
 )
 from app.channels.routing.router_models import _CleanupEntry
 from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
     InboundMessage,
     OutboundMessage,
     ReactionLevel,
@@ -305,27 +305,22 @@ class RouterDeliveryMixin:
     ) -> OutboundMessage:
         """Append a SECONDARY "Continue in browser" button for IM channel replies.
 
-        The button links the conversation ``msg`` belongs to, resolved the way the turn and every command resolve it
-        (serving agent, reset policy, a conversation opened with ``/new``), so the deep link points to the chat the user
-        is talking in through a valid ``/{chatUUID}`` frontend route. A conversation that is not stored gets no button.
+        The button links the stored chat the reply was produced in, which its producer named in
+        ``METADATA_STORED_CHAT_KEY``: only the turn knows the conversation it ran in (the agent an alias routed it to, the
+        session a resumed approval belongs to), so the deep link points to that chat through a valid ``/{chatUUID}``
+        frontend route. A reply no stored chat produced gets no button; ``msg`` only sets the button's language.
         Failures are swallowed so the main reply is never blocked.
         """
+        stored_chat_id = (result.metadata or {}).get(METADATA_STORED_CHAT_KEY)
+        if not isinstance(stored_chat_id, str) or not stored_chat_id:
+            return result
         try:
-            from app.core.channel_bridge.command_session import resolve_command_session_key
             from app.remote_access.mobile_deep_link import resolve_web_handoff_components
-            from app.services.chat.chat_service import ChatService
 
-            chat = await ChatService.get_channel_chat_by_key(await resolve_command_session_key(msg))
-            if not chat:
-                return result
-            locale = resolve_message_locale(msg)
-            handoff_rows = await resolve_web_handoff_components(chat.id, locale=locale)
-            if not handoff_rows:
-                return result
-            return dataclasses.replace(
-                result,
-                components=result.components + handoff_rows,
-            )
+            handoff_rows = await resolve_web_handoff_components(stored_chat_id, locale=resolve_message_locale(msg))
         except Exception:
             logger.debug("Failed to attach web handoff button, skipping", exc_info=True)
             return result
+        if not handoff_rows:
+            return result
+        return dataclasses.replace(result, components=result.components + handoff_rows)

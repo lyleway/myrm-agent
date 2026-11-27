@@ -1,27 +1,52 @@
 """An unexpected executor failure replies with member-safe wording; only the owner's direct chat is told what to fix.
 
 Guests, paired members and group chats get the generic sentence for every error kind. The raw exception only
-reaches the operator log, under the reference id the reply carries.
+reaches the operator log, under the reference id the reply carries. A failure after the turn's chat was stored names that
+chat in the reply, so the browser button links it; a failure before has no chat to name.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncGenerator, Callable
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from myrm_agent_harness.api.config import ConfigIncompleteError
 from myrm_agent_harness.toolkits.llms.errors import FailoverReason, MyrmLLMError
 
 from app.channels.routing.friendly_errors import is_error_reply
-from app.channels.types import InboundMessage, OutboundMessage
+from app.channels.types import METADATA_STORED_CHAT_KEY, InboundMessage, OutboundMessage
 from app.core.channel_bridge.agent_executor.executor import ChannelAgentExecutor
 
 _EXECUTOR = "app.core.channel_bridge.agent_executor.executor"
 _CAPABILITIES = "app.channels.routing.friendly_errors.get_deployment_capabilities"
 _REF = re.compile(r" \[ref: ([0-9a-f]{8})\]$")
 _RAW = "insufficient balance: key sk-live-secret-42 for https://internal.example/v1"
+_STORED_CHAT = "chat-db-1"
+
+
+def _billing() -> MyrmLLMError:
+    return MyrmLLMError(error_code=FailoverReason.BILLING, default_msg="billing")
+
+
+def _incomplete() -> ConfigIncompleteError:
+    return ConfigIncompleteError({"en": "Set a model first."}, "no model", ["Add a model."])
+
+
+def _boom() -> RuntimeError:
+    return RuntimeError("boom")
+
+
+# One failure per branch of the executor's error handling: the exception, and who sent the message the turn answered.
+_FAILURES = [
+    pytest.param(_incomplete, "user-1", id="config-incomplete"),
+    pytest.param(_billing, "user-1", id="llm-owner"),
+    pytest.param(_billing, "guest_abc", id="llm-guest"),
+    pytest.param(_boom, "user-1", id="generic"),
+]
 
 
 def _inbound(*, is_group: bool = False) -> InboundMessage:
@@ -52,6 +77,46 @@ async def _reply(
     return replies[0]
 
 
+class _FailingAgent:
+    """An agent whose stream fails after its first event, so the turn's chat is stored by then."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def process_stream(self, **_kwargs: object) -> AsyncGenerator[dict[str, object], None]:
+        yield {"type": "message", "data": "partial"}
+        raise self._exc
+
+
+async def _reply_after_the_chat_was_stored(exc: Exception, *, user_id: str) -> OutboundMessage:
+    prep = SimpleNamespace(
+        agent=_FailingAgent(exc),
+        token_ctx=None,
+        chat_id=_STORED_CHAT,
+        session_key="telegram:dm:user-1",
+        chat_history=[],
+        query_input="hi",
+        channel_budget_key="",
+        memory_settings=None,
+        lite_model_cfg=None,
+        session_was_auto_reset=False,
+        session_policy=None,
+        params=SimpleNamespace(agent_id="main"),
+        agent_engine_params={},
+        user_timezone="UTC",
+    )
+    with (
+        patch(f"{_EXECUTOR}.prepare_channel_execution", new=AsyncMock(return_value=SimpleNamespace(pre_events=[], prep=prep))),
+        patch("app.services.agent.runtime_context.build_agent_runtime_context", new=AsyncMock(return_value={})),
+        patch(f"{_EXECUTOR}.finalize_agent_session", new=AsyncMock()),
+        patch(_CAPABILITIES, return_value=SimpleNamespace(uses_platform_budget=False)),
+    ):
+        events = [event async for event in ChannelAgentExecutor().execute_stream(_inbound(), user_id)]
+    replies = [event for event in events if isinstance(event, OutboundMessage)]
+    assert len(replies) == 1
+    return replies[0]
+
+
 @pytest.mark.asyncio
 async def test_raw_exception_never_reaches_the_chat_and_is_logged_under_the_reference(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.ERROR):
@@ -72,6 +137,25 @@ async def test_the_failure_reply_is_flagged_as_a_failed_turn() -> None:
     reply = await _reply(RuntimeError("boom"))
 
     assert is_error_reply(reply)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "user_id"), _FAILURES)
+async def test_a_turn_that_fails_in_its_stored_chat_names_that_chat(failure: Callable[[], Exception], user_id: str) -> None:
+    reply = await _reply_after_the_chat_was_stored(failure(), user_id=user_id)
+
+    assert is_error_reply(reply)
+    assert reply.metadata is not None
+    assert reply.metadata[METADATA_STORED_CHAT_KEY] == _STORED_CHAT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure", "user_id"), _FAILURES)
+async def test_a_turn_that_fails_before_it_has_a_stored_chat_names_none(failure: Callable[[], Exception], user_id: str) -> None:
+    reply = await _reply(failure(), user_id=user_id)
+
+    assert is_error_reply(reply)
+    assert METADATA_STORED_CHAT_KEY not in (reply.metadata or {})
 
 
 @pytest.mark.asyncio
