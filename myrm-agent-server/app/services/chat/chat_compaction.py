@@ -13,7 +13,8 @@
 
 [POS]
 Compaction drain 编排层。提供 compaction summary 字段更新、后台 drain 任务调度
-和冷缓存离线摘要生成（含 LLM 调用；落库走共用的 `do_persist_to_db`，期间被回退删掉的边界会令摘要作废）。
+和冷缓存离线摘要生成（含 LLM 调用；摘要截在闸门所见最新行之前的最后一条活跃消息，落库走共用的 `do_persist_to_db`，
+期间该边界被删除或被停用则摘要作废）。
 """
 
 from __future__ import annotations
@@ -86,7 +87,6 @@ class _ChatCompactionMixin(_ChatServiceBase):
                 latest_msg = await _ChatServiceBase._cr(uow).get_latest_message(chat_id)
                 if not latest_msg:
                     return
-                snapshot_id = latest_msg.id
 
                 chat = await _ChatServiceBase._cr(uow).get_chat_by_id(chat_id, load_messages=False)
                 if not chat:
@@ -97,16 +97,19 @@ class _ChatCompactionMixin(_ChatServiceBase):
                     logger.info("❄️ [Drain] Cache still hot for %s, deferring drain.", chat_id)
                     return
 
-            logger.info("❄️ [Drain] Cache is cold for %s, starting offline summarization for snapshot %s.", chat_id, snapshot_id)
-
             async with UnitOfWork() as uow:
                 all_msgs = await _ChatServiceBase._cr(uow).get_all_messages(chat_id)
 
-            target_msgs = []
-            for msg in all_msgs:
-                target_msgs.append(msg)
-                if msg.id == snapshot_id:
-                    break
+            # The newest row the gate saw can be a sibling version a switch left inactive, or a row Focus & Flush
+            # cleared. The summary covers the active rows up to it and is cut at the last of them: a row the next
+            # prompt keeps, which the shared writer accepts as a boundary.
+            gate = (latest_msg.created_at, latest_msg.id)
+            target_msgs = [msg for msg in all_msgs if (msg.created_at, msg.id) <= gate]
+            if not target_msgs:
+                logger.info("❄️ [Drain] No active message left to summarize for %s.", chat_id)
+                return
+            snapshot_id = target_msgs[-1].id
+            logger.info("❄️ [Drain] Cache is cold for %s, starting offline summarization for snapshot %s.", chat_id, snapshot_id)
 
             langchain_msgs = _to_langchain(target_msgs)
 

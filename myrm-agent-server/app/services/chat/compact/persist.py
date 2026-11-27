@@ -22,7 +22,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, cast
 
-from sqlalchemy import func, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.time_utils import as_utc
@@ -57,27 +57,25 @@ async def do_persist_to_db(
     idle drain) gets this from here, so none can forget it; the session's transaction must not have read anything yet.
 
     Raises:
-        ValueError: no boundary can be resolved, or the one given no longer exists in the chat.
+        ValueError: no boundary can be resolved, or the one given is no longer an active message of the chat.
     """
-    from sqlalchemy import desc
-
     await acquire_write_lock(db)
 
-    effective_before_id: str | None = before_message_id or None
-    if not effective_before_id:
-        result = await db.execute(
-            select(Message.id).where(Message.chat_id == chat_id).order_by(desc(Message.created_at)).limit(1)
-        )
-        effective_before_id = result.scalar_one_or_none()
-    else:
-        # A boundary the caller picked before its model call may be gone by now (a rewind or undo ran meanwhile);
-        # a summary of removed messages must not be stored.
-        boundary = await db.execute(select(Message.id).where(Message.chat_id == chat_id, Message.id == effective_before_id))
+    # The boundary must be a row the next prompt still builds on. One the caller picked before its model call may have
+    # been deleted (rewind, undo, edit) or deactivated (regenerate, sibling switch, Focus & Flush) since; that change
+    # settled the summary before this write, so only this check keeps a summary of those rows out.
+    active_rows = select(Message.id).where(Message.chat_id == chat_id, Message.is_active.is_(True))
+    if before_message_id:
+        boundary = await db.execute(active_rows.where(Message.id == before_message_id))
         if boundary.scalar_one_or_none() is None:
-            raise ValueError(f"Compaction boundary {effective_before_id} no longer exists in chat_id={chat_id}")
-
-    if not effective_before_id:
-        raise ValueError(f"Cannot resolve before_message_id for chat_id={chat_id}")
+            raise ValueError(f"Compaction boundary {before_message_id} is no longer an active message of chat_id={chat_id}")
+        effective_before_id = before_message_id
+    else:
+        newest = await db.execute(active_rows.order_by(desc(Message.created_at)).limit(1))
+        resolved = newest.scalar_one_or_none()
+        if resolved is None:
+            raise ValueError(f"Cannot resolve before_message_id for chat_id={chat_id}")
+        effective_before_id = resolved
 
     chat_result = await db.execute(select(Chat.compacted_before_id).where(Chat.id == chat_id))
     current_compacted_before_id = chat_result.scalar_one_or_none()
