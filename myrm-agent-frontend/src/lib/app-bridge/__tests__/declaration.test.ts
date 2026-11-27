@@ -5,6 +5,7 @@ import {
   declaredScope,
   isExactPublicHost,
   isSubset,
+  offeredCapabilities,
   parseDeclaration,
   resolveStatuses,
   type Declaration,
@@ -37,9 +38,10 @@ describe('parseDeclaration', () => {
     });
   });
 
-  it('only a literal true declares tray or float', () => {
-    const declaration = parseDeclaration(declare('{"tray": "yes", "float": 1}'));
-    expect([declaration.tray, declaration.float]).toEqual([false, false]);
+  it('only a literal true declares tray, float or ai', () => {
+    const declaration = parseDeclaration(declare('{"tray": "yes", "float": 1, "ai": "true"}'));
+    expect([declaration.tray, declaration.float, declaration.ai]).toEqual([false, false, false]);
+    expect(parseDeclaration(declare('{"ai": true}'))).toEqual({ ...EMPTY_DECLARATION, ai: true });
   });
 
   it('drops the whole shortcut list when one combination is not allowed or there are more than four', () => {
@@ -144,12 +146,14 @@ describe('declaredScope / isSubset', () => {
     const declaration: Declaration = {
       notify: true,
       fetchHosts: ['a.example.com'],
+      ai: true,
       tray: true,
       float: true,
       shortcuts: ['Alt+F1'],
     };
     expect(declaredScope('notify', declaration)).toEqual([]);
     expect(declaredScope('fetch', declaration)).toEqual(['a.example.com']);
+    expect(declaredScope('ai', declaration)).toEqual([]);
     expect(declaredScope('tray', declaration)).toEqual([]);
     expect(declaredScope('float', declaration)).toEqual([]);
     expect(declaredScope('shortcut', declaration)).toEqual(['Alt+F1']);
@@ -178,7 +182,14 @@ describe('resolveStatuses', () => {
     version_sha256: sha,
   });
   const both: Declaration = { ...EMPTY_DECLARATION, notify: true, fetchHosts: ['a.example.com'] };
-  const undeclared = { notify: 'undeclared', fetch: 'undeclared', tray: 'undeclared', shortcut: 'undeclared', float: 'undeclared' };
+  const undeclared = {
+    notify: 'undeclared',
+    fetch: 'undeclared',
+    ai: 'undeclared',
+    tray: 'undeclared',
+    shortcut: 'undeclared',
+    float: 'undeclared',
+  };
 
   it('marks what the page does not declare as undeclared, whatever was granted before', () => {
     expect(resolveStatuses(EMPTY_DECLARATION, [grant('notify', 'allow', [])])).toEqual(undeclared);
@@ -224,6 +235,22 @@ describe('resolveStatuses', () => {
     expect(resolveStatuses(tray, [grant('tray', 'allow', [])]).tray).toBe('allowed');
     expect(resolveStatuses(tray, [grant('tray', 'deny', [])]).tray).toBe('denied');
     expect(resolveStatuses(EMPTY_DECLARATION, [grant('tray', 'allow', [])]).tray).toBe('undeclared');
+  });
+
+  it('treats ai like any scopeless capability: asked once, then the decision stands', () => {
+    const declared: Declaration = { ...EMPTY_DECLARATION, ai: true };
+
+    expect(resolveStatuses(declared, []).ai).toBe('ask');
+    expect(resolveStatuses(declared, [grant('ai', 'allow', [])]).ai).toBe('allowed');
+    expect(resolveStatuses(declared, [grant('ai', 'deny', [])]).ai).toBe('denied');
+    expect(resolveStatuses(EMPTY_DECLARATION, [grant('ai', 'allow', [])]).ai).toBe('undeclared');
+  });
+
+  it('offers ai in every window, unlike the desktop capabilities', () => {
+    const statuses = resolveStatuses({ ...EMPTY_DECLARATION, ai: true, tray: true }, []);
+
+    expect(offeredCapabilities(statuses, false)).toEqual(['ai']);
+    expect(offeredCapabilities(statuses, true)).toEqual(['ai', 'tray']);
   });
 
   it('does not let a notify decision stand in for fetch', () => {

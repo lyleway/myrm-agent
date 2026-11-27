@@ -1,12 +1,14 @@
 import { vi } from 'vitest';
 import type { CapabilityStatus } from '../declaration';
-import {
-  createAppBridgeHost,
-  type AppBridgeActivity,
-  type AppSurfaceDeps,
-  type ProxyFetchReply,
-  type ProxyFetchRequest,
-} from '../host';
+import { createAppBridgeHost } from '../host';
+import type {
+  AppBridgeActivity,
+  AppSurfaceDeps,
+  ProxyAiReply,
+  ProxyAiRequest,
+  ProxyFetchReply,
+  ProxyFetchRequest,
+} from '../hostTypes';
 import type { BridgeCapability, RpcResponse } from '../protocol';
 
 export const SHA = 'c'.repeat(64);
@@ -38,6 +40,7 @@ export function setup(statuses: Partial<Record<BridgeCapability, CapabilityStatu
   const current: Record<BridgeCapability, CapabilityStatus> = {
     notify: 'allowed',
     fetch: 'allowed',
+    ai: 'allowed',
     tray: 'allowed',
     shortcut: 'allowed',
     float: 'allowed',
@@ -45,6 +48,7 @@ export function setup(statuses: Partial<Record<BridgeCapability, CapabilityStatu
   };
   const activity: AppBridgeActivity[] = [];
   const proxyFetch = vi.fn<(request: ProxyFetchRequest) => Promise<ProxyFetchReply>>();
+  const proxyAi = vi.fn<(request: ProxyAiRequest) => Promise<ProxyAiReply>>();
   const showNotification = vi.fn<(title: string, body: string) => Promise<void>>().mockResolvedValue(undefined);
   const surface = createSurface();
   const host = createAppBridgeHost({
@@ -53,12 +57,13 @@ export function setup(statuses: Partial<Record<BridgeCapability, CapabilityStatu
     getStatuses: () => current,
     getDeclaredShortcuts: () => DECLARED_SHORTCUTS,
     proxyFetch,
+    proxyAi,
     surface: options.desktop === false ? null : surface,
     reportActivity: (entry) => activity.push(entry),
     showNotification,
     now: () => clock.at,
   });
-  return { handle: host.handle, host, clock, current, activity, proxyFetch, showNotification, surface };
+  return { handle: host.handle, host, clock, current, activity, proxyFetch, proxyAi, showNotification, surface };
 }
 
 export const request = (method: string, params?: unknown, id: number | string = 1) => ({
@@ -68,7 +73,8 @@ export const request = (method: string, params?: unknown, id: number | string = 
   params,
 });
 
-export const reasonOf = (reply: RpcResponse | null) => (reply && 'error' in reply ? reply.error.data.reason : undefined);
+export const reasonOf = (reply: RpcResponse | null) =>
+  reply && 'error' in reply ? reply.error.data.reason : undefined;
 
 export const okReply = (body = '{"t":1}'): ProxyFetchReply => ({
   ok: true,
@@ -78,3 +84,5 @@ export const okReply = (body = '{"t":1}'): ProxyFetchReply => ({
   code: null,
   message: null,
 });
+
+export const aiReply = (text = 'Sunny'): ProxyAiReply => ({ ok: true, text, code: null, message: null });

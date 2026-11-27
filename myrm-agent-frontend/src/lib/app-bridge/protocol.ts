@@ -8,7 +8,7 @@
  * - RpcRequest / RpcResponse / parseRpcRequest / rpcResult / rpcFailure / rpcEvent: the JSON-RPC 2.0 envelope of the
  *   page-to-host channel and the host-to-page notification.
  * - BridgeError: thrown by host handlers; carries the stable `reason` the page sees.
- * - parseNotifyParams / parseFetchParams / parseTrayParams / parseShortcutParams / parseFloatParams: shape checks.
+ * - parseNotifyParams / parseFetchParams / parseAiParams / parseTrayParams / parseShortcutParams / parseFloatParams: shape checks.
  *
  * [POS]
  * Wire contract between a sandboxed app page and the host that embeds it. A method is named after the capability it
@@ -18,9 +18,9 @@
 
 import { normalizeAccelerator } from './accelerator';
 
-export type BridgeCapability = 'notify' | 'fetch' | 'tray' | 'shortcut' | 'float';
+export type BridgeCapability = 'notify' | 'fetch' | 'ai' | 'tray' | 'shortcut' | 'float';
 
-export const BRIDGE_CAPABILITIES: readonly BridgeCapability[] = ['notify', 'fetch', 'tray', 'shortcut', 'float'];
+export const BRIDGE_CAPABILITIES: readonly BridgeCapability[] = ['notify', 'fetch', 'ai', 'tray', 'shortcut', 'float'];
 
 /** These act on the operating system around the app window, so they exist only in the app's own desktop window. */
 export const DESKTOP_CAPABILITIES: readonly BridgeCapability[] = ['tray', 'shortcut', 'float'];
@@ -32,6 +32,11 @@ export function isDesktopCapability(capability: BridgeCapability): boolean {
 export const NOTIFY_TITLE_MAX = 80;
 export const NOTIFY_BODY_MAX = 200;
 export const FETCH_URL_MAX = 2048;
+/** Mirror the server's model-call limits; the server re-checks them. */
+export const AI_PROMPT_MAX = 16_000;
+export const AI_SYSTEM_MAX = 4_000;
+export const AI_OUTPUT_TOKENS_MAX = 4_096;
+export const AI_OUTPUT_TOKENS_DEFAULT = 1_024;
 export const TRAY_TITLE_MAX = 24;
 export const TRAY_TOOLTIP_MAX = 80;
 
@@ -49,6 +54,8 @@ export type BridgeFailure =
   | 'bad_request'
   | 'blocked'
   | 'response_too_large'
+  | 'budget_exceeded'
+  | 'unavailable'
   | 'timeout'
   | 'upstream_error'
   | 'failed';
@@ -161,6 +168,30 @@ export function parseFetchParams(params: unknown): FetchParams | null {
     return null;
   }
   return { url: params.url, method: method as FetchMethod, headers: headers as Record<string, string>, body };
+}
+
+export interface AiParams {
+  prompt: string;
+  system: string | null;
+  maxTokens: number;
+}
+
+export function parseAiParams(params: unknown): AiParams | null {
+  if (!isRecord(params) || typeof params.prompt !== 'string') {
+    return null;
+  }
+  const system = params.system ?? null;
+  const maxTokens = params.maxTokens ?? AI_OUTPUT_TOKENS_DEFAULT;
+  if (!params.prompt.trim() || params.prompt.length > AI_PROMPT_MAX) {
+    return null;
+  }
+  if (system !== null && (typeof system !== 'string' || system.length > AI_SYSTEM_MAX)) {
+    return null;
+  }
+  if (!Number.isInteger(maxTokens) || (maxTokens as number) < 1 || (maxTokens as number) > AI_OUTPUT_TOKENS_MAX) {
+    return null;
+  }
+  return { prompt: params.prompt, system, maxTokens: maxTokens as number };
 }
 
 export interface TrayParams {

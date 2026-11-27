@@ -1,14 +1,14 @@
-"""In-memory call limiter for the host fetch proxy.
+"""In-memory call limiters for the host fetch and model-call proxies.
 
 [INPUT]
 - (none)
 
 [OUTPUT]
 - CallLimiter: per-key sliding-window rate plus an in-flight cap.
-- FETCH_LIMITER: the process-wide limiter used by the fetch proxy.
+- FETCH_LIMITER / AI_LIMITER: the process-wide limiters used by the fetch proxy and the model-call proxy.
 
 [POS]
-Business layer. Keeps one runaway page from hammering a third-party host or the server's connection pool. State is
+Business layer. Keeps one runaway page from hammering a third-party host, the model provider or the server's connection pool. State is
 process memory on purpose: it only has to bound a burst, not account for usage.
 """
 
@@ -49,3 +49,5 @@ class CallLimiter:
 
 
 FETCH_LIMITER: Final = CallLimiter(PER_MINUTE, MAX_IN_FLIGHT)
+# A model call takes seconds and costs money, so its pace is well below a page's fetches.
+AI_LIMITER: Final = CallLimiter(20, MAX_IN_FLIGHT)

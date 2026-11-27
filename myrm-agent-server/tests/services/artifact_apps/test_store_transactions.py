@@ -1,4 +1,4 @@
-"""Install registry writes on the production SQLite transaction policy (WAL file, deferred read / immediate write).
+"""Install registry and spend ledger writes on the production SQLite transaction policy (WAL file, deferred read / immediate write).
 
 The routes read before they write (is the app installed, which hosts are allowed) and the proxied request in between
 takes seconds. A session that keeps that read snapshot open fails its write with SQLITE_BUSY_SNAPSHOT ("database is
@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.database.factory import register_sqlite_transaction_events
 from app.database.models import Base
-from app.services.artifact_apps import store
+from app.services.artifact_apps import ai_usage, store
+from app.services.budget.budget_day import budget_day_start_utc
 
 _SHA = "1" * 64
 _BUSY_TIMEOUT_MS = 5000
@@ -117,3 +118,33 @@ async def test_writes_from_many_requests_at_once_are_all_kept(sessions: async_se
     async with sessions() as check:
         assert len(await store.list_activity(check, "a1", 50)) == 16
         assert {g.capability for g in await store.get_grants(check, "a1")} == {"notify", "fetch"}
+
+
+async def test_a_charge_survives_a_commit_that_landed_after_the_callers_read(sessions: async_sessionmaker[AsyncSession]) -> None:
+    async with sessions() as seed:
+        await store.install_app(seed, "a1")
+
+    async with sessions() as request, sessions() as other:
+        assert await store.is_installed(request, "a1")
+        await store.set_grant(other, "unrelated", "notify", "allow", [], _SHA)
+
+        charge_id = await ai_usage.reserve(request, "a1", 0.2, daily_cap_usd=1.0)
+        assert charge_id is not None
+        await ai_usage.settle(request, charge_id, 0.05)
+
+    async with sessions() as check:
+        assert await ai_usage.spent_since(check, budget_day_start_utc(), "a1") == pytest.approx(0.05)
+
+
+async def test_concurrent_calls_of_one_app_cannot_pass_a_cap_each_alone_respects(
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    async def call() -> int | None:
+        async with sessions() as db:
+            return await ai_usage.reserve(db, "a1", 0.3, daily_cap_usd=1.0)
+
+    charges = await asyncio.gather(*(call() for _ in range(10)))
+
+    assert sum(charge is not None for charge in charges) == 3
+    async with sessions() as check:
+        assert await ai_usage.spent_since(check, budget_day_start_utc(), "a1") == pytest.approx(0.9)

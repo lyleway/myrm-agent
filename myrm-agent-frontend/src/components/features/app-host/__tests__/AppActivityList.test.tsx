@@ -66,6 +66,22 @@ describe('AppActivityList', () => {
     expect(rows[1].querySelectorAll('span.text-muted-foreground')).toHaveLength(1);
   });
 
+  it("shows what a model call cost, and why a refused one was refused in the user's language", async () => {
+    fetchAppActivity.mockResolvedValue([
+      entry({ capability: 'ai', outcome: 'ok', detail: '$0.0020' }),
+      entry({ capability: 'ai', outcome: 'denied', detail: 'budget_exceeded' }),
+      entry({ capability: 'ai', outcome: 'denied', detail: 'risk_held' }),
+    ]);
+
+    render(<AppActivityList artifactId="art-1" />);
+
+    const rows = await screen.findAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('ai.title');
+    expect(rows[0]).toHaveTextContent('$0.0020');
+    expect(rows[1]).toHaveTextContent('activity.reason.budget_exceeded');
+    expect(rows[2]).toHaveTextContent('activity.reason.risk_held');
+  });
+
   it('treats a failed read as an empty log instead of an error', async () => {
     fetchAppActivity.mockRejectedValue(new Error('offline'));
 

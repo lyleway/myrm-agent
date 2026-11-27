@@ -14,13 +14,14 @@
  */
 
 import { useTranslations } from 'next-intl';
-import { Bell, Globe, Keyboard, PanelTop, PictureInPicture2 } from 'lucide-react';
+import { Bell, BrainCircuit, Globe, Keyboard, PanelTop, PictureInPicture2 } from 'lucide-react';
 import { Switch } from '@/components/primitives/switch';
 import type { BridgeCapability } from '@/lib/app-bridge/protocol';
 
 const ICONS: Record<BridgeCapability, typeof Bell> = {
   notify: Bell,
   fetch: Globe,
+  ai: BrainCircuit,
   tray: PanelTop,
   shortcut: Keyboard,
   float: PictureInPicture2,

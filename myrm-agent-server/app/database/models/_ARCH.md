@@ -20,7 +20,7 @@
 | `artifact.py` | 域模块 | Artifact（含所跟踪的工作区文件路径 `source_path`）, ArtifactVersion, ArtifactAuditLog（企业协作 Vault） | ✅ |
 | `artifact_publication.py` | 域模块 | ArtifactPublication（按 hosting target 的逐目标发布状态 ORM） | ✅ |
 | `artifact_share.py` | 域模块 | ArtifactShareRecord（分享链接生命周期登记：fingerprint/过期/撤销时间戳） | ✅ |
-| `artifact_app.py` | 域模块 | ArtifactApp（已安装为应用的工件）· ArtifactAppGrant（每个能力的最近一次决定：decision / 声明范围 / 决定时的版本哈希，`(artifact_id, capability)` 唯一）· ArtifactAppActivity（桥调用的元数据记录：能力 / 结果 / 简短标签，不含请求体、响应体与通知正文） | ✅ |
+| `artifact_app.py` | 域模块 | ArtifactApp（已安装为应用的工件）· ArtifactAppGrant（每个能力的最近一次决定：decision / 声明范围 / 决定时的版本哈希，`(artifact_id, capability)` 唯一）· ArtifactAppActivity（桥调用的元数据记录：能力 / 结果 / 简短标签，不含请求体、响应体、通知正文与提示词）· ArtifactAppAiUsage（`ai` 能力每次模型调用的花费，调用前先按上界记一笔、完成后改记实际值；卸载应用时保留，超过 8 天的行在写入时清理） | ✅ |
 | `fission.py` | 域模块 | FissionTaskRecord（高并发子代理执行图持久化，防刷新丢失） | ✅ |
 | `vault_credential.py` | 域模块 | VaultCredential | ✅ |
 | `web_push_subscription.py` | 域模块 | WebPushSubscription（Web Push VAPID 订阅） | ✅ |

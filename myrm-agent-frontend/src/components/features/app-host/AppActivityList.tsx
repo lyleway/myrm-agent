@@ -6,11 +6,11 @@
  * - @/lib/utils/relativeTime::formatRelativeTime (POS: relative timestamps)
  *
  * [OUTPUT]
- * - AppActivityList: what the app did with its permissions lately (capability, outcome, site), newest first.
+ * - AppActivityList: what the app did with its permissions lately (capability, outcome, site or cost), newest first.
  *
  * [POS]
  * The user's check on a granted app. The log holds metadata only, so this list can show the site a request went to
- * but never what was asked or answered.
+ * or what a model call cost (or why it was refused) but never what was asked or answered.
  */
 
 import { useEffect, useState } from 'react';
@@ -19,6 +19,16 @@ import { formatRelativeTime } from '@/lib/utils/relativeTime';
 import { fetchAppActivity, type AppActivity } from '@/services/artifactApps';
 
 const RECENT = 20;
+/** What the server writes as the detail of a refused model call. */
+const AI_REFUSALS: readonly string[] = [
+  'permission_denied',
+  'rate_limited',
+  'budget_exceeded',
+  'unavailable',
+  'upstream_error',
+  'timeout',
+  'risk_held',
+];
 
 export function AppActivityList({ artifactId }: { artifactId: string }) {
   const t = useTranslations('artifacts.apps.permissions');
@@ -49,7 +59,15 @@ export function AppActivityList({ artifactId }: { artifactId: string }) {
             >
               <span className="min-w-0 truncate">
                 <span className="font-medium">{t(`${entry.capability}.title`)}</span>
-                {entry.detail && <span className="text-muted-foreground"> · {entry.detail}</span>}
+                {entry.detail && (
+                  <span className="text-muted-foreground">
+                    {' '}
+                    ·{' '}
+                    {entry.capability === 'ai' && AI_REFUSALS.includes(entry.detail)
+                      ? t(`activity.reason.${entry.detail}`)
+                      : entry.detail}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 text-muted-foreground">
                 {t(`activity.outcome.${entry.outcome}`)} · {formatRelativeTime(entry.created_at, locale)}

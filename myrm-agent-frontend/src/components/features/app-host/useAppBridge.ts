@@ -17,12 +17,13 @@
  */
 
 import { useEffect, useRef, type RefObject } from 'react';
-import { createAppBridgeHost, type AppBridgeHost, type AppSurfaceDeps } from '@/lib/app-bridge/host';
+import { createAppBridgeHost } from '@/lib/app-bridge/host';
+import type { AppBridgeHost, AppSurfaceDeps } from '@/lib/app-bridge/hostTypes';
 import type { CapabilityStatus } from '@/lib/app-bridge/declaration';
 import { BRIDGE_CAPABILITIES, rpcEvent, type AppEvent, type BridgeCapability } from '@/lib/app-bridge/protocol';
 import { onAppSurfaceEvent } from '@/lib/desktop/appSurface';
 import { showAppNotification } from '@/services/appNotification';
-import { proxyAppFetch, reportAppActivity } from '@/services/artifactApps';
+import { proxyAppAi, proxyAppFetch, reportAppActivity } from '@/services/artifactApps';
 
 interface UseAppBridgeOptions {
   artifactId: string;
@@ -71,6 +72,7 @@ export function useAppBridge({
       getStatuses: () => live.current.statuses,
       getDeclaredShortcuts: () => live.current.declaredShortcuts,
       proxyFetch: (request) => proxyAppFetch(artifactId, request),
+      proxyAi: (request) => proxyAppAi(artifactId, request),
       surface: surface && {
         ...surface,
         setFloat: async (on) => {
