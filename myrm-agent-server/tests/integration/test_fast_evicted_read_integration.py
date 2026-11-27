@@ -104,7 +104,7 @@ def workspace(tmp_path: Path) -> Path:
 def test_web_fast_mount_resolves_evicted_read_only_meta_tools() -> None:
     flags = resolve_agent_mount(
         ExecutionSurface.WEB_FAST,
-        resolve_builtin_tool_flags(["answer_tool"]),
+        resolve_builtin_tool_flags([]),
     )
     assert flags["file_access_mode"] == FileAccessMode.SPILL_AND_UPLOADS
     assert flags["enable_shell_tools"] is False

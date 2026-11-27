@@ -52,8 +52,8 @@ def resolve_builtin_tool_flags(
     function to ensure parity. Adding a new tool flag requires only a single
     change here.
 
-    ``answer_tool`` is only mounted for Fast Search via ``allow_answer_tool=True``
-    in ``converter.py``; profile opt-in is ignored.
+    ``answer_tool`` is mounted only when the caller passes ``allow_answer_tool=True``;
+    a profile opt-in alone is ignored.
     """
     from app.services.agent.builtin_specs.builtin_tool_ids import (
         strip_deploy_incompatible_builtin_tools,
