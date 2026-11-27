@@ -1,6 +1,7 @@
 """[INPUT]
 - myrm_agent_harness.toolkits.llms.tts.generator::AsyncTTSEngine (POS: TTS synthesis engine)
 - myrm_agent_harness.toolkits.llms.tts.models::TTSConfig (POS: TTS engine config)
+- app.ai_agents.media_tools.result_announcement::announce_result (POS: tells the chat stream what the call answered)
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 
 [OUTPUT]
@@ -9,7 +10,8 @@
 [POS]
 LangChain adapter for harness AsyncTTSEngine (product layer). The engine stores the audio before it answers, and the
 result carries the audio's ``media://`` reference: the call reports success only with a stored reference. The audio is
-also copied into the agent's workspace and the result names the copy in ``workspace_files``.
+also copied into the agent's workspace and the result names the copy in ``workspace_files``. A successful result is
+announced to the chat stream, which is where the message gets the card of the audio.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from myrm_agent_harness.toolkits.llms.tts.generator import AsyncTTSEngine
 from myrm_agent_harness.toolkits.llms.tts.models import TTSConfig
 from pydantic import BaseModel, Field, PrivateAttr
 
+from app.ai_agents.media_tools.result_announcement import announce_result
 from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
 
 logger = logging.getLogger(__name__)
@@ -123,7 +126,7 @@ class TTSTool(BaseTool):
             out["duration_seconds"] = round(result.duration_seconds, 1)
         if self._exporter is not None:
             out = await self._exporter.complete(out)
-        return json.dumps(out, ensure_ascii=False)
+        return await announce_result(self.name, json.dumps(out, ensure_ascii=False))
 
 
 def create_tts_tool(config: TTSConfig, *, allowed_roots: Sequence[str] = ()) -> TTSTool:

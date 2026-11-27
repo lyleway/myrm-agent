@@ -5,6 +5,7 @@
 - myrm_agent_harness.toolkits.llms.media_inputs::resolve_media_inputs (POS: the single reference resolver)
 - myrm_agent_harness.utils.mime_types::sniff_image_mime (POS: image container detection)
 - app.ai_agents.media_tools.input_policy::build_media_input_policy, keep_image_size (POS: reference-resolution policy and its size-keeping variant)
+- app.ai_agents.media_tools.result_announcement::announce_result (POS: tells the chat stream what generate and edit answered)
 - app.ai_agents.media_tools.task_results (POS: shared error, started-tasks and status results)
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 - app.tasks.task_payload_crypto::seal_task_payload_secrets (POS: payload secret sealing)
@@ -16,7 +17,8 @@
 LangChain adapter of the image engines. ``generate`` enqueues one background task per image (``n`` tasks) and answers
 with the task list; ``edit`` answers in the call; ``status`` (optionally waiting for a running task) and ``list`` read
 the queue and the model catalog. Every failure is an explicit error result, and a parameter that belongs to another
-action is refused instead of dropped.
+action is refused instead of dropped. ``generate`` and ``edit`` also announce their answer to the chat stream, which is
+where the message gets the card of what they produced.
 A finished image is also copied into the agent's workspace; the ``status`` and ``edit`` results name the copy in
 ``workspace_files``. The source of an edit with a mask keeps its resolution, as the mask does.
 ``quality`` is sent on the OpenAI-compatible wire only (``openai_chat``, ``azure_openai``), for generation and edit
@@ -40,6 +42,7 @@ from myrm_agent_harness.utils.mime_types import sniff_image_mime
 from pydantic import BaseModel, Field
 
 from app.ai_agents.media_tools.input_policy import build_media_input_policy, keep_image_size
+from app.ai_agents.media_tools.result_announcement import announce_result
 from app.ai_agents.media_tools.task_results import (
     MAX_WAIT_SECONDS,
     WAIT_SECONDS_DESCRIPTION,
@@ -53,6 +56,7 @@ from app.tasks.task_payload_crypto import seal_task_payload_secrets
 
 logger = logging.getLogger(__name__)
 
+_TOOL_NAME = "image_tool"
 _TOOL_DESCRIPTION = (
     "Generate or edit images. Each generated image is a background task whose result appears in the chat by itself, "
     "so never repeat its media:// address in your reply. "
@@ -193,10 +197,13 @@ def create_image_generation_tool(
             )
             for _ in range(n)
         ]
-        return started_tasks_result(
-            TASK_TYPE_IMAGE_GENERATE,
-            task_ids,
-            message="Generation started; each image appears in the chat when it is ready.",
+        return await announce_result(
+            _TOOL_NAME,
+            started_tasks_result(
+                TASK_TYPE_IMAGE_GENERATE,
+                task_ids,
+                message="Generation started; each image appears in the chat when it is ready.",
+            ),
         )
 
     async def _edit(
@@ -234,9 +241,9 @@ def create_image_generation_tool(
             image_mime=sniff_image_mime(image),
             image_size_bytes=len(image),
         )
-        return await exporter.complete_json(answer) if exporter is not None else answer
+        return await announce_result(_TOOL_NAME, await exporter.complete_json(answer) if exporter is not None else answer)
 
-    @tool("image_tool", args_schema=ImageToolInput)
+    @tool(_TOOL_NAME, args_schema=ImageToolInput)
     async def image_tool(
         action: Literal["generate", "edit", "list", "status"] = "generate",
         prompt: str = "",
