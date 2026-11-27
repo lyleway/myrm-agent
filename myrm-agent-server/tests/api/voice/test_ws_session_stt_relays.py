@@ -22,7 +22,7 @@ from tests.api.stt.stream_testkit import (
     deepgram_results,
     sent_json,
 )
-from tests.api.voice.session_testkit import voice_session
+from tests.api.voice.session_testkit import socket_of, voice_session
 
 _CLOSE_STREAM = {"type": "CloseStream"}
 
@@ -96,7 +96,7 @@ class TestProviderConnection:
         with patch("websockets.connect", side_effect=ImportError("websockets")):
             await session._run_streaming_stt()
 
-        assert sent_json(session._ws) == [{"type": "error", "message": "STT provider unavailable"}]
+        assert sent_json(socket_of(session)) == [{"type": "error", "message": "STT provider unavailable"}]
 
     async def test_a_failed_provider_connection_is_reported_to_the_browser(self) -> None:
         session = voice_session()
@@ -104,7 +104,7 @@ class TestProviderConnection:
         with patch("websockets.connect", side_effect=ConnectionRefusedError("refused")):
             await session._run_streaming_stt()
 
-        assert sent_json(session._ws) == [{"type": "error", "message": "STT connection failed"}]
+        assert sent_json(socket_of(session)) == [{"type": "error", "message": "STT connection failed"}]
 
     async def test_the_session_connects_with_the_api_key_to_the_shared_stream_url(self) -> None:
         session = voice_session()
@@ -138,7 +138,7 @@ class TestProviderConnection:
         with patch("websockets.connect", return_value=DeepgramConnect(deepgram)):
             await asyncio.wait_for(session._run_streaming_stt(), timeout=5)
 
-        assert sent_json(session._ws) == [{"type": "stt_final", "text": "hello"}]
+        assert sent_json(socket_of(session)) == [{"type": "stt_final", "text": "hello"}]
         assert control_messages(deepgram) == [_CLOSE_STREAM]
 
 
@@ -204,7 +204,7 @@ class TestTranscriptsDownstream:
 
         await session._relay_deepgram_transcripts(deepgram)
 
-        assert sent_json(session._ws) == [
+        assert sent_json(socket_of(session)) == [
             {"type": "stt_interim", "text": "hel"},
             {"type": "stt_final", "text": "hello"},
         ]
@@ -215,7 +215,7 @@ class TestTranscriptsDownstream:
 
         await session._relay_deepgram_transcripts(FakeDeepgram(deepgram_results("late", is_final=True)))
 
-        assert sent_json(session._ws) == []
+        assert sent_json(socket_of(session)) == []
 
     async def test_a_closed_session_starts_no_agent_turn(self) -> None:
         bridge = create_autospec(VoiceAgentBridge, instance=True)
@@ -237,7 +237,7 @@ class TestTranscriptsDownstream:
         await asyncio.sleep(0)
 
         bridge.handle_stt_final.assert_awaited_once_with("book a table")
-        assert sent_json(session._ws) == [{"type": "stt_interim", "text": "book"}]
+        assert sent_json(socket_of(session)) == [{"type": "stt_interim", "text": "book"}]
 
     @pytest.mark.parametrize(
         ("closed", "reported"),
@@ -260,7 +260,7 @@ class TestTranscriptsDownstream:
             await asyncio.sleep(0)
 
         assert "Agent bridge task failed" in caplog.text
-        assert sent_json(session._ws) == reported
+        assert sent_json(socket_of(session)) == reported
 
     async def test_a_relay_failure_is_logged_while_the_session_is_open(self, caplog: pytest.LogCaptureFixture) -> None:
         session = voice_session()

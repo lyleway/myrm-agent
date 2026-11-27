@@ -10,5 +10,5 @@
 |------|------|------|-------|
 | `__init__.py` | 入口 | Media library module — persistent gallery for AI-generated media. | ✅ |
 | `service.py` | 模块 | 媒体库写读服务：保存（文件、图片的 WebP 缩略图、记录）、游标分页查询、取单项、改标签、删除（记录与文件）、标签列表、计数、批量删除与批量改标签 | ✅ |
-| `reference.py` | 模块 | `media://<id>` 引用的构造 / 解析与按引用读回字节（输入解析器的 `media` 加载器） | ✅ |
+| `reference.py` | 模块 | `media://<id>` 引用的构造 / 解析，按引用读回字节（输入解析器的 `media` 加载器），以及按引用取本地磁盘上的文件（`local_media_file`，供复制或整体提供文件的调用方；存储不在本地磁盘时为 `None`，文件不在抛 `FileNotFoundError`，存储键逃出存储根抛 `StorageError`） | ✅ |
 | `selection.py` | 模块 | 三种模态「已选择模型」的判定：图像 = 命中内置档案，视频 = 供应商注册表可提供该模型，语音 = 供应商 / 模型 / 音色齐备且供应商受支持；存量值不在目录内等同未选择 | ✅ |

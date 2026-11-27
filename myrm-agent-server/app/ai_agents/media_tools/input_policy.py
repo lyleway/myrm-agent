@@ -8,6 +8,7 @@
 
 [OUTPUT]
 - build_media_input_policy(): policy for resolving image and video references
+- keep_image_size(): the same policy with an image hook that sanitizes but never shrinks
 
 [POS]
 The business-layer half of the single input resolver: it names the folders a reference may be read from (the agent's
@@ -17,7 +18,9 @@ image once on the way out. Local deployments may reach private addresses; everyw
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from myrm_agent_harness.toolkits.llms.media_inputs import MediaInputPolicy
@@ -31,6 +34,10 @@ def _downsize(data: bytes) -> bytes:
     return clamp_image_payload(data)[0]
 
 
+def _sanitize(data: bytes) -> bytes:
+    return clamp_image_payload(data, max_dimension=sys.maxsize, max_bytes=sys.maxsize)[0]
+
+
 def build_media_input_policy(allowed_roots: Sequence[str] = ()) -> MediaInputPolicy:
     """Policy for resolving references on behalf of an agent whose workspace folders are ``allowed_roots``."""
     return MediaInputPolicy(
@@ -41,4 +48,12 @@ def build_media_input_policy(allowed_roots: Sequence[str] = ()) -> MediaInputPol
     )
 
 
-__all__ = ["build_media_input_policy"]
+def keep_image_size(policy: MediaInputPolicy) -> MediaInputPolicy:
+    """``policy`` with an image hook that bakes in the orientation and flattens transparency but never shrinks the image.
+
+    A mask is valid only for an image of its own size, so the source of a masked edit must keep its resolution.
+    """
+    return replace(policy, image_hook=_sanitize)
+
+
+__all__ = ["build_media_input_policy", "keep_image_size"]

@@ -14,7 +14,7 @@ from app.api.voice import ws_session
 from app.api.voice.ws_session import _VoiceSession
 from app.channels.types import VoiceConfig
 from tests.api.stt.stream_testkit import browser_socket, sent_json, stored_voice_settings
-from tests.api.voice.session_testkit import voice_config, voice_session
+from tests.api.voice.session_testkit import socket_of, voice_config, voice_session
 
 _CONFIG = voice_config()
 _STT_DISABLED = VoiceConfig(stt_enabled=False, stt_provider="deepgram", stt_api_key="key")
@@ -165,7 +165,7 @@ class TestSessionRun:
 
         await session.run()
 
-        session._ws.close.assert_awaited_once_with(code=1000, reason="Session ended")
+        socket_of(session).close.assert_awaited_once_with(code=1000, reason="Session ended")
         assert asyncio.all_tasks() == tasks_before
 
     async def test_the_session_is_closed_even_when_speech_to_text_crashes(self) -> None:
@@ -175,4 +175,4 @@ class TestSessionRun:
             with pytest.raises(RuntimeError, match="boom"):
                 await session.run()
 
-        session._ws.close.assert_awaited_once_with(code=1000, reason="Session ended")
+        socket_of(session).close.assert_awaited_once_with(code=1000, reason="Session ended")
