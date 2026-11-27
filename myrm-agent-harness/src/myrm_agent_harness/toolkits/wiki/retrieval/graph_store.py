@@ -3,12 +3,13 @@
 [INPUT]
 - sqlite3 (POS: standard library database)
 - ..core.structure::WikiStructure (POS: database path resolution)
-- ..core.link_extraction::WIKILINK_RE (POS: the `[[wikilink]]` syntax)
+- ..core.link_extraction::MAX_LINK_PART, WIKILINK_RE (POS: the `[[wikilink]]` syntax and the longest part of a link)
 - ..core.link_resolver::concept_index_key, link_lookup_forms, page_link_forms, page_lookup_keys (POS: page-key canonicalization and the spellings a link names a page by)
 - myrm_agent_harness.utils.markdown_frontmatter::parse_frontmatter (POS: page aliases)
 - .concept_links::ConceptBacklink, ConceptLink, ConceptLinks (POS: typed concept link lookup result)
 - .graph_analysis::enrich_graph_with_communities, compute_graph_insights (POS: graph analysis)
 - .graph_tables::federated_graph_queries (POS: graph node/edge rows shared with the insights)
+- .heading_text::clean_heading_text (POS: the plain title of the heading a backlink sits under)
 
 [OUTPUT]
 - WikiGraphStore: Graph topology storage, BFS traversal, concept link lookup returning a typed `ConceptLinks` (any spelling of a page name; each direction ordered by weight then name, capped at `MAX_CONCEPT_LINKS` and flagged when cut) with the section and text of the link each backlink holds, and insight computation
@@ -31,11 +32,12 @@ from typing import TYPE_CHECKING
 
 from myrm_agent_harness.utils.markdown_frontmatter import parse_frontmatter
 
-from ..core.link_extraction import WIKILINK_RE
+from ..core.link_extraction import MAX_LINK_PART, WIKILINK_RE
 from ..core.link_resolver import concept_index_key, link_lookup_forms, page_link_forms, page_lookup_keys
 from .concept_links import ConceptBacklink, ConceptLink, ConceptLinks
 from .graph_analysis import compute_graph_insights, enrich_graph_with_communities
 from .graph_tables import federated_graph_queries
+from .heading_text import clean_heading_text
 
 if TYPE_CHECKING:
     from ..core.structure import WikiStructure
@@ -52,26 +54,6 @@ def _fetch_capped(conn: sqlite3.Connection, sql: str, concept: str) -> tuple[lis
     """Run an edge query that takes `(concept, limit)`; the one-row probe past the cap tells whether the list was cut."""
     rows = conn.execute(sql, (concept, MAX_CONCEPT_LINKS + 1)).fetchall()
     return rows[:MAX_CONCEPT_LINKS], len(rows) > MAX_CONCEPT_LINKS
-
-
-def _clean_heading_text(raw_heading: str) -> str:
-    """Strip markdown formatting (links, bold, code, tags) to produce a pure heading title."""
-    text = raw_heading.strip()
-    text = re.sub(r"^#{1,6}\s*", "", text)
-    # Strip wikilinks: [[target|display]] -> display, [[target]] -> target
-    text = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", r"\1", text)
-    # Strip markdown links and images: [text](url) -> text, ![alt](url) -> alt
-    text = re.sub(r"!?\[([^\]]*)\]\([^)]+\)", r"\1", text)
-    # Strip inline code: `code` -> code
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    # Strip bold and italics: **text**, __text__, *text*, _text_
-    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
-    text = re.sub(r"__([^_]+)__", r"\1", text)
-    text = re.sub(r"\*([^*]+)\*", r"\1", text)
-    text = re.sub(r"_([^_]+)_", r"\1", text)
-    # Strip strikethrough: ~~text~~ -> text
-    text = re.sub(r"~~([^~]+)~~", r"\1", text)
-    return re.sub(r"\s+", " ", text).strip()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +82,9 @@ def _mention_patterns(names: tuple[str, ...]) -> tuple[re.Pattern[str], ...]:
     patterns: list[re.Pattern[str]] = []
     for name in names:
         escaped = re.escape(name)
-        patterns.append(re.compile(rf"\[[^\]]+\]\([^)]*{escaped}[^)]*\)", re.IGNORECASE))
+        # Link parts are bounded like ``MARKDOWN_LINK_RE``'s, whose links are the edges that make a page a backlink at all.
+        part = rf"[^)]{{0,{MAX_LINK_PART}}}"
+        patterns.append(re.compile(rf"\[[^\]]{{1,{MAX_LINK_PART}}}\]\({part}{escaped}{part}\)", re.IGNORECASE))
         if any("\u4e00" <= ch <= "\u9fff" for ch in name):
             if len(name) >= 2:
                 patterns.append(re.compile(rf"(?<![a-zA-Z0-9]){escaped}(?![a-zA-Z0-9])", re.IGNORECASE))
@@ -332,7 +316,7 @@ class WikiGraphStore:
             if not text:
                 continue
             if text.startswith("#"):
-                current_heading = _clean_heading_text(text)
+                current_heading = clean_heading_text(text)
                 continue
             clean_line = re.sub(r"^[-*+>]\s+", "", text).strip()
             span = _first_mention(clean_line, target)

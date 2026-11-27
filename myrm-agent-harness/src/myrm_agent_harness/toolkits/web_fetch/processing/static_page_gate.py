@@ -2,6 +2,7 @@
 
 [INPUT]
 - web_fetch.fetchers.protocols::FetcherType (POS: Fetcher tier enum)
+- utils.markdown_links::replace_markdown_links (POS: Linear-time Markdown link scan)
 
 [OUTPUT]
 - count_visible_markdown_chars: counts visible non-punctuation characters in Markdown (excluding image tags and link URLs)
@@ -14,16 +15,14 @@ from being treated as L1 failures and escalating to heavier tiers when boilerpla
 
 from __future__ import annotations
 
-import re
 import unicodedata
+
+from myrm_agent_harness.utils.markdown_links import replace_markdown_links
 
 from ..fetchers.protocols import FetcherType
 
 _MIN_VISIBLE_CHARS = 3_000
 _MIN_TEXT_TO_HTML_RATIO = 0.04
-
-_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
-_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
 def count_visible_markdown_chars(raw_markdown: str) -> int:
@@ -34,8 +33,12 @@ def count_visible_markdown_chars(raw_markdown: str) -> int:
     """
     if not raw_markdown:
         return 0
-    without_images = _IMAGE_RE.sub(" ", raw_markdown)
-    text_only = _LINK_RE.sub(r"\1", without_images)
+    without_images = replace_markdown_links(
+        raw_markdown, lambda _label, _target, _original: " ", image=True, label_min=0, target_min=0
+    )
+    text_only = replace_markdown_links(
+        without_images, lambda label, _target, _original: label, label_min=0, target_min=0
+    )
     count = 0
     for ch in text_only:
         if ch.isspace():

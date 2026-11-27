@@ -5,6 +5,7 @@
 - ..core.config::WikiConfig (POS: feature flags)
 - myrm_agent_harness.toolkits.retriever.fusion_strategies::rrf_fusion (POS: RRF merge)
 - myrm_agent_harness.utils.db.fts5::fts5_auto_heal, fts5_integrity_check, fts5_rebuild, fts5_swap_tokenizer, relevance_from_rank (POS: FTS5 index self-heal, tokenizer swap and rank relevance)
+- myrm_agent_harness.utils.markdown_links::markdown_links (POS: linear-time Markdown link scan)
 - .tokenizer::FTS_TOKENIZER, tokenize_for_fts (POS: table tokenizer and FTS5 query builder)
 
 [OUTPUT]
@@ -25,7 +26,6 @@ import contextlib
 import hashlib
 import json
 import logging
-import re
 import sqlite3
 import uuid
 from collections.abc import Iterator
@@ -42,6 +42,7 @@ from myrm_agent_harness.utils.db.fts5 import (
     fts5_swap_tokenizer,
     relevance_from_rank,
 )
+from myrm_agent_harness.utils.markdown_links import markdown_links
 
 from ..core.config import WikiConfig
 from ..core.structure import WikiStructure
@@ -55,7 +56,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".avif"})
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 _COLLECTION_NAME = "wiki_assets"
 _ASSET_FTS_COLUMNS = ("filename", "caption")
 
@@ -190,8 +190,8 @@ class WikiAssetIndexer:
                 except OSError:
                     continue
                 concept = md_path.stem if root == self._structure.concepts_dir else md_path.relative_to(root).as_posix()
-                for match in _MARKDOWN_IMAGE_RE.finditer(content):
-                    target = Path(match.group(1).strip()).name
+                for image in markdown_links(content, image=True, label_min=0):
+                    target = Path(image.target(content).strip()).name
                     if target:
                         refs.setdefault(target, set()).add(concept)
         return {name: sorted(values) for name, values in refs.items()}

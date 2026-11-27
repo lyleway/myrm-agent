@@ -7,7 +7,7 @@ Converts standard Markdown to WhatsApp-supported formatting:
 - Preserves code fences (```...```) and inline code (`...`)
 
 [INPUT]
-- none (imports no other project module)
+- myrm_agent_harness.utils.markdown_links::replace_markdown_links (POS: Markdown link scan in time linear in the text)
 
 [OUTPUT]
 - WhatsApp-formatted text
@@ -20,6 +20,8 @@ formatting markers, restores protected content.
 from __future__ import annotations
 
 import re
+
+from myrm_agent_harness.utils.markdown_links import replace_markdown_links
 
 # Closed by NUL like the other converters: an index never swallows the digit that follows the code.
 _FENCE_PLACEHOLDER = "\x00FENCE{}\x00"
@@ -36,7 +38,6 @@ _BOLD_DOUBLE_UNDERSCORE_RE = re.compile(r"__(.+?)__")
 _STRIKE_RE = re.compile(r"~~(.+?)~~")
 # Spaces or tabs only: a lone "#" on a line must not take the next line (or the blank lines before it) as its text.
 _HEADER_RE = re.compile(r"^#{1,6}[ \t]+(.+)$", re.MULTILINE)
-_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
 def md_to_whatsapp(text: str) -> str:
@@ -95,7 +96,7 @@ def md_to_whatsapp(text: str) -> str:
     result = _BOLD_DOUBLE_STAR_RE.sub(r"*\1*", result)
     result = _BOLD_DOUBLE_UNDERSCORE_RE.sub(r"*\1*", result)
     result = _STRIKE_RE.sub(r"~\1~", result)
-    result = _LINK_RE.sub(r"\1 (\2)", result)
+    result = replace_markdown_links(result, lambda label, target, _original: f"{label} ({target})")
 
     # Step 4: Restore inline code
     def restore_inline_code(match: re.Match[str]) -> str:
