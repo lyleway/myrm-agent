@@ -109,7 +109,7 @@ class TelegramInboundMixin:
             sender_id=sender_id,
             content=emoji,
             chat_id=chat_id,
-            is_group=bool(reaction.chat and reaction.chat.type in ("group", "supergroup")),
+            is_group=bool(reaction.chat and reaction.chat.is_group),
             mentioned=True,
             message_id=target_msg_id,
             metadata={"reaction": True, "target_message_id": target_msg_id},
@@ -203,9 +203,10 @@ class TelegramInboundMixin:
         if prefix not in ("qr", "act", "sel", "ag"):
             return None
 
-        chat_id = ""
-        if cbq.message and cbq.message.chat:
-            chat_id = str(cbq.message.chat.id)
+        chat = cbq.message.chat if cbq.message else None
+        chat_id = str(chat.id) if chat else ""
+        # A tap belongs to the chat it happened in, and in a group it addresses the bot like a mention does.
+        is_group = bool(chat and chat.is_group)
 
         sender_id = str(cbq.from_user.id)
         cbq_display_name = (
@@ -230,8 +231,8 @@ class TelegramInboundMixin:
             content=payload,
             chat_id=chat_id,
             sender_name=cbq_display_name or None,
-            is_group=False,
-            mentioned=False,
+            is_group=is_group,
+            mentioned=is_group,
             metadata={
                 "callback_query_id": cbq.id,
                 "callback_prefix": prefix,

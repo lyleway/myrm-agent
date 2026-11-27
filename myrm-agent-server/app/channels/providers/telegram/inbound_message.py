@@ -260,7 +260,7 @@ class TelegramMessageParserMixin:
         if chat and chat.title:
             metadata["chat_name"] = chat.title
 
-        is_group = chat_type in ("group", "supergroup")
+        is_group = bool(chat and chat.is_group)
         explicit_mention = self._message_mentions_bot(msg) if is_group else False
         mentioned = explicit_mention
 

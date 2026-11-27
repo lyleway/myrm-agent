@@ -47,11 +47,15 @@ button click — so the three cannot disagree. It judges the answer against the 
   who qualifies.
 
 The chat counts as a group when the request or the answer says so, because a flag is only evidence when it
-says group. A channel that cannot tell reports a direct chat: Telegram's parser does so for every button
-click — the approval card's `act:` buttons and the `qr:/approve` answer buttons of the in-turn card alike — so
-the click that answers a request asked in a group must not turn that group into a DM. The answer is not
-judged against the chat's registry entry (`_ActiveTask.requester_id`) either: a delegated run asks while
-another member's turn can hold that entry.
+says group. A channel that cannot tell reports a direct chat, so the message that answers a request asked in
+a group must not turn that group into a DM. Button clicks report the kind of chat they happened in: a
+Telegram click takes it from the chat of the message its button sits on, a Feishu card callback — which names
+its chat but not its kind — from the group chats that chat's typed messages were seen in
+(`providers/feishu/group_chats.py`; a chat none has been seen in counts as direct). A click in a group is a
+group message like a typed one: it counts as addressing the bot (`mentioned`) and shares the group's session
+and admission policy, so a request that a click started is registered as a group request that another
+member's click cannot take. The answer is not judged against the chat's registry entry
+(`_ActiveTask.requester_id`) either: a delegated run asks while another member's turn can hold that entry.
 
 The question is asked at the moment the request is taken. `_handle_approval_command` asks it after the last
 `await` of the handler (the risk screening of a `/deny <reason>`) and directly before `PendingApprovals.pop`.
