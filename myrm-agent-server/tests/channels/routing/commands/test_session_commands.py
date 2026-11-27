@@ -13,7 +13,7 @@ from app.channels.routing.commands import (
     handle_topic_command,
 )
 from app.channels.types import OutboundMessage
-from tests.channels.command_testkit import make_command_bus, make_command_msg
+from tests.channels.routing.commands.command_testkit import make_command_bus, make_command_msg
 
 
 class TestHandleNewSession:

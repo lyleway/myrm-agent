@@ -318,12 +318,12 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `core/channel_bridge/test_topic_config_channel_bind.py` | 集成 | 渠道绑定策略（真实存储，智能体登记簿可编辑）：Search 轨道与不存在的智能体绑不上且不留存储；通用智能体可绑；已绑定的智能体后来变成 Search 轨道或被删除，读到时绑定被永久清除（智能体恢复后也不回来）；`get_all_topics` 清掉不可绑定的绑定并落库，清理存不下时仍照常回答；格式不对的绑定条目被跳过且不去查智能体；Search 轨道错误的识别，以及智能体元数据缺失、不是字典时不算 Search 轨道 |
 | `core/channel_bridge/test_topic_config_workspace.py` | 集成 | 话题工作区字段（真实存储）：绑定项目存 `projectId` 且不留 `authorizedPath`；绑路径换掉项目、绑项目换掉路径，同时清空两者都删除；绑定时不提工作区则保留原值；项目与路径同时给出被拒且什么也不存 |
 | `channels/types/test_topic_context.py` | 单元 | `TopicContext.effective_agent_id`：绑定的智能体，身份冻结、没有或为空的智能体 id 时为 `None`；冻结保留已存的 `agent_id` |
-| `channels/command_testkit.py` | 辅助 | 斜杠命令处理器测试的共享替身：`make_command_msg()`（入站消息）、`make_command_bus()`（记录出站发布的总线）、`make_command_resolver()`（把每个 DM 发送者与群成员解成同一个用户的策略解析器） |
-| `channels/test_command_resolution.py` | 单元 | 斜杠命令的解析：`/stop`、`/new`、`/compact`、`/help` 的解出；批准用语（斜杠、数字、自然语言、表情、批量与带理由的拒绝）、`/topic` 参数与智能体路由命令别名的解析 |
-| `channels/test_command_registry.py` | 单元 | `CommandRegistry` 的登记校验与冲突检测、边界情形、注销与过滤 |
-| `channels/test_skill_command_registry.py` | 单元 | 技能绑定命令：登记与解析的健壮性、网关热更新技能命令、生产力技能命令的登记 |
-| `channels/test_session_commands.py` | 单元 | `/new` 处理器先开启新会话再确认，开不出会话时回失败文案而不确认，回复发往聊天而不是发送者；`/topic` 的绑定、解绑与查看 |
-| `channels/test_turn_commands.py` | 单元 | `/retry`、`/undo` 处理器：没有配置处理器、成功（含已撤销与无法回滚的文件）、无可撤销、失败或异常各回各自的文案，群里按群成员解用户 |
+| `channels/routing/commands/command_testkit.py` | 辅助 | 斜杠命令处理器测试的共享替身：`make_command_msg()`（入站消息）、`make_command_bus()`（记录出站发布的总线）、`make_command_resolver()`（把每个 DM 发送者与群成员解成同一个用户的策略解析器） |
+| `channels/routing/commands/test_command_resolution.py` | 单元 | 斜杠命令的解析：`/stop`、`/new`、`/compact`、`/help` 的解出；批准用语（斜杠、数字、自然语言、表情、批量与带理由的拒绝）、`/topic` 参数与智能体路由命令别名的解析 |
+| `channels/routing/commands/test_command_registry.py` | 单元 | `CommandRegistry` 的登记校验与冲突检测、边界情形、注销与过滤 |
+| `channels/routing/commands/test_skill_command_registry.py` | 单元 | 技能绑定命令：登记与解析的健壮性、网关热更新技能命令、生产力技能命令的登记 |
+| `channels/routing/commands/test_session_commands.py` | 单元 | `/new` 处理器先开启新会话再确认，开不出会话时回失败文案而不确认，回复发往聊天而不是发送者；`/topic` 的绑定、解绑与查看 |
+| `channels/routing/commands/test_turn_commands.py` | 单元 | `/retry`、`/undo` 处理器：没有配置处理器、成功（含已撤销与无法回滚的文件）、无可撤销、失败或异常各回各自的文案，群里按群成员解用户 |
 | `channels/test_handoff_command.py` | 单元 | IM `/handoff <渠道>`：交接的是命令解出的那个会话；没有目标、与当前渠道相同、聊天没有会话各回自己的提示；渠道不存在或未连接、没有配对、其他失败分别回各自的文案 |
 | `core/channel_bridge/test_turn_handler_revert_messages.py` | 单元 | `_revert_messages`：空列表给 0；逐条还原并统计已还原与不可还原的文件；还原了文件才清理对应的持久化快照并通知智能体，什么都没还原时两者都不做；一条消息抛错不影响其余，全部失败给 0 |
 | `services/chat/test_chat_message_spill_workspace.py` | 集成 | `ChatService.append_message(spill_workspace=…)`：超长用户消息存进调用方指定工作区的 `.myrm/pastes/`（文件内容与原文一致、消息里是落盘提示与路径、`extra_data.spillover` 带路径/字数/预览、HOME 下什么都没写）；存下的粘贴躲过 24h 清扫而活跃回合的外溢被清掉、智能体路径策略放行；工作区是 git 项目时存下的粘贴不出现在 `git status`；chat 的 title/last_message/first_message 是预览而非指针；Web 路径同样落在聊天工作区；短消息原样入库不写文件也不查工作区；助手消息从不落盘；带附件发送的长粘贴，库里的行与历史回放都不含全文；工作区写不了文件时消息原样留在库里；首次运行建的沙箱接纳已存有粘贴的目录；不超过人写文本停车线的长消息原样入库、不写文件也不建工作区 |
