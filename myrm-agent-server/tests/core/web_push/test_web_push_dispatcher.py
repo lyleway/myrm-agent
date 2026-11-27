@@ -12,7 +12,10 @@ from app.core.web_push.dispatcher import (
     WebPushDispatcher,
     _background_task_title,
 )
+from app.core.web_push.service import BroadcastResult
 from app.services.event.app_event_bus import AppEvent, AppEventType, ServerEventBus
+
+_REACHED_ONE_DEVICE = BroadcastResult(subscriptions=1)
 
 
 class TestPushTemplates:
@@ -75,7 +78,7 @@ class TestWebPushDispatcher:
         dispatcher = WebPushDispatcher(bus)
 
         mock_service = AsyncMock()
-        mock_service.broadcast = AsyncMock(return_value=1)
+        mock_service.broadcast = AsyncMock(return_value=_REACHED_ONE_DEVICE)
 
         with patch(
             "app.core.web_push.service.get_web_push_service",
@@ -108,7 +111,7 @@ class TestWebPushDispatcher:
         dispatcher = WebPushDispatcher(bus)
 
         mock_service = AsyncMock()
-        mock_service.broadcast = AsyncMock(return_value=1)
+        mock_service.broadcast = AsyncMock(return_value=_REACHED_ONE_DEVICE)
 
         with patch(
             "app.core.web_push.service.get_web_push_service",
@@ -166,7 +169,7 @@ class TestWebPushDispatcher:
         dispatcher = WebPushDispatcher(bus)
 
         mock_service = AsyncMock()
-        mock_service.broadcast = AsyncMock(return_value=1)
+        mock_service.broadcast = AsyncMock(return_value=_REACHED_ONE_DEVICE)
 
         with patch(
             "app.core.web_push.service.get_web_push_service",
@@ -203,7 +206,7 @@ class TestWebPushDispatcher:
         dispatcher = WebPushDispatcher(bus)
 
         mock_service = AsyncMock()
-        mock_service.broadcast = AsyncMock(return_value=1)
+        mock_service.broadcast = AsyncMock(return_value=_REACHED_ONE_DEVICE)
 
         with patch(
             "app.core.web_push.service.get_web_push_service",
@@ -272,7 +275,7 @@ class TestWebPushDispatcher:
         dispatcher = WebPushDispatcher(bus)
 
         mock_service = AsyncMock()
-        mock_service.broadcast = AsyncMock(return_value=1)
+        mock_service.broadcast = AsyncMock(return_value=_REACHED_ONE_DEVICE)
 
         with patch(
             "app.core.web_push.service.get_web_push_service",

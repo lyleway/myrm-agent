@@ -1026,8 +1026,11 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/agent/test_fleet_overview_integration.py` | 模块 | Fleet Overview API 集成（Chat/CronJob/Approval 真实 DB 聚合 + kanban IN_REVIEW 并入 pendingApprovals + kanban store 故障降级）；聚合用例把 kanban 读取固定为没有看板（它读进程库，别的套件会在里面留下 IN_REVIEW 任务），kanban 两条用例各自替换读取 |
 | `api/chats/test_kanban_in_review_seed_integration.py` | 模块 | IN_REVIEW seed fixture 集成（fixture → badges 计数 + approve/reject 转换回落） |
 | `core/web_push/test_push_deep_links.py` | 模块 | Web Push 点击路由（resolve_push_url：APPROVAL_REQUIRED 深链、pending_review+board_id 直达看板 in_review 列、非 review 状态回退聊天页、缺 chat 回首页、自动备份告警直达备份设置、云端同步告警直达云端备份页） |
-| `core/web_push/conftest.py` | 辅助 | `keyed_service`：持有 `vapid_keys.py` 在临时状态目录里真实生成的 VAPID 密钥对（PKCS8 PEM）的推送服务，`test_web_push_service.py` 的发送用例与 `test_web_push_delivery.py` 共用 |
-| `core/web_push/test_web_push_delivery.py` | 模块 | `_send_one` 走真实 pywebpush，只桩掉它最底层的 `requests.post`：库接受生成器写出的 PEM 私钥并发出请求；请求头里的 VAPID 令牌用对外公布的公钥验签（`aud` 取推送端点的源、`sub` 取 `NOREPLY_EMAIL`）；每个请求带有界超时；推送服务回 410 或 404 时清掉订阅，回 500 时保留 |
+| `core/web_push/conftest.py` | 辅助 | `keyed_service`：持有 `vapid_keys.py` 在临时状态目录里真实生成的 VAPID 密钥对（PKCS8 PEM）的推送服务，`test_web_push_send_one.py` 与 `test_web_push_delivery.py` 共用 |
+| `core/web_push/test_web_push_delivery.py` | 模块 | `_send_one` 走真实 pywebpush，只桩掉它最底层的 `requests.post`：库接受生成器写出的 PEM 私钥并发出请求；请求头里的 VAPID 令牌用对外公布的公钥验签（`aud` 取推送端点的源、`sub` 取 `NOREPLY_EMAIL`）；每个请求带有界超时；推送服务回 410 或 404 时清掉订阅，回 500 时保留；失败原因取推送服务的 HTTP 回复（410 / 404 另注明已移除订阅）或异常类型，网络错误的原因不含请求地址，VAPID 密钥读不出来也是一条原因而不是抛出 |
+| `core/web_push/test_web_push_send_one.py` | 模块 | `_send_one` 的各分支（pywebpush 调用被桩掉）：推送服务接受则没有原因；回 410 或 404 时清掉订阅并注明已移除，回 500 时保留订阅；网络错误与不带回复的 `WebPushException` 以异常类型作为原因 |
+| `core/web_push/test_web_push_delivery_alert.py` | 模块 | `DeliveryAlert`：整批订阅都没送达才发一条 `HEALTH_ALERT`（`component=web_push`、带失败原因、`suppress_web_push`，IM 文案以 `Health alert (web_push)` 开头）；连续失败只告警一次，任一设备送达、没有订阅或再无可送达的订阅都结束这一轮，发布失败则下一次广播补发；`WebPushDispatcher` 接入后告警自身不再经 Web Push 推送 |
+| `core/web_push/test_web_push_router.py` | 模块 | `POST /web-push/test`：回送达数、订阅数与去重后的未送达原因；没有订阅时原因是“未登记设备”而不是光秃秃的 0；请求参数原样转给广播；经 ASGI 的响应体形状 |
 | `api/kanban/test_in_review_api.py` | 模块 | IN_REVIEW 审批 API（approve/reject 转换、守卫、pending_review 通知 payload 含 board_id） |
 | `platform_utils/sandbox/_ARCH.md` | 模块 | `platform_utils/sandbox` 业务逻辑回归（platform provider seed 14 例 + tool gateway merge），见子目录清单 |
 | `services/skills/test_scan_risk_policy.py` | 模块 | 后台学习的高危新增复核策略（真实扫描器）：新技能对比空内容、同类发现数量增加仍判新增（计数差分）、原有发现不重复拦截、语境型类别仅 CRITICAL 生效、扫描异常 fail-closed、信号词汇 |

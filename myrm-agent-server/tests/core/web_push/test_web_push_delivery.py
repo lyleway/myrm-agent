@@ -15,6 +15,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from py_vapid.jwt import decode as decode_vapid_token
+from requests.exceptions import ConnectTimeout
 
 from app.core.brand import NOREPLY_EMAIL
 from app.core.web_push.service import WebPushService
@@ -34,11 +35,12 @@ def _browser_subscription_keys() -> tuple[str, str]:
     return _b64url(point), _b64url(os.urandom(16))
 
 
-def _push_service_reply(status_code: int) -> MagicMock:
-    return MagicMock(status_code=status_code, text="", headers={})
+def _push_service_reply(status_code: int, reason: str = "") -> MagicMock:
+    return MagicMock(status_code=status_code, reason=reason, text="", headers={})
 
 
-async def _send(service: WebPushService, endpoint_hash: str = "h") -> bool:
+async def _send(service: WebPushService, endpoint_hash: str = "h") -> str | None:
+    """The failure reason of one push through the real library, None once the push service accepted it."""
     p256dh, auth = _browser_subscription_keys()
     return await service._send_one(endpoint=_ENDPOINT, p256dh=p256dh, auth=auth, payload=_PAYLOAD, endpoint_hash=endpoint_hash)
 
@@ -46,9 +48,9 @@ async def _send(service: WebPushService, endpoint_hash: str = "h") -> bool:
 class TestSendOneAgainstRealLibrary:
     async def test_request_is_signed_with_the_advertised_vapid_key(self, keyed_service: WebPushService) -> None:
         with patch("pywebpush.requests.post", return_value=_push_service_reply(201)) as post:
-            delivered = await _send(keyed_service)
+            failure = await _send(keyed_service)
 
-        assert delivered is True
+        assert failure is None
         post.assert_called_once()
         assert post.call_args.args[0] == _ENDPOINT
         headers = post.call_args.kwargs["headers"]
@@ -81,10 +83,44 @@ class TestSendOneAgainstRealLibrary:
             patch("pywebpush.requests.post", return_value=_push_service_reply(status_code)),
             patch.object(keyed_service, "_remove_subscription", new_callable=AsyncMock) as remove,
         ):
-            delivered = await _send(keyed_service, endpoint_hash="h_reply")
+            failure = await _send(keyed_service, endpoint_hash="h_reply")
 
-        assert delivered is False
+        assert failure is not None
         if subscription_removed:
             remove.assert_awaited_once_with("h_reply")
         else:
             remove.assert_not_awaited()
+
+
+class TestFailureReason:
+    """The reason is what the test endpoint and the delivery alert show, so it must explain and must not leak."""
+
+    @pytest.mark.parametrize(
+        ("status_code", "phrase", "reason"),
+        [
+            (403, "Forbidden", "HTTP 403 Forbidden"),
+            (429, "Too Many Requests", "HTTP 429 Too Many Requests"),
+            (500, "", "HTTP 500"),
+            (410, "Gone", "HTTP 410 Gone (subscription removed)"),
+        ],
+    )
+    async def test_reply_of_the_push_service_is_the_reason(
+        self, keyed_service: WebPushService, status_code: int, phrase: str, reason: str
+    ) -> None:
+        with (
+            patch("pywebpush.requests.post", return_value=_push_service_reply(status_code, phrase)),
+            patch.object(keyed_service, "_remove_subscription", new_callable=AsyncMock),
+        ):
+            assert await _send(keyed_service) == reason
+
+    async def test_network_error_reason_is_its_type_and_never_the_endpoint(self, keyed_service: WebPushService) -> None:
+        # requests puts the full request URL into the message, and an endpoint URL identifies the subscriber's device.
+        timed_out = ConnectTimeout(f"HTTPSConnectionPool(host='push.example.test'): timed out for url {_ENDPOINT}")
+        with patch("pywebpush.requests.post", side_effect=timed_out):
+            reason = await _send(keyed_service)
+
+        assert reason == "ConnectTimeout"
+
+    async def test_unloadable_vapid_keys_are_a_reason_not_a_crash(self, keyed_service: WebPushService) -> None:
+        with patch.object(keyed_service, "_ensure_keys", side_effect=OSError("vapid_private_key.pem unreadable")):
+            assert await _send(keyed_service) == "OSError"

@@ -1,6 +1,8 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { sendTestPush } from '@/services/web-push';
+
 import { usePushSubscription } from '../usePushSubscription';
 
 vi.mock('@/services/web-push', () => ({
@@ -171,5 +173,18 @@ describe('usePushSubscription', () => {
       const count = await result.current.sendTest();
       expect(count).toBe(1);
     });
+  });
+
+  it('sendTest keeps the reason a test push reached no device and rethrows it', async () => {
+    mockPushEnvironment({ permission: 'granted', subscription: null });
+    vi.mocked(sendTestPush).mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
+
+    const { result } = renderHook(() => usePushSubscription());
+
+    await act(async () => {
+      await expect(result.current.sendTest()).rejects.toThrow('HTTP 403 Forbidden');
+    });
+
+    expect(result.current.error).toBe('HTTP 403 Forbidden');
   });
 });

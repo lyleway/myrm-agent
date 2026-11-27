@@ -9,6 +9,7 @@
  *
  * [POS]
  * Thin REST client for backend `/web-push/*` endpoints. SW click routing lives in `lib/web-push/`.
+ * A test push that reached no device is an error carrying the server's reasons, never a count of zero.
  */
 
 import { getApiUrl } from '@/lib/api';
@@ -19,6 +20,12 @@ interface WebPushVapidKeyResponse {
 
 interface WebPushSubscriptionResponse {
   endpoint_hash: string;
+}
+
+interface WebPushTestResponse {
+  delivered: number;
+  subscriptions: number;
+  failures: string[];
 }
 
 export async function fetchVapidPublicKey(): Promise<string> {
@@ -60,6 +67,7 @@ export async function removeSubscription(endpoint: string): Promise<void> {
   }
 }
 
+/** Resolves with the number of devices the test push reached; rejects with the server's reasons when it reached none. */
 export async function sendTestPush(): Promise<number> {
   const res = await fetch(getApiUrl('/web-push/test'), {
     method: 'POST',
@@ -69,7 +77,10 @@ export async function sendTestPush(): Promise<number> {
   if (!res.ok) {
     throw new Error(`Failed to send test push: ${res.status}`);
   }
-  const data = (await res.json()) as { delivered: number };
+  const data = (await res.json()) as WebPushTestResponse;
+  if (data.delivered === 0) {
+    throw new Error(data.failures.join('; '));
+  }
   return data.delivered;
 }
 

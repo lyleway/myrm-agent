@@ -3,16 +3,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   BACKUP_ALERT_COMPONENT,
   CLOUD_SYNC_ALERT_COMPONENT,
+  WEB_PUSH_ALERT_COMPONENT,
   showBackupFailureToast,
   showCloudSyncFailureToast,
-  type BackupToastDeps,
-} from '@/hooks/globalEvents/backupAlertToast';
+  showWebPushFailureToast,
+  type FailureToastDeps,
+} from '@/hooks/globalEvents/failureAlertToast';
 
 function buildDeps() {
   const error = vi.fn();
   const push = vi.fn();
   const notifyIfLeader = vi.fn();
-  const deps: BackupToastDeps = { t: (key) => key, router: { push }, toast: { error }, notifyIfLeader };
+  const deps: FailureToastDeps = { t: (key) => key, router: { push }, toast: { error }, notifyIfLeader };
   return { deps, error, push, notifyIfLeader };
 }
 
@@ -99,5 +101,54 @@ describe('showCloudSyncFailureToast', () => {
 
     const ids = error.mock.calls.map(([, options]) => (options as { id: string }).id);
     expect(new Set(ids).size).toBe(2);
+  });
+});
+
+describe('showWebPushFailureToast', () => {
+  it('matches the component the server raises the alert for', () => {
+    expect(WEB_PUSH_ALERT_COMPONENT).toBe('web_push');
+  });
+
+  it('shows localized copy only, as its own replaceable toast', () => {
+    const { deps, error } = buildDeps();
+
+    showWebPushFailureToast(deps);
+
+    expect(error).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      'webPushFailureTitle',
+      expect.objectContaining({
+        id: 'web-push-failure',
+        description: 'webPushFailureBody',
+        duration: 15_000,
+        dismissible: true,
+      }),
+    );
+  });
+
+  it('opens the preferences from the toast and from the cross-tab notification', () => {
+    const { deps, error, push, notifyIfLeader } = buildDeps();
+
+    showWebPushFailureToast(deps);
+    const options = error.mock.calls[0][1] as { action: { label: string; onClick: () => void } };
+    expect(options.action.label).toBe('viewWebPushSettings');
+    options.action.onClick();
+    expect(push).toHaveBeenLastCalledWith('/settings/preferences');
+
+    expect(notifyIfLeader).toHaveBeenCalledWith('webPushFailureTitle', 'webPushFailureBody', expect.any(Function));
+    (notifyIfLeader.mock.calls[0][2] as () => void)();
+    expect(push).toHaveBeenCalledTimes(2);
+    expect(push).toHaveBeenLastCalledWith('/settings/preferences');
+  });
+
+  it('never replaces the toast of a backup', () => {
+    const { deps, error } = buildDeps();
+
+    showBackupFailureToast(deps);
+    showCloudSyncFailureToast(deps);
+    showWebPushFailureToast(deps);
+
+    const ids = error.mock.calls.map(([, options]) => (options as { id: string }).id);
+    expect(new Set(ids).size).toBe(3);
   });
 });
