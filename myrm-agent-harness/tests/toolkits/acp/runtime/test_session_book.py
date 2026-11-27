@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.session import CliSessionBook
+from myrm_agent_harness.toolkits.acp.runtime.session_book import CliSessionBook
 from myrm_agent_harness.toolkits.acp.types import CliSessionRecord
-
-from ._fakes import RecordingStore
+from tests.toolkits.acp._stores import RecordingStore
 
 _RECORD = CliSessionRecord("cli-1", "/work")
 

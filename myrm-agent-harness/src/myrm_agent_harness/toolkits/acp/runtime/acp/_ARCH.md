@@ -1,7 +1,7 @@
 # acp/
 
 ## Overview
-ACP runtime backend — keeps one external ACP-compatible agent process per backend (Claude Code, Codex CLI, ...) and drives it over the ACP JSON-RPC protocol on stdin/stdout: session reuse, resume, cancel, permission requests, file access with path safety, image prompts, and a bounded stop for an agent that stopped reading.
+ACP runtime backend — keeps one external ACP-compatible agent process per backend (Gemini CLI, Qwen Code, ...) and drives it over the ACP JSON-RPC protocol on stdin/stdout: session reuse, resume, cancel, permission requests, file access with path safety, image prompts, and a bounded stop for an agent that stopped reading.
 
 Detailed design: [ACP_SYSTEM.md](../../ACP_SYSTEM.md)
 

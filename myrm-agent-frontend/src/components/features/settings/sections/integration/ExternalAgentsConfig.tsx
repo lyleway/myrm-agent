@@ -6,6 +6,7 @@ import {
   IconPencil,
   IconPlug,
   IconPlus,
+  IconServer,
   IconTerminal,
   IconTrash,
 } from '@/components/features/icons/PremiumIcons';
@@ -52,6 +53,7 @@ import { REVEAL_ON_HOVER } from '@/lib/utils/a11y';
 const TYPE_ICONS: Record<ExternalAgentType, React.ElementType> = {
   cli: IconTerminal,
   acp: IconPlug,
+  app_server: IconServer,
 };
 
 const syncManager = getConfigSyncManager();

@@ -1,22 +1,23 @@
-"""A spawned CLI agent process — line-wise stdout, a bounded stderr tail, and the only code that stops it.
+"""A spawned agent process — line-wise stdout, a bounded stderr tail, and the only code that stops it.
 
-Every way a turn can end (EOF, an error, a cancelled task, an abandoned stream, a timeout) leaves through the
-``spawn_cli_process`` context, which stops a process that is still running. Stopping is idempotent and runs to
-completion even when the task awaiting it is cancelled again, so a stopped turn never leaves a CLI behind.
+Every way a run can end (EOF, an error, a cancelled task, an abandoned stream, a timeout) leaves through the
+``spawn_managed_process`` context, which stops a process that is still running. Stopping is idempotent and runs to
+completion even when the task awaiting it is cancelled again, so a stopped run never leaves an agent behind.
 
 [INPUT]
 - utils.os_compat::get_process_group_kwargs, kill_process_group (POS: Unified abstractions for POSIX/Windows differences (file locks, process groups))
 
 [OUTPUT]
-- CliProcess: a running CLI process with ``start_prompt``, ``lines``, ``wait``, ``terminate`` and the facts a turn is judged by
-- CliLaunchError: the CLI executable does not exist
-- spawn_cli_process: async context manager that spawns a CliProcess and stops it on exit
+- ManagedProcess: a running agent process with ``start_prompt`` / ``send``, ``lines``, ``wait``, ``terminate`` and the facts a run is judged by
+- ProcessLaunchError: the agent executable does not exist
+- spawn_managed_process: async context manager that spawns a ManagedProcess and stops it on exit
 
 [POS]
-Process ownership of CliRuntime. Knows nothing about the CLI's output format or sessions. The prompt is written to
-stdin beside the turn, not before it: a CLI reads stdin when it is ready (Claude's stream-json input is read only
-after its start hooks have run), and a prompt of several MB, an image, waits in the pipe until then. A turn that
-waited for the write could neither stream nor be stopped in the meantime.
+Process ownership of every runtime that starts an agent: CliRuntime (one process per turn, fed one prompt) and
+CodexRuntime (one resident process, driven line by line). Knows nothing about the agent's output format or sessions.
+A one-shot prompt is written to stdin beside the run, not before it: a CLI reads stdin when it is ready (Claude's
+stream-json input is read only after its start hooks have run), and a prompt of several MB, an image, waits in the
+pipe until then. A run that waited for the write could neither stream nor be stopped in the meantime.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ _STDOUT_LINE_LIMIT = 16 * 1024 * 1024
 _STDERR_TAIL_BYTES = 8 * 1024
 _STDERR_READ_BYTES = 4096
 _TERMINATE_GRACE_SECONDS = 5.0
-# A grandchild that inherited the pipe can keep stderr open after the CLI exited; the tail is enough by then.
+# A grandchild that inherited the pipe can keep stderr open after the agent exited; the tail is enough by then.
 _STDERR_DRAIN_SECONDS = 2.0
 _EXIT_POLL_SECONDS = 0.05
 _KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
@@ -48,15 +49,15 @@ def _signal_group(pid: int, sig: int) -> None:
     try:
         kill_process_group(pid, sig)
     except OSError:
-        logger.debug("cli_process_signal_failed pid=%d signal=%d", pid, sig, exc_info=True)
+        logger.debug("managed_process_signal_failed pid=%d signal=%d", pid, sig, exc_info=True)
 
 
-class CliLaunchError(Exception):
-    """The CLI executable does not exist, so no process was started."""
+class ProcessLaunchError(Exception):
+    """The agent executable does not exist, so no process was started."""
 
 
-class CliProcess:
-    """One running CLI process and its pipes."""
+class ManagedProcess:
+    """One running agent process and its pipes."""
 
     def __init__(self, process: asyncio.subprocess.Process) -> None:
         self._process = process
@@ -98,8 +99,27 @@ class CliProcess:
             stdin.close()
             await stdin.wait_closed()
         except OSError:
-            logger.debug("cli_process_left_before_prompt pid=%d", self._process.pid)
+            logger.debug("managed_process_left_before_prompt pid=%d", self._process.pid)
         finally:
+            with contextlib.suppress(OSError, RuntimeError):
+                stdin.close()
+
+    async def send(self, line: str) -> None:
+        """Write ``line`` and a newline to the stdin of a process spawned ``interactive``, and wait until it is flushed.
+
+        A whole line is handed to the transport in one call, so lines sent from different tasks never interleave.
+        Raises ``OSError`` when the process is not reading any more (it left, or its stdin was closed).
+        """
+        stdin = self._process.stdin
+        if stdin is None or stdin.is_closing():
+            raise BrokenPipeError("The process takes no more input")
+        stdin.write(line.encode("utf-8") + b"\n")
+        await stdin.drain()
+
+    def close_stdin(self) -> None:
+        """End the input of an interactive process: a well-behaved agent finishes what it holds and exits."""
+        stdin = self._process.stdin
+        if stdin is not None and not stdin.is_closing():
             with contextlib.suppress(OSError, RuntimeError):
                 stdin.close()
 
@@ -107,7 +127,7 @@ class CliProcess:
         """Non-empty stdout lines until the process closes its stdout.
 
         With ``idle_tick`` a ``None`` is yielded each time that many seconds pass without a line, so a caller can
-        show that a CLI which is silent (one long tool call) is still running. A tick never loses output: a line
+        show that an agent which is silent (one long tool call) is still running. A tick never loses output: a line
         that is only half written stays in the stream buffer and is returned whole once it is complete.
         """
         stdout = self._process.stdout
@@ -175,7 +195,7 @@ class CliProcess:
             await asyncio.wait_for(self._process.wait(), _TERMINATE_GRACE_SECONDS)
             return
         except TimeoutError:
-            logger.warning("cli_process_ignored_sigterm pid=%d", pid)
+            logger.warning("managed_process_ignored_sigterm pid=%d", pid)
         _signal_group(pid, _KILL)
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._process.wait(), _TERMINATE_GRACE_SECONDS)
@@ -189,18 +209,25 @@ class CliProcess:
 
 
 @asynccontextmanager
-async def spawn_cli_process(
+async def spawn_managed_process(
     args: list[str],
     *,
     env: dict[str, str],
     cwd: str,
-    stdin_text: str | None,
-) -> AsyncIterator[CliProcess]:
-    """Spawn ``args`` as its own process group, start feeding ``stdin_text`` (the prompt) if given, stop it on exit."""
+    stdin_text: str | None = None,
+    interactive: bool = False,
+) -> AsyncIterator[ManagedProcess]:
+    """Spawn ``args`` as its own process group and stop it on exit.
+
+    ``stdin_text`` (the one-shot prompt of a CLI) starts being fed at once and ends the input; ``interactive`` keeps
+    stdin open for ``send`` instead. With neither, stdin is empty.
+    """
+    if interactive and stdin_text is not None:
+        raise ValueError("An interactive process takes no initial stdin text")
     try:
         process = await asyncio.create_subprocess_exec(
             *args,
-            stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if interactive or stdin_text is not None else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -209,14 +236,14 @@ async def spawn_cli_process(
             **get_process_group_kwargs(),
         )
     except FileNotFoundError as exc:
-        # A missing working directory fails the same way; only a missing program means the CLI is not installed.
+        # A missing working directory fails the same way; only a missing program means the agent is not installed.
         if not os.path.isdir(cwd):
             raise
-        raise CliLaunchError(f"CLI executable not found: {args[0]}") from exc
-    cli_process = CliProcess(process)
+        raise ProcessLaunchError(f"CLI executable not found: {args[0]}") from exc
+    managed = ManagedProcess(process)
     try:
         if stdin_text is not None:
-            cli_process.start_prompt(stdin_text)
-        yield cli_process
+            managed.start_prompt(stdin_text)
+        yield managed
     finally:
-        await cli_process.close()
+        await managed.close()

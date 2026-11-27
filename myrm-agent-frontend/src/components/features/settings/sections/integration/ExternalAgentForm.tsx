@@ -95,6 +95,9 @@ const ExternalAgentForm = memo(
                 <SelectItem value="acp" data-testid="external-agent-type-acp">
                   {t('typeAcp')}
                 </SelectItem>
+                <SelectItem value="app_server" data-testid="external-agent-type-app-server">
+                  {t('typeAppServer')}
+                </SelectItem>
               </SelectContent>
             </Select>
             {fixedTransport !== null && <p className="text-[11px] text-muted-foreground/60">{t('typeFixedHint')}</p>}

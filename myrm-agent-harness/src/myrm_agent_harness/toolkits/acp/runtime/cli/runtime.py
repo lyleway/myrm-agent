@@ -1,7 +1,7 @@
 """CLI runtime backend — one external CLI agent process per turn, streamed as RuntimeEvents.
 
-Supports Claude Code (``claude -p --output-format stream-json``), Codex (``codex exec --json``), and any CLI
-that prints newline-delimited JSON events. The CLI's own session id is what carries a conversation between turns:
+Supports Claude Code (``claude -p --output-format stream-json``) and any CLI that prints newline-delimited JSON
+events or plain text. The CLI's own session id is what carries a conversation between turns:
 it is stored the moment the CLI announces it and replayed through the CLI's resume syntax (see ``dialect``).
 
 [INPUT]
@@ -13,8 +13,8 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 - toolkits.acp.runtime.cli.dialect::dialect_for, is_session_id (POS: Per-CLI launch knowledge of CliRuntime)
 - toolkits.acp.runtime.cli.failure::classify_failure (POS: Error vocabulary of CliRuntime)
 - toolkits.acp.runtime.image_blocks::load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
-- toolkits.acp.runtime.cli.process::CliLaunchError, CliProcess, spawn_cli_process (POS: Process ownership of CliRuntime)
-- toolkits.acp.runtime.cli.session::CliSessionBook (POS: Session continuity state of CliRuntime)
+- toolkits.acp.runtime.process::ManagedProcess, ProcessLaunchError, spawn_managed_process (POS: Process ownership of every runtime that starts an agent)
+- toolkits.acp.runtime.session_book::CliSessionBook (POS: Session continuity state of the runtimes that continue an agent's own conversation)
 - toolkits.acp.runtime.cli.turn_parser::CliResult, TurnParser (POS: Output parsing of CliRuntime)
 
 [OUTPUT]
@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -45,10 +45,10 @@ from myrm_agent_harness.toolkits.acp.runtime._base import (
 )
 from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import CliDialect, dialect_for, is_session_id
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
-from myrm_agent_harness.toolkits.acp.runtime.cli.process import CliLaunchError, CliProcess, spawn_cli_process
-from myrm_agent_harness.toolkits.acp.runtime.cli.session import CliSessionBook
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import load_image_blocks
+from myrm_agent_harness.toolkits.acp.runtime.process import ManagedProcess, ProcessLaunchError, spawn_managed_process
+from myrm_agent_harness.toolkits.acp.runtime.session_book import CliSessionBook
 from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
@@ -117,7 +117,7 @@ class _Attempt:
 class CliRuntime(BaseRuntime):
     """RuntimeBackend that runs a CLI process per turn and parses its NDJSON output.
 
-    The prompt reaches the CLI on stdin (``-p``) or as the last argument. A CLI with a dialect (Claude, Codex)
+    The prompt reaches the CLI on stdin (``-p``) or as the last argument. A CLI with a dialect (Claude)
     is resumed from the session it announced earlier, provided the turn starts in the directory that created it;
     with a ``session_store`` that id also survives a restart of the host process. A resume the CLI rejects as
     unknown is retried once as a fresh session in the same turn, and the old id is replaced only once the fresh
@@ -134,7 +134,7 @@ class CliRuntime(BaseRuntime):
         session_store: CliSessionStore | None = None,
     ) -> None:
         super().__init__(runtime_name, config, backend_type="cli", workspace=workspace)
-        self._process: CliProcess | None = None
+        self._process: ManagedProcess | None = None
         self._stop_requested = False
         self._sessions = CliSessionBook(runtime_name, session_store)
 
@@ -146,7 +146,7 @@ class CliRuntime(BaseRuntime):
             supports_mcp=False,
             supports_streaming=True,
             supports_tools=False,
-            supports_images=dialect is not None and dialect.takes_images,
+            supports_images=dialect is not None and dialect.sends_image_blocks,
             supports_permission_requests=dialect is not None and dialect.asks_host,
         )
 
@@ -181,13 +181,13 @@ class CliRuntime(BaseRuntime):
 
         cwd = self._workspace
         dialect = dialect_for(command)
-        if images and (dialect is None or not dialect.takes_images):
+        if images and (dialect is None or not dialect.sends_image_blocks):
             # Same as MCP above: the pool already withholds what a backend did not declare it takes.
             logger.warning(
                 "cli_runtime_images_ignored backend=%s images=%d reason=unsupported", self._name, len(images)
             )
         env = {**(dialect.env_defaults if dialect is not None else {}), **build_safe_env(self._config)}
-        args = self._launch_args(command, dialect, images or ())
+        args = self._launch_args(command, dialect)
         if images and dialect is not None and dialect.sends_image_blocks:
             blocks = await asyncio.to_thread(load_image_blocks, images)
             args, prompt = dialect.with_image_blocks(args, prompt, blocks)
@@ -241,7 +241,7 @@ class CliRuntime(BaseRuntime):
                 async with aclosing(self._run_attempt(args, prompt, session_id, cwd, env, dialect, attempt)) as events:
                     async for event in events:
                         yield event
-        except CliLaunchError as exc:
+        except ProcessLaunchError as exc:
             logger.warning("cli_launch_failed name=%s command=%s", self._name, command_preview(args[0], 200))
             yield create_event(
                 RuntimeEventType.ERROR,
@@ -253,7 +253,7 @@ class CliRuntime(BaseRuntime):
         for event in self._closing_events(attempt, session_id):
             yield event
 
-    def _launch_args(self, command: str, dialect: CliDialect | None, images: Sequence[str] = ()) -> list[str]:
+    def _launch_args(self, command: str, dialect: CliDialect | None) -> list[str]:
         """The command line of a fresh turn: the CLI's launch and permission args, plus what its dialect adds."""
         args = [command, *resolve_cli_args(command, self._config.args, self._config.permission_mode)]
         if "--output-format" in args and "stream-json" in args and "--verbose" not in args:
@@ -261,7 +261,6 @@ class CliRuntime(BaseRuntime):
         if dialect is not None:
             args = dialect.with_partial_messages(args)
             args = dialect.with_max_turns(args, self._config.max_turns)
-            args = dialect.with_images(args, images)
         return args
 
     async def _resume_args(
@@ -312,7 +311,7 @@ class CliRuntime(BaseRuntime):
         argv = args if uses_stdin else [*args, prompt]
         parser = TurnParser(session_id)
         started = time.monotonic()
-        async with spawn_cli_process(argv, env=env, cwd=cwd, stdin_text=prompt if uses_stdin else None) as process:
+        async with spawn_managed_process(argv, env=env, cwd=cwd, stdin_text=prompt if uses_stdin else None) as process:
             self._process = process
             if self._stop_requested:
                 await process.terminate()

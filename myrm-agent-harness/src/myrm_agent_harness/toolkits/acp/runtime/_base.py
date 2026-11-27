@@ -14,6 +14,7 @@ environment variable sanitization, timeout control, and response truncation.
 - build_safe_env: Build the environment of a delegated child process: core variables only, plus the configured env, plus the system trust store while enterprise network compatibility is on.
 - truncate_response: Truncate response text if it exceeds the configured limit.
 - KEEPALIVE_SECONDS / working_status: how long a turn may be silent, and the ``working`` status it reports then.
+- UNAUTHORIZED_RETRIES_LIMIT: how many refused-login retries in a row an agent's turn is given up after.
 
 [POS]
 Base class for RuntimeBackend implementations.
@@ -51,6 +52,9 @@ logger = logging.getLogger(__name__)
 # An agent is silent while one tool call runs (a build, a long test run). Every this many seconds of silence the
 # turn says it is still working, so a host that watches for activity does not take the quiet for a hang.
 KEEPALIVE_SECONDS = 15.0
+# Consecutive retries of a request answered 401 after which a turn is given up: a rejected login does not heal by
+# retrying, while a token the agent refreshes on its own needs one retry.
+UNAUTHORIZED_RETRIES_LIMIT = 3
 
 
 def working_status(session_id: str, elapsed_seconds: float) -> RuntimeEvent:

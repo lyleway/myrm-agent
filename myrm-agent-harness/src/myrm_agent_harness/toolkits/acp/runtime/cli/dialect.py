@@ -1,17 +1,15 @@
-"""Per-CLI dialects — how each CLI resumes a conversation, limits its own turns and wants to be launched.
+"""Per-CLI dialects — how a CLI resumes a conversation, limits its own turns and wants to be launched.
 
-The CLIs share the NDJSON event vocabulary (``parser``) but not their command lines: Claude resumes with a
-``--resume <id>`` flag, Codex with an ``exec resume <id>`` subcommand, only Claude has a native turn limit, and
-an attached image reaches Claude as a base64 block in its stream-json input and Codex as an ``--image`` file.
-Only Claude can hand its permission prompts to the host (``--permission-prompt-tool``).
-Keeping those differences in one place leaves the runtime free of per-CLI branching.
+Claude resumes with a ``--resume <id>`` flag, has a native turn limit, takes an attached image as a base64 block in
+its stream-json input and hands its permission prompts to the host (``--permission-prompt-tool``). Keeping those
+differences in one place leaves the runtime free of per-CLI branching.
 
 [INPUT]
 - toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry; resolves a command to its backend)
 - toolkits.acp.runtime.image_blocks::ImageBlock (POS: Image input shared by CliRuntime and AcpRuntime)
 
 [OUTPUT]
-- CliDialect: launch differences of one CLI (resume, native turn limit, partial-message streaming, images, permission prompts, environment)
+- CliDialect: launch differences of one CLI (resume, native turn limit, partial-message streaming, image blocks, permission prompts, environment)
 - dialect_for: the dialect of a command, or None for a CLI without a known one
 - has_native_turn_limit: whether a command's CLI stops itself at the configured turn limit
 - is_session_id: whether a string has the shape of a CLI session id
@@ -30,9 +28,8 @@ from types import MappingProxyType
 from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock
 
-# Claude and Codex both identify a conversation by a canonical hyphenated UUID. A resume id comes from a store
-# the CLI did not write, and Codex starts a brand-new thread (instead of failing) on a malformed one, so an id
-# that does not look like one is never replayed.
+# Claude identifies a conversation by a canonical hyphenated UUID. A resume id comes from a store the CLI did not
+# write, so an id that does not look like one is never replayed.
 _SESSION_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 
@@ -49,9 +46,7 @@ class CliDialect:
     partial_messages_flag: str | None = None
     # Environment the CLI needs when a program, not a person, runs it; the host's and the configured env win.
     env_defaults: Mapping[str, str] = MappingProxyType({})
-    # Whether the CLI takes an attached image: as a file on its command line (``with_images``) or as a base64
-    # block in its input (``sends_image_blocks``, ``with_image_blocks``).
-    takes_images = False
+    # Whether the CLI takes an attached image as a base64 block in its input (``with_image_blocks``).
     sends_image_blocks = False
     # Whether the CLI can hand its permission prompts to the host while it runs (``with_permission_bridge``).
     asks_host = False
@@ -77,10 +72,6 @@ class CliDialect:
             return args
         return [*args, flag]
 
-    def with_images(self, args: list[str], images: Sequence[str]) -> list[str]:
-        """``args`` attaching this turn's image files; unchanged for a CLI that takes none or takes blocks."""
-        return args
-
     def with_image_blocks(self, args: list[str], prompt: str, blocks: Sequence[ImageBlock]) -> tuple[list[str], str]:
         """``args`` and the stdin ``prompt`` carrying this turn's images as blocks; unchanged for a CLI that takes none."""
         return args, prompt
@@ -100,7 +91,6 @@ class _ClaudeDialect(CliDialect):
     # Without it a turn stays open until every background task the model started has ended, so a task that
     # never ends (a dev server) hangs the turn until the timeout. The turn then ends when the model is done.
     env_defaults = MappingProxyType({"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"})
-    takes_images = True
     sends_image_blocks = True
     asks_host = True
 
@@ -134,29 +124,7 @@ class _ClaudeDialect(CliDialect):
         return [*args, "--resume", cli_session_id]
 
 
-class _CodexDialect(CliDialect):
-    name = "codex"
-    takes_images = True
-
-    def is_resuming(self, args: list[str]) -> bool:
-        return "exec" in args and "resume" in args[args.index("exec") + 1 :]
-
-    def with_images(self, args: list[str], images: Sequence[str]) -> list[str]:
-        """Codex attaches an image with ``--image=<file>``.
-
-        The ``=`` form is required: ``-i <file>`` takes the prompt that follows as one more file.
-        """
-        return [*args, *(f"--image={image}" for image in images)]
-
-    def _resume(self, args: list[str], cli_session_id: str) -> list[str] | None:
-        """``codex ... exec <opts>`` becomes ``codex ... exec resume <opts> <id>``; the prompt follows the id."""
-        if "exec" not in args:
-            return None
-        exec_index = args.index("exec")
-        return [*args[: exec_index + 1], "resume", *args[exec_index + 1 :], cli_session_id]
-
-
-_DIALECTS: dict[str, CliDialect] = {"claude": _ClaudeDialect(), "codex": _CodexDialect()}
+_DIALECTS: dict[str, CliDialect] = {"claude": _ClaudeDialect()}
 
 
 def dialect_for(command: str | None) -> CliDialect | None:

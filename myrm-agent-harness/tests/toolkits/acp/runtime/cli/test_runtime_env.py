@@ -26,10 +26,10 @@ class TestDialectDefaults:
         assert _child_env(fake_cli)["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"
 
     @pytest.mark.asyncio
-    async def test_codex_gets_no_claude_setting(self, fake_cli: FakeCli) -> None:
-        await run_turn(make_runtime(fake_cli, "codex"))
+    async def test_a_cli_without_a_dialect_gets_no_claude_setting(self, fake_cli: FakeCli) -> None:
+        await run_turn(make_runtime(fake_cli, "my-agent"))
 
-        assert "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" not in _child_env(fake_cli, "codex")
+        assert "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" not in _child_env(fake_cli, "my-agent")
 
     @pytest.mark.asyncio
     async def test_the_configured_env_beats_a_dialect_default(self, fake_cli: FakeCli) -> None:

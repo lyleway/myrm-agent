@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.parser import tool_summary
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
+from myrm_agent_harness.toolkits.acp.runtime.event_text import tool_summary
 from myrm_agent_harness.toolkits.acp.types import RuntimeEvent, RuntimeEventType
 
 _ID = "11111111-2222-3333-4444-555555555555"
@@ -29,13 +29,6 @@ class TestAnnouncedSession:
         events = _feed(parser, {"type": "system", "subtype": "init", "session_id": _ID})
 
         assert events == []
-        assert parser.take_announced() == _ID
-
-    def test_codex_announces_its_thread_when_it_starts(self) -> None:
-        parser = TurnParser("s1")
-
-        _feed(parser, {"type": "thread.started", "thread_id": _ID})
-
         assert parser.take_announced() == _ID
 
     def test_an_announcement_is_taken_once(self) -> None:

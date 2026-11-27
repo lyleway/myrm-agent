@@ -15,6 +15,7 @@ no - Base type definition module
 - AcpErrorCode: ACP error enum
 - ContinuityStatus: status_update statuses for a CLI conversation that could not be continued
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
+- BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
 - RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
 - delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
@@ -93,7 +94,10 @@ IMAGES_NOT_SENT_STATUS = "images_not_sent"
 # answer it, it may only read. ``allow_all``: the agent acts without asking.
 PermissionMode = Literal["safe", "allow_all"]
 
-BackendType = Literal["acp", "cli"]
+# How a delegated backend is run: over the Agent Client Protocol, as a CLI process per turn, or over Codex's own app
+# server. The ACP and app-server backends keep one resident process that serves many turns.
+BackendType = Literal["acp", "cli", "app_server"]
+RESIDENT_BACKEND_TYPES: frozenset[BackendType] = frozenset({"acp", "app_server"})
 
 BackendStatus = Literal["ready", "starting", "error", "stopped"]
 

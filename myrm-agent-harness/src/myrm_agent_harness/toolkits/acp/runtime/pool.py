@@ -1,19 +1,19 @@
 """RuntimePool — unified pool for managing arbitrary RuntimeBackend instances.
 
-Supports ACP and CLI backends with config-driven registration and
+Supports ACP, app-server and CLI backends with config-driven registration and
 concurrency control via a global asyncio.Semaphore plus per-backend
 serialization locks. Every turn names the workspace it runs in: a backend belongs to one
 (name, workspace) pair for its whole life, is created lazily on first use, and a resident
-ACP process that has exited is reconnected by its next ``run_turn``. A ``oneshot``
+process (ACP agent, app server) that has exited is reconnected by its next ``run_turn``. A ``oneshot``
 turn runs on a private backend (fresh session, closed afterwards) so it never
 disturbs the shared backend's persistent session. ``release_resident`` frees the
-resident ACP processes of an idle pool while CLI backends keep their resume state. An optional
-``CliSessionStore`` lets the persistent CLI backends resume their sessions after the host restarts.
+resident processes of an idle pool while CLI backends keep their resume state. An optional
+``CliSessionStore`` lets the CLI and app-server backends resume their sessions after the host restarts.
 
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
-- myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime (POS: runtime backend implementations)
+- myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime, CodexRuntime (POS: runtime backend implementations)
 - myrm_agent_harness.toolkits.acp.auth._profiles::effective_transport (POS: Authentication profile registry; the transport a known agent's contract names)
 - myrm_agent_harness.core.security.redact::command_preview (POS: masked, cut command for a log line)
 
@@ -38,6 +38,7 @@ from uuid import uuid4
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._profiles import effective_transport
 from myrm_agent_harness.toolkits.acp.types import (
+    RESIDENT_BACKEND_TYPES,
     CliSessionStore,
     McpServerConfig,
     PermissionBroker,
@@ -73,6 +74,11 @@ def _create_runtime(
         from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 
         return CliRuntime(name, config, workspace=workspace, session_store=cli_session_store)
+
+    if config.backend_type == "app_server":
+        from myrm_agent_harness.toolkits.acp.runtime.codex.runtime import CodexRuntime
+
+        return CodexRuntime(name, config, workspace=workspace, session_store=cli_session_store)
 
     msg = f"Unknown backend_type: {config.backend_type!r}"
     raise ValueError(msg)
@@ -127,7 +133,7 @@ class RuntimePool:
             logger.info(
                 "pool_transport_by_contract name=%s command=%s configured=%s using=%s",
                 name,
-                command_preview(config.command, 120),
+                command_preview(config.command or "", 120),
                 config.backend_type,
                 transport,
             )
@@ -292,16 +298,17 @@ class RuntimePool:
             logger.info("pool_cancel backend=%s session=%s", name, session_id)
 
     async def release_resident(self) -> None:
-        """Stop the backends that keep an OS process between turns (ACP) and keep the rest.
+        """Stop the backends that keep an OS process between turns (ACP, app server) and keep the rest.
 
         A CLI backend runs one process per turn, so between turns it holds nothing but the session id
-        behind ``--resume``; that stays. A released ACP backend is recreated by its next turn.
+        behind ``--resume``; that stays. A released backend is recreated by its next turn; an app-server
+        conversation continues there only from a ``CliSessionStore`` (its threads live in the released process).
         Call it only while no turn is running on this pool.
         """
         resident = {
             key: backend
             for key, backend in self._backends.items()
-            if (config := self._configs.get(key[0])) is not None and config.backend_type == "acp"
+            if (config := self._configs.get(key[0])) is not None and config.backend_type in RESIDENT_BACKEND_TYPES
         }
         if not resident:
             return

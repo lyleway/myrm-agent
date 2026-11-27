@@ -1,4 +1,4 @@
-"""``spawn_cli_process`` against real subprocesses: lines, stderr, and every way a turn can stop its process."""
+"""``spawn_managed_process`` against real subprocesses: lines, stderr, input, and every way a run can stop its process."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.cli import process as process_module
-from myrm_agent_harness.toolkits.acp.runtime.cli.process import CliLaunchError, CliProcess, spawn_cli_process
+from myrm_agent_harness.toolkits.acp.runtime import process as process_module
+from myrm_agent_harness.toolkits.acp.runtime.process import ManagedProcess, ProcessLaunchError, spawn_managed_process
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups and signals")
 
@@ -26,10 +26,10 @@ def _python(code: str) -> list[str]:
 
 
 def _spawn(code: str, *, stdin_text: str | None = None):
-    return spawn_cli_process(_python(code), env=_ENV, cwd=os.getcwd(), stdin_text=stdin_text)
+    return spawn_managed_process(_python(code), env=_ENV, cwd=os.getcwd(), stdin_text=stdin_text)
 
 
-async def _collect(process: CliProcess) -> list[str]:
+async def _collect(process: ManagedProcess) -> list[str]:
     return [line async for line in process.lines()]
 
 
@@ -293,7 +293,7 @@ class TestStopping:
     async def test_a_cancelled_consumer_still_stops_its_process(self) -> None:
         """Stop pressed while the CLI is silent: the task awaiting its output is cancelled."""
         started = asyncio.Event()
-        holder: list[CliProcess] = []
+        holder: list[ManagedProcess] = []
 
         async def consume() -> None:
             async with _spawn("import time; time.sleep(60)") as process:
@@ -323,7 +323,7 @@ class TestStopping:
             print("ready", flush=True)
             time.sleep(60)
         """
-        holder: list[CliProcess] = []
+        holder: list[ManagedProcess] = []
         ready = asyncio.Event()
 
         async def consume() -> None:
@@ -359,14 +359,14 @@ class TestStopping:
 
     @pytest.mark.asyncio
     async def test_an_executable_that_does_not_exist_is_a_launch_error_naming_it(self) -> None:
-        with pytest.raises(CliLaunchError, match="CLI executable not found: /nonexistent/agent"):
-            async with spawn_cli_process(["/nonexistent/agent"], env=_ENV, cwd=os.getcwd(), stdin_text=None):
+        with pytest.raises(ProcessLaunchError, match="CLI executable not found: /nonexistent/agent"):
+            async with spawn_managed_process(["/nonexistent/agent"], env=_ENV, cwd=os.getcwd(), stdin_text=None):
                 pass
 
     @pytest.mark.asyncio
     async def test_a_working_directory_that_does_not_exist_is_not_a_launch_error(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
-            async with spawn_cli_process(_python("pass"), env=_ENV, cwd=str(tmp_path / "gone"), stdin_text=None):
+            async with spawn_managed_process(_python("pass"), env=_ENV, cwd=str(tmp_path / "gone"), stdin_text=None):
                 pass
 
 
@@ -413,3 +413,94 @@ class TestIdleTicks:
             items = [item async for item in process.lines()]
 
         assert items == ["late"]
+
+
+_ECHO_UPPER = """
+    import sys
+    for line in sys.stdin:
+        print(line.strip().upper(), flush=True)
+"""
+
+
+def _interactive(code: str):
+    return spawn_managed_process(_python(code), env=_ENV, cwd=os.getcwd(), interactive=True)
+
+
+class TestInteractiveInput:
+    @pytest.mark.asyncio
+    async def test_lines_sent_to_an_interactive_process_are_answered_in_order(self) -> None:
+        async with _interactive(_ECHO_UPPER) as process:
+            await process.send("one")
+            await process.send("two")
+            answers = []
+            async for line in process.lines():
+                answers.append(line)
+                if len(answers) == 2:
+                    break
+
+        assert answers == ["ONE", "TWO"]
+
+    @pytest.mark.asyncio
+    async def test_closing_the_input_lets_the_process_finish_by_itself(self) -> None:
+        async with _interactive(_ECHO_UPPER) as process:
+            await process.send("last")
+            process.close_stdin()
+            process.close_stdin()
+            remaining = await _collect(process)
+            code = await process.wait()
+
+        assert remaining == ["LAST"]
+        assert code == 0
+        assert process.killed_by_us is False
+
+    @pytest.mark.asyncio
+    async def test_a_very_large_line_is_written_whole(self) -> None:
+        async with _interactive(_ECHO_UPPER) as process:
+            await process.send("a" * 3_000_000)
+            process.close_stdin()
+            lines = await _collect(process)
+
+        assert lines == ["A" * 3_000_000]
+
+    @pytest.mark.asyncio
+    async def test_lines_sent_from_concurrent_tasks_never_interleave(self) -> None:
+        sizes = [200_000 + n for n in range(12)]
+        async with _interactive(_ECHO_UPPER) as process:
+            await asyncio.gather(*(process.send(chr(ord("a") + n) * size) for n, size in enumerate(sizes)))
+            process.close_stdin()
+            lines = await _collect(process)
+
+        assert sorted(len(line) for line in lines) == sizes
+        assert all(len(set(line)) == 1 for line in lines)
+
+    @pytest.mark.asyncio
+    async def test_sending_to_a_process_that_left_is_an_os_error(self) -> None:
+        async with _interactive("pass") as process:
+            await process.wait()
+            with pytest.raises(OSError):
+                for _ in range(50):
+                    await process.send("x" * 100_000)
+
+    @pytest.mark.asyncio
+    async def test_a_process_spawned_without_input_takes_none(self) -> None:
+        async with _spawn("pass") as process:
+            with pytest.raises(BrokenPipeError):
+                await process.send("x")
+
+    @pytest.mark.asyncio
+    async def test_an_interactive_process_is_stopped_with_its_group_on_leaving(self) -> None:
+        async with _interactive(_ECHO_UPPER) as process:
+            pid = process._process.pid
+            await process.send("alive")
+
+        assert process.returncode is not None
+        assert process.killed_by_us is True
+        assert not _alive(pid)
+
+    @pytest.mark.asyncio
+    async def test_initial_text_and_interactive_input_are_exclusive(self) -> None:
+        with pytest.raises(ValueError, match="takes no initial stdin text"):
+            async with spawn_managed_process(
+                _python("pass"), env=_ENV, cwd=os.getcwd(), stdin_text="x", interactive=True
+            ):
+                pass

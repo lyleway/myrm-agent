@@ -88,6 +88,18 @@ jobs:
             done
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # Codex runs every command of a turn inside a sandbox built from unprivileged user namespaces, which the
+      # runner's AppArmor restricts: the tests that let Codex run commands need them allowed, as Codex's own CI does.
+      # Each setting is changed only where the kernel has it.
+      - name: Allow unprivileged user namespaces
+        run: |
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - name: Run the contract tests
         run: >-
           uv run --no-sync pytest -m integration -q --tb=short
@@ -101,6 +113,9 @@ jobs:
           tests/toolkits/acp/runtime/cli/test_real_cli_failures.py
           tests/toolkits/acp/runtime/cli/test_real_cli_images.py
           tests/toolkits/acp/runtime/cli/test_real_claude_permission_prompt.py
+          tests/toolkits/acp/runtime/codex/test_real_codex_protocol_contract.py
+          tests/toolkits/acp/runtime/codex/test_real_codex_app_server.py
+          tests/toolkits/acp/runtime/codex/test_real_codex_threads.py
 
   real-turns:
     name: Real turns (provider credentials)

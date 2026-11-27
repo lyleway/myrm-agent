@@ -3,7 +3,7 @@
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
 - myrm_agent_harness.toolkits.acp.auth::effective_transport, cli_launch_args (POS: The transport and baseline launch args a known agent's contract names; a stored choice cannot override the transport)
-- myrm_agent_harness.toolkits.acp.types::RuntimeConfig (POS: ACP runtime config contract)
+- myrm_agent_harness.toolkits.acp.types::RuntimeConfig, BackendType (POS: ACP runtime config contract and the kinds of backend the harness can run)
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
 - app.config.settings::settings (POS: Gateway wall-clock ceiling that bounds a delegated turn)
@@ -12,7 +12,7 @@
 - _auth_mode / _permission_mode / _cfg_int / _turn_timeout: Config parsing helpers (a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
 - _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
-- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's)
+- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted)
 
 [POS]
 GeneralAgent 外部 Agent 配置归一化与探测装配层。确保 RuntimePool 指纹与注册字段同源，
@@ -25,13 +25,13 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import AuthMode, PermissionMode
+    from myrm_agent_harness.toolkits.acp.types import AuthMode, BackendType, PermissionMode
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +235,13 @@ async def _resolve_external_agent_cfgs(
         return None
 
 
+def _backend_type(value: str) -> BackendType | None:
+    """The kind of backend ``value`` names, if the harness runs it: the harness owns the list, so a new kind needs no edit here."""
+    from myrm_agent_harness.toolkits.acp.types import BackendType
+
+    return next((kind for kind in get_args(BackendType) if kind == value), None)
+
+
 def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, object]]) -> None:
     from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 
@@ -247,17 +254,14 @@ def _register_backends_on_pool(pool: RuntimePool, agent_cfgs: list[dict[str, obj
             logger.warning("Skipping external agent with missing name or command: %s", cfg)
             continue
 
-        backend_type = normalized_cfg.backend_type
-        match backend_type:
-            case "cli" | "acp":
-                pass
-            case _:
-                logger.warning(
-                    "Skipping external agent '%s': invalid type '%s'",
-                    normalized_cfg.name,
-                    backend_type,
-                )
-                continue
+        backend_type = _backend_type(normalized_cfg.backend_type)
+        if backend_type is None:
+            logger.warning(
+                "Skipping external agent '%s': invalid type '%s'",
+                normalized_cfg.name,
+                normalized_cfg.backend_type,
+            )
+            continue
 
         runtime_cfg = RuntimeConfig(
             backend_type=backend_type,

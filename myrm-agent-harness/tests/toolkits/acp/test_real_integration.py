@@ -1,6 +1,6 @@
 """Real integration tests for ACP module with live CLI backends.
 
-These tests spawn actual agent processes (Claude Code and Codex per turn, Gemini over ACP)
+These tests spawn actual agent processes (Claude Code per turn, Codex over its app server, Gemini over ACP)
 and verify end-to-end event parsing, session management, and pool routing.
 
 Requirements:
@@ -28,6 +28,7 @@ from myrm_agent_harness.toolkits.acp.acp_agent_tools import (
 from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
+from myrm_agent_harness.toolkits.acp.runtime.codex import CodexRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     McpServerConfig,
@@ -63,6 +64,30 @@ _CLAUDE_ENV_PREFIXES = ("ANTHROPIC_", "CLAUDE_CODE_")
 def _claude_credentials() -> dict[str, str]:
     """What a host injects for Claude Code: a delegated CLI does not inherit provider keys from its parent."""
     return {key: value for key, value in os.environ.items() if key.startswith(_CLAUDE_ENV_PREFIXES)}
+
+
+_CODEX_KEYS = ("OPENAI_API_KEY", "CODEX_API_KEY")
+
+
+def _codex_config(**overrides: object) -> RuntimeConfig:
+    """Codex as a host registers it: over its app server, with an injected key when the environment has one.
+
+    The app server reads no key from its environment, so the runtime logs the injected key in; without one the turn
+    runs on the login of Codex itself.
+    """
+    defaults: dict[str, object] = {
+        "backend_type": "app_server",
+        "command": "codex",
+        "permission_mode": "allow_all",
+        "timeout_seconds": TIMEOUT,
+        "max_turns": 1,
+        "description": "Codex CLI",
+    }
+    credentials = {key: value for key, value in os.environ.items() if key in _CODEX_KEYS}
+    if credentials:
+        defaults.update(env=credentials, auth_mode="api_key")
+    defaults.update(overrides)
+    return RuntimeConfig(**defaults)  # type: ignore[arg-type]
 
 
 def _claude_can_answer() -> bool:
@@ -192,38 +217,29 @@ class TestClaudeCliReal:
         assert status_events[0].data["status"] == "starting"
 
 
-# ── Codex CLI ───────────────────────────────────────────────────────────
+# ── Codex over its app server ───────────────────────────────────────────
 
 
 @skip_no_codex
-class TestCodexCliReal:
-    """Live tests against Codex CLI.
+class TestCodexAppServerReal:
+    """Live tests against Codex, which the runtime drives over ``codex app-server``.
 
-    Codex uses ``exec --json`` with the resolved permission-mode args for non-interactive NDJSON output.
-    The prompt is passed via stdin (``-p`` flag triggers stdin mode).
+    The launch args come from the agent's contract and the approval policy and sandbox are set with every turn, so the
+    config carries neither.
     """
-
-    def _make_config(self, **overrides: object) -> RuntimeConfig:
-        defaults: dict[str, object] = {
-            "backend_type": "cli",
-            "command": "codex",
-            "args": ["exec", "--json", "-p"],
-            "permission_mode": "allow_all",
-            "timeout_seconds": TIMEOUT,
-            "max_turns": 1,
-        }
-        defaults.update(overrides)
-        return RuntimeConfig(**defaults)  # type: ignore[arg-type]
 
     @pytest.mark.asyncio
     async def test_basic_prompt_produces_events(self) -> None:
-        """Codex should produce parseable NDJSON events.
+        """Codex should produce a turn the runtime translates.
 
         With valid API quota: TEXT_DELTA + DONE.
-        With exhausted quota: ERROR (rate_limited / turn.failed) — still validates parsing.
+        With exhausted quota: ERROR (rate_limited) — still validates the translation.
         """
-        rt = CliRuntime("codex-test", self._make_config(), workspace=os.getcwd())
-        events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-real-s1")]
+        rt = CodexRuntime("codex-test", _codex_config(), workspace=os.getcwd())
+        try:
+            events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-real-s1")]
+        finally:
+            await rt.close()
 
         types = [e.type for e in events]
         assert len(types) > 0, "Codex should produce at least one event"
@@ -235,10 +251,13 @@ class TestCodexCliReal:
         assert has_text or has_error or has_done, f"Expected TEXT_DELTA, ERROR, or DONE, got: {types}"
 
     @pytest.mark.asyncio
-    async def test_codex_ndjson_parsing(self) -> None:
-        """Verify NDJSON event stream is parseable regardless of API quota."""
-        rt = CliRuntime("codex-parse", self._make_config(), workspace=os.getcwd())
-        events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-parse-s1")]
+    async def test_every_event_belongs_to_the_session_of_the_turn(self) -> None:
+        """Verify the event stream is well formed regardless of API quota."""
+        rt = CodexRuntime("codex-parse", _codex_config(), workspace=os.getcwd())
+        try:
+            events = [e async for e in rt.run_turn(SIMPLE_PROMPT, "codex-parse-s1")]
+        finally:
+            await rt.close()
 
         for event in events:
             assert event.type in RuntimeEventType.__members__.values()
@@ -313,18 +332,7 @@ class TestRuntimePoolReal:
                 ),
             )
         if _HAS_CODEX:
-            pool.register(
-                "codex",
-                RuntimeConfig(
-                    backend_type="cli",
-                    command="codex",
-                    args=["exec", "--json", "-p"],
-                    permission_mode="allow_all",
-                    timeout_seconds=TIMEOUT,
-                    max_turns=1,
-                    description="Codex CLI",
-                ),
-            )
+            pool.register("codex", _codex_config())
         if _HAS_GEMINI:
             pool.register(
                 "gemini",
@@ -525,18 +533,7 @@ class TestDelegateToolReal:
     @pytest.mark.skipif(not _HAS_CODEX, reason="codex CLI not installed")
     async def test_delegate_to_codex(self) -> None:
         pool = RuntimePool(max_concurrent=2)
-        pool.register(
-            "codex",
-            RuntimeConfig(
-                backend_type="cli",
-                command="codex",
-                args=["exec", "--json", "-p"],
-                permission_mode="allow_all",
-                timeout_seconds=TIMEOUT,
-                max_turns=1,
-                description="Codex CLI",
-            ),
-        )
+        pool.register("codex", _codex_config())
 
         tool_func = create_invoke_acp_agent_tool(pool, workspace=os.getcwd())
         try:

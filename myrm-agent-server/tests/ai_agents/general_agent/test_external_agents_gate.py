@@ -160,6 +160,7 @@ async def test_auto_detect_gives_each_agent_the_transport_and_baseline_args_of_i
             return [
                 SimpleNamespace(name="claude", path="/usr/bin/claude"),
                 SimpleNamespace(name="gemini", path="/usr/bin/gemini"),
+                SimpleNamespace(name="codex", path="/usr/bin/codex"),
             ]
 
     with (
@@ -175,6 +176,9 @@ async def test_auto_detect_gives_each_agent_the_transport_and_baseline_args_of_i
     # The ACP flags come from the contract when the runtime launches the agent, not from a stored list.
     assert by_name["gemini"]["type"] == "acp"
     assert by_name["gemini"]["args"] == []
+    # Codex is driven over its own app server: its approval policy and sandbox travel with every turn, not as flags.
+    assert by_name["codex"]["type"] == "app_server"
+    assert by_name["codex"]["args"] == []
 
 
 @pytest.mark.parametrize(
@@ -184,10 +188,15 @@ async def test_auto_detect_gives_each_agent_the_transport_and_baseline_args_of_i
         ("/usr/local/bin/gemini", "cli", "acp"),
         ("qwen", "cli", "acp"),
         ("claude", "acp", "cli"),
+        ("codex", "cli", "app_server"),
+        ("/opt/bin/codex", "acp", "app_server"),
+        # What is stored for an agent that is already on its own transport changes nothing.
+        ("codex", "app_server", "app_server"),
         # Anything else keeps what was stored: an adapter that merely carries an agent's name is not that agent.
         ("claude-code-acp", "acp", "acp"),
         ("gemini-wrapper", "cli", "cli"),
         ("my-acp-agent", "acp", "acp"),
+        ("my-app-server-agent", "app_server", "app_server"),
     ],
 )
 def test_register_backends_on_pool_runs_a_known_agent_over_its_contract_transport(

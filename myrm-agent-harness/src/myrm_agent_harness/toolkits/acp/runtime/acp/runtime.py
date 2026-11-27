@@ -1,6 +1,6 @@
 """ACP protocol runtime backend.
 
-Spawns an external ACP-compatible agent process (Claude Code, Codex CLI, etc.)
+Spawns an external ACP-compatible agent process (Gemini CLI, Qwen Code, etc.)
 and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
