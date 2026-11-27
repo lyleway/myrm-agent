@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,10 +46,12 @@ def scripted_pool(
     *,
     session_store: CliSessionStore | None = None,
     account_home: Path | None = None,
+    extra_env: Mapping[str, str] | None = None,
 ) -> RuntimePool:
     """A pool with the agent registered the way every config stored before the move to ACP says: as a CLI.
 
     ``account_home`` runs it as the account whose home that is; ``home`` stays what the process calls its own.
+    ``extra_env`` is added to the agent's environment.
     """
     pool = RuntimePool(max_concurrent=1, cli_session_store=session_store)
     pool.register(
@@ -58,7 +60,7 @@ def scripted_pool(
             backend_type="cli",
             command=cli_binary(name),
             auth_mode="api_key",
-            env={**SCRIPTED_AGENTS[name].env(api.base_url), "HOME": str(home)},
+            env={**SCRIPTED_AGENTS[name].env(api.base_url), "HOME": str(home), **(extra_env or {})},
             timeout_seconds=TURN_SECONDS,
             permission_mode=mode,
             account_home=None if account_home is None else str(account_home),

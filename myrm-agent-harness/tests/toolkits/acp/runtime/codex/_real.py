@@ -8,13 +8,14 @@ server says, which the pool then runs over the transport the agent's contract na
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     CliSessionStore,
-    McpServerConfig,
     PermissionBroker,
     PermissionMode,
     RuntimeConfig,
@@ -61,7 +62,7 @@ def codex_pool(
     *,
     mode: PermissionMode = "safe",
     store: CliSessionStore | None = None,
-    mcp_servers: list[McpServerConfig] | None = None,
+    mcp_servers: Sequence[McpServerConfig] | None = None,
     timeout_seconds: int = TURN_SECONDS,
 ) -> RuntimePool:
     pool = RuntimePool(max_concurrent=1, cli_session_store=store)
@@ -81,7 +82,7 @@ def codex_pool(
 
 
 def echo_mcp_server() -> McpServerConfig:
-    return McpServerConfig(
+    return StdioMcpServer(
         name="echo",
         command=sys.executable,
         args=[str(Path(__file__).parents[2] / "_echo_mcp_server.py")],

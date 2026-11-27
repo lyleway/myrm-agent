@@ -6,6 +6,8 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 
 [INPUT]
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
+- toolkits.acp.mcp_servers::McpServerConfig (POS: The MCP servers a host hands a delegated agent)
+- toolkits.acp.runtime.mcp_status::mcp_not_attached_event (POS: The status update naming the MCP servers an agent was not given)
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, CliSessionRecord, CliSessionStore, ContinuityStatus, StopReason (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
@@ -30,13 +32,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -47,6 +50,7 @@ from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import load_image_blocks
+from myrm_agent_harness.toolkits.acp.runtime.mcp_status import mcp_not_attached_event
 from myrm_agent_harness.toolkits.acp.runtime.process import ManagedProcess, ProcessLaunchError, spawn_managed_process
 from myrm_agent_harness.toolkits.acp.runtime.session_book import CliSessionBook
 from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
@@ -58,7 +62,6 @@ from myrm_agent_harness.toolkits.acp.types import (
     CliSessionRecord,
     CliSessionStore,
     ContinuityStatus,
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -145,7 +148,7 @@ class CliRuntime(BaseRuntime):
     def capabilities(self) -> BackendCapabilities:
         return BackendCapabilities(
             supports_resume=self._is_claude,
-            supports_mcp=False,
+            supports_mcp=self._is_claude,
             supports_streaming=True,
             supports_tools=False,
             supports_images=self._is_claude,
@@ -161,18 +164,10 @@ class CliRuntime(BaseRuntime):
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
-        if mcp_servers:
-            # CliRuntime 不支持 session-level MCP 注入；pool.run_turn 已拦截，
-            # 此处兜底直接调用路径（绕过 pool 时），避免静默失效。
-            logger.warning(
-                "cli_runtime_mcp_ignored backend=%s mcp_servers=%d reason=unsupported",
-                self._name,
-                len(mcp_servers),
-            )
         command = self._config.command
         if command is None:
             msg = "CliRuntime requires 'command' in RuntimeConfig"
@@ -180,6 +175,14 @@ class CliRuntime(BaseRuntime):
 
         self._stop_requested = False
         yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting")
+        if mcp_servers and not self._is_claude:
+            # Only Claude Code reads MCP servers from its command line; the pool withholds them from the others
+            # already, so this is a caller that went around it.
+            logger.warning(
+                "cli_runtime_mcp_ignored backend=%s mcp_servers=%d reason=unsupported", self._name, len(mcp_servers)
+            )
+            yield mcp_not_attached_event(session_id, [server.name for server in mcp_servers])
+            mcp_servers = None
 
         cwd = self._workspace
         if images and not self._is_claude:
@@ -194,6 +197,10 @@ class CliRuntime(BaseRuntime):
             args, prompt = claude.with_image_blocks(args, prompt, blocks)
 
         async with AsyncExitStack() as stack:
+            if mcp_servers:
+                args = claude.with_mcp_servers(
+                    args, stack.enter_context(claude.mcp_config_file(mcp_servers)), mcp_servers
+                )
             if permissions is not None and self._asks_host():
                 bridge = await stack.enter_async_context(self._permission_bridge(permissions, session_id))
                 args = claude.with_permission_bridge(args, bridge.prompt_tool, bridge.config_path)

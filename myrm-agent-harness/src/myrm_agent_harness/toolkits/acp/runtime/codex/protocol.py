@@ -3,7 +3,8 @@
 [INPUT]
 - myrm_agent_harness::__version__ (POS: the harness version a client announces)
 - toolkits.acp.runtime.codex.wire::Json, as_bool, as_list, as_obj, as_str (POS: Typed reads of the decoded JSON that Codex's app server sends)
-- toolkits.acp.types::McpServerConfig, PermissionMode (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.mcp_servers::HttpMcpServer, McpServerConfig, StdioMcpServer (POS: The MCP servers a host hands a delegated agent)
+- toolkits.acp.types::PermissionMode (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 
 [OUTPUT]
 - OPT_OUT_NOTIFICATIONS: the notification methods the host never reads, which the server is asked not to send
@@ -20,13 +21,13 @@ mode means to Codex is small and testable. Every field here is checked against t
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from myrm_agent_harness import __version__
+from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.wire import Json, as_bool, as_list, as_obj
-from myrm_agent_harness.toolkits.acp.types import McpServerConfig, PermissionMode
+from myrm_agent_harness.toolkits.acp.types import PermissionMode
 
 _CLIENT_NAME = "myrm_agent_harness"
 
@@ -61,7 +62,6 @@ OPT_OUT_NOTIFICATIONS: tuple[str, ...] = (
 )
 
 # Codex accepts an MCP server only under a name made of these characters.
-_INVALID_SERVER_NAME_CHARS = re.compile(r"[^A-Za-z0-9_-]")
 
 
 def initialize_params() -> dict[str, object]:
@@ -140,14 +140,26 @@ def turn_policy(mode: PermissionMode, *, can_ask: bool, workspace_write: Workspa
     return _ASKING if can_ask else _READ_ONLY
 
 
+def _mcp_server_entry(server: McpServerConfig) -> dict[str, object]:
+    """One ``mcp_servers`` entry of a thread's config: a program to start, or a ``url`` to connect to with headers."""
+    entry: dict[str, object]
+    match server:
+        case StdioMcpServer():
+            entry = {"command": server.command, "args": list(server.args)}
+            if server.env:
+                entry["env"] = dict(server.env)
+        case HttpMcpServer():
+            entry = {"url": server.url}
+            if server.headers:
+                entry["http_headers"] = dict(server.headers)
+    if server.read_only:
+        # Codex asks before every MCP tool call under ``on-request``; a server whose tools only read is not asked about.
+        entry["default_tools_approval_mode"] = "approve"
+    return entry
+
+
 def _mcp_servers_config(servers: Sequence[McpServerConfig]) -> dict[str, object]:
-    configured: dict[str, object] = {}
-    for server in servers:
-        entry: dict[str, object] = {"command": server.command, "args": list(server.args)}
-        if server.env:
-            entry["env"] = dict(server.env)
-        configured[_INVALID_SERVER_NAME_CHARS.sub("_", server.name)] = entry
-    return {"mcp_servers": configured}
+    return {"mcp_servers": {server.name: _mcp_server_entry(server) for server in servers}}
 
 
 def thread_params(

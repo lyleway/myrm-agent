@@ -26,12 +26,12 @@ from myrm_agent_harness.toolkits.acp.acp_agent_tools import (
     create_invoke_acp_agent_tool,
 )
 from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.acp.runtime import AcpRuntime
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.runtime.codex import CodexRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEventType,
 )
@@ -352,7 +352,7 @@ class TestRuntimePoolReal:
         self, per_call: bool, caplog: pytest.LogCaptureFixture
     ) -> None:
         """A CLI backend cannot take session-level MCP: the pool warns, drops it, and the child still answers."""
-        server = McpServerConfig(name="search", command="node", args=["server.js"], env={"MCP_TOKEN": "secret"})
+        server = StdioMcpServer(name="search", command="node", args=["server.js"], env={"MCP_TOKEN": "secret"})
         bridge = "print('ran', flush=True)"
         pool = RuntimePool(max_concurrent=1)
         pool.register(

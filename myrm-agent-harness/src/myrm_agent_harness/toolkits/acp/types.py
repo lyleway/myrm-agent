@@ -6,7 +6,7 @@ depend on this module.
 
 
 [INPUT]
-no - Base type definition module
+- toolkits.acp.mcp_servers::McpServerConfig (POS: The MCP servers a host hands a delegated agent)
 
 [OUTPUT]
 - RuntimeBackend: Runtime Backend abstract protocol
@@ -34,10 +34,12 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
+
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -203,16 +205,6 @@ class BackendInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class McpServerConfig:
-    """Configuration for an MCP server to inject into a runtime."""
-
-    name: str
-    command: str
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     """Unified configuration for any RuntimeBackend."""
 
@@ -223,7 +215,7 @@ class RuntimeConfig:
     timeout_seconds: int = 300
     permission_mode: PermissionMode = "safe"
     auth_mode: AuthMode = "subscription"
-    mcp_servers: list[McpServerConfig] = field(default_factory=list)
+    mcp_servers: Sequence[McpServerConfig] = field(default_factory=list)
     max_response_chars: int = 50_000
     max_turns: int = 25
     description: str = ""
@@ -309,7 +301,7 @@ class RuntimeBackend(Protocol):
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...
@@ -343,7 +335,7 @@ class DelegationPool(Protocol):
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]: ...

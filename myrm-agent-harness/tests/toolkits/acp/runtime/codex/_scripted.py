@@ -9,15 +9,15 @@ from __future__ import annotations
 import json
 import stat
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     AuthMode,
     BackendType,
     CliSessionStore,
-    McpServerConfig,
     PermissionMode,
     RuntimeConfig,
 )
@@ -48,7 +48,7 @@ class ScriptedServer:
         store: CliSessionStore | None = None,
         env: Mapping[str, str] | None = None,
         timeout_seconds: int = 30,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         backend_type: BackendType = "cli",
     ) -> RuntimePool:
         pool = RuntimePool(max_concurrent=1, cli_session_store=store)

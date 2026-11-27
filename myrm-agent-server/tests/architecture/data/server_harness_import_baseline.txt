@@ -297,6 +297,7 @@ myrm_agent_harness.runtime.survival.startup
 myrm_agent_harness.toolkits
 myrm_agent_harness.toolkits.acp.auth
 myrm_agent_harness.toolkits.acp.core.backend_detector
+myrm_agent_harness.toolkits.acp.mcp_servers
 myrm_agent_harness.toolkits.acp.runtime.pool
 myrm_agent_harness.toolkits.acp.toolchains
 myrm_agent_harness.toolkits.acp.types

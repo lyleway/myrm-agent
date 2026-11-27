@@ -33,6 +33,9 @@ class AgentCapabilities:
     resume_session: bool = False
     # ``sessionCapabilities.close``: ``session/close`` frees an open session.
     close_session: bool = False
+    # ``mcpCapabilities.http``: a session may be given an MCP server to connect to over HTTP (stdio servers need no
+    # advertisement: every agent takes them).
+    mcp_http: bool = False
 
     @classmethod
     def of(cls, response: InitializeResponse) -> AgentCapabilities:
@@ -42,9 +45,11 @@ class AgentCapabilities:
             return cls()
         sessions = advertised.session_capabilities
         prompts = advertised.prompt_capabilities
+        mcp = advertised.mcp_capabilities
         return cls(
             image_prompts=prompts is not None and bool(prompts.image),
             load_session=bool(advertised.load_session),
             resume_session=sessions is not None and sessions.resume is not None,
             close_session=sessions is not None and sessions.close is not None,
+            mcp_http=mcp is not None and bool(mcp.http),
         )

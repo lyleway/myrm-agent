@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import stat
+import sys
+from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock
 
@@ -138,3 +142,64 @@ class TestPermissionBridge:
             "--mcp-config",
             "/tmp/bridge.json",
         ]
+
+
+class TestMcpServers:
+    _MEMORY = HttpMcpServer(
+        name="memory", url="http://127.0.0.1:9/mcp", headers={"Authorization": "Bearer s3cret"}, read_only=True
+    )
+    _LOCAL = StdioMcpServer(name="local", command="mcp-local", args=["--ro"], env={"KEY": "value"})
+
+    def test_the_file_holds_each_server_in_the_form_claude_reads(self) -> None:
+        with claude.mcp_config_file([self._MEMORY, self._LOCAL]) as path:
+            config = json.loads(Path(path).read_text())
+
+        assert config == {
+            "mcpServers": {
+                "memory": {
+                    "type": "http",
+                    "url": "http://127.0.0.1:9/mcp",
+                    "headers": {"Authorization": "Bearer s3cret"},
+                },
+                "local": {"command": "mcp-local", "args": ["--ro"], "env": {"KEY": "value"}},
+            }
+        }
+
+    def test_a_server_without_headers_or_environment_names_neither(self) -> None:
+        with claude.mcp_config_file([HttpMcpServer(name="open", url="https://example.test/mcp")]) as path:
+            config = json.loads(Path(path).read_text())
+
+        assert config == {"mcpServers": {"open": {"type": "http", "url": "https://example.test/mcp"}}}
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+    def test_only_this_user_can_read_the_file_because_it_may_hold_a_credential(self) -> None:
+        with claude.mcp_config_file([self._MEMORY]) as path:
+            mode = stat.S_IMODE(Path(path).stat().st_mode)
+
+        assert mode == 0o600
+
+    def test_the_file_is_gone_when_the_turn_is_over(self) -> None:
+        with claude.mcp_config_file([self._MEMORY]) as path:
+            assert Path(path).exists()
+
+        assert not Path(path).exists()
+
+    def test_the_file_is_gone_when_the_turn_failed(self) -> None:
+        with pytest.raises(RuntimeError), claude.mcp_config_file([self._MEMORY]) as path:
+            raise RuntimeError("the turn failed")
+
+        assert not Path(path).exists()
+
+    def test_a_file_already_removed_is_not_an_error(self) -> None:
+        with claude.mcp_config_file([self._MEMORY]) as path:
+            Path(path).unlink()
+
+    def test_the_tools_of_read_only_servers_are_allowed_in_advance_and_those_of_any_other_are_not(self) -> None:
+        args = claude.with_mcp_servers(["claude", "-p"], "/tmp/mcp.json", [self._MEMORY, self._LOCAL])
+
+        assert args == ["claude", "-p", "--mcp-config", "/tmp/mcp.json", "--allowedTools", "mcp__memory"]
+
+    def test_with_no_read_only_server_nothing_is_allowed_in_advance(self) -> None:
+        args = claude.with_mcp_servers(["claude"], "/tmp/mcp.json", [self._LOCAL])
+
+        assert args == ["claude", "--mcp-config", "/tmp/mcp.json"]

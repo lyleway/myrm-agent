@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_app_server_args
+from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     OPT_OUT_NOTIFICATIONS,
     WorkspaceWriteSettings,
@@ -17,7 +18,6 @@ from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     turn_policy,
 )
 from myrm_agent_harness.toolkits.acp.runtime.codex.turn_events import READ_NOTIFICATIONS
-from myrm_agent_harness.toolkits.acp.types import McpServerConfig
 
 _READ_ONLY = {"type": "readOnly", "networkAccess": False}
 _ASKING = turn_policy("safe", can_ask=True, workspace_write=WorkspaceWriteSettings())
@@ -98,20 +98,61 @@ def test_an_ephemeral_thread_says_so() -> None:
     assert thread_params("/w", _ASKING, mcp_servers=[], ephemeral=True)["ephemeral"] is True
 
 
-def test_mcp_servers_get_names_codex_accepts_and_an_environment_only_when_they_have_one() -> None:
+def test_a_stdio_server_has_an_environment_only_when_it_has_one() -> None:
     servers = [
-        McpServerConfig(name="my server.1", command="mcp", args=["--x"], env={"A": "b"}),
-        McpServerConfig(name="plain", command="other"),
+        StdioMcpServer(name="my-server_1", command="mcp", args=["--x"], env={"A": "b"}),
+        StdioMcpServer(name="plain", command="other"),
     ]
 
     config = thread_params("/w", _ASKING, mcp_servers=servers, ephemeral=False)["config"]
 
     assert config == {
         "mcp_servers": {
-            "my_server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}},
+            "my-server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}},
             "plain": {"command": "other", "args": []},
         }
     }
+
+
+def test_an_http_server_is_a_url_with_its_headers() -> None:
+    servers = [
+        HttpMcpServer(name="memory", url="http://127.0.0.1:9/mcp", headers={"Authorization": "Bearer t"}),
+        HttpMcpServer(name="open", url="https://example.test/mcp"),
+    ]
+
+    config = thread_params("/w", _ASKING, mcp_servers=servers, ephemeral=False)["config"]
+
+    assert config == {
+        "mcp_servers": {
+            "memory": {"url": "http://127.0.0.1:9/mcp", "http_headers": {"Authorization": "Bearer t"}},
+            "open": {"url": "https://example.test/mcp"},
+        }
+    }
+
+
+def test_the_tools_of_a_read_only_server_are_approved_in_advance_and_those_of_any_other_are_asked_about() -> None:
+    servers: list[McpServerConfig] = [
+        HttpMcpServer(name="memory", url="http://127.0.0.1:9/mcp", read_only=True),
+        StdioMcpServer(name="local", command="mcp", read_only=True),
+        StdioMcpServer(name="other", command="mcp"),
+    ]
+
+    config = thread_params("/w", _ASKING, mcp_servers=servers, ephemeral=False)["config"]
+    assert isinstance(config, dict)
+    entries = config["mcp_servers"]
+
+    assert [name for name, entry in entries.items() if entry.get("default_tools_approval_mode") == "approve"] == [
+        "memory",
+        "local",
+    ]
+
+
+def test_a_resumed_thread_is_given_the_servers_again() -> None:
+    servers = [HttpMcpServer(name="memory", url="http://127.0.0.1:9/mcp")]
+
+    config = resume_params("t-1", "/w", _ASKING, mcp_servers=servers)["config"]
+
+    assert config == {"mcp_servers": {"memory": {"url": "http://127.0.0.1:9/mcp"}}}
 
 
 def test_a_resumed_thread_is_asked_for_without_its_history() -> None:

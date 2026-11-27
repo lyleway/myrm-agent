@@ -8,7 +8,7 @@ with a prefix to verify the full ACP roundtrip. With ``--images`` it advertises
 
 A prompt that starts with ``/permission``, ``/write`` or ``/edit`` followed by a JSON object makes the agent call
 the client the way a real agent does, over the real SDK, and report what came back:
-``/permission {"kind", "title", "raw_input", "locations", "diff_path"}`` -> ``[permission] <outcome> <option id>``;
+``/permission {"kind", "title", "raw_input", "locations", "diff_path", "meta"}`` -> ``[permission] <outcome> <option id>``;
 ``/write {"path", "content"}`` -> ``[write] ok`` or ``[write] error <code> <message> <data as JSON>``;
 ``/edit {"path", "content"}`` asks permission to edit the file, then writes it: both reports, joined.
 ``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``;
@@ -17,6 +17,7 @@ the client the way a real agent does, over the real SDK, and report what came ba
 ``/session`` -> ``[session] <the ACP session id the prompt runs in>``;
 ``/history`` -> ``[history] <the earlier prompts of the session, joined by "|">``;
 ``/story`` says "before", runs a tool call and then says "after", as an agent that speaks around a tool call does;
+``/mcp`` -> ``[mcp] <the MCP servers the session was opened with, as JSON>``;
 ``/stop <reason>`` ends the prompt with that ACP stop reason.
 A ``session/cancel`` makes the prompt that is running end with stop reason ``cancelled`` once what it waits for is
 answered, as the real agents do.
@@ -54,6 +55,7 @@ from acp.schema import (
     InitializeResponse,
     ListSessionsResponse,
     LoadSessionResponse,
+    McpCapabilities,
     NewSessionResponse,
     PermissionOption,
     PromptCapabilities,
@@ -99,6 +101,7 @@ class MockAcpAgent:
         self._sessions: dict[str, str] = {}
         self._history: dict[str, list[str]] = {}
         self._modes: dict[str, str] = {}
+        self._mcp_servers: dict[str, list[dict[str, Any]]] = {}
         self._cancelled: set[str] = set()
         self._stop_reason: StopReason | None = None
         self._client_capabilities: ClientCapabilities | None = None
@@ -121,6 +124,12 @@ class MockAcpAgent:
             for session_id, cwd in self._sessions.items()
         }
         Path(self._state_path).write_text(json.dumps(stored))
+
+    def _keep_mcp_servers(self, session_id: str, servers: list[object] | None) -> None:
+        """What the client handed the session, as it arrived over the wire."""
+        self._mcp_servers[session_id] = [
+            cast(Any, server).model_dump(by_alias=True, exclude_none=True) for server in servers or []
+        ]
 
     def _require_known(self, session_id: str) -> None:
         """Answer the way an agent does for a session it does not know, or one it cannot open without a login."""
@@ -152,6 +161,7 @@ class MockAcpAgent:
             agent_capabilities=AgentCapabilities(
                 load_session="--load" in sys.argv[1:],
                 prompt_capabilities=PromptCapabilities(image=advertise_images),
+                mcp_capabilities=McpCapabilities(http="--mcp-http" in sys.argv[1:]),
                 session_capabilities=sessions,
             ),
             agent_info=Implementation(name="mock-acp-agent", version="1.0.0"),
@@ -170,6 +180,7 @@ class MockAcpAgent:
         session_id = str(uuid.uuid4())
         self._sessions[session_id] = cwd
         self._history[session_id] = []
+        self._keep_mcp_servers(session_id, mcp_servers)
         self._persist()
         mode = _flag_value("--mode")
         if mode is None:
@@ -181,8 +192,11 @@ class MockAcpAgent:
         )
         return NewSessionResponse(session_id=session_id, modes=modes)
 
-    async def load_session(self, cwd: str, session_id: str, **kwargs: Any) -> LoadSessionResponse:
+    async def load_session(
+        self, cwd: str, session_id: str, mcp_servers: list[object] | None = None, **kwargs: Any
+    ) -> LoadSessionResponse:
         self._require_known(session_id)
+        self._keep_mcp_servers(session_id, mcp_servers)
         if self._conn is not None:
             # An agent that continues a stored session replays it to the client before it answers.
             for earlier in self._history[session_id]:
@@ -267,6 +281,8 @@ class MockAcpAgent:
             return f"[history] {'|'.join(self._history[session_id][:-1])}"
         if verb == "/story":
             return await self._tell_around_a_tool_call(session_id)
+        if verb == "/mcp":
+            return f"[mcp] {json.dumps(self._mcp_servers.get(session_id, []), sort_keys=True)}"
         if verb == "/stop":
             self._stop_reason = cast(StopReason, rest)
             return f"[stop] {rest}"
@@ -306,6 +322,7 @@ class MockAcpAgent:
             kind=args.get("kind"),
             title=args.get("title"),
             raw_input=args.get("raw_input"),
+            field_meta=args.get("meta"),
             locations=[ToolCallLocation(path=path) for path in args.get("locations", [])] or None,
             content=[FileEditToolCallContent(type="diff", path=args["diff_path"], new_text="new")]
             if "diff_path" in args
@@ -324,8 +341,11 @@ class MockAcpAgent:
     async def fork_session(self, cwd: str, session_id: str, **kwargs: Any) -> None:
         return None
 
-    async def resume_session(self, cwd: str, session_id: str, **kwargs: Any) -> ResumeSessionResponse:
+    async def resume_session(
+        self, cwd: str, session_id: str, mcp_servers: list[object] | None = None, **kwargs: Any
+    ) -> ResumeSessionResponse:
         self._require_known(session_id)
+        self._keep_mcp_servers(session_id, mcp_servers)
         return ResumeSessionResponse()
 
     async def close_session(self, session_id: str, **kwargs: Any) -> CloseSessionResponse:

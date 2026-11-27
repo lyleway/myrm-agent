@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime._base import BaseRuntime, build_safe_env, truncate_response
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
     BackendType,
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -180,7 +180,7 @@ class _ScriptedRuntime(BaseRuntime):
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:

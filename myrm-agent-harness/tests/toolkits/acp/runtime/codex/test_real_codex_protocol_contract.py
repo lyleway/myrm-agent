@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     OPT_OUT_NOTIFICATIONS,
     WorkspaceWriteSettings,
@@ -30,7 +31,6 @@ from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     turn_policy,
 )
 from myrm_agent_harness.toolkits.acp.runtime.codex.turn_events import READ_NOTIFICATIONS
-from myrm_agent_harness.toolkits.acp.types import McpServerConfig
 from tests.toolkits.acp.cli_contract import cli_binary, probe_env
 
 pytestmark = [
@@ -207,7 +207,7 @@ def test_the_handshake_and_login_use_fields_the_server_knows(schema: Schema) -> 
 
 def test_the_thread_and_turn_requests_use_fields_the_server_knows(schema: Schema) -> None:
     policy = turn_policy("safe", can_ask=True, workspace_write=WorkspaceWriteSettings())
-    servers = [McpServerConfig(name="echo", command="python", args=["-V"], env={"A": "b"})]
+    servers = [StdioMcpServer(name="echo", command="python", args=["-V"], env={"A": "b"})]
     start = thread_params("/w", policy, mcp_servers=servers, ephemeral=True)
     resume = resume_params("t", "/w", policy, mcp_servers=servers)
 

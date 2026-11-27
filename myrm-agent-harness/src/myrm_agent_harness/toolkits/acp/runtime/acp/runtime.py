@@ -4,7 +4,9 @@ Spawns an external ACP-compatible agent process (Gemini CLI, Qwen Code, etc.)
 and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 
 [INPUT]
-- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, McpServerConfig, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.mcp_servers::McpServerConfig, read_only_names (POS: The MCP servers a host hands a delegated agent)
+- toolkits.acp.runtime.mcp_status::mcp_not_attached_event (POS: The status update naming the MCP servers an agent was not given)
+- toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, PermissionBroker, images_not_sent_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 - toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
 - toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
@@ -31,6 +33,10 @@ A refused login (JSON-RPC ``auth_required``) ends the turn as ``AUTH_FAILED`` wi
 A silent agent (one long tool call) is reported as still working at a fixed interval, as ``CliRuntime`` does, and a
 missing ACP SDK (the optional ``acp`` extra) ends the turn with a ``BACKEND_NOT_FOUND`` error that says how to install it.
 
+The MCP servers of a turn are handed over when the session is opened; an HTTP server goes only to an agent that
+advertised ``mcpCapabilities.http``, and a turn on a session that runs without a server opens with an
+``mcp_not_attached`` status update naming it.
+
 The images of a turn travel as image content blocks after the text, only to an agent that advertised
 ``promptCapabilities.image``; for any other agent the turn opens with an ``images_not_sent`` status
 update and carries the text alone. Cancel and transport exit are bounded (``stalled_agent``), so an agent that has
@@ -44,12 +50,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, NoReturn
 
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
 from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, read_only_names
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -61,13 +68,13 @@ from myrm_agent_harness.toolkits.acp.runtime.acp.capabilities import AgentCapabi
 from myrm_agent_harness.toolkits.acp.runtime.acp.sessions import AUTH_REQUIRED_CODE, AgentSessions, OpenedSession
 from myrm_agent_harness.toolkits.acp.runtime.acp.stalled_agent import cancel_session, leave_transport
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock, load_image_blocks
+from myrm_agent_harness.toolkits.acp.runtime.mcp_status import mcp_not_attached_event
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
     BackendCapabilities,
     BackendStatus,
     CliSessionStore,
-    McpServerConfig,
     PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
@@ -147,7 +154,7 @@ class AcpRuntime(BaseRuntime):
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
@@ -174,9 +181,11 @@ class AcpRuntime(BaseRuntime):
             msg = "Handler not initialized"
             raise RuntimeError(msg)
         opened = await self._open_session(handler, session_id, mcp_servers)
-        handler.begin_turn(permissions, session_id)
+        handler.begin_turn(permissions, session_id, read_only_names(mcp_servers))
         if opened.notice is not None:
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=opened.notice)
+        if opened.mcp_left_out:
+            yield mcp_not_attached_event(session_id, opened.mcp_left_out)
 
         blocks: list[ImageBlock] = []
         if images and self._agent.image_prompts:
@@ -358,7 +367,7 @@ class AcpRuntime(BaseRuntime):
         logger.info("acp_runtime_connected name=%s pid=%s capabilities=%s", self._name, process.pid, self._agent)
 
     async def _open_session(
-        self, handler: AcpCallbackHandler, session_id: str, mcp_servers: list[McpServerConfig] | None
+        self, handler: AcpCallbackHandler, session_id: str, mcp_servers: Sequence[McpServerConfig] | None
     ) -> OpenedSession:
         """The ACP session of ``session_id`` (opened, or given back from the agent's storage), in a mode that asks."""
         if self._conn is None:

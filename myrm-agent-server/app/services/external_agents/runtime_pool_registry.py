@@ -25,14 +25,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from contextlib import aclosing, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
+    from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
     from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
-    from myrm_agent_harness.toolkits.acp.types import McpServerConfig, PermissionBroker, RuntimeConfig, RuntimeEvent
+    from myrm_agent_harness.toolkits.acp.types import PermissionBroker, RuntimeConfig, RuntimeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,7 @@ class ChatScopedRuntimePoolFacade:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
