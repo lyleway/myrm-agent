@@ -4,7 +4,7 @@
 - cdp_chat.support (POS: the messages the runtime under test stored for a chat)
 - tests.support.chrome_mcp_e2e (POS: CDP page helpers, wait_for_state)
 - tests.support.context_compaction_e2e (POS: the dormant long chat, the locale files, the compaction state of the server)
-- tests.support.context_compaction_ui (POS: the compress control of the strategy panel, the compact requests the page sends)
+- tests.support.context_compaction_ui (POS: the compress control of the strategy panel, the composer and command palette, the compact requests the page sends)
 
 [OUTPUT]
 - compress_in_chat() / compress_open_chat() / compact_open_chat_by_command(): opens a dormant chat (or takes the open one) and compresses it from the strategy panel, or by typing `/compact`, with the real model; returns what the server and the page then hold
@@ -119,7 +119,7 @@ def _press_until_summarized(client: ChromeMcpClient, page: McpPage, page_url: st
     """Press "compress" until the server has summarized the chat.
 
     The server declines with reason ``timeout`` (HTTP 200, nothing stored) when the model gateway sends no token for
-    its inactivity limit, which happens while other sessions load the same gateway; the user presses again, so does this.
+    its inactivity limit, which a loaded gateway causes; the user presses again, so does this.
     Any other decline is a failure.
     """
     sent_before = len(read_compact_requests(client, page))

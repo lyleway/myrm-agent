@@ -3,7 +3,8 @@
 A user compresses a long chat from the strategy panel, then changes its history. Whether the summary survives is
 decided by what the change touched: a rewind of a turn made after the compression leaves the summary alone, while a
 regenerate or an edit-and-resend of a turn the summary covers makes the server drop it, and the page stops showing it
-once it has re-read the chat. A rewound chat still answers, from the turns that remain.
+once it has re-read the chat. Switching back to an earlier version of an answer drops a summary written after that
+version, because the summary describes the other version. A rewound chat still answers, from the turns that remain.
 """
 
 from __future__ import annotations
