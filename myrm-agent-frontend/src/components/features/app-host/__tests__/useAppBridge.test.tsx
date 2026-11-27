@@ -22,14 +22,18 @@ import type { BridgeCapability } from '@/lib/app-bridge/protocol';
 const mocks = vi.hoisted(() => ({
   showAppNotification: vi.fn(),
   proxyAppFetch: vi.fn(),
+  proxyAppAi: vi.fn(),
   reportAppActivity: vi.fn(),
   stopEvents: vi.fn(),
-  surfaceEvents: { current: null as null | { onShortcut: (accelerator: string) => void; onOpenPermissions: () => void } },
+  surfaceEvents: {
+    current: null as null | { onShortcut: (accelerator: string) => void; onOpenPermissions: () => void },
+  },
 }));
 
 vi.mock('@/services/appNotification', () => ({ showAppNotification: mocks.showAppNotification }));
 vi.mock('@/services/artifactApps', () => ({
   proxyAppFetch: mocks.proxyAppFetch,
+  proxyAppAi: mocks.proxyAppAi,
   reportAppActivity: mocks.reportAppActivity,
 }));
 
@@ -40,12 +44,13 @@ vi.mock('@/lib/desktop/appSurface', () => ({
   }),
 }));
 
-import type { AppSurfaceDeps } from '@/lib/app-bridge/host';
+import type { AppSurfaceDeps } from '@/lib/app-bridge/hostTypes';
 import { useAppBridge } from '../useAppBridge';
 
 const ALLOWED: Record<BridgeCapability, CapabilityStatus> = {
   notify: 'allowed',
   fetch: 'allowed',
+  ai: 'allowed',
   tray: 'allowed',
   shortcut: 'allowed',
   float: 'allowed',
@@ -168,6 +173,23 @@ describe('useAppBridge', () => {
       method: 'GET',
       headers: {},
       body: null,
+      version_sha256: 'a'.repeat(64),
+    });
+  });
+
+  it('sends a granted model call through the proxy and hands the page only the answer text', async () => {
+    mocks.proxyAppAi.mockResolvedValue({ ok: true, text: 'Sunny', code: null, message: null });
+    const { send, replies } = setup();
+
+    send({ jsonrpc: '2.0', id: 'a1', method: 'ai.complete', params: { prompt: 'Weather?', maxTokens: 64 } });
+
+    await waitFor(() =>
+      expect(replies).toHaveBeenCalledWith({ jsonrpc: '2.0', id: 'a1', result: { text: 'Sunny' } }, '*'),
+    );
+    expect(mocks.proxyAppAi).toHaveBeenCalledWith('art-1', {
+      prompt: 'Weather?',
+      system: null,
+      maxTokens: 64,
       version_sha256: 'a'.repeat(64),
     });
   });

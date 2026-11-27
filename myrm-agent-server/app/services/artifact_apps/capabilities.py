@@ -10,8 +10,8 @@
 - InvalidScopeError: raised for a scope the capability cannot carry.
 
 [POS]
-Business layer vocabulary. A scope is what the page declared and the user approved: nothing for ``notify``, ``tray`` and
-``float``, a list of exact public host names for ``fetch``, a list of key combinations for ``shortcut``. Exact names only
+Business layer vocabulary. A scope is what the page declared and the user approved: nothing for ``notify``, ``tray``,
+``float`` and ``ai``, a list of exact public host names for ``fetch``, a list of key combinations for ``shortcut``. Exact names only
 (no wildcards, no IP literals, no ports) so that the list the user reads in the permission dialog is the list the proxy
 enforces; a key combination needs a modifier other than Shift so a page cannot take over plain typing.
 """
@@ -22,14 +22,14 @@ import re
 from collections.abc import Iterable
 from typing import Final, Literal
 
-Capability = Literal["notify", "fetch", "tray", "shortcut", "float"]
+Capability = Literal["notify", "fetch", "ai", "tray", "shortcut", "float"]
 Decision = Literal["allow", "deny"]
 Outcome = Literal["ok", "denied", "rate_limited", "error"]
 
 MAX_FETCH_HOSTS: Final = 20
 MAX_SHORTCUTS: Final = 4
 
-_SCOPELESS: Final = frozenset({"notify", "tray", "float"})
+_SCOPELESS: Final = frozenset({"notify", "ai", "tray", "float"})
 _MODIFIERS: Final = ("CommandOrControl", "Control", "Alt", "Shift")
 _KEY: Final = re.compile(r"^(?:[A-Z0-9]|F(?:[1-9]|1[0-2]))$")
 

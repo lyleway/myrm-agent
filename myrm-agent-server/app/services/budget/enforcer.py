@@ -10,6 +10,7 @@ singleton, and provides the guard to agent factory for injection.
 - app.database.models.chat::Message (POS: 消息域模型)
 - app.database.models.config::UserConfig (POS: 用户配置域模型)
 - app.services.budget.budget_day::budget_day_start_utc (POS: Budget day boundary as naive UTC)
+- app.services.artifact_apps.ai_usage::spent_since (POS: What artifact apps' model calls cost; they leave no message)
 
 [OUTPUT]
 - BudgetPolicy: Pydantic model for budget policy configuration
@@ -48,6 +49,7 @@ from app.database.models.config import UserConfig
 from app.platform_utils import get_session_factory
 from app.platform_utils.deployment_capabilities import get_deployment_capabilities
 from app.platform_utils.sandbox.entitlements.platform_budget_adapter import PlatformBudgetAdapter
+from app.services.artifact_apps.ai_usage import spent_since as app_ai_spent_since
 from app.services.budget.budget_day import budget_day_start_utc
 
 logger = logging.getLogger(__name__)
@@ -213,7 +215,7 @@ async def save_budget_policy(policy: BudgetPolicy) -> None:
 
 
 async def _query_today_cost() -> float:
-    """Sum costUsd from today's assistant messages to recover spend after process restart."""
+    """Sum today's costUsd of assistant messages and of artifact apps' model calls to recover spend after a restart."""
     try:
         session_factory = get_session_factory()
         today_start = budget_day_start_utc()
@@ -229,7 +231,7 @@ async def _query_today_cost() -> float:
                     )
                 )
             )
-            total: float = float(result.scalar_one())
+            total: float = float(result.scalar_one()) + await app_ai_spent_since(session, today_start)
         return total
     except Exception as e:
         logger.warning("Failed to recover today's cost from DB, starting from $0: %s", e)

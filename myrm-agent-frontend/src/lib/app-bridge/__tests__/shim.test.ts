@@ -13,6 +13,7 @@ interface MyrmClient {
   tray: { set(options?: { title?: string; tooltip?: string }): Promise<void>; clear(): Promise<void> };
   shortcut: { register(accelerator: string): Promise<void>; unregister(accelerator: string): Promise<void> };
   float(on: boolean): Promise<void>;
+  llm: { complete(options: string | { prompt?: unknown; system?: string; maxTokens?: number }): Promise<string> };
   notify(options?: { title?: string; body?: string }): Promise<void>;
   fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: unknown }): Promise<Response>;
 }
@@ -52,7 +53,8 @@ describe('injectAppBridge', () => {
   it('defines a frozen window.myrm', () => {
     const { myrm } = bootShim();
     expect(Object.isFrozen(myrm)).toBe(true);
-    expect(Object.keys(myrm).sort()).toEqual(['fetch', 'float', 'notify', 'on', 'shortcut', 'tray']);
+    expect(Object.keys(myrm).sort()).toEqual(['fetch', 'float', 'llm', 'notify', 'on', 'shortcut', 'tray']);
+    expect(Object.isFrozen(myrm.llm)).toBe(true);
     expect(Object.isFrozen(myrm.tray)).toBe(true);
     expect(Object.isFrozen(myrm.shortcut)).toBe(true);
   });
@@ -99,11 +101,21 @@ describe('myrm.notify', () => {
 
 describe('the desktop calls', () => {
   it.each<[string, (myrm: MyrmClient) => Promise<void>, string, Record<string, unknown>]>([
-    ['tray.set', (myrm) => myrm.tray.set({ title: '3 unread', tooltip: 'Inbox' }), 'tray.set', { title: '3 unread', tooltip: 'Inbox' }],
+    [
+      'tray.set',
+      (myrm) => myrm.tray.set({ title: '3 unread', tooltip: 'Inbox' }),
+      'tray.set',
+      { title: '3 unread', tooltip: 'Inbox' },
+    ],
     ['tray.set without options', (myrm) => myrm.tray.set(), 'tray.set', {}],
     ['tray.clear', (myrm) => myrm.tray.clear(), 'tray.clear', {}],
     ['shortcut.register', (myrm) => myrm.shortcut.register('Alt+F1'), 'shortcut.register', { accelerator: 'Alt+F1' }],
-    ['shortcut.unregister', (myrm) => myrm.shortcut.unregister('Alt+F1'), 'shortcut.unregister', { accelerator: 'Alt+F1' }],
+    [
+      'shortcut.unregister',
+      (myrm) => myrm.shortcut.unregister('Alt+F1'),
+      'shortcut.unregister',
+      { accelerator: 'Alt+F1' },
+    ],
     ['float(true)', (myrm) => myrm.float(true), 'float.set', { on: true }],
     ['float with a truthy value', (myrm) => myrm.float('yes' as unknown as boolean), 'float.set', { on: true }],
     ['float(false)', (myrm) => myrm.float(false), 'float.set', { on: false }],
@@ -184,6 +196,52 @@ describe('myrm.on', () => {
     const { myrm } = bootShim();
 
     expect(() => myrm.on('shortcut', 'nope' as unknown as () => void)).not.toThrow();
+  });
+});
+
+describe('myrm.llm.complete', () => {
+  it('sends the prompt, system text and output cap and resolves with the answer text', async () => {
+    const { myrm, parent, deliver } = bootShim();
+
+    const done = myrm.llm.complete({ prompt: 'Weather?', system: 'Be brief', maxTokens: 64 });
+    expect(parent.posted[0]).toMatchObject({
+      method: 'ai.complete',
+      params: { prompt: 'Weather?', system: 'Be brief', maxTokens: 64 },
+    });
+    deliver({ jsonrpc: '2.0', id: parent.posted[0].id, result: { text: 'Sunny' } });
+
+    await expect(done).resolves.toBe('Sunny');
+  });
+
+  it('takes a plain string as the prompt', async () => {
+    const { myrm, parent, deliver } = bootShim();
+
+    const done = myrm.llm.complete('Weather?');
+    expect(parent.posted[0].params.prompt).toBe('Weather?');
+    deliver({ jsonrpc: '2.0', id: parent.posted[0].id, result: { text: 'Sunny' } });
+
+    await expect(done).resolves.toBe('Sunny');
+  });
+
+  it('leaves a missing prompt for the host to refuse instead of sending the text "undefined"', async () => {
+    const { myrm, parent } = bootShim();
+
+    void myrm.llm.complete({});
+
+    expect(parent.posted[0].params.prompt).toBeUndefined();
+  });
+
+  it('rejects with the host reason as error.code', async () => {
+    const { myrm, parent, deliver } = bootShim();
+
+    const done = myrm.llm.complete('hi');
+    deliver({
+      jsonrpc: '2.0',
+      id: parent.posted[0].id,
+      error: { code: -32000, message: 'The daily budget leaves no room', data: { reason: 'budget_exceeded' } },
+    });
+
+    await expect(done).rejects.toMatchObject({ code: 'budget_exceeded', message: 'The daily budget leaves no room' });
   });
 });
 

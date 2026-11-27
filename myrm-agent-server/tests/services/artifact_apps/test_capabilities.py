@@ -50,8 +50,8 @@ def test_fetch_caps_the_number_of_hosts() -> None:
     assert len(normalize_scope("fetch", hosts[:MAX_FETCH_HOSTS])) == MAX_FETCH_HOSTS
 
 
-@pytest.mark.parametrize("capability", ["tray", "float"])
-def test_tray_and_float_carry_no_scope(capability: str) -> None:
+@pytest.mark.parametrize("capability", ["ai", "tray", "float"])
+def test_ai_tray_and_float_carry_no_scope(capability: str) -> None:
     assert normalize_scope(capability, []) == []  # type: ignore[arg-type]
     with pytest.raises(InvalidScopeError):
         normalize_scope(capability, ["x"])  # type: ignore[arg-type]

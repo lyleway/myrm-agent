@@ -7,7 +7,7 @@
  *
  * [POS]
  * Page half of the channel. The sandboxed page has no network and no OS access, so `myrm.notify`, `myrm.fetch`,
- * `myrm.tray`, `myrm.shortcut` and `myrm.float` send JSON-RPC requests to `window.parent` and settle from the reply;
+ * `myrm.llm.complete`, `myrm.tray`, `myrm.shortcut` and `myrm.float` send JSON-RPC requests to `window.parent` and settle from the reply;
  * `myrm.on(name, handler)` receives what the host reports (`permission-revoked`, `shortcut`). Messages are accepted from
  * the parent window only. The shim is a convenience: the host authenticates the sender itself, so a page that skips it
  * gains nothing.
@@ -55,6 +55,12 @@ const SHIM = `<script>
       unregister:function(accelerator){return call('shortcut.unregister',{accelerator:String(accelerator)}).then(done)}
     }),
     float:function(on){return call('float.set',{on:!!on}).then(done)},
+    llm:Object.freeze({
+      complete:function(options){
+        var o=typeof options==='string'?{prompt:options}:options||{};
+        return call('ai.complete',{prompt:o.prompt,system:o.system,maxTokens:o.maxTokens}).then(function(r){return r.text});
+      }
+    }),
     notify:function(options){return call('notify',options||{}).then(function(){})},
     fetch:function(url,init){
       init=init||{};

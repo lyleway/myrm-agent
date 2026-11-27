@@ -9,12 +9,15 @@
 [OUTPUT]
 - install_app / uninstall_app / is_installed / list_apps: the install registry.
 - get_grants / set_grant / allowed_fetch_hosts / decode_scope: per-capability decisions.
+- is_allowed: whether the user allowed an app a capability.
 - record_activity / list_activity: the metadata-only bridge activity log.
+- begin_write: the write transaction every write of the artifact-app tables starts with.
 
 [POS]
-Business layer. The only module that reads or writes the three artifact-app tables; the API layer and the fetch proxy
-go through it. Every database function takes the caller's session and commits its own write, in a transaction of its
-own: the caller's earlier reads (is the app installed) must not decide whether the write can happen.
+Business layer. The only module that reads or writes the registry, grant and activity tables (the model-call spend
+ledger is ai_usage's); the API layer and the proxies go through it. Every database function takes the caller's session
+and commits its own write, in a transaction of its own: the caller's earlier reads (is the app installed) must not
+decide whether the write can happen.
 """
 
 from __future__ import annotations
@@ -44,7 +47,7 @@ class InstalledApp:
     updated_at: datetime
 
 
-async def _begin_write(db: AsyncSession) -> None:
+async def begin_write(db: AsyncSession) -> None:
     """Start a write transaction that no earlier read of this session can invalidate.
 
     The routes read first (is the app installed, which hosts are allowed) and a proxied request can sit between that
@@ -59,15 +62,18 @@ async def _begin_write(db: AsyncSession) -> None:
 
 async def install_app(db: AsyncSession, artifact_id: str) -> None:
     """Register the artifact as an app; installing twice is a no-op."""
-    await _begin_write(db)
+    await begin_write(db)
     if not await is_installed(db, artifact_id):
         db.add(ArtifactApp(artifact_id=artifact_id))
     await db.commit()
 
 
 async def uninstall_app(db: AsyncSession, artifact_id: str) -> bool:
-    """Remove the app with its grants and activity; returns whether it was installed."""
-    await _begin_write(db)
+    """Remove the app with its grants and activity; returns whether it was installed.
+
+    The model-call spend ledger stays: that money was spent, and a reinstall must not start the app's day again.
+    """
+    await begin_write(db)
     installed = await is_installed(db, artifact_id)
     for model in (ArtifactAppActivity, ArtifactAppGrant, ArtifactApp):
         await db.execute(delete(model).where(model.artifact_id == artifact_id))
@@ -112,7 +118,7 @@ async def set_grant(
     version_sha256: str,
 ) -> ArtifactAppGrant:
     """Record the latest decision on one capability, replacing the previous one."""
-    await _begin_write(db)
+    await begin_write(db)
     rows = await db.execute(
         select(ArtifactAppGrant).where(ArtifactAppGrant.artifact_id == artifact_id, ArtifactAppGrant.capability == capability)
     )
@@ -126,6 +132,15 @@ async def set_grant(
     await db.commit()
     await db.refresh(grant)
     return grant
+
+
+async def is_allowed(db: AsyncSession, artifact_id: str, capability: Capability) -> bool:
+    rows = await db.execute(
+        select(ArtifactAppGrant.decision).where(
+            ArtifactAppGrant.artifact_id == artifact_id, ArtifactAppGrant.capability == capability
+        )
+    )
+    return rows.scalars().first() == "allow"
 
 
 async def allowed_fetch_hosts(db: AsyncSession, artifact_id: str) -> frozenset[str]:
@@ -147,7 +162,7 @@ async def record_activity(
     outcome: Outcome,
     detail: str | None,
 ) -> None:
-    await _begin_write(db)
+    await begin_write(db)
     db.add(
         ArtifactAppActivity(
             artifact_id=artifact_id,

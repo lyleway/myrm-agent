@@ -66,6 +66,7 @@ _ENTRIES: tuple[tuple[str, str, str], ...] = (
     ("api/chats/chat/turn.py", "regenerate_last_turn", "reject_if_risky"),
     ("api/chats/chat/copilot.py", "advisor_ask", "reject_if_risky"),
     ("api/wiki/routes/query.py", "query_wiki", "reject_if_risky"),
+    ("api/artifact_apps/router.py", "ai_for_app", "reject_if_risky"),
     ("api/kanban/routes/specify.py", "apply_decompose", "reject_if_risky"),
     ("core/cron/adapters/inbound_event_dispatch.py", "dispatch_cron_event_for_inbound_message", "screen_user_text"),
     ("channels/routing/pipeline/inbound.py", "_claim_delegation", "hold_risky_inbound"),
