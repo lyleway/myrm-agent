@@ -146,6 +146,20 @@ class TestBatchSpeechToText:
         assert sent_json(socket_of(session)) == [_INFO, {"type": "stt_final", "text": "turn it on"}]
 
     @pytest.mark.parametrize(
+        "text",
+        ["not json", "[]", "null", json.dumps({"type": ["end_utterance"]})],
+        ids=["garbled", "an array", "null", "type not a string"],
+    )
+    async def test_unusable_control_frames_neither_end_the_utterance_nor_stop_the_loop(self, text: str) -> None:
+        session = _session([{"type": "websocket.receive", "text": text}, audio_frame(_UTTERANCE_AUDIO), _END_UTTERANCE])
+
+        with patch.object(_VoiceSession, "_batch_transcribe", new_callable=AsyncMock, return_value="turn it on") as transcribe:
+            await session._run_batch_stt()
+
+        transcribe.assert_awaited_once_with(_UTTERANCE_AUDIO)
+        assert sent_json(socket_of(session)) == [_INFO, {"type": "stt_final", "text": "turn it on"}]
+
+    @pytest.mark.parametrize(
         ("size", "transcribed"),
         [(_MIN_UTTERANCE_BYTES - 1, False), (_MIN_UTTERANCE_BYTES, True)],
         ids=["under one kilobyte", "one kilobyte"],

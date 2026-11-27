@@ -1,14 +1,15 @@
 """WebSocket STT streaming endpoint.
 
-Proxies audio from browser → backend WebSocket → STT provider (Deepgram/Groq).
-Returns interim and final transcripts in real-time.
+Proxies audio from browser → backend WebSocket → Deepgram live transcription and returns interim and final
+transcripts in real-time. Providers without live streaming get the collected audio transcribed in one request.
 
 Protocol:
   1. Client opens WS to /ws/stt/stream
   2. Client sends JSON config: {"keyterms": ["term1", ...]}
   3. Client sends binary audio chunks (webm/opus)
   4. Server streams back: {"type": "transcript", "text": "...", "is_final": true/false}
-  5. Client sends {"action": "close"} to end, or server closes on provider disconnect
+  5. Client sends {"action": "close"} to end; the final results Deepgram flushes for the audio it still holds are
+     relayed before the stream closes. The server also closes on provider disconnect
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field, ValidationError
 
 from app.api.dependencies import verify_voice_enabled
 from app.core.infra.ws_origin_guard import verify_ws_origin
@@ -36,6 +38,22 @@ _WS_CLOSE_NORMAL = 1000
 _WS_CLOSE_ERROR = 1011
 _MAX_AUDIO_CHUNK = 1024 * 1024  # 1MB per chunk
 _SESSION_IDLE_TIMEOUT = 120.0  # Close WS if no data received for 120s
+_PROVIDER_FLUSH_TIMEOUT = 5.0  # How long Deepgram may take to flush its final results once the client side has ended
+
+
+class _StreamFrame(BaseModel):
+    """A text frame of the stream protocol: the opening config (`keyterms`) or the `close` action."""
+
+    action: str = ""
+    keyterms: list[str] = Field(default_factory=list)
+
+
+def _parse_frame(message: str) -> _StreamFrame | None:
+    """The frame `message` holds, or None when it is not valid JSON, not an object or a field has the wrong type."""
+    try:
+        return _StreamFrame.model_validate_json(message)
+    except ValidationError:
+        return None
 
 
 @router.websocket("/stream")
@@ -46,13 +64,14 @@ async def stt_stream(ws: WebSocket) -> None:
     await ws.accept()
 
     try:
-        config_msg = await asyncio.wait_for(ws.receive_text(), timeout=10.0)
-        client_config = json.loads(config_msg)
-    except (asyncio.TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
+        config = _parse_frame(await asyncio.wait_for(ws.receive_text(), timeout=10.0))
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        config = None
+    if config is None:
         await _close_ws(ws, _WS_CLOSE_ERROR, "Invalid config")
         return
 
-    keyterms: list[str] = client_config.get("keyterms", [])
+    keyterms = config.keyterms
 
     voice_config = await _load_voice_config_from_ws(ws)
     if not voice_config:
@@ -97,10 +116,12 @@ async def _stream_via_deepgram(
             receive_task = asyncio.create_task(_relay_client_audio(ws, dg_ws))
             send_task = asyncio.create_task(_relay_deepgram_transcripts(ws, dg_ws))
 
-            done, pending = await asyncio.wait(
-                {receive_task, send_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+            tasks = {receive_task, send_task}
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if receive_task in done and send_task in pending:
+                # The client side has sent CloseStream. Deepgram answers with the final results of the audio it still
+                # holds and then ends the stream, so the transcript relay gets time to deliver them before it is dropped.
+                done, pending = await asyncio.wait(tasks, timeout=_PROVIDER_FLUSH_TIMEOUT)
 
             for task in pending:
                 task.cancel()
@@ -146,13 +167,9 @@ async def _relay_client_audio(ws: WebSocket, dg_ws: object) -> None:
                 await dg_ws.send(data)
 
             elif "text" in msg and msg["text"]:
-                try:
-                    parsed = json.loads(msg["text"])
-                    if parsed.get("action") == "close":
-                        await dg_ws.send(json.dumps({"type": "CloseStream"}))
-                        break
-                except json.JSONDecodeError:
-                    pass
+                frame = _parse_frame(msg["text"])
+                if frame is not None and frame.action == "close":
+                    break
     except WebSocketDisconnect:
         pass
     finally:
@@ -239,12 +256,9 @@ async def _batch_fallback(ws: WebSocket, config: VoiceConfig) -> None:
                 chunks.append(chunk)
 
             elif "text" in msg and msg["text"]:
-                try:
-                    parsed = json.loads(msg["text"])
-                    if parsed.get("action") == "close":
-                        break
-                except json.JSONDecodeError:
-                    pass
+                frame = _parse_frame(msg["text"])
+                if frame is not None and frame.action == "close":
+                    break
     except WebSocketDisconnect:
         pass
 

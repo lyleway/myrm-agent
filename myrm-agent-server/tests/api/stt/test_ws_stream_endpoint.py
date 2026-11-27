@@ -42,8 +42,26 @@ class TestSessionSetup:
 
     @pytest.mark.parametrize(
         "config_message",
-        ["not json", WebSocketDisconnect(), asyncio.TimeoutError()],
-        ids=["garbled", "disconnected", "too slow"],
+        [
+            "not json",
+            "[]",
+            "null",
+            '"config"',
+            '{"keyterms": "alpha"}',
+            '{"keyterms": [1]}',
+            WebSocketDisconnect(),
+            asyncio.TimeoutError(),
+        ],
+        ids=[
+            "garbled",
+            "an array",
+            "null",
+            "a string",
+            "keyterms not a list",
+            "keyterms not strings",
+            "disconnected",
+            "too slow",
+        ],
     )
     async def test_an_unreadable_config_closes_the_session_before_any_lookup(self, config_message: str | Exception) -> None:
         ws = _socket(config_message)

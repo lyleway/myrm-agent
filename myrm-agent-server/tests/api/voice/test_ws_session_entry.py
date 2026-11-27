@@ -47,12 +47,26 @@ class TestSessionEntry:
         ("first_message", "reason"),
         [
             ("not json", "Invalid config"),
+            ("[]", "Invalid config"),
+            ("null", "Invalid config"),
+            (json.dumps({"type": "config", "keyterms": "Myrm"}), "Invalid config"),
+            (json.dumps({"type": "config", "chat_id": 7}), "Invalid config"),
             (WebSocketDisconnect(), "Invalid config"),
             (asyncio.TimeoutError(), "Invalid config"),
             (json.dumps({"type": "tts", "text": "hi"}), "First message must be type:config"),
             (json.dumps({"type": "config", "chat_id": "../etc/passwd"}), "Invalid chat_id"),
         ],
-        ids=["unparsable", "browser gone", "too slow", "not a config", "unsafe chat id"],
+        ids=[
+            "unparsable",
+            "an array",
+            "null",
+            "keyterms not a list",
+            "chat id not a string",
+            "browser gone",
+            "too slow",
+            "not a config",
+            "unsafe chat id",
+        ],
     )
     async def test_a_bad_opening_message_is_refused_and_no_session_starts(
         self, first_message: str | Exception, reason: str
@@ -92,6 +106,17 @@ class TestSessionEntry:
             "ws_send_lock": send_lock,
         }
         session_cls.return_value.run.assert_awaited_once_with()
+
+    async def test_the_config_the_frontend_sends_for_a_new_chat_is_accepted(self) -> None:
+        config = {"type": "config", "mode": "agent_bridge", "agent_id": None, "chat_id": None, "keyterms": []}
+
+        with patch("app.api.voice.agent_bridge.VoiceAgentBridge") as bridge_cls:
+            ws, session_cls = await _enter(json.dumps(config))
+
+        assert (bridge_cls.call_args.kwargs["_agent_id"], bridge_cls.call_args.kwargs["_chat_id"]) == (None, None)
+        assert session_cls.call_args.kwargs["keyterms"] == []
+        session_cls.return_value.run.assert_awaited_once_with()
+        ws.close.assert_not_awaited()
 
 
 class TestVoiceConfigLookup:

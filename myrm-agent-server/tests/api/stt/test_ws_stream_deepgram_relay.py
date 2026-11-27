@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections.abc import Sequence
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -16,6 +18,7 @@ from app.channels.voice.stt import deepgram_stream_url
 from tests.api.stt.stream_testkit import (
     DeepgramConnect,
     FakeDeepgram,
+    Frame,
     audio_frame,
     browser_socket,
     control_messages,
@@ -56,14 +59,33 @@ class TestProviderConnection:
         assert sent_json(ws) == [{"type": "transcript", "text": "hello", "is_final": True}]
         assert control_messages(deepgram)[-1] == _CLOSE_STREAM
 
-    async def test_the_provider_stream_is_dropped_when_the_browser_leaves_first(self) -> None:
-        ws = browser_socket()
-        deepgram = FakeDeepgram(hang=True)
+    @pytest.mark.parametrize("browser_frames", [[_text(action="close")], []], ids=["close action", "disconnect"])
+    async def test_final_results_flushed_after_the_browser_ends_the_stream_are_still_delivered(
+        self, browser_frames: Sequence[Frame]
+    ) -> None:
+        ws = browser_socket(browser_frames)
+        deepgram = FakeDeepgram(deepgram_results("early"), flush_on_close=[deepgram_results("last words", is_final=True)])
 
         with patch("websockets.connect", return_value=DeepgramConnect(deepgram)):
             await ws_stream._stream_via_deepgram(ws, _CONFIG, [])
 
-        assert control_messages(deepgram)[-1] == _CLOSE_STREAM
+        assert sent_json(ws) == [
+            {"type": "transcript", "text": "early", "is_final": False},
+            {"type": "transcript", "text": "last words", "is_final": True},
+        ]
+        assert control_messages(deepgram) == [_CLOSE_STREAM]
+
+    async def test_a_provider_that_does_not_answer_the_close_is_dropped_after_the_flush_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ws_stream, "_PROVIDER_FLUSH_TIMEOUT", 0.01)
+        ws = browser_socket()
+        deepgram = FakeDeepgram(hang=True)
+
+        with patch("websockets.connect", return_value=DeepgramConnect(deepgram)):
+            await asyncio.wait_for(ws_stream._stream_via_deepgram(ws, _CONFIG, []), timeout=5)
+
+        assert control_messages(deepgram) == [_CLOSE_STREAM]
 
     async def test_a_relay_that_fails_unexpectedly_is_logged_instead_of_raised(self, caplog: pytest.LogCaptureFixture) -> None:
         ws = browser_socket(hang=True)
@@ -112,6 +134,9 @@ class TestAudioUpstream:
                 audio_frame(b"x" * (ws_stream._MAX_AUDIO_CHUNK + 1)),
                 audio_frame(b""),
                 {"type": "websocket.receive", "text": "not json"},
+                {"type": "websocket.receive", "text": "[]"},
+                {"type": "websocket.receive", "text": "null"},
+                _text(action=["close"]),
                 _text(action="ping"),
                 audio_frame(b"kept"),
             ]
@@ -121,15 +146,16 @@ class TestAudioUpstream:
         await ws_stream._relay_client_audio(ws, deepgram)
 
         assert [message for message in deepgram.sent if isinstance(message, bytes)] == [b"kept"]
+        assert control_messages(deepgram) == [_CLOSE_STREAM]
 
-    async def test_a_close_request_ends_the_stream_without_reading_later_frames(self) -> None:
+    async def test_a_close_request_ends_the_stream_once_without_reading_later_frames(self) -> None:
         ws = browser_socket([_text(action="close"), audio_frame(b"late")])
         deepgram = FakeDeepgram()
 
         await ws_stream._relay_client_audio(ws, deepgram)
 
         assert b"late" not in deepgram.sent
-        assert _CLOSE_STREAM in control_messages(deepgram)
+        assert control_messages(deepgram) == [_CLOSE_STREAM]
 
     async def test_a_silent_browser_is_dropped_after_the_idle_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(ws_stream, "_SESSION_IDLE_TIMEOUT", 0.01)
