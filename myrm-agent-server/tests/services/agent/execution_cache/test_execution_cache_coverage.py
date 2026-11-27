@@ -25,6 +25,7 @@ from app.services.agent.execution_cache.session_lifecycle import (
     resolve_execution_mode,
 )
 from app.services.agent.execution_cache.types import BuiltExecutionUnit, ExecutionMode
+from tests.support.execution_unit_mocks import agent_close
 
 
 def test_stable_json_nested_and_model_dump() -> None:
@@ -136,7 +137,7 @@ async def test_registry_idle_eviction() -> None:
     await asyncio.sleep(0.02)
     second = await registry.acquire("chat-2:default", "fp-a", build_unit)
     assert first.skill_agent is not second.skill_agent
-    first.skill_agent.close.assert_awaited_once()
+    agent_close(first).assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -153,7 +154,7 @@ async def test_registry_proactively_evicts_idle_units_without_new_acquire() -> N
     await asyncio.sleep(0.08)
 
     assert await registry.snapshot_warm_units() == []
-    first.skill_agent.close.assert_awaited_once()
+    agent_close(first).assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -169,11 +170,11 @@ async def test_registry_idle_reaper_preserves_active_turn() -> None:
     async with registry.guard_turn("chat-active:default"):
         await asyncio.sleep(0.08)
         assert await registry.snapshot_warm_units() != []
-        first.skill_agent.close.assert_not_awaited()
+        agent_close(first).assert_not_awaited()
 
     await asyncio.sleep(0.08)
     assert await registry.snapshot_warm_units() == []
-    first.skill_agent.close.assert_awaited_once()
+    agent_close(first).assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -247,7 +248,7 @@ async def test_registry_guard_holder_replaces_the_unit_it_is_about_to_use() -> N
 
     assert deferred is old_unit
     assert replaced is new_unit
-    old_unit.skill_agent.close.assert_awaited_once()
+    agent_close(old_unit).assert_awaited_once()
     build_new.assert_awaited_once()
     assert await registry.is_warm("chat-4:default", "fp-b")
 
@@ -264,7 +265,7 @@ async def test_registry_guard_holder_reuses_the_unit_when_the_config_is_unchange
 
     assert reused is unit
     build.assert_awaited_once()
-    unit.skill_agent.close.assert_not_called()
+    agent_close(unit).assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -306,15 +307,16 @@ async def test_finalize_agent_session_ephemeral_closes_agent() -> None:
     skill = MagicMock()
     skill.close = AsyncMock()
     wrapper.agent = skill
-    wrapper.close = AsyncMock()
+    wrapper_close = AsyncMock()
 
-    await finalize_agent_session(
-        wrapper,
-        chat_id="c1",
-        agent_id="a1",
-        extra_context={"execution_mode": ExecutionMode.EPHEMERAL},
-    )
-    wrapper.close.assert_awaited_once()
+    with patch.object(wrapper, "close", wrapper_close):
+        await finalize_agent_session(
+            wrapper,
+            chat_id="c1",
+            agent_id="a1",
+            extra_context={"execution_mode": ExecutionMode.EPHEMERAL},
+        )
+    wrapper_close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -327,11 +329,13 @@ async def test_finalize_pooled_swallows_release_errors() -> None:
     )
     skill = MagicMock()
     wrapper.agent = skill
-    wrapper.release_pooled_session = AsyncMock(side_effect=RuntimeError("boom"))
 
-    with patch(
-        "app.services.agent.execution_cache.session_lifecycle.get_execution_cache",
-    ) as cache_mock:
+    with (
+        patch.object(wrapper, "release_pooled_session", AsyncMock(side_effect=RuntimeError("boom"))),
+        patch(
+            "app.services.agent.execution_cache.session_lifecycle.get_execution_cache",
+        ) as cache_mock,
+    ):
         cache_mock.return_value.refresh_unit = AsyncMock(side_effect=RuntimeError("refresh"))
         cache_mock.return_value.release = AsyncMock(side_effect=RuntimeError("release"))
         await finalize_agent_session(

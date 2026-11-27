@@ -14,7 +14,7 @@ post-processing event emission.
 
 [OUTPUT]
 - setup_workspace: Create workspace under host ``workspaces_storage_root``, bind executor, set context vars. The storage-root ContextVar undo token is stashed in a ContextVar (not in ``merged_context``) so checkpoints/msgpack never serialize it. An executor it creates itself (none was handed in) is recorded in a ContextVar as this run's own and closed if the start fails; a handed-in executor is never recorded.
-- cleanup_run: Run-end cleanup: cancel children, reset context vars, collect stats, and close the executor this run created itself (an executor handed in stays open: its owner closes it).
+- cleanup_run: Run-end cleanup: cancel children, reset context vars, collect stats, record each model's integer token counts as metrics, and close the executor this run created itself (an executor handed in stays open: its owner closes it).
 - collect_tracker_stats: Extract token usage and cost from the current TokenTracker into the run statistics.
 - post_run_events: Yield post-processing events: artifacts, FILE_MUTATION_FAILED, and MESSAGE_END (payload assembly lives in ``message_end_event``).
 
@@ -324,12 +324,17 @@ def cleanup_run(
 
             if stats.model_usage:
                 for model, usage in stats.model_usage.items():
-                    metrics_registry.record_tokens(
-                        agent_id=agent_type,
-                        model=model,
-                        prompt_tokens=usage.get("prompt_tokens", 0),
-                        completion_tokens=usage.get("completion_tokens", 0),
-                    )
+                    # A model's usage dict also holds the float ``cost_usd``, so its values are typed ``object``:
+                    # a count reaches the registry only when it really is an integer.
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+                    if isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+                        metrics_registry.record_tokens(
+                            agent_id=agent_type,
+                            model=model,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                        )
 
         reset_token_tracker()
         clear_pending_explicit_cache_snapshot()

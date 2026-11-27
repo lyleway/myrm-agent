@@ -1,4 +1,4 @@
-"""The folder of the workspace copies: kept out of git, left as the user has it, and never left half made, whoever else is at work.
+"""The folder of the workspace copies: kept out of git, left as the user has it, never left half made by calls of one process.
 
 [INPUT]
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: completes a result with the workspace copies of its media)
@@ -8,8 +8,8 @@
 [OUTPUT]
 Fails when the folder reaches git, when a folder of the user's is written to, when a folder is left behind without its rule,
 when a rule that something else wrote is replaced or removed, when what another process left in the folder is deleted,
-when calls that meet while the folder is made leave copies without their rule, or when calls on different workspaces wait
-for each other.
+when calls of one process that meet while the folder is made leave copies without their rule, or when calls on different
+workspaces wait for each other.
 
 [POS]
 tests/unit/ai_agents/media_tools/test_workspace_export_folder.py; the media library is real (SQLite in memory, local

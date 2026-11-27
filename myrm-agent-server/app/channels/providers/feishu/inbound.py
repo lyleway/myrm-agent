@@ -7,6 +7,7 @@
 - channels.providers.feishu.models::FeishuWebhookPayload, FeishuCardEvent (POS: webhook payload models)
 - channels.providers.feishu.reactions::FEISHU_EMOJI_TO_UNICODE (POS: reaction emoji vocabulary)
 - channels.providers.feishu.user_resolver::FeishuUserResolver (POS: sender display-name resolution)
+- channels.providers.feishu.group_chats::GroupChatMemory (POS: the group chats typed messages came from, so a card click is judged by its chat)
 - channels.providers.feishu.comment::read_comment_document (POS: body of the document a comment turn is about)
 
 [OUTPUT]
@@ -39,6 +40,7 @@ from .api import FeishuClient
 from .cards import (
     parse_card_action,
 )
+from .group_chats import GroupChatMemory
 from .models import FeishuCardEvent, FeishuWebhookPayload
 from .parser import FeishuInboundEvent, extract_message_text, parse_inbound_event
 from .reactions import FEISHU_EMOJI_TO_UNICODE
@@ -58,6 +60,7 @@ class FeishuInboundMixin(BaseChannel):
 
     _client: FeishuClient
     _user_resolver: FeishuUserResolver
+    _group_chats: GroupChatMemory
 
     async def handle_webhook_event(self, event_data: dict[str, object]) -> dict[str, object] | None:
         """Process a Feishu event callback (URL verify / message / card action / comment)."""
@@ -75,6 +78,8 @@ class FeishuInboundMixin(BaseChannel):
         if event_type == "im.message.receive_v1":
             parsed = parse_inbound_event(event_data, bot_open_id=self._client.bot_open_id)
             if parsed and parsed.sender_id != self._client.bot_open_id:
+                if parsed.is_group:
+                    self._group_chats.remember(parsed.chat_id)
                 reply_to = await self._fetch_reply_context(parsed.parent_id)
                 content = parsed.content
                 media = await self._resolve_inbound_media(parsed)
@@ -147,14 +152,18 @@ class FeishuInboundMixin(BaseChannel):
                         except (ValueError, TypeError):
                             pass
 
+                    # The callback names its chat but not the kind of chat, so the kind is what the chat's typed messages
+                    # reported; a chat none has been seen in is a direct one. In a group a tap addresses the bot like
+                    # a mention does.
+                    is_group = chat_id in self._group_chats
                     inbound = self._build_inbound(
                         sender_id=sender_id,
                         content=content,
                         sent_at=sent_at,
                         sent_timezone="UTC",
                         chat_id=chat_id,
-                        is_group=False,
-                        mentioned=False,
+                        is_group=is_group,
+                        mentioned=is_group,
                         sender_name=await self._resolve_sender_name(sender_id),
                         metadata=metadata,
                     )

@@ -264,7 +264,7 @@ async def create_fast_lane_stream(
     Bypasses the heavy AgentFactory and LangGraph engine entirely.
     Uses a bare-bones LLM chain with 0 tools and a minimal system prompt.
     """
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
     from myrm_agent_harness.api import AgentEventType
     from myrm_agent_harness.toolkits.llms import llm_manager
 
@@ -276,7 +276,7 @@ async def create_fast_lane_stream(
     if params.user_instructions:
         system_prompt += f"\n\n用户指令:\n{params.user_instructions}"
 
-    messages = [SystemMessage(content=system_prompt)]
+    messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
 
     if params.chat_history:
         history = await convert_chat_history(params.chat_history)
@@ -319,12 +319,10 @@ async def create_fast_lane_stream(
     }
 
     try:
-        # Enable stream_usage for token tracking if supported by the provider
-        stream_kwargs = {}
-        if hasattr(llm, "bind_tools"):  # A simple heuristic to check if it's a modern chat model
-            stream_kwargs["stream_usage"] = True
-
-        async for chunk in llm.astream(messages, **stream_kwargs):
+        # Enable stream_usage for token tracking if supported by the provider; a model that can bind tools is a
+        # simple heuristic for a modern chat model.
+        chunks = llm.astream(messages, stream_usage=True) if hasattr(llm, "bind_tools") else llm.astream(messages)
+        async for chunk in chunks:
             if cancel_token and cancel_token.is_cancelled:
                 break
             if chunk.content:
@@ -348,7 +346,9 @@ async def create_fast_lane_stream(
                     cached_tokens = prompt_details.get("cached_tokens", 0) or 0
                     cache_write_tokens = prompt_details.get("cache_creation_input_tokens", 0) or 0
                 if not cached_tokens:
-                    cached_tokens = usage.get("cached_tokens", 0) or 0
+                    # Not a ``UsageMetadata`` field, so the value is untyped: only an int counts.
+                    flat_cached = usage.get("cached_tokens", 0)
+                    cached_tokens = flat_cached if isinstance(flat_cached, int) else 0
 
                 cache_hit_rate = round(cached_tokens / prompt_tokens, 4) if prompt_tokens > 0 else 0.0
 

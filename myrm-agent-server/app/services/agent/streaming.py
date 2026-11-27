@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # PhaseWaiter — generic in-process suspend/resume for Dynamic Workflow gates
 # ---------------------------------------------------------------------------
 
-PhaseAnswer = str | list[str] | dict[str, str | list[str]] | None
+PhaseAnswer = bool | str | list[str] | dict[str, str | list[str]] | None  # the plan gate resolves with a bool
 
 PHASE_TIMEOUT_SECONDS = 300
 

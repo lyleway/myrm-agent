@@ -9,7 +9,7 @@ All fields are optional with defaults to handle partial payloads gracefully.
 
 [OUTPUT]
 - TgUser: Telegram User object (subset of fields used by the channel).
-- TgChat: Telegram Chat object.
+- TgChat: Telegram Chat object; ``is_group`` tells a group or supergroup from a private chat or a channel.
 - TgPhotoSize: Telegram PhotoSize (largest element of the photo array).
 - TgDocument: Shared model for voice and audio objects.
 - TgVideo: Telegram Video object.
@@ -24,6 +24,8 @@ Pydantic models for Telegram Bot API webhook payloads.
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_GROUP_CHAT_TYPES = frozenset({"group", "supergroup"})
 
 
 class TgUser(BaseModel):
@@ -45,6 +47,11 @@ class TgChat(BaseModel):
     type: str = ""
     title: str | None = None
     is_forum: bool | None = None
+
+    @property
+    def is_group(self) -> bool:
+        """Whether this is a group or a supergroup, as opposed to a private chat or a channel."""
+        return self.type in _GROUP_CHAT_TYPES
 
 
 class TgPhotoSize(BaseModel):

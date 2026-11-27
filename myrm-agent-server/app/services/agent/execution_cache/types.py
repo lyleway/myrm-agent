@@ -14,6 +14,7 @@ execution_cache 类型层。定义 pooled/ephemeral 模式与可复用构建单�
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,7 +53,7 @@ class BuiltExecutionUnit:
                 close = getattr(self.browser_session, "close", None)
                 if callable(close):
                     result = close()
-                    if hasattr(result, "__await__"):
+                    if inspect.isawaitable(result):
                         await result
             except Exception:
                 pass
@@ -64,7 +65,7 @@ class BuiltExecutionUnit:
                 close = getattr(self.desktop_session, "close", None)
                 if callable(close):
                     result = close()
-                    if hasattr(result, "__await__"):
+                    if inspect.isawaitable(result):
                         await result
             except Exception:
                 pass

@@ -9,6 +9,7 @@
 - idle_compacting_agent(): a user agent that compacts a chat quiet for half an hour before its next reply, removed on exit
 - record_compaction_phases(): taps the stream recorder, so the compaction's phases are kept at the moment they arrive
 - ask_in_chat(): sends a prompt and waits until the reply is on screen and stored; returns what the page saw of the turn
+- completed_replies() / wait_new_reply_stored(): how many replies the server holds as complete, and the wait for one more (a turn the page started some other way, such as a regenerate or an edit)
 - TurnEvidence: the compaction phases on the stream, the steps and text of the reply
 - steps_panel_js(): expands the reply's progress steps until they name a title in this language
 
@@ -116,7 +117,7 @@ def steps_panel_js(locale: str, title: str) -> str:
 }})()"""
 
 
-def _completed_replies(chat_id: str, api_url: str) -> int:
+def completed_replies(chat_id: str, api_url: str) -> int:
     """How many assistant replies the server has stored and marked complete (0 while the chat cannot be read)."""
     try:
         stored = [m for m in fetch_chat_messages(chat_id, api_url=api_url) if isinstance(m, dict)]
@@ -131,11 +132,11 @@ def _completed_replies(chat_id: str, api_url: str) -> int:
     )
 
 
-def _wait_new_reply_stored(chat_id: str, api_url: str, *, completed_before: int) -> None:
+def wait_new_reply_stored(chat_id: str, api_url: str, *, completed_before: int) -> None:
     """Wait until the server has stored one more reply it marked complete, so the summary it wrote can be read."""
     deadline = time.monotonic() + TURN_TIMEOUT_SEC
     while time.monotonic() < deadline:
-        if _completed_replies(chat_id, api_url) > completed_before:
+        if completed_replies(chat_id, api_url) > completed_before:
             return
         time.sleep(2.0)
     pytest.fail(f"no new completed reply for chat {chat_id} within {TURN_TIMEOUT_SEC}s (had {completed_before})")
@@ -179,13 +180,13 @@ def ask_in_chat(
     client: ChromeMcpClient, page: McpPage, page_url: str, *, chat_id: str, api_url: str, prompt: str
 ) -> TurnEvidence:
     """Send ``prompt`` as the user would and wait until its reply is on screen and stored; returns what the page saw."""
-    completed_before = _completed_replies(chat_id, api_url)
+    completed_before = completed_replies(chat_id, api_url)
     sent = client.evaluate(page, _send_turn_js(prompt), timeout_sec=60.0)
     assert isinstance(sent, dict) and sent.get("ok") is True, f"send failed: {sent!r}"
     assistants_before = sent.get("assistantsBefore")
     assert isinstance(assistants_before, int), f"send reported no assistant count: {sent!r}"
     wait_for_state(client, page, _turn_finished_js(assistants_before), timeout_sec=TURN_TIMEOUT_SEC, page_url=page_url)
-    _wait_new_reply_stored(chat_id, api_url, completed_before=completed_before)
+    wait_new_reply_stored(chat_id, api_url, completed_before=completed_before)
     return _read_turn_evidence(client, page)
 
 
