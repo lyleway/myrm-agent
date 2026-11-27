@@ -15,6 +15,7 @@ from tests.support.tool_order_probe import (
     bash_tags_in,
     ran_in_one_message,
     read_steps,
+    started_tags,
     step_script,
     tool_round_ends_ns,
 )
@@ -58,6 +59,29 @@ def test_a_step_that_has_not_ended_and_a_half_written_line_are_not_steps(tmp_pat
 
 def test_a_missing_log_has_no_steps(tmp_path: Path) -> None:
     assert read_steps(tmp_path / STEP_LOG_NAME) == []
+
+
+def test_a_step_named_in_pauses_waits_its_own_time_and_the_others_keep_the_default(tmp_path: Path) -> None:
+    script = tmp_path / "step.py"
+    script.write_text(step_script({"ALPHA": 0}), encoding="utf-8")
+
+    for tag in ("ALPHA", "BRAVO"):
+        subprocess.run([sys.executable, str(script), tag], check=True, cwd=tmp_path)
+
+    alpha, bravo = read_steps(tmp_path / STEP_LOG_NAME)
+    assert alpha.ended_ns - alpha.started_ns < 400_000_000
+    assert bravo.ended_ns - bravo.started_ns >= 400_000_000
+
+
+def test_tags_that_started_are_listed_in_start_order_whether_or_not_they_ended(tmp_path: Path) -> None:
+    log = tmp_path / STEP_LOG_NAME
+    log.write_text("BRAVO start 10\nALPHA start 20\nALPHA end 30\nCHARLIE sta", encoding="utf-8")
+
+    assert started_tags(log) == ["BRAVO", "ALPHA"]
+
+
+def test_a_missing_log_has_no_started_tags(tmp_path: Path) -> None:
+    assert started_tags(tmp_path / STEP_LOG_NAME) == []
 
 
 def test_only_model_calls_that_ended_by_asking_for_tools_are_rounds(tmp_path: Path) -> None:

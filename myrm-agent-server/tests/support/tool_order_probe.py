@@ -5,20 +5,22 @@
 
 [OUTPUT]
 - TAGS / STEP_LOG_NAME / LEDGER_NAME / BASH_STEP_KEY: the step names a turn asks for and the files it leaves in the chat's workspace
-- Step / read_steps(): the steps the turn's shared log records, in the order they started
-- step_script(): the program each step runs; it appends its start and its end to the shared log
+- Step / read_steps(): the steps the turn's shared log records as finished, in the order they started
+- started_tags(): the tags the shared log records as started, finished or not, in the order they started
+- step_script(): the program each step runs; it appends its start and its end to the shared log, and holds the steps named in ``pauses`` for as long as asked
 - tool_round_ends_ns() / ran_in_one_message(): from the chat's usage ledger, whether two of the steps came from one model message
 - bash_tags_in(): the step tags among the bash steps a chat stored
 
 [POS]
-Shared by tests/e2e/test_parallel_tool_order_live_chrome_e2e.py; the pure parsing is covered by tests/support/test_tool_order_probe.py.
+Shared by tests/e2e/test_parallel_tool_order_live_chrome_e2e.py and tests/api/agent/test_stop_exclusive_batch_live_e2e.py; the pure parsing
+is covered by tests/support/test_tool_order_probe.py.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -40,8 +42,12 @@ class Step:
     ended_ns: int
 
 
-def step_script() -> str:
-    """The program each step runs: record start and end in the shared log, with a pause between so overlap shows."""
+def step_script(pauses: Mapping[str, float] | None = None) -> str:
+    """The program each step runs: record start and end in the shared log, with a pause between so overlap shows.
+
+    A step named in ``pauses`` waits that many seconds instead of the default half second, so a test can act on a turn while
+    its first step is still running.
+    """
     return "\n".join(
         (
             "import sys",
@@ -49,6 +55,7 @@ def step_script() -> str:
             "from pathlib import Path",
             "",
             f"log = Path(__file__).with_name({STEP_LOG_NAME!r})",
+            f"pauses = {dict(pauses or {})!r}",
             "",
             "",
             "def stamp(phase: str) -> None:",
@@ -57,29 +64,38 @@ def step_script() -> str:
             "",
             "",
             'stamp("start")',
-            "time.sleep(0.5)",
+            "time.sleep(pauses.get(sys.argv[1], 0.5))",
             'stamp("end")',
             "",
         )
     )
 
 
-def read_steps(log: Path) -> list[Step]:
-    """The steps that ended, in the order they started."""
+def _log_rows(log: Path) -> Iterator[tuple[str, str, int]]:
+    """The complete rows of the shared log as (tag, phase, time in ns); a row another step is still writing is skipped."""
     if not log.exists():
-        return []
-    starts: list[tuple[str, int]] = []
-    ends: dict[str, int] = {}
+        return
     for line in log.read_text(encoding="utf-8").splitlines():
         parts = line.split()
-        if len(parts) != 3:
-            continue  # a line another step is still writing
-        tag, phase, stamp = parts
+        if len(parts) == 3:
+            yield parts[0], parts[1], int(parts[2])
+
+
+def read_steps(log: Path) -> list[Step]:
+    """The steps that ended, in the order they started."""
+    starts: list[tuple[str, int]] = []
+    ends: dict[str, int] = {}
+    for tag, phase, stamp in _log_rows(log):
         if phase == "start":
-            starts.append((tag, int(stamp)))
+            starts.append((tag, stamp))
         else:
-            ends[tag] = int(stamp)
+            ends[tag] = stamp
     return [Step(tag, started, ends[tag]) for tag, started in starts if tag in ends]
+
+
+def started_tags(log: Path) -> list[str]:
+    """The tags that started, in the order they started; a step that has not ended (or never will) counts."""
+    return [tag for tag, phase, _ in _log_rows(log) if phase == "start"]
 
 
 def tool_round_ends_ns(ledger: Path) -> list[int]:
