@@ -40,11 +40,18 @@ from myrm_agent_harness.agent.streaming.stream_compactor import StreamCompactor
 from tests.api.agent.utils import check_e2e_errors, get_lite_model_selection
 from tests.support.marked_command_lines import processes_with_marker
 from tests.support.real_model_workspace_turns import harness_workspace, new_chat, stream_turn, turn_request
-from tests.support.tool_order_probe import BASH_STEP_KEY, STEP_LOG_NAME, TAGS, started_tags, step_script
+from tests.support.tool_order_probe import (
+    BATCH_SHELL_TAG,
+    BATCH_SYSTEM_PROMPT,
+    STEP_LOG_NAME,
+    WAITING_FILES,
+    WRITE_STEP_KEY,
+    batch_prompt,
+    started_tags,
+    step_script,
+    stored_stop_reason,
+)
 
-_SHELL_TAG = TAGS[0]
-_WRITE_TOOL = "file_write_tool"
-_WAITING_FILES = ("waiting_one.txt", "waiting_two.txt")
 _SHELL_STEP_HOLD_SECONDS = 120
 _SHELL_STEP_WAIT_SECONDS = 60.0
 _STOP_DELAY_SECONDS = 1.0
@@ -76,13 +83,13 @@ class Batch:
     worker: threading.Thread
 
     def shell_started(self) -> bool:
-        return _SHELL_TAG in started_tags(self.workspace / STEP_LOG_NAME)
+        return BATCH_SHELL_TAG in started_tags(self.workspace / STEP_LOG_NAME)
 
     def written(self) -> list[str]:
-        return [name for name in _WAITING_FILES if (self.workspace / name).exists()]
+        return [name for name in WAITING_FILES if (self.workspace / name).exists()]
 
     def announced_writes(self) -> int:
-        return sum(1 for event in self.events if event.get("type") == "tasks_steps" and event.get("tool_name") == _WRITE_TOOL)
+        return sum(1 for event in self.events if event.get("type") == "tasks_steps" and event.get("tool_name") == WRITE_STEP_KEY)
 
     def kill_leftovers(self) -> None:
         for pid in processes_with_marker(str(self.script)):
@@ -131,11 +138,7 @@ def _create_agent(client: TestClient) -> str:
             "name": f"Stop batch LIVE {uuid.uuid4().hex[:8]}",
             "description": "Live check of a Stop pressed during a batch of exclusive calls",
             "is_built_in": False,
-            "system_prompt": (
-                f"You work with {BASH_STEP_KEY} and {_WRITE_TOOL}. The tools run the calls of one response one after another, in the "
-                "order you list them. When the user lists several calls, make one call per item, all in the same response and in "
-                "the order listed; never wait for one result before the next call and never combine items into one call."
-            ),
+            "system_prompt": BATCH_SYSTEM_PROMPT,
             "skill_ids": [],
             "mcp_ids": [],
             "enabled_builtin_tools": ["code_execute", "file_ops"],
@@ -150,23 +153,13 @@ def _create_agent(client: TestClient) -> str:
     return agent_id
 
 
-def _prompt(script: Path, workspace: Path) -> str:
-    writes = "\n".join(
-        f"{number}. {_WRITE_TOOL}: path {workspace / name}, content {name}" for number, name in enumerate(_WAITING_FILES, start=2)
-    )
-    return (
-        "Make these calls in your next response, in this order (the tools run them one after another in the order you list them):\n"
-        f"1. {BASH_STEP_KEY}: python3 {script} {_SHELL_TAG}\n{writes}"
-    )
-
-
 def _send_batch(client: TestClient, agent_id: str, shell_step_seconds: float) -> Batch:
     """Send the batch in a new chat; the shell step holds for ``shell_step_seconds``."""
     chat_id = new_chat(client)
     workspace = asyncio.run(harness_workspace(chat_id))
     script = workspace / "step.py"
-    script.write_text(step_script({_SHELL_TAG: shell_step_seconds}), encoding="utf-8")
-    request = turn_request(_prompt(script, workspace), chat_id, get_lite_model_selection(), agent_id)
+    script.write_text(step_script({BATCH_SHELL_TAG: shell_step_seconds}), encoding="utf-8")
+    request = turn_request(batch_prompt(script, workspace), chat_id, get_lite_model_selection(), agent_id)
     events: list[dict[str, object]] = []
     failures: list[Exception] = []
 
@@ -188,19 +181,6 @@ def _wait_until(condition: Callable[[], bool], seconds: float) -> bool:
             return True
         time.sleep(0.2)
     return condition()
-
-
-def _stored_stop_reason(messages: list[object]) -> str | None:
-    """The reason the chat stored on its latest assistant message as the end of the turn, if it stored one."""
-    for message in reversed(messages):
-        if not isinstance(message, dict) or message.get("role") != "assistant":
-            continue
-        metadata = message.get("metadata")
-        stop = metadata.get("stopReason") if isinstance(metadata, dict) else None
-        detail = stop.get("detail") if isinstance(stop, dict) else None
-        reason = detail.get("reason") if isinstance(detail, dict) else None
-        return reason if isinstance(reason, str) else None
-    return None
 
 
 def _stop_one_turn(client: TestClient, agent_id: str, event_path_hold: threading.Event, hold_seconds: float) -> StoppedTurn:
@@ -236,7 +216,7 @@ def _stop_one_turn(client: TestClient, agent_id: str, event_path_hold: threading
             written_during_hold=written_during_hold,
             written_after=batch.written(),
             alive=processes_with_marker(str(batch.script)),
-            stop_reason=_stored_stop_reason(messages),
+            stop_reason=stored_stop_reason(messages),
             events=batch.events,
         )
     finally:
@@ -276,6 +256,6 @@ def test_control_a_batch_nobody_stops_writes_every_waiting_file(client: TestClie
         if batch.failures:
             raise batch.failures[0]
         check_e2e_errors(batch.events)
-        assert batch.written() == list(_WAITING_FILES), f"files written by a batch nobody stopped: {batch.written()}"
+        assert batch.written() == list(WAITING_FILES), f"files written by a batch nobody stopped: {batch.written()}"
     finally:
         batch.kill_leftovers()

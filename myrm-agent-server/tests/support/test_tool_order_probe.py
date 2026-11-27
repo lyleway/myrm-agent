@@ -10,13 +10,18 @@ from pathlib import Path
 
 from tests.support.tool_order_probe import (
     BASH_STEP_KEY,
+    BATCH_SHELL_TAG,
     STEP_LOG_NAME,
+    WRITE_STEP_KEY,
     Step,
     bash_tags_in,
+    batch_prompt,
     ran_in_one_message,
     read_steps,
     started_tags,
+    step_keys_in,
     step_script,
+    stored_stop_reason,
     tool_round_ends_ns,
 )
 
@@ -151,3 +156,41 @@ def test_bash_step_tags_are_read_from_the_progress_steps_in_listed_order() -> No
     ]
 
     assert bash_tags_in(messages) == ["ALPHA", "BRAVO"]
+
+
+def test_step_keys_name_every_stored_step_in_listed_order() -> None:
+    messages: list[object] = [
+        {"role": "user", "content": "write them"},
+        {"role": "assistant", "progressSteps": [{"step_key": f"{BASH_STEP_KEY}_tool"}, {"tool_name": "file_write_tool"}]},
+        {"role": "assistant", "metadata": {"progressSteps": [{"step_key": "file_write_tool_tool"}, "not a step", {"items": []}]}},
+        "not a message",
+    ]
+
+    assert step_keys_in(messages) == [f"{BASH_STEP_KEY}_tool", "file_write_tool", "file_write_tool_tool", ""]
+
+
+def test_the_batch_prompt_asks_for_the_shell_step_first_and_a_write_of_each_waiting_file_behind_it() -> None:
+    lines = batch_prompt(Path("/w/step.py"), Path("/w")).splitlines()
+
+    assert lines[1:] == [
+        f"1. {BASH_STEP_KEY}: python3 /w/step.py {BATCH_SHELL_TAG}",
+        f"2. {WRITE_STEP_KEY}: path /w/waiting_one.txt, content waiting_one.txt",
+        f"3. {WRITE_STEP_KEY}: path /w/waiting_two.txt, content waiting_two.txt",
+    ]
+
+
+def test_the_stored_stop_reason_is_the_one_on_the_latest_assistant_message() -> None:
+    messages: list[object] = [
+        {"role": "assistant", "metadata": {"stopReason": {"detail": {"reason": "earlier"}}}},
+        {"role": "assistant", "metadata": {"stopReason": {"detail": {"reason": "user_cancelled"}}}},
+        {"role": "user", "content": "next"},
+        "not a message",
+    ]
+
+    assert stored_stop_reason(messages) == "user_cancelled"
+
+
+def test_a_chat_that_stored_no_stop_reason_has_none() -> None:
+    assert stored_stop_reason([]) is None
+    assert stored_stop_reason([{"role": "user", "content": "go"}]) is None
+    assert stored_stop_reason([{"role": "assistant", "metadata": {"stopReason": {"detail": "not a mapping"}}}]) is None

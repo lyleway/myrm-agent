@@ -8,12 +8,13 @@
 [OUTPUT]
 - setup_skill_chat(): providers + agent owning the adopted hook skill (its declared shell permission granted) + empty chat
 - setup_file_read_chat(): providers + HITL pinned on + agent following a given system prompt + empty chat, no skill adopted
+- setup_auto_approving_agent() / new_agent_chat(): providers + an agent with the given built-in tools whose tool calls need no approval; an empty chat for it (as many as a test needs)
 - SkillChat: one probe (agent, chat, the folder hooks write into)
 - audit_hooks() / fail_closed_hooks(): SKILL.md ``hooks:`` blocks that write observable files
 - BASH_TOOL / DONE_TOKEN / BLOCKED_TOKEN / COMMAND_OUTPUT: the words the probe turns agree on
 
 [POS]
-Shared by tests/e2e/test_skill_hooks_live_chrome_e2e.py; the browser side lives in chrome_skill_hooks_composer and
+Shared by tests/e2e/test_skill_hooks_live_chrome_e2e.py and tests/e2e/test_stop_exclusive_batch_chrome_e2e.py; the browser side lives in chrome_skill_hooks_composer and
 what a turn left behind is read by chrome_skill_hooks_observe.
 """
 
@@ -120,8 +121,15 @@ def fail_closed_hooks(out: Path) -> str:
 # --- product API setup -----------------------------------------------------------------------------
 
 
-def _create_agent(api_url: str, suffix: str, *, yolo: bool, system_prompt: str = _AGENT_SYSTEM_PROMPT) -> str:
-    """Custom agent with the bash tool; ``yolo`` decides whether approval cards interrupt the turn."""
+def _create_agent(
+    api_url: str,
+    suffix: str,
+    *,
+    yolo: bool,
+    system_prompt: str = _AGENT_SYSTEM_PROMPT,
+    tools: tuple[str, ...] = ("code_execute",),
+) -> str:
+    """Custom agent with the given built-in tools (the bash tool by default); ``yolo`` decides whether approval cards interrupt the turn."""
     overrides: dict[str, object] = {"yoloModeEnabled": True, "yolo_mode_enabled_at": time.time()} if yolo else {}
     created = http_json(
         "POST",
@@ -132,7 +140,7 @@ def _create_agent(api_url: str, suffix: str, *, yolo: bool, system_prompt: str =
             "system_prompt": system_prompt,
             "skill_ids": [],
             "mcp_ids": [],
-            "enabled_builtin_tools": ["code_execute"],
+            "enabled_builtin_tools": list(tools),
             "security_overrides": overrides,
         },
     )
@@ -266,6 +274,29 @@ def setup_file_read_chat(tmp_path: Path, ledger: E2EResourceLedger, prefix: str,
     agent_id = _create_agent(api_url, suffix, yolo=False, system_prompt=system_prompt)
     ledger.register("agent", agent_id)
     chat_id = f"{prefix}{suffix}"
+    _create_chat(api_url, chat_id, agent_id)
+    ledger.register("chat", chat_id)
+    return SkillChat(
+        skill_name="", agent_id=agent_id, chat_id=chat_id, out=tmp_path, log_offset=snapshot_backend_log_offset(api_url)
+    )
+
+
+def setup_auto_approving_agent(ledger: E2EResourceLedger, system_prompt: str, tools: tuple[str, ...]) -> str:
+    """Providers and an agent that follows ``system_prompt`` with the given built-in tools; its tool calls need no approval."""
+    api_url = get_e2e_api_url()
+    prepare_e2e_ui_session(api_url)
+    seed_live_e2e_providers(api_url)
+    if not wait_e2e_provider_ready(timeout_sec=90.0):
+        pytest.fail("Provider not ready — run ./myrm-dev ready --chrome")
+    agent_id = _create_agent(api_url, uuid.uuid4().hex[:8], yolo=True, system_prompt=system_prompt, tools=tools)
+    ledger.register("agent", agent_id)
+    return agent_id
+
+
+def new_agent_chat(tmp_path: Path, ledger: E2EResourceLedger, prefix: str, agent_id: str) -> SkillChat:
+    """An empty chat for ``agent_id``; the probe's ``skill_name`` is empty, so turns on it are sent with ``invoke_skill=False``."""
+    api_url = get_e2e_api_url()
+    chat_id = f"{prefix}{uuid.uuid4().hex[:8]}"
     _create_chat(api_url, chat_id, agent_id)
     ledger.register("chat", chat_id)
     return SkillChat(
