@@ -163,6 +163,20 @@ describe('IntegrationConnectDialog credential flows', () => {
       expect(mockGateMcpEnable).not.toHaveBeenCalled();
       expect(screen.getByRole('button', { name: 'connect' })).toBeEnabled();
     });
+
+    it('refuses a service whose name differs from a configured one only in symbols or spaces', async () => {
+      storeState.mcpConfigs = [makeStoredConfig('my svc')];
+      renderDialog(makeEntry({ mcpConfig: { name: 'my-svc', type: 'stdio', command: 'run' } }));
+
+      fireEvent.change(screen.getByPlaceholderText('credentialPlaceholder'), { target: { value: 'secret' } });
+      clickConnect();
+
+      await waitFor(() =>
+        expect(mockToast).toHaveBeenCalledExactlyOnceWith({ title: 'alreadyConnected', variant: 'destructive' }),
+      );
+      expect(mockGateMcpEnable).not.toHaveBeenCalled();
+      expect(mockSetMCPConfigs).not.toHaveBeenCalled();
+    });
   });
 
   describe('connectivity probe', () => {

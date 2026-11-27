@@ -27,7 +27,7 @@
 | `SchemaForm.tsx`                                                                   | 辅助 | JSON Schema 驱动表单                                                         | ✅    |
 | `ConfigToggleItem.tsx`                                                             | 辅助 | 带图标的开关行；开关由标题命名、由说明文字描述                               | ✅    |
 | `ConfigImportExport.tsx`                                                           | 辅助 | 配置导入导出                                                                 | ✅    |
-| `MCPConfigForm.tsx`                                                                | 辅助 | MCP 顶层表单（详情见 `mcp/`）                                                | ✅    |
+| `MCPConfigForm.tsx`                                                                | 辅助 | MCP 顶层表单（详情见 `mcp/`）；JSON 导入跳过与已有服务或同批前一个共用工具名身份的服务 | ✅    |
 | `Switcher.tsx`                                                                     | 辅助 | 亮/暗/系统主题切换                                                           | ✅    |
 | `AppearancePanel`（`theme/AppearancePanel.tsx`）                                   | 辅助 | Theme Engine v2 预设、壁纸上传、wash 滑条、字体（ConfigSync SSOT）           | ✅    |
 | `ThemeStudioSettingsSection`（`sections/personal/ThemeStudioSettingsSection.tsx`） | 辅助 | 四步 Theme Studio 设置页 `/settings/theme-studio`                            | ✅    |

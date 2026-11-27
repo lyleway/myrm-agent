@@ -202,6 +202,7 @@ describe('mcpConfigHelpers', () => {
     const errs1 = validateMCPFormFields(
       { ...DEFAULT_FORM_DATA, type: 'sse', url: 'not-a-url', keepaliveInterval: 2 },
       t,
+      [],
     );
     expect(errs1.name).toBe('mcpNameRequired');
     expect(errs1.url).toBe('mcpUrlInvalid');
@@ -211,8 +212,20 @@ describe('mcpConfigHelpers', () => {
     const errs2 = validateMCPFormFields(
       { ...DEFAULT_FORM_DATA, name: 'ok', description: 'ok', type: 'stdio', command: '' },
       t,
+      [],
     );
     expect(errs2.command).toBe('mcpCommandRequired');
+    expect(errs2.name).toBeUndefined();
+
+    const errsConflict = validateMCPFormFields(
+      { ...DEFAULT_FORM_DATA, name: 'my-api', description: 'ok', type: 'sse', url: 'https://example.com/sse' },
+      t,
+      [
+        { ...DEFAULT_FORM_DATA, name: 'github' },
+        { ...DEFAULT_FORM_DATA, name: 'my_api' },
+      ],
+    );
+    expect(errsConflict.name).toBe('mcpNameConflict');
 
     const cfgs: MCPServiceConfig[] = [
       { ...DEFAULT_FORM_DATA, name: 's1', enabled: true, url: 'https://a.com' },

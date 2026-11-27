@@ -205,6 +205,23 @@ async def test_migrated_mcp_servers_join_the_stored_list_disabled(credentials: C
 
 
 @pytest.mark.asyncio
+async def test_migrated_mcp_servers_sharing_a_tool_prefix_with_a_stored_or_earlier_one_are_skipped(
+    credentials: CredentialStore,
+) -> None:
+    await config_service.set("mcpServers", {"mcpConfigs": [{**FS_SERVER, "name": "my_api"}]}, device_id="web")
+
+    inserted = await _write_migrated_mcp_configs(
+        [{"name": name, "type": "stdio", "command": "run"} for name in ("my-api", "a-b", "a_b", "天气", "我的服务")],
+    )
+
+    # ``my-api`` meets the stored ``my_api`` and ``a_b`` meets the ``a-b`` just before it; the two Chinese names are
+    # different servers.
+    assert inserted == 3
+    names = [entry["name"] for entry in _entries((await _stored("mcpServers"))["mcpConfigs"])]
+    assert names == ["my_api", "a-b", "天气", "我的服务"]
+
+
+@pytest.mark.asyncio
 async def test_a_migrated_mcp_server_starts_once_the_user_enables_it(credentials: CredentialStore) -> None:
     converted = convert_competitor_mcp_servers(
         {"github": {"command": "npx", "args": ["-y", "server-github"], "env": {"GITHUB_PAT": "PLACEHOLDER_MCP_CREDENTIAL"}}},
