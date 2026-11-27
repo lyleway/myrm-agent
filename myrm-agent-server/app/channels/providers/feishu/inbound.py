@@ -153,8 +153,8 @@ class FeishuInboundMixin(BaseChannel):
                             pass
 
                     # The callback names its chat but not the kind of chat, so the kind is what the chat's typed messages
-                    # reported; a chat none has been seen in is a direct one. In a group a tap addresses the bot like
-                    # a mention does.
+                    # reported; a chat the memory does not hold (never seen, or evicted) is a direct one. In a group a
+                    # tap addresses the bot like a mention does.
                     is_group = chat_id in self._group_chats
                     inbound = self._build_inbound(
                         sender_id=sender_id,

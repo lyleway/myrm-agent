@@ -66,7 +66,7 @@ ProgressSteps.tsx  ← UI 渲染
 中间件通过 duck typing 调用异常的 `format_for_llm()` 方法。任何异常只要实现该方法，其结构化诊断信息就会自动传递给 LLM。
 
 ```python
-# _tool_helpers.format_tool_error() 的核心逻辑（tool_interceptor_middleware 的 execute_with_retry 捕获后调用）：
+# _tool_helpers.format_tool_error() 的核心逻辑（由 tool_executor 的 execute_with_retry 与拦截器的 handle_execution_error 调用）：
 format_fn = getattr(e, "format_for_llm", None)
 if callable(format_fn):
     return format_fn()  # 优先使用结构化格式
@@ -183,7 +183,7 @@ WebSearchError
 
 ## 中间件拦截逻辑
 
-**文件**：`agent/middlewares/tooling/_tool_helpers/helpers.py`（`format_tool_error`，由 `tool_interceptor_middleware` 的 `execute_with_retry` 捕获异常后调用）
+**文件**：`agent/middlewares/tooling/_tool_helpers/helpers.py`（`format_tool_error`，由 `tool_executor.py` 的 `execute_with_retry` 与拦截器 `_tool_execution_lifecycle.py` 的 `handle_execution_error` 捕获异常后调用）
 
 `format_tool_error()` 函数处理三种情况（按优先级），输出统一经 `redact_sensitive_text` + `sanitize` 脱敏：
 

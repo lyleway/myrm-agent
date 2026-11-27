@@ -2,6 +2,7 @@
 - myrm_agent_harness.toolkits.llms.video.video_engine::VideoGenerationTools (POS: provider listing)
 - myrm_agent_harness.toolkits.llms.video.async_video_engine::AsyncVideoGenerationTools (POS: video task enqueue)
 - myrm_agent_harness.toolkits.llms.video::VideoGenerationConfig, get_registry (POS: engine config and provider registry)
+- app.ai_agents.media_tools.result_announcement::announce_result (POS: tells the chat stream what generate answered)
 - app.ai_agents.media_tools.task_results (POS: shared error, started-tasks and status results)
 - app.ai_agents.media_tools.video_schema::build_video_input_schema (POS: provider-pruned tool input model)
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
@@ -11,7 +12,8 @@
 - create_video_generation_tool(): LangChain BaseTool adapter for video generation
 
 [POS]
-LangChain adapter of the video engine. ``generate`` enqueues one background task and answers with the task list;
+LangChain adapter of the video engine. ``generate`` enqueues one background task, answers with the task list and
+announces that answer to the chat stream, which is where the message gets the card of the video;
 ``status`` (optionally waiting for a running task) and ``list`` read the queue and the provider catalog. Reference
 files are resolved by the worker through the single input resolver, so a bad reference fails the task with its name in
 the message instead of generating something else. A finished video is also copied into the agent's workspace; the
@@ -29,6 +31,7 @@ from myrm_agent_harness.toolkits.llms.media_task_types import TASK_TYPE_VIDEO_GE
 from myrm_agent_harness.toolkits.llms.video import VideoGenerationConfig, VideoGenerationTools, get_registry
 from myrm_agent_harness.toolkits.llms.video.async_video_engine import AsyncVideoGenerationTools
 
+from app.ai_agents.media_tools.result_announcement import announce_result
 from app.ai_agents.media_tools.task_results import (
     media_task_status_result,
     media_task_store,
@@ -41,6 +44,7 @@ from app.tasks.task_payload_crypto import seal_task_payload_secrets
 
 logger = logging.getLogger(__name__)
 
+_TOOL_NAME = "video_tool"
 _TOOL_DESCRIPTION = (
     "Generate videos. Generation is a background task whose result appears in the chat by itself, "
     "so never repeat its media:// address in your reply. "
@@ -117,13 +121,16 @@ def create_video_generation_tool(
             agent_id=agent_id,
             chat_id=chat_id,
         )
-        return started_tasks_result(
-            TASK_TYPE_VIDEO_GENERATE,
-            [task_id],
-            message="Generation started; the video appears in the chat when it is ready.",
+        return await announce_result(
+            _TOOL_NAME,
+            started_tasks_result(
+                TASK_TYPE_VIDEO_GENERATE,
+                [task_id],
+                message="Generation started; the video appears in the chat when it is ready.",
+            ),
         )
 
-    @tool("video_tool", args_schema=input_schema)
+    @tool(_TOOL_NAME, args_schema=input_schema)
     async def video_tool(
         action: Literal["generate", "status", "list"] = "generate",
         prompt: str | None = None,

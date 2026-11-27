@@ -18,12 +18,12 @@
 - execute_with_retry(): Execute a tool call with timeout, retry, and exponential backoff
 
 [POS]
-Tool execution engine. Encapsulates timeout/retry/backoff logic with event logging
-and stream emission. Called from tool_interceptor_middleware after pre-call guards pass.
-A request that was stopped meanwhile ends the backoff at once and gets no retry: a retry would run again a call
-the user already stopped. The stop also ends a call that is still running: a tool that reacts to the stop returns its
-own result within the grace period, any other (a remote call that only looks at its deadline) is cancelled when the
-period ends, so no call keeps running after the request is over.
+Tool execution engine, called from tool_interceptor_middleware after the pre-call guards pass: timeout, one retry with
+exponential backoff, event logging and stream emission.
+A request stopped meanwhile ends the backoff at once and gets no retry, since a retry would run again a call the user
+already stopped; a call still running gets the grace period to end itself on the stop (a shell, a delegated agent or a
+browser call returns its own result), and one that has not ended by then is cancelled with the model told its outcome is
+unknown, so no call keeps running after the request is over.
 """
 
 from __future__ import annotations
