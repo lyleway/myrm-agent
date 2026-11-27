@@ -6,7 +6,7 @@
 - myrm_agent_harness.agent.meta_tools.progress.schemas::TodoItem, TodoStatus, TodoStore
 
 [OUTPUT]
-- Test cases verifying branch isolation, workspace fallback, and atomic rewind alignment.
+- Test cases verifying branch isolation, the workspace list taking precedence over the branch archive, and atomic rewind alignment.
 """
 
 from __future__ import annotations
@@ -69,10 +69,10 @@ def _create_fake_message(
 
 
 @pytest.mark.asyncio
-async def test_get_goal_plan_prioritizes_active_branch_over_workspace(
+async def test_get_goal_plan_serves_the_workspace_list_over_the_branch_archive(
     test_client_fixture: tuple[TestClient, Path],
 ) -> None:
-    """Active conversation branch state takes absolute priority over physical workspace file."""
+    """The list the agent reads and writes is the plan shown; the branch archive lags it until the turn is saved."""
     client, tmp_path = test_client_fixture
     chat_id = "session-branch-priority-1"
 
@@ -80,24 +80,24 @@ async def test_get_goal_plan_prioritizes_active_branch_over_workspace(
     workspace = await workspace_svc.get_or_create(session_id=f"chat_{chat_id}")
     workspace_root = workspace_svc.get_workspace_absolute_path(workspace)
 
-    # 1. Contaminate physical workspace with an outdated or conflicting store
+    # 1. The list the running agent has just written
     write_todos_sync_to_workspace(
         workspace_root,
         TodoStore(
-            goal="Outdated workspace goal",
-            todos=[TodoItem(id="old_1", content="Stale item", status=TodoStatus.COMPLETED)],
-            revision=1,
+            goal="Live workspace goal",
+            todos=[
+                TodoItem(id="step_1", content="Explore repository", status=TodoStatus.COMPLETED),
+                TodoItem(id="step_2", content="Refactor architecture", status=TodoStatus.IN_PROGRESS),
+            ],
+            revision=3,
         ),
         chat_id,
     )
 
-    # 2. Prepare active message branch with authoritative state
+    # 2. The plan archived with the last saved message of the branch
     branch_store = TodoStore(
-        goal="Authoritative branch goal",
-        todos=[
-            TodoItem(id="step_1", content="Explore repository", status=TodoStatus.COMPLETED),
-            TodoItem(id="step_2", content="Refactor architecture", status=TodoStatus.IN_PROGRESS),
-        ],
+        goal="Archived branch goal",
+        todos=[TodoItem(id="old_1", content="Explore repository", status=TodoStatus.IN_PROGRESS)],
         revision=2,
     )
     branch_message = _create_fake_message(
@@ -113,11 +113,13 @@ async def test_get_goal_plan_prioritizes_active_branch_over_workspace(
 
             response = client.get(f"/api/v1/goals/{chat_id}/plan")
 
+        mock_msgs.assert_not_awaited()
+
     assert response.status_code == 200
     plan = response.json().get("plan")
     assert plan is not None
-    assert plan["goal"] == "Authoritative branch goal"
-    assert plan["revision"] == 2
+    assert plan["goal"] == "Live workspace goal"
+    assert plan["revision"] == 3
     assert len(plan["steps"]) == 2
     assert plan["steps"][0]["step_id"] == "step_1"
     assert plan["steps"][1]["step_id"] == "step_2"

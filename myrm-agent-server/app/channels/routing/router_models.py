@@ -59,10 +59,9 @@ class _ActiveTask:
     """Running agent task metadata for /stop, /steer, stuck watchdog, and placeholder cleanup.
 
     ``requester_id`` is the channel-level sender identifier (e.g. Slack user
-    id, Telegram user id) of the message that initiated this turn. It is
-    captured at task creation time so reaction-based approvals can verify that
-    the reacting user is either the original requester or an explicitly
-    permitted co-approver.
+    id, Telegram user id) of the message that initiated this turn, captured at
+    task creation time. In a group it names the one member who may answer this
+    turn's approval by button and who may ``/steer`` the run.
 
     ``started_at`` is a monotonic timestamp used by the janitor's stuck-task
     watchdog to detect tasks that exceed ``_STUCK_TASK_TIMEOUT``.

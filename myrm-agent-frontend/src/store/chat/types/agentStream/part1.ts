@@ -23,6 +23,7 @@ export const AgentEventType = {
   ERROR: 'error',
   AGENT_CANCELLED: 'agent_cancelled',
   TASKS_STEPS: 'tasks_steps',
+  PLAN_UPDATE: 'plan_update',
   TOOL_HEARTBEAT: 'tool_heartbeat',
   SOURCES: 'sources',
   MESSAGE: 'message',
@@ -186,6 +187,16 @@ export interface TasksStepsStreamEvent extends BaseAgentEvent {
   duration_ms?: number;
   metadata?: Record<string, unknown>;
   skill_mutation_batch_id?: string;
+}
+
+/** The whole plan after a todo_write. A signal to re-read the plan the server serves, not state to apply. */
+export interface PlanUpdateStreamEvent extends BaseAgentEvent {
+  type: typeof AgentEventType.PLAN_UPDATE;
+  data: {
+    goal: string | null;
+    revision: number;
+    todos: Array<{ id: string; content: string; status: string }>;
+  };
 }
 
 export interface ToolHeartbeatStreamEvent extends BaseAgentEvent {

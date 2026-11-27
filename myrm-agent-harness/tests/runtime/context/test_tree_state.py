@@ -7,6 +7,7 @@ import logging
 
 import pytest
 
+from myrm_agent_harness.agent.meta_tools.progress.events import emit_plan_update
 from myrm_agent_harness.agent.meta_tools.progress.schemas import (
     TodoItem,
     TodoStatus,
@@ -168,17 +169,13 @@ def test_malformed_snapshot_is_skipped_and_keeps_the_earlier_state(caplog: pytes
     assert "Secret task text" not in caplog.text
 
 
-def test_emit_todo_progress_events_dispatches_tool_result_details(monkeypatch) -> None:
-    """emit_todo_progress_events must dispatch tool_result_details with complete TodoStore."""
-    from myrm_agent_harness.agent.meta_tools.progress.events import emit_todo_progress_events
-
-    dispatched: list[tuple[str, dict[str, object]]] = []
-
-    def mock_dispatch(name: str, payload: dict[str, object]) -> None:
-        dispatched.append((name, payload))
-
-    monkeypatch.setattr("myrm_agent_harness.agent.meta_tools.progress.events.dispatch_custom_event", mock_dispatch)
-
+def test_the_snapshot_emit_plan_update_sends_is_a_plan_the_fold_accepts(monkeypatch) -> None:
+    """The producer of the plan snapshot and the fold that reads it back from a message agree on one shape."""
+    sent: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        "myrm_agent_harness.agent.meta_tools.progress.events.emit_custom_event_sync",
+        lambda name, data: sent.append((name, data)),
+    )
     store = TodoStore(
         goal="Feature development",
         revision=3,
@@ -188,21 +185,8 @@ def test_emit_todo_progress_events_dispatches_tool_result_details(monkeypatch) -
         ],
     )
 
-    emit_todo_progress_events(store)
+    emit_plan_update(store)
 
-    assert len(dispatched) >= 1
-    root_event = dispatched[0]
-    assert root_event[0] == "tasks_steps"
-    payload = root_event[1]
-    assert payload.get("tool_name") == "todo_write"
-    details = payload.get("tool_result_details")
-    assert isinstance(details, dict)
-    assert details["goal"] == "Feature development"
-    assert details["revision"] == 3
-    assert len(details["todos"]) == 2
-
-    # Fold verifying extracted payload
-    folded = fold_branch_todo_state([{"extra_data": {"tool_result_details": details}}])
-    assert folded is not None
-    assert folded.goal == "Feature development"
-    assert folded.revision == 3
+    [(name, snapshot)] = sent
+    assert name == "plan_update"
+    assert fold_branch_todo_state([{"extra_data": {TOOL_DETAILS_KEY: snapshot}}]) == store

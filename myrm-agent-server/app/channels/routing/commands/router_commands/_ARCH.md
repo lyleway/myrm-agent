@@ -10,7 +10,7 @@ Router 命令 mixin 域：`mixin.py` 把各命令族 mixin 组合成 `RouterComm
 |------|------|------|-------|
 | `__init__.py` | 门面 | 聚合门面，导出全部 mixin 与 `DraftAction` | ✅ |
 | `mixin.py` | 核心 | 组合基类 `RouterCommandsMixin` | ✅ |
-| `approval.py` / `approval_end.py` | 核心 | 审批命令与审批超时/被取代收尾；按钮点击落在被扣留回复（`outbound_draft`）或外部 Agent 的权限请求（`external_agent_permission`）上时，`resolve_approval` 之后只更新原卡片，不恢复 Agent 运行（前者已发出或释放，后者已唤醒等它的委托回合）；群聊旁观者的权限校验与其他审批一致 | ✅ |
+| `approval.py` / `approval_end.py` | 核心 | 审批命令与审批超时/被取代收尾；按钮点击落在被扣留回复（`outbound_draft`）或外部 Agent 的权限请求（`external_agent_permission`）上时，`resolve_approval` 之后只更新原卡片，不恢复 Agent 运行（前者已发出或释放，后者已唤醒等它的委托回合）；谁能作答由 `_may_decide` 一条规则裁定，文字回答、反应与按钮点击共用：私聊谁发的都算，群聊只有发起审批的成员；按钮点击落在群聊里没有回合发起过的审批上时，只有 owner 能决定；文字回答与反应对照审批登记里的发起者，在取走审批之前判断；被拒的回答记 INFO 日志后丢弃、不回复，审批保持待答 | ✅ |
 | `delegation.py` | 核心 | `/delegate` 委派与审批交接 | ✅ |
 | `draft.py` | 核心 | `/draft` 决定与 `DraftAction` | ✅ |
 | `goals.py` | 核心 | `/goal`、`/subgoal`、`/background`、`/handoff` | ✅ |

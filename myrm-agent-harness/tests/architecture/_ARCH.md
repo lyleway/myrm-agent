@@ -18,6 +18,7 @@ CI 架构门禁：层边界、分形文档、PyPI wheel 打包不变量、tool r
 | `test_artifact_vault_path_boundary.py` | Gate | harness `src/` 禁止 `.myrm/vault` 等品牌 vault 路径字面量 | — |
 | `test_harness_boundary.py` | Gate | harness 禁止 import 业务层（server/control-plane） | — |
 | `test_tls_single_trust_source.py` | Gate | AST：除 `infra/tls_compat.py` 外，harness `src/` 不得直接构造 TLS 上下文（`SSLContext(...)`、`_create_unverified_context(...)`），否则绕过企业网络兼容开关与系统证书库；按名字匹配直接调用（含模块别名与 `from ... import` 后的调用，不含改名导入、变量绑定、`getattr`）；自带扫描器正反例，并检查豁免模块仍在构造上下文 | — |
+| `test_custom_event_single_source.py` | Gate | AST：除 `utils/event_utils.py` 外，harness `src/` 不得从 LangChain 导入 `dispatch_custom_event` / `adispatch_custom_event`——它们的事件只到 `astream_events` 回调，到不了流式执行器消费的 `custom` 流，事件无声丢失，发射方的测试只看得到自己的发射器被调用；按名字匹配 `from langchain... import`（含函数内导入，不含以模块属性访问的引用）；自带扫描器正反例，并检查包装模块仍保留 LangChain 回退 | — |
 | `test_wheel_browser_assets.py` | Gate | wheel 须含 `browser/assets/ad_domains.txt`（≥3500 域） | — |
 | `test_package_root_flat_layout.py` | Gate | 包根禁止平铺实现模块；`tests/` 根禁止散落测试模块；`runtime/install_guard/` 子包 layout 与 legacy 文件名回归 |
 | `test_distribution_packaging.py` | Gate | 分发打包管线不变量（wheel build/install；`slow` 标记项在 CI `distribution-packaging-slow` job） | — |

@@ -1,7 +1,7 @@
 """Goal plan HTTP API endpoint.
 
 [INPUT]
-- app.services.chat.chat_todo_sync::resolve_session_todo_store (POS: Authoritative branch todo resolver)
+- app.services.chat.chat_todo_sync::resolve_session_todo_store (POS: The plan a chat shows: its list in the workspace, else the plan of its active branch)
 
 [OUTPUT]
 - plan_router: APIRouter for the plan progress endpoint

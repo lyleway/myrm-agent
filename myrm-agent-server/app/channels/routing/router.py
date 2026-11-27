@@ -210,7 +210,6 @@ class AgentRouter(
         status_provider: StatusProvider | None = None,
         extra_commands: tuple[CommandDef, ...] = (),
         locale_provider: LocaleProvider | None = None,
-        approval_co_approvers: frozenset[str] | None = None,
     ) -> None:
         self._bus = bus
         self._executor = agent_executor
@@ -254,7 +253,6 @@ class AgentRouter(
         self._active_tasks: dict[str, _ActiveTask] = {}
         self._cleanups: dict[str, _CleanupEntry] = {}
         self._pending_approvals = PendingApprovals(on_expire=self._resume_after_approval_timeout)
-        self._approval_co_approvers: frozenset[str] = approval_co_approvers or frozenset()
         self._janitor_task: asyncio.Task[None] | None = None
         self._seen_messages: dict[str, float] = {}
         self._session_yolo: dict[str, tuple[float, int | None]] = {}
