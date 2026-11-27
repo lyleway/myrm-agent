@@ -37,6 +37,7 @@ vi.mock('../handlerDeps', () => ({
   useConfigStore: {
     getState: () => mockState,
   },
+  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },

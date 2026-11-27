@@ -230,13 +230,10 @@ export async function completionEvents(ctx: StreamCtx): Promise<StreamTurn | nul
     H.useToolApprovalStore.getState().unmarkProcessing(data.messageId);
 
     // Clear stale plan steps that are still pending/in_progress after turn ends. The plan panel shows the open
-    // chat's plan only, so a background turn's end must not wipe it; the gate runs after the lazy import so a chat
-    // switch that happened while it loaded drops the clear instead of hitting the next chat's plan.
-    void import('@/store/chat/goals/usePlanStore').then(({ usePlanStore }) => {
-      if (H.isStreamForOpenChat(state)) {
-        usePlanStore.getState().clearActivePlan();
-      }
-    });
+    // chat's plan only, so a background turn's end must not wipe it.
+    if (H.isStreamForOpenChat(state)) {
+      H.usePlanStore.getState().clearActivePlan();
+    }
 
     // Passive progression milestone detection
     void import('@/lib/progression/tryMarkMilestone').then(({ tryMarkMilestone }) => {

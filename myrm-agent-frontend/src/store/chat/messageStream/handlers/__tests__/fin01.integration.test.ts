@@ -26,7 +26,7 @@ vi.mock('@/lib/api', () => ({
   fetchWithTimeout: vi.fn(async () => ({ ok: true, json: async () => ({ plan: null }) })),
 }));
 
-vi.mock('../handlerDeps', () => ({
+vi.mock('../handlerDeps', async () => ({
   AgentEventType: {
     GOAL_STATUS: 'goal_status',
     FILE_MUTATION_FAILED: 'file_mutation_failed',
@@ -52,6 +52,7 @@ vi.mock('../handlerDeps', () => ({
   useConfigStore: {
     getState: () => ({ enableCompletionSound: false, enableWebNotifications: false }),
   },
+  usePlanStore: (await import('@/store/chat/goals/usePlanStore')).usePlanStore,
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },

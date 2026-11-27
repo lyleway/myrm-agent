@@ -18,10 +18,6 @@ vi.mock('@/store/useBrowserInspectorStore', () => ({
   },
 }));
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
-}));
-
 vi.mock('@/store/chat/goals/useGoalStore', () => ({
   useGoalStore: { getState: () => ({ setActiveGoal: vi.fn() }) },
 }));
@@ -68,6 +64,7 @@ vi.mock('../handlerDeps', () => ({
   useConfigStore: {
     getState: () => ({ enableCompletionSound: false, enableWebNotifications: false }),
   },
+  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },

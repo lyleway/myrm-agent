@@ -5,10 +5,6 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
-}));
-
 vi.mock('../handlerDeps', () => ({
   AgentEventType: {
     ERROR: 'error',
@@ -25,6 +21,7 @@ vi.mock('../handlerDeps', () => ({
   resolveStreamChatId: (state: { chatId?: string; messages?: Array<{ chatId?: string }> }) =>
     state.chatId?.trim() || state.messages?.[0]?.chatId?.trim() || '',
   getUserFriendlyError: vi.fn(async () => ({ message: 'failed', hint: undefined })),
+  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },

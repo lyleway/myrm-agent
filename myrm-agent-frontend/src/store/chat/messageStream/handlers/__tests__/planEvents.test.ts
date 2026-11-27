@@ -4,7 +4,8 @@
  * Real scenario: the model ticks a step off in chat A. If the user is watching chat A the panel must update while the
  * turn runs; if the user reads chat B, B's plan stays as it is; with the goals feature off there is no plan endpoint
  * to call. The event goes through the real parser and the real stream entry, so a type the parser drops or a handler
- * the registry never reaches fails here.
+ * the registry never reaches fails here. The read starts with the event itself: nothing it waits for (a chunk to
+ * fetch, say) can arrive after the turn has ended.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +34,6 @@ async function receivePlanUpdate(chatId: string): Promise<void> {
   const event = parseSseEnvelope({ type: 'plan_update', messageId: 'msg-1', data: SNAPSHOT });
   expect(event).not.toBeNull();
   await handleMessageStream(event as never, '', undefined, false, '', streamOf(chatId), {} as never);
-  await vi.dynamicImportSettled();
 }
 
 describe('plan_update stream event', () => {

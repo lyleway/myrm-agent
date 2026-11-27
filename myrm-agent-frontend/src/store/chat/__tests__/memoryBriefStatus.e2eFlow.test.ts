@@ -33,10 +33,6 @@ vi.mock('@/services/notification', () => ({
   notificationService: { notify: vi.fn() },
 }));
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: clearActivePlanMock }) },
-}));
-
 vi.mock('@/store/chat/goals/useGoalStore', () => ({
   useGoalStore: { getState: () => ({ setActiveGoal: vi.fn() }) },
 }));
@@ -98,6 +94,7 @@ vi.mock('../messageStream/handlers/handlerDeps', () => ({
   useConfigStore: {
     getState: () => ({ enableCompletionSound: false, enableWebNotifications: false }),
   },
+  usePlanStore: { getState: () => ({ clearActivePlan: clearActivePlanMock }) },
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },

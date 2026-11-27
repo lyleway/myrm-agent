@@ -12,10 +12,6 @@ const { mockClearActivePlan, mockUnmarkProcessing, mockReleaseTurnInspectorContr
     mockFindAssistantMessageIndex: vi.fn(() => 0),
   }));
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: mockClearActivePlan }) },
-}));
-
 vi.mock('@/lib/utils/toast', () => ({
   toast: { error: vi.fn(), warning: vi.fn() },
 }));
@@ -46,6 +42,7 @@ vi.mock('../handlerDeps', () => ({
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: mockUnmarkProcessing })),
   },
+  usePlanStore: { getState: () => ({ clearActivePlan: mockClearActivePlan }) },
   getContextOverflowMessage: vi.fn(() => 'overflow'),
 }));
 

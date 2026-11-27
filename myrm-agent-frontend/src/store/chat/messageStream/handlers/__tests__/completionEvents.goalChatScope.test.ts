@@ -4,10 +4,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
-}));
-
 vi.mock('@/services/notification', () => ({
   notificationService: { notify: vi.fn() },
 }));
@@ -37,6 +33,7 @@ vi.mock('../handlerDeps', () => ({
   }),
   useChatStore: { getState: vi.fn(() => ({ chatId: 'chat-a', setWorkspaceDir: vi.fn() })) },
   useConfigStore: { getState: () => ({ enableCompletionSound: false, enableWebNotifications: false }) },
+  usePlanStore: { getState: () => ({ clearActivePlan: vi.fn() }) },
   useToolApprovalStore: { getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })) },
   playCompletionSound: vi.fn(() => false),
   dispatchPetSurfaceAwayCompletion: vi.fn(),

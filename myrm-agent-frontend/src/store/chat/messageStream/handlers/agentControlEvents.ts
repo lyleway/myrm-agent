@@ -61,11 +61,9 @@ export async function agentControlEvents(ctx: StreamCtx): Promise<StreamTurn | n
     });
 
     actions.setLoading(false);
-    void import('@/store/chat/goals/usePlanStore').then(({ usePlanStore }) => {
-      if (H.isStreamForOpenChat(ctx.state)) {
-        usePlanStore.getState().clearActivePlan();
-      }
-    });
+    if (H.isStreamForOpenChat(ctx.state)) {
+      H.usePlanStore.getState().clearActivePlan();
+    }
     H.releaseInspectorControls(H.resolveStreamChatId(ctx.state));
     return done(ctx);
   }
@@ -94,11 +92,9 @@ export async function agentControlEvents(ctx: StreamCtx): Promise<StreamTurn | n
     actions.setLoading(false);
     // Release the processing lock on cancellation
     H.useToolApprovalStore.getState().unmarkProcessing(data.messageId);
-    void import('@/store/chat/goals/usePlanStore').then(({ usePlanStore }) => {
-      if (H.isStreamForOpenChat(ctx.state)) {
-        usePlanStore.getState().clearActivePlan();
-      }
-    });
+    if (H.isStreamForOpenChat(ctx.state)) {
+      H.usePlanStore.getState().clearActivePlan();
+    }
     H.releaseInspectorControls(H.resolveStreamChatId(ctx.state));
     return done(ctx);
   }

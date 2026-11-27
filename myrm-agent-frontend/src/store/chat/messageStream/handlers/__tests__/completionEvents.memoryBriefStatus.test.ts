@@ -2,10 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockClearActivePlan = vi.fn();
 
-vi.mock('@/store/chat/goals/usePlanStore', () => ({
-  usePlanStore: { getState: () => ({ clearActivePlan: mockClearActivePlan }) },
-}));
-
 vi.mock('@/store/chat/goals/useGoalStore', () => ({
   useGoalStore: { getState: () => ({ setActiveGoal: vi.fn() }) },
 }));
@@ -38,6 +34,7 @@ vi.mock('../handlerDeps', () => ({
   useConfigStore: {
     getState: () => ({ enableCompletionSound: false, enableWebNotifications: false }),
   },
+  usePlanStore: { getState: () => ({ clearActivePlan: mockClearActivePlan }) },
   useToolApprovalStore: {
     getState: vi.fn(() => ({ unmarkProcessing: vi.fn() })),
   },
