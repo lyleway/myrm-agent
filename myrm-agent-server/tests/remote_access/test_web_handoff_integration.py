@@ -164,6 +164,19 @@ async def test_the_reply_is_still_delivered_when_the_button_cannot_be_built(monk
     assert not patched.components
 
 
+async def test_the_reply_is_unchanged_when_the_instance_has_no_address_to_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no running tunnel and no ingress address no link can be opened from outside, so the reply gets no button."""
+    monkeypatch.setattr("app.remote_access.tunnel_manager.get_tunnel_manager", TunnelManager)
+    result = _reply(await _store_chat("telegram:dm:offline-peer"))
+
+    patched = await RouterExecutionMixin._attach_web_handoff(
+        result, InboundMessage(channel="telegram", sender_id="offline-peer", content="hi")
+    )
+
+    assert patched is result
+    assert not patched.components
+
+
 @pytest.fixture
 def sent_messages(monkeypatch: pytest.MonkeyPatch) -> list[OutboundMessage]:
     """The messages the channel bus is asked to send."""
