@@ -104,6 +104,7 @@ jobs:
         run: >-
           uv run --no-sync pytest -m integration -q --tb=short
           tests/toolkits/acp/test_real_cli_launch_contract.py
+          tests/toolkits/acp/test_real_cli_account_home.py
           tests/toolkits/acp/runtime/cli/test_real_cli_argv_contract.py
           tests/toolkits/acp/runtime/cli/test_real_cli_login_contract.py
           tests/toolkits/acp/runtime/acp/test_real_acp_handshake.py

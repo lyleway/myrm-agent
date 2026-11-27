@@ -260,7 +260,8 @@ RuntimeConfig (frozen dataclass)
 ```
 
 **环境变量管理 + 鉴权模式（`auth_mode`）**：
-- 环境基线：`build_safe_env()` 只让子进程继承核心变量（PATH、HOME、语言、代理等，复用 `core/security/process_env/env_isolation.py` 的 `CORE` 策略）加上该 CLI 自己的登录目录变量（`CLAUDE_CONFIG_DIR` / `CODEX_HOME`，取自 auth profile 的 `home_env`）；宿主的 provider 密钥与其余环境一律不带——委托 CLI 会把自己的环境原样交给它执行的每条命令。后端另需的变量（`JAVA_HOME`、`SSH_AUTH_SOCK`、云厂商路由变量等）经 `RuntimeConfig.env` 设置。`CliRuntime`、`AcpRuntime` 与 `CodexRuntime` 启动前统一调用；「企业网络兼容」打开时它还在末尾补上 `NODE_USE_SYSTEM_CA=1`（`infra/tls_compat.py::with_node_system_ca`），让基于 Node 的 CLI 像宿主一样信任操作系统证书库，`RuntimeConfig.env` 自己写了该变量则保留它的值；受管工具链下载的 Node 是认该变量的 `NODE_VERSION`，其 npm 安装子进程同样带它
+- 环境基线：`build_safe_env()` 只让子进程继承核心变量（PATH、HOME、语言、代理等，复用 `core/security/process_env/env_isolation.py` 的 `CORE` 策略）加上该 CLI 自己的登录目录变量（`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GEMINI_CLI_HOME` / `QWEN_HOME`，取自 auth profile 的 `relocation_vars`）；宿主的 provider 密钥与其余环境一律不带——委托 CLI 会把自己的环境原样交给它执行的每条命令。后端另需的变量（`JAVA_HOME`、`SSH_AUTH_SOCK`、云厂商路由变量等）经 `RuntimeConfig.env` 设置。`CliRuntime`、`AcpRuntime` 与 `CodexRuntime` 启动前统一调用；「企业网络兼容」打开时它还在末尾补上 `NODE_USE_SYSTEM_CA=1`（`infra/tls_compat.py::with_node_system_ca`），让基于 Node 的 CLI 像宿主一样信任操作系统证书库，`RuntimeConfig.env` 自己写了该变量则保留它的值；受管工具链下载的 Node 是认该变量的 `NODE_VERSION`，其 npm 安装子进程同样带它
+- 账号（`RuntimeConfig.account_home`）：宿主把已知 Agent 跑在命名账号的目录里时，`build_safe_env` 在其余一切（含 `RuntimeConfig.env`）之后写入把该 CLI 搬进那个目录的变量（`launch_env.account_env`；各 CLI 怎么被搬由 auth profile 的契约给出）。必须最后写：Gemini、Qwen 的家目录变量（`GEMINI_CLI_HOME`、`QWEN_HOME`）带 provider 前缀，订阅模式会把 `env` 里这类条目当作密钥丢弃。`account_home` 必须是绝对路径且命令必须是已知 Agent，否则 `RuntimePool.register` 当场抛 `ValueError`，不留到首个回合才失败
 - Claude 默认环境：`claude.ENV_DEFAULTS` 垫在宿主与配置环境之下（后两者可覆盖）；Claude 的 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` 让无头回合不留后台任务（后台任务期间 `claude -p` 不会退出）
 - `subscription`（默认）：剥离所有 provider 密钥 **并丢弃** `env` 中注入的密钥，强制委托 CLI 走自身订阅登录态（用户的 ChatGPT Plus / Claude Max / Gemini 订阅），绝不静默回退按量计费的 API Key
 - `api_key`：业务层经 `env` 注入该后端应计费的单一 provider 密钥，剥离基线后重新应用；Codex app server 不从环境读密钥，所以 `CodexRuntime` 用 `account/login/start` 把密钥交给 server（只在内存里），并让 Codex 以 `-c cli_auth_credentials_store="ephemeral"` 启动，密钥不进子进程环境（它会被 Codex 执行的每条命令继承）、不写进 Codex 的 home，用户自己的登录文件原样不动（`test_an_api_key_logs_in_through_the_server_and_leaves_the_users_own_login_alone`）
@@ -284,6 +285,7 @@ RuntimeConfig (frozen dataclass)
 auth/
 ├── _profiles.py        # AuthProfile：每个 CLI 的凭据路径、登录命令、策略、api_key env
 │                       #   环境感知 resolve_home（CODEX_HOME/CLAUDE_CONFIG_DIR → /persistent）
+├── accounts.py         # AccountStore：同一个 CLI 的多个登录各占一个目录（命名账号 + 按 API Key 计费运行的稳定目录）
 ├── credential_store.py # CredentialStore：状态检测 / 通用凭据导入（原子写+0600）/ 清除
 └── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent（提取 URL/设备码）
 ```
@@ -291,6 +293,7 @@ auth/
 **三大机制**：
 - **登录态检测**（`resolve_login_state`）：该后端是否已登录？有状态命令的 CLI（`claude auth status`、`codex login status`）问 CLI 自己并以它的回答为准，没有的（gemini、qwen）与 CLI 无回应时退回 `CredentialStore.state` 的文件判断；驱动状态徽章；鉴权态从不缓存（用户随时登录/登出）
 - **交互式登录**（`CliLoginSession`）：spawn `<cli> <login_args>`，并发读 stdout/stderr，URL/设备码 → 可操作 PROMPT 事件，进程退出后用 `CredentialStore` 校验落地 → SUCCESS/ERROR；`needs_code_input` 时经 `feed()` 回填用户粘贴的 code
+- **命名账号**（`AccountStore`）：同一个 CLI 的两个订阅登录（工作号、个人号）不能共用 CLI 存登录的那个目录。账号就是宿主在自选根目录下按名字建的目录 `<根>/<后端>/<名字>`，目录树本身是登记表（不存第二份记录，也不跟随符号链接）；CLI 被重定向进去后只看得到该账号的登录、设置与历史，用户自己 home 里的登录不被碰。各 CLI 的搬法是它契约的一部分（`AuthProfile.isolated_env`）：Claude `CLAUDE_CONFIG_DIR`、Codex `CODEX_HOME`、Qwen `QWEN_HOME`、Gemini `GEMINI_CLI_HOME`（状态在 `<根>/.gemini` 下）并加 `GEMINI_FORCE_FILE_STORAGE=true`（否则 Gemini 把凭据放进所有 home 共用的系统钥匙串，账号会悄悄共用一个登录）。`AccountStore.api_key_home` 给按 API Key 计费的运行一个从不被登录、不是账号、不被列出的稳定目录，遗留的订阅登录因此不会被读到。会话与账号的绑定不另存：Agent 换账号后先前的会话 id 在新账号里不存在，走既有的“会话失效”重试开新会话并提示。真二进制契约（`test_real_cli_account_home.py`）逐个 CLI 盯住：作为账号跑一回合，写下的一切都在账号目录里（进程自己的 home 保持为空）、对话只在该账号里续接、一个账号里的登录只是该账号的登录
 - **凭据导入兜底**（`CredentialStore.import_credential`）：登录不可脚本化（gemini/qwen 浏览器流）或不便时的**通用路径**——用户在有浏览器的机器登录后粘贴 `auth.json`，原子安全写入对应路径
 - **拒绝保存凭据**（`CredentialStore(accepts_new_credentials=False)`）：订阅登录会把用户自己的凭据留在宿主上，订阅条款只允许这发生在用户自己控制的机器上；业务层在不属于用户的宿主（托管沙箱）上以该开关构造存储，导入在写任何文件之前抛 `CredentialStorageDisabledError`，而检测与清除照常可用，使开关生效之前留下的凭据仍能被移除。登录会话本身由 CLI 自己落盘，harness 无法拦截，业务层必须在启动 `CliLoginSession` 之前拒绝
 
@@ -318,9 +321,10 @@ acp/
 │   └── backend_detector.py # CLI 探测（detect + detect_with_auth 安装+登录态一次性视图；版本与登录态并发询问）
 ├── auth/                   # 订阅鉴权子系统（业务无关机制）
 │   ├── __init__.py         # 公共导出
-│   ├── _profiles.py        # AuthProfile：CLI 凭据路径/登录命令/策略
+│   ├── _profiles.py        # AuthProfile：CLI 凭据路径/登录命令/策略/家目录重定位变量
+│   ├── accounts.py         # AccountStore：命名账号（每个登录一个目录）与按 API Key 计费运行的稳定目录
 │   ├── credential_store.py # 状态检测 + 凭据导入兜底 + 清除
-│   ├── launch_env.py       # cli_base_env：每次启动 CLI 的基线环境（回合与探测共用）
+│   ├── launch_env.py       # cli_base_env：每次启动 CLI 的基线环境（回合与探测共用）；account_env：把 CLI 搬进账号目录的变量
 │   ├── login_state.py      # probe_login / resolve_login_state：CLI 自述的登录态，文件判断作兜底
 │   └── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
 ├── server/                 # ACP Server 方向（IDE → Agent）

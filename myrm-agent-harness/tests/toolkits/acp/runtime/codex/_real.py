@@ -31,25 +31,28 @@ TURN_SECONDS = 90
 _RETRY_OFF = "request_max_retries = 0\nstream_max_retries = 0\n"
 
 
-def write_codex_home(root: Path, base_url: str, *, retries: int | None = 0, builtin: bool = False) -> dict[str, str]:
-    """An isolated home whose only model API is ``base_url``; returns the environment that makes Codex use it.
+def codex_config_toml(base_url: str, *, retries: int | None = 0, builtin: bool = False) -> str:
+    """The ``config.toml`` that makes Codex's only model API ``base_url``.
 
     ``retries`` is the provider's request and stream retry count (``None``: the CLI's defaults). ``builtin`` keeps
     Codex's own OpenAI provider and only moves its endpoint, so a login is what authenticates the requests.
     """
+    if builtin:
+        return f'openai_base_url = "{base_url}/v1"\nmodel = "stub-model"\n'
+    retry_settings = _RETRY_OFF if retries == 0 else ""
+    return (
+        'model_provider = "stub"\nmodel = "stub-model"\n\n'
+        '[model_providers.stub]\nname = "stub"\n'
+        f'base_url = "{base_url}/v1"\nenv_key = "STUB_KEY"\nwire_api = "responses"\n{retry_settings}'
+    )
+
+
+def write_codex_home(root: Path, base_url: str, *, retries: int | None = 0, builtin: bool = False) -> dict[str, str]:
+    """An isolated home whose only model API is ``base_url``; returns the environment that makes Codex use it."""
     home = root / "home"
     codex_home = home / ".codex"
     codex_home.mkdir(parents=True)
-    if builtin:
-        config = f'openai_base_url = "{base_url}/v1"\nmodel = "stub-model"\n'
-    else:
-        retry_settings = _RETRY_OFF if retries == 0 else ""
-        config = (
-            'model_provider = "stub"\nmodel = "stub-model"\n\n'
-            '[model_providers.stub]\nname = "stub"\n'
-            f'base_url = "{base_url}/v1"\nenv_key = "STUB_KEY"\nwire_api = "responses"\n{retry_settings}'
-        )
-    (codex_home / "config.toml").write_text(config)
+    (codex_home / "config.toml").write_text(codex_config_toml(base_url, retries=retries, builtin=builtin))
     return {"HOME": str(home), "CODEX_HOME": str(codex_home), "STUB_KEY": STUB_KEY}
 
 

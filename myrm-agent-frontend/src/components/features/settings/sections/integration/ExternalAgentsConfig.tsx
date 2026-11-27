@@ -39,13 +39,16 @@ import ExternalAgentAuthControls from './ExternalAgentAuthControls';
 import ExternalAgentForm from './ExternalAgentForm';
 import {
   DEFAULT_AGENT,
+  accountBackend,
   backendKeyFromCommand,
   cleanAgent,
   contractTransport,
+  detachAccount,
   envRowProblems,
   toDraft,
   type ExternalAgentDraft,
 } from './externalAgentModel';
+import { useExternalAgentAccounts } from './useExternalAgentAccounts';
 import SettingsSection from '../SettingsSection';
 import { cn } from '@/lib/utils/classnameUtils';
 import { REVEAL_ON_HOVER } from '@/lib/utils/a11y';
@@ -67,6 +70,7 @@ const ExternalAgentsConfig = memo(() => {
   const [isLoading, setIsLoading] = useState(true);
   const [isTesting, setIsTesting] = useState(false);
   const [authStatuses, setAuthStatuses] = useState<ExternalAgentAuthStatus[]>([]);
+  const { accounts, refreshAccounts } = useExternalAgentAccounts();
 
   const refreshAuthStatuses = useCallback(async () => {
     try {
@@ -75,6 +79,11 @@ const ExternalAgentsConfig = memo(() => {
       // Login state is advisory; never block the settings UI on it.
     }
   }, []);
+
+  const refreshLogins = useCallback(() => {
+    void refreshAuthStatuses();
+    void refreshAccounts();
+  }, [refreshAuthStatuses, refreshAccounts]);
 
   // Until the server has answered, assume a local deployment: the server turns subscription mode into an API key
   // by itself where login is not allowed, so a form opened early is never a way around it.
@@ -105,7 +114,8 @@ const ExternalAgentsConfig = memo(() => {
       }
     })();
     void refreshAuthStatuses();
-  }, [refreshAuthStatuses]);
+    void refreshAccounts();
+  }, [refreshAuthStatuses, refreshAccounts]);
 
   const persist = useCallback((updated: ExternalAgentConfig[]) => {
     setAgents(updated);
@@ -166,6 +176,18 @@ const ExternalAgentsConfig = memo(() => {
     persist(updated);
     setEditingIndex(null);
   }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, authStatuses, t]);
+
+  // The agents that ran as a removed account go back to the login the CLI has on this machine.
+  const handleAccountDeleted = useCallback(
+    (backend: string, name: string) => {
+      void refreshAccounts();
+      const detached = detachAccount(agents, backend, name);
+      if (detached !== agents) {
+        persist([...detached]);
+      }
+    },
+    [agents, persist, refreshAccounts],
+  );
 
   const handleDelete = useCallback(() => {
     if (deleteIndex === null) {
@@ -257,6 +279,11 @@ const ExternalAgentsConfig = memo(() => {
           <div className="space-y-2">
             {agents.map((agent, index) => {
               const TypeIcon = TYPE_ICONS[contractTransport(agent.command, authStatuses) ?? agent.type] ?? IconTerminal;
+              const accountOf = accountBackend(agent.command, agent.authMode, subscriptionLoginAllowed);
+              const account = accountOf !== null ? agent.account : undefined;
+              const accountState = account
+                ? (accounts.find((a) => a.backend === accountOf && a.name === account) ?? null)
+                : null;
               return (
                 <div
                   key={`${agent.name}-${index}`}
@@ -278,7 +305,9 @@ const ExternalAgentsConfig = memo(() => {
                     <ExternalAgentAuthControls
                       command={agent.command}
                       status={statusForCommand(agent.command)}
-                      onChanged={refreshAuthStatuses}
+                      account={account}
+                      accountState={accountState}
+                      onChanged={refreshLogins}
                     />
                     <button
                       onClick={() => handleStartEdit(index)}
@@ -308,6 +337,9 @@ const ExternalAgentsConfig = memo(() => {
             isNew={editingIndex === -1}
             isTesting={isTesting}
             subscriptionLoginAllowed={subscriptionLoginAllowed}
+            accounts={accounts}
+            onAccountCreated={refreshLogins}
+            onAccountDeleted={handleAccountDeleted}
             onChange={setDraft}
             onSave={handleSave}
             onCancel={handleCancel}

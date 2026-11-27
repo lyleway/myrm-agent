@@ -69,6 +69,8 @@ _EXCLUDED_TOP_LEVEL: dict[str, PathCategory] = {
     "session_vault": PathCategory.SECRET,
     "whatsapp_auth": PathCategory.SECRET,
     "matrix": PathCategory.SECRET,
+    # Named accounts of delegated CLIs: each home holds that CLI's login tokens, settings and session history
+    "external-agents": PathCategory.SECRET,
     # Host-bound access control (password hashes, pairing state)
     "webui": PathCategory.HOST_BOUND,
     # Rebuildable indexes / derived state. The embedded vector store (`qdrant/`) is deliberately

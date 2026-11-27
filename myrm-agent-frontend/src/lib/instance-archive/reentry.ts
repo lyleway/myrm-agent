@@ -35,6 +35,7 @@ const PATH_GROUPS: Readonly<Record<string, ReentryGroup>> = {
   session_vault: 'savedSecrets',
   whatsapp_auth: 'connectedAccounts',
   matrix: 'connectedAccounts',
+  'external-agents': 'connectedAccounts',
 };
 
 const GROUPS_BY_KIND: Readonly<Record<string, Readonly<Record<string, ReentryGroup>>>> = {

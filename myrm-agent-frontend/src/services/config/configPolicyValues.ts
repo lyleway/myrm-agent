@@ -49,6 +49,11 @@ export interface ExternalAgentConfig {
   maxTurns?: number;
   /** Variables set when the agent starts, such as its API key; the values are secrets. */
   env?: Record<string, string>;
+  /**
+   * The named account the agent runs as: its own login, settings and history, so a work and a personal
+   * subscription never mix. Absent: the login the CLI already has on this machine.
+   */
+  account?: string;
 }
 
 /**

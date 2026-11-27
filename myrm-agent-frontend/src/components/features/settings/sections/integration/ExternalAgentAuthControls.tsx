@@ -6,23 +6,31 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/primitives/button';
 import { IconLoader } from '@/components/features/icons/PremiumIcons';
-import { logoutExternalAgent, type ExternalAgentAuthStatus } from '@/services/external-agents';
+import {
+  logoutExternalAgent,
+  type ExternalAgentAccount,
+  type ExternalAgentAuthStatus,
+} from '@/services/external-agents';
 
 import ExternalAgentInstallDialog from './ExternalAgentInstallDialog';
 import ExternalAgentLoginDialog from './ExternalAgentLoginDialog';
 
-interface AuthControlsProps {
+interface Props {
   command: string;
   status: ExternalAgentAuthStatus | null;
+  /** The named account the agent runs as; absent: the login the CLI keeps on this machine. */
+  account?: string;
+  /** What the server reports for that account, once it has. */
+  accountState?: ExternalAgentAccount | null;
   onChanged: () => void;
 }
 
 /**
  * Per-agent controls: install while the CLI is missing, otherwise the login-state badge plus login / logout.
- * A hosted deployment offers no login (agents run on an API key); it only shows a login left from before, so
- * that it can be removed.
+ * An agent that runs as a named account shows that account's login, and logs in and out of it. A hosted deployment
+ * offers no login (agents run on an API key); it only shows a login left from before, so that it can be removed.
  */
-const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthControlsProps) => {
+const ExternalAgentAuthControls = memo(({ command, status, account, accountState = null, onChanged }: Props) => {
   const t = useTranslations('settings.developer.externalAgents');
   const [loginOpen, setLoginOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
@@ -34,7 +42,7 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
     }
     setLoggingOut(true);
     try {
-      await logoutExternalAgent(status.backend);
+      await logoutExternalAgent(status.backend, account);
       toast.success(t('logoutSuccess'));
       onChanged();
     } catch {
@@ -42,30 +50,39 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
     } finally {
       setLoggingOut(false);
     }
-  }, [status, t, onChanged]);
+  }, [status, account, t, onChanged]);
 
   if (!status) {
     return null;
   }
 
-  const badgeTone = status.authenticated
+  const authenticated = account ? (accountState?.authenticated ?? false) : status.authenticated;
+  const badgeTone = authenticated
     ? 'bg-green-500/10 text-green-600 dark:text-green-400'
     : 'bg-muted text-muted-foreground';
-  const dotTone = status.authenticated ? 'bg-green-500' : 'bg-muted-foreground/40';
-  const badgeLabel = status.authenticated ? t('badgeLoggedIn') : t('badgeLoggedOut');
-  const showLoginState = status.installed && (status.subscriptionLoginAllowed || status.authenticated);
+  const dotTone = authenticated ? 'bg-green-500' : 'bg-muted-foreground/40';
+  const badgeLabel = authenticated ? t('badgeLoggedIn') : t('badgeLoggedOut');
+  const showLoginState = status.installed && (status.subscriptionLoginAllowed || authenticated);
 
   return (
     <>
       {showLoginState && (
         <div className="flex items-center gap-1.5">
+          {account && (
+            <span
+              title={account}
+              className="max-w-24 truncate rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+            >
+              {account}
+            </span>
+          )}
           <span
             className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeTone}`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${dotTone}`} />
             {badgeLabel}
           </span>
-          {status.authenticated ? (
+          {authenticated ? (
             <Button
               variant="ghost"
               size="sm"
@@ -100,6 +117,7 @@ const ExternalAgentAuthControls = memo(({ command, status, onChanged }: AuthCont
           onOpenChange={setLoginOpen}
           command={command}
           status={status}
+          account={account}
           onChanged={onChanged}
         />
       )}

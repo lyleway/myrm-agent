@@ -152,11 +152,24 @@ describe('streamExternalAgentLogin', () => {
     expect(JSON.parse(init.body)).toEqual({ command: 'codex', backend: 'codex', sessionId: 's1' });
   });
 
+  it('names the account to log in to when one is given', async () => {
+    mocks.fetchWithTimeout.mockResolvedValue(sseResponse([frame({ type: 'success', message: 'done' })]));
+
+    await streamExternalAgentLogin({ command: 'claude', backend: 'claude', sessionId: 's1', account: 'work' }, () => {
+      /* events are not under test */
+    });
+
+    expect(JSON.parse(mocks.fetchWithTimeout.mock.calls[0][1].body)).toEqual({
+      command: 'claude',
+      backend: 'claude',
+      sessionId: 's1',
+      account: 'work',
+    });
+  });
+
   it('throws when the server refuses the login stream', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(new Response('no', { status: 400 }));
 
-    await expect(
-      streamExternalAgentLogin({ command: 'x', sessionId: 's1' }, () => undefined),
-    ).rejects.toThrow('400');
+    await expect(streamExternalAgentLogin({ command: 'x', sessionId: 's1' }, () => undefined)).rejects.toThrow('400');
   });
 });

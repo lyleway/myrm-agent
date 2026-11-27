@@ -159,6 +159,8 @@ def source_state(tmp_path: Path) -> Path:
     (state / "whatsapp_auth" / "creds.json").write_text("{}")
     (state / "session_vault").mkdir()
     (state / "session_vault" / "site.enc").write_bytes(b"x")
+    (state / "external-agents" / "accounts" / "claude" / "work").mkdir(parents=True)
+    (state / "external-agents" / "accounts" / "claude" / "work" / ".credentials.json").write_text("external-agent-account-login")
     (state / "webui").mkdir()
     (state / "webui" / "admin.json").write_text("{}")
     seed_memory_vectors(state / "qdrant")

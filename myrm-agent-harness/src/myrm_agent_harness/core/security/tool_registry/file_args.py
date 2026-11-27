@@ -7,7 +7,7 @@
 - FILE_ARG_KEYS: every argument name a file tool receives its files under
 - PATHS_ALIAS_KEYS: the single-path spellings ``file_read_tool`` accepts for its ``paths`` list
 - coerce_path_list: an array argument as a list, reading a string that holds a JSON array the way the tool does (``url_args`` reads ``urls`` with it too)
-- file_arg_values: each non-empty path string among those arguments, passed as a string, a JSON array string or a list
+- file_arg_values: each non-empty path string among those arguments, passed as a string, a JSON array string or a list, as sent and without the whitespace around it
 - READ_RANGE_PATTERN: the one grammar of the ``:START-END`` line-range selector after a file name (groups: file, start, end)
 - strip_read_range: the file a path argument names: the path without its ``:START-END`` line-range selector
 - is_url: whether a path is a network URL, which file tools refuse
@@ -85,11 +85,20 @@ def coerce_path_list(value: object) -> list[object] | None:
 
 
 def file_arg_values(args: dict[str, object]) -> Iterator[str]:
-    """Yield every non-empty path string in the arguments, whether passed as a string, a JSON array string or a list."""
+    """Yield every non-empty path string in the arguments, as sent and then without the whitespace around it.
+
+    The file tools open the text exactly as sent, so ``"a "`` is a file of its own and a name made only of
+    whitespace is a file name. The trimmed spelling is yielded too: a tool whose path does not exist opens that
+    spelling instead (``find_existing_unicode_path``). Judging both can only tighten a verdict.
+    """
     for key in FILE_ARG_KEYS:
         for item in coerce_path_list(args.get(key)) or ():
-            if isinstance(item, str) and item.strip():
-                yield item.strip()
+            if not isinstance(item, str) or not item:
+                continue
+            yield item
+            trimmed = item.strip()
+            if trimmed and trimmed != item:
+                yield trimmed
 
 
 def strip_read_range(path: str) -> str:
