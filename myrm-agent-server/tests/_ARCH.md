@@ -169,7 +169,10 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `channels/routing/test_router_reassurance.py` | 单元 | 静默心跳 `run_reassurance_loop`：首条发送、之后原地编辑；编辑失败时改发新消息，渠道不能编辑时只发首条；调用方可自带间隔、次数与消息文案（间隔次数覆盖前台默认值）；发送未返回消息号时下一次重新发送而不编辑；优先级 NORMAL（不触发推送）；最近有活动则不打扰；发送异常不使循环崩溃（下一轮重试）；无渠道只发一次 |
 | `channels/routing/test_deliver_followup.py` | 单元 | 没有消息问起的回复按普通回复的规则送出（真实路由器，总线、话题存储、网页接力查询与数据面账本为记录替身）：送到来源对话与话题、私聊无会话 id 时送给发送者、带网页接力、附件随回复送出、`[SILENT]` 不送、话题已停用不送且不留临时附件、待审话题只生成草稿而不发送、草稿落不下就扣下（不会未经审阅发出）；`is_session_busy` 只在该对话的回合运行期间为真、别的发送者不受影响（真实会话闸门） |
 | `channels/routing/test_draft_review_stream_hold.py` | 单元 | `draft_review` 待审回复：生成期间正文不流式写入聊天占位消息（审批续跑回合同样），普通回复照常流式；是否扣留只取决于话题，与回合类型无关 |
-| `channels/routing/test_action_button_approval.py` | 单元 | IM 按钮审批：内容解析校验、群聊请求者/共同审批人授权（私聊免检）、批准/拒绝续跑与重复点击幂等、原消息状态行按点击者语言编辑、无运行任务时 SSE 回退；扣留回复（`outbound_draft`）仅 owner 可裁决——非 owner 被拒并指引、运行中的任务不放行他人、工具审批不受 owner 校验，owner 卡片的每个按钮处理器都认识 |
+| `channels/routing/action_button/test_resolve.py` | 单元 | IM 按钮审批的解析与裁决（内存 SQLite 审批库）：内容解析校验、批准/拒绝续跑与重复点击幂等、原消息状态行按点击者语言编辑、无运行任务时 SSE 回退、通知卡片按钮的契约 |
+| `channels/routing/action_button/test_authority.py` | 单元 | IM 按钮审批的谁能点：群聊里只有发起该回合的成员（旁观者、没有发送者的点击、发起者未知的回合都不能让审批通过，审批保持待答、不续跑），私聊免检；群聊里没有回合发起过的审批只有 owner 能决定（工具审批与外部 Agent 权限请求各一例），私聊不查 owner；外部 Agent 权限请求的点击只唤醒等它的委托回合；扣留回复（`outbound_draft`）仅 owner 可裁决——非 owner 被拒并指引、运行中的任务不放行他人、工具审批不受 owner 校验，owner 卡片的每个按钮处理器都认识 |
+| `channels/routing/action_button/testkit.py` | 辅助 | 按钮审批测试的共享构建器（`conftest.py` 提供内存库表与事件总线夹具）：`make_host()`（总线与会话闸门为记录器的路由器宿主）、`click()`、`seed()`（存一条审批记录）、`status_of()`、`active_turn()`（已结束、仍因审批保留登记的回合及其发起人） |
+| `channels/routing/test_approval_authority.py` | 集成 | 群聊里谁能取走聊天的未决审批（真实 `AgentRouter` 派发，会话闸门只记录）：只有提问回合的发起成员，8 种文字回答（斜杠命令、裸词、带理由的拒绝、批量）与 3 种反应都一样；旁观者的回答不取走审批、不开回合、不回复、卡片不改；没有发送者、审批发起者未知时无人能取；以审批登记里的发起者为准，而不是聊天里恰好在跑的回合的发起人（委派运行）；发起者在取走审批的那一刻读取，`/deny <理由>` 的风险筛查期间审批易主时按新的发起者判断；私聊谁发的都算 |
 | `channels/core/test_outbound_drain.py` | 单元 | `MessageBus.drain_outbound`：等到排队与正在发送的消息都投递完才返回、队列为空与未启动时立即返回、发送永不返回时在时限处放弃、投递循环没在跑时不空等 |
 | `channels/core/test_gateway_followup.py` | 集成 | 真实 `ChannelGateway.deliver_followup`：回复经路由与总线送到对话来源渠道的原对话；没有路由的网关什么都不送且不留临时附件；`is_session_busy` 转述路由的回答、没有路由就不忙 |
 | `channels/core/test_gateway_shutdown.py` | 集成 | 真实 `ChannelGateway.stop()`：路由器在停止时发出的委托任务中断通知，在发送本身要花时间的渠道（0.3 秒）上也先于渠道关闭送达 |
@@ -218,7 +221,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `services/agent/test_sse_merge_real_run.py` | 模块 | 真实智能体运行经流合并推进时，工具调用仍落进本次运行的事件日志：只脚本化模型，其余（智能体循环、工具中间件、钩子、事件日志）全真；断言日志里有 `tool_start` 与 `tool_end`，`tool_end` 带工具名、`completed` 状态与大于 0 的耗时；合并若让每一步各在一个任务里，日志只剩 `tasks_steps`，工具分析的耗时与调用数为空 |
 | `services/agent/test_swarm_fission_real_agent.py` | 集成 | 蜂群分叉在生产构建器造出的真实智能体上：子任务经内层 `SkillAgent` 的 `delegate_task` 工具派出并返回各自结果；包装里没有内层智能体时抛错，而不是报告成一个失败的批次 |
 | `services/agent/test_background_job_startup.py` | 集成 | 启动挂钩 `init_background_job_store()` 在真实进程上的行为（账本在临时目录）：注册它的 server 已不存在的任务领队被 SIGKILL、账本行变为 orphaned；server 仍存活或账本没有记录 server 时领队不动；配置账本失败只记警告；没有账本时直接返回（Windows 跳过） |
-| `support/pending_approvals.py` | 辅助 | 路由器待决审批测试共用：`inbound_message`（控制面转发的 u1 消息：身份已解析，路由器背后不需要配对与策略）、`router_with_agent`（真实路由器配脚本化智能体，可记录续跑）、`said_by`（总线发出的文本）、`asked_in` / `waiting` / `empty_registry`（登记簿里的未决请求） |
+| `support/pending_approvals.py` | 辅助 | 路由器待决审批测试共用：`inbound_message`（控制面转发的 u1 消息：身份已解析，路由器背后不需要配对与策略）、`router_with_agent`（真实路由器配脚本化智能体，可记录续跑）、`said_by`（总线发出的文本）、`asked_in` / `waiting` / `empty_registry`（登记簿里的未决请求）、`finished_turn`（已结束、仍因审批保留登记的回合及其发起人） |
 | `support/channel_chat_rows.py` | 辅助 | 渠道会话键查找测试共用：`seed_channel_chat`（按键与空闲分钟数存一个聊天）、`seed_costed_reply`（存一条带成本的助手回复，默认盖当前 UTC 时刻、可用 `at` 指定，与库里所有消息同一个钟） |
 | `support/cron_run_rows.py` | 辅助 | 数失败运行的测试共用（导航徽标、Ops 快照）：`seed_runs_with_two_recent_failures` 经 SQL store 存一个任务和各状态的运行（成功、错误、熔断、跳过各一条在刚刚，另有一条一周前的熔断），最近 24 小时的失败是 `FAILURES_IN_THE_LAST_DAY` 条；在 `policy_database(...)` 内调用 |
 | `channels/routing/test_command_authorization.py` | 单元 | 内置系统命令默认仅 owner 可用：目录钉住对所有发送者开放的命令集合（只在发送者自己的会话内、至多花一轮），技能/Agent 路由命令不受 owner 限制；其余命令对非 owner 一律被拒（不论 DM 策略是否放行）而 owner 全部可达；`/help` 列表与回复按发送者身份过滤；非 owner 不能委派任务或 steer 运行中的委派，被拒的 `/btw` 不会被委派前缀捡走 |

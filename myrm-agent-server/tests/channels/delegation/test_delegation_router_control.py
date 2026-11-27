@@ -182,8 +182,13 @@ async def test_in_a_group_only_the_delegating_member_can_answer_the_delegated_ap
     await router._handle_delegation_inbound(group_request, "x")
     await _until(lambda: bus.send_tracked.call_count == 1)
 
-    assert router._is_reaction_approval_valid(replace(group_request, content="")) is True
-    assert router._is_reaction_approval_valid(replace(group_request, sender_id="u2", content="")) is False
+    await router._handle_approval_command(replace(group_request, sender_id="u2", content="/approve"), "allow_once")
+    assert _STATE_KEY in router._pending_approvals
+    router._gate.submit.assert_not_called()  # type: ignore[attr-defined]
+
+    await router._handle_approval_command(replace(group_request, content="/approve"), "allow_once")
+    assert _STATE_KEY not in router._pending_approvals
+    router._gate.submit.assert_called_once()  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

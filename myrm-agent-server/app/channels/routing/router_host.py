@@ -150,7 +150,6 @@ class RouterCommandsHost(Protocol):
     _active_tasks: dict[str, _ActiveTask]
     _gate: SessionGate
     _pending_approvals: PendingApprovals
-    _approval_co_approvers: frozenset[str]
     _compact_handler: CompactHandler | None
     _retry_handler: RetryHandler | None
     _undo_handler: UndoHandler | None
