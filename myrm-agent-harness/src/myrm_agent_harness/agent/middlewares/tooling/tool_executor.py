@@ -8,9 +8,10 @@
 - agent.middlewares._session_context (POS: Middleware session context)
 - agent.streaming.types::AgentEventType (POS: Agent event type definitions)
 - utils.errors::ToolError (POS: Framework-level tool errors)
+- agent.middlewares.tooling._request_stop::request_stopped (POS: the one predicate for a stopped request, shared with the pre-call guard)
 - agent.middlewares.tooling._tool_execution_lifecycle::report_tool_cancelled (POS: hook + stream event + result for a cancelled tool call)
 - utils.runtime.cancel_hook::DeadlineCut, cut_deadline_on_cancel (POS: end a timeout scope when the request token is cancelled)
-- utils.runtime.cancellation::get_cancel_token (POS: request-level cancellation token; a stopped request is never retried)
+- utils.runtime.cancellation::get_cancel_token (POS: request-level cancellation token; its reason and cancellation cut a running call)
 
 [OUTPUT]
 - execute_with_retry(): Execute a tool call with timeout, retry, and exponential backoff
@@ -41,6 +42,7 @@ from myrm_agent_harness.agent.middlewares._session_context import (
     get_event_logger,
     get_terminal_errors,
 )
+from myrm_agent_harness.agent.middlewares.tooling._request_stop import request_stopped
 from myrm_agent_harness.agent.middlewares.tooling._tool_execution_lifecycle import report_tool_cancelled
 from myrm_agent_harness.agent.middlewares.tooling._tool_helpers import (
     format_tool_error,
@@ -75,18 +77,13 @@ def _stop_reason() -> str:
     return "user_cancelled"
 
 
-def _request_stopped() -> bool:
-    token = get_cancel_token()
-    return token is not None and token.is_cancelled
-
-
 async def _backoff_sleep(seconds: float) -> None:
     """Wait before a retry, ending early once the request is stopped (the caller then skips the retry)."""
     if get_cancel_token() is None:
         await asyncio.sleep(seconds)
         return
     remaining = seconds
-    while remaining > 0 and not _request_stopped():
+    while remaining > 0 and not request_stopped():
         step = min(_STOP_POLL_S, remaining)
         await asyncio.sleep(step)
         remaining -= step
@@ -125,7 +122,7 @@ async def execute_with_retry(
     start_time = time.time()
 
     for attempt in range(2):
-        if attempt > 0 and _request_stopped():
+        if attempt > 0 and request_stopped():
             return make_error_msg(
                 tool_name,
                 tool_call_id,
