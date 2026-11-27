@@ -307,15 +307,16 @@ async def test_finalize_agent_session_ephemeral_closes_agent() -> None:
     skill = MagicMock()
     skill.close = AsyncMock()
     wrapper.agent = skill
-    wrapper.close = AsyncMock()
+    wrapper_close = AsyncMock()
 
-    await finalize_agent_session(
-        wrapper,
-        chat_id="c1",
-        agent_id="a1",
-        extra_context={"execution_mode": ExecutionMode.EPHEMERAL},
-    )
-    wrapper.close.assert_awaited_once()
+    with patch.object(wrapper, "close", wrapper_close):
+        await finalize_agent_session(
+            wrapper,
+            chat_id="c1",
+            agent_id="a1",
+            extra_context={"execution_mode": ExecutionMode.EPHEMERAL},
+        )
+    wrapper_close.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -328,11 +329,13 @@ async def test_finalize_pooled_swallows_release_errors() -> None:
     )
     skill = MagicMock()
     wrapper.agent = skill
-    wrapper.release_pooled_session = AsyncMock(side_effect=RuntimeError("boom"))
 
-    with patch(
-        "app.services.agent.execution_cache.session_lifecycle.get_execution_cache",
-    ) as cache_mock:
+    with (
+        patch.object(wrapper, "release_pooled_session", AsyncMock(side_effect=RuntimeError("boom"))),
+        patch(
+            "app.services.agent.execution_cache.session_lifecycle.get_execution_cache",
+        ) as cache_mock,
+    ):
         cache_mock.return_value.refresh_unit = AsyncMock(side_effect=RuntimeError("refresh"))
         cache_mock.return_value.release = AsyncMock(side_effect=RuntimeError("release"))
         await finalize_agent_session(

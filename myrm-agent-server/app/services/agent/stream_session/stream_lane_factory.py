@@ -78,8 +78,10 @@ async def create_dynamic_workflow_stream(
     so every exit after it is built closes it: the stream's end, a failure while
     the run is prepared, a consumer that stops, a cancelled task.
     """
-    from myrm_agent_harness.agent.dynamic_workflow import run_dynamic_workflow_stream
-    from myrm_agent_harness.agent.dynamic_workflow.preflight import WorkflowPlanReview
+    from myrm_agent_harness.agent.dynamic_workflow import (
+        WorkflowPlanReview,
+        run_dynamic_workflow_stream,
+    )
     from myrm_agent_harness.api import AgentEventType
     from myrm_agent_harness.utils.token_economics.tracker import (
         get_token_tracker,
