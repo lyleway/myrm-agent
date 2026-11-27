@@ -8,8 +8,8 @@ Wiki raw ingress SSOT — browser clip and URL markdown asset localization befor
 | --- | --- | --- | --- |
 | `types.py` | Types | `ClipMode`, `ClipAssetInput`, `ClipIngressRequest`, `UrlMarkdownIngressRequest`, `ClipIngressResult` | ✅ |
 | `wikiignore.py` | Core | Vault `.wikiignore` load/write + gitignore-like pattern matching | ✅ |
-| `asset_store.py` | Core | Clip asset bytes → `wiki/assets/` hash store; markdown image rewrite + public URL fetch | ✅ |
-| `publish.py` | Core | `publish_clip_ingress`, `publish_url_markdown_ingress` → `raw_gate.publish_raw` | ✅ |
+| `asset_store.py` | Core | Clip asset bytes → `wiki/assets/` hash store; markdown image rewrite + public URL fetch (images are read with the linear scan of `utils.markdown_links`) | ✅ |
+| `publish.py` | Core | `publish_clip_ingress`, `publish_url_markdown_ingress` → `raw_gate.publish_raw` (whether a body embeds an image is read with the same linear scan) | ✅ |
 | `video_segment_parser.py` | Core | Subtitle segment parsing, sliding-window merging, and markdown synthesis | ✅ |
 | `video_ingress.py` | Core | `publish_video_url_ingress`, `publish_media_ingress` → `raw_gate.publish_raw`; `VideoTranscriptUnavailableError` when a video URL yields no readable subtitles | ✅ |
 | `__init__.py` | Package | Public exports | ✅ |

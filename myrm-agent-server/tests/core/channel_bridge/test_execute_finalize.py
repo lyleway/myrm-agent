@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
     InboundMessage,
     MediaAttachment,
     MediaType,
@@ -298,6 +299,17 @@ async def test_session_auto_reset_metadata() -> None:
     _persist_mock, reply = await _finalize(acc, session_was_auto_reset=True)
     assert reply.metadata is not None
     assert "session_auto_reset" in reply.metadata
+
+
+@pytest.mark.asyncio
+async def test_every_reply_names_the_stored_chat_it_was_written_into() -> None:
+    """The router links that chat from the reply, an empty turn's included, instead of resolving the turn's chat again."""
+    answered = StreamAccumulator()
+    answered.draft.feed({"type": "message", "data": "Done."})
+    for acc in (answered, StreamAccumulator()):
+        _persist_mock, reply = await _finalize(acc)
+        assert reply.metadata is not None
+        assert reply.metadata[METADATA_STORED_CHAT_KEY] == "chat-1"
 
 
 @pytest.mark.asyncio

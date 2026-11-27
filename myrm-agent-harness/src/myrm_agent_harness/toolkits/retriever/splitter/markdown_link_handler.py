@@ -64,11 +64,12 @@ restored_chunks = [handler.restore_markdown_links(chunk, link_map) for chunk in 
 ## Technical Details
 
 - Only protects links containing newlines (newline-free links need no protection)
-- Uses negative lookbehind to exclude Markdown image syntax (`![alt](url)`), only handles links (`[text](url)`)
+- Excludes Markdown image syntax (`![alt](url)`), only handles links (`[text](url)`); the scan is linear in the text (a run of unclosed `[` cannot stall it)
 - Placeholder length matches original link token count for accurate split positions
 - Uses padding char 'x' to match token counts
 
 [INPUT]
+- myrm_agent_harness.utils.markdown_links::replace_nested_markdown_links (POS: Linear-time Markdown link scan)
 - myrm_agent_harness.utils.text_utils::get_token_count (POS: Token count calculator)
 
 [OUTPUT]
@@ -82,6 +83,7 @@ import logging
 import re
 from collections.abc import Callable
 
+from myrm_agent_harness.utils.markdown_links import replace_nested_markdown_links
 from myrm_agent_harness.utils.text_utils import get_token_count
 
 logger = logging.getLogger(__name__)
@@ -94,10 +96,7 @@ class MarkdownLinkHandler:
     FILL_CHAR = "x"
     FILL_TOKEN_RATIO = 0.27
 
-    def __init__(self):
-        # Pre-compiled regex patterns
-        # Negative lookbehind (?<!\!) excludes image syntax ![alt](url), only matches links [text](url)
-        self._link_pattern = re.compile(r"(?<!\!)\[(.+?)\]\(([^)]+)\)", re.MULTILINE | re.DOTALL)
+    def __init__(self) -> None:
         self._placeholder_pattern = re.compile(r"__MDLINK_(\d+)__x*")
 
     def protect_markdown_links(self, text: str) -> tuple[str, dict[int, str]]:
@@ -111,13 +110,9 @@ class MarkdownLinkHandler:
         Returns:
             (protected_text, link_map)
         """
-        link_map = {}
+        link_map: dict[int, str] = {}
 
-        def replace_link(match):
-            link_text = match.group(1)
-            link_url = match.group(2)
-            original_link = f"[{link_text}]({link_url})"
-
+        def replace_link(_link_text: str, _link_url: str, original_link: str) -> str:
             # Only protect links containing newlines
             if "\n" not in original_link:
                 return original_link
@@ -151,7 +146,7 @@ class MarkdownLinkHandler:
             link_map[link_id] = original_link
             return placeholder
 
-        protected_text = self._link_pattern.sub(replace_link, text)
+        protected_text = replace_nested_markdown_links(text, replace_link)
         return protected_text, link_map
 
     def restore_markdown_links(self, text: str, link_map: dict[int, str]) -> str:
@@ -165,7 +160,7 @@ class MarkdownLinkHandler:
             Text with links restored
         """
 
-        def restore_link(match: re.Match) -> str:
+        def restore_link(match: re.Match[str]) -> str:
             link_id = int(match.group(1))
             if link_id in link_map:
                 return link_map[link_id]

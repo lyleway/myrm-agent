@@ -6,12 +6,13 @@ PRE-CALL (in this order; the first guard that refuses answers for the call):
  1. PRE_TOOL_USE hook — a hook may block the call or rewrite its arguments
  2. Circuit breaker — a registered terminal error refuses the tools that depend on the broken resource
  3. E-Stop check — global emergency brake (fail-closed)
- 4. LoopGuard pre-check — tool-call loop detection (WARN lets the call run, BREAK refuses it)
- 5. Turn budget — per-turn tool and search budget of a delegated run
- 6. Steering skip — user injected new message at runtime
- 7. Invalid tool check — tool does not exist
- 8. Trust attenuation — turn tool policy and INSTALLED skills restrict the available tools
- 9. PII Guard — classify tool parameters for PII, block if policy requires
+ 4. Stopped request — a call that has not started when its request is stopped is refused, before the loop guard sees it
+ 5. LoopGuard pre-check — tool-call loop detection (WARN lets the call run, BREAK refuses it)
+ 6. Turn budget — per-turn tool and search budget of a delegated run
+ 7. Steering skip — user injected new message at runtime
+ 8. Invalid tool check — tool does not exist
+ 9. Trust attenuation — turn tool policy and INSTALLED skills restrict the available tools
+10. PII Guard — classify tool parameters for PII, block if policy requires
 
 POST-CALL (in this order):
  1. Steering activation — check steering queue after execution

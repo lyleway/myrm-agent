@@ -109,4 +109,34 @@ describe('ConfigSyncManager progressive preload', () => {
     expect(listener).not.toHaveBeenCalled();
     expect(manager.get('securityConfig')).toEqual(expect.objectContaining({ yoloModeEnabled: true }));
   });
+
+  it('warns and keeps the loaded core configuration when the background preload cannot be fetched', async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    global.fetch = vi.fn((url: RequestInfo | URL) =>
+      isCoreRequest(url) ? Promise.resolve(okResponse(coreResponse)) : Promise.reject(new TypeError('Failed to fetch')),
+    ) as unknown as typeof fetch;
+
+    const manager = getConfigSyncManager();
+    await manager.initialize();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(warn).toHaveBeenCalledWith('[ConfigSync] Background preload failed:', expect.any(TypeError));
+    expect(manager.isInitialized).toBe(true);
+    expect(manager.status).toBe('idle');
+    expect(manager.get('chatSettings')).toEqual({});
+  });
+
+  it('lets a second initialize() call join the load that is already in flight', async () => {
+    const mockFetch = vi.fn((url: RequestInfo | URL) =>
+      Promise.resolve(okResponse(isCoreRequest(url) ? coreResponse : configsResponse(nonCoreEntries))),
+    );
+    global.fetch = mockFetch as unknown as typeof fetch;
+
+    const manager = getConfigSyncManager();
+    const [first, second] = await Promise.all([manager.initialize(), manager.initialize()]);
+
+    expect(second).toBe(first);
+    expect(mockFetch.mock.calls.filter(([url]) => isCoreRequest(url))).toHaveLength(1);
+  });
 });

@@ -5,6 +5,7 @@
 - app.database.models::Chat, Message (POS: ORM compaction metadata)
 - app.services.chat.conversation_recall_index_service::ConversationRecallIndexService (POS: post-compact index rebuild)
 - compact._constants::COMPACTION_FAILURE_COOLDOWN_SECONDS (POS: cooldown duration)
+- app.core.utils.time_utils::as_utc (POS: zone-safe cooldown comparison)
 
 [OUTPUT]
 - do_persist_to_db: compaction metadata write under the write lock (caller commits)
@@ -12,7 +13,7 @@
 - persist_compaction: Pipeline fire-and-forget wrapper
 
 [POS]
-Server DB persistence for ``compact_chat`` and harness Pipeline compaction callbacks.
+Server DB persistence for ``compact_chat``, the idle drain and harness Pipeline compaction callbacks.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from typing import Protocol, cast
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils.time_utils import as_utc
 from app.database.factory import acquire_write_lock
 from app.database.models import Chat, Message
 from app.services.chat.compact._constants import COMPACTION_FAILURE_COOLDOWN_SECONDS
@@ -51,8 +53,11 @@ async def do_persist_to_db(
 
     The stored compaction boundary is read before the write, so the write lock is taken first: it leaves no moment
     between that read and the write for another writer to commit in, which would abort the write with
-    SQLITE_BUSY_SNAPSHOT and lose a summary already paid for. Both callers get this from here, so neither can forget
-    it; the session's transaction must not have read anything yet.
+    SQLITE_BUSY_SNAPSHOT and lose a summary already paid for. Every caller (the manual path, the Pipeline callback and the
+    idle drain) gets this from here, so none can forget it; the session's transaction must not have read anything yet.
+
+    Raises:
+        ValueError: no boundary can be resolved, or the one given no longer exists in the chat.
     """
     from sqlalchemy import desc
 
@@ -64,6 +69,12 @@ async def do_persist_to_db(
             select(Message.id).where(Message.chat_id == chat_id).order_by(desc(Message.created_at)).limit(1)
         )
         effective_before_id = result.scalar_one_or_none()
+    else:
+        # A boundary the caller picked before its model call may be gone by now (a rewind or undo ran meanwhile);
+        # a summary of removed messages must not be stored.
+        boundary = await db.execute(select(Message.id).where(Message.chat_id == chat_id, Message.id == effective_before_id))
+        if boundary.scalar_one_or_none() is None:
+            raise ValueError(f"Compaction boundary {effective_before_id} no longer exists in chat_id={chat_id}")
 
     if not effective_before_id:
         raise ValueError(f"Cannot resolve before_message_id for chat_id={chat_id}")
@@ -171,8 +182,6 @@ async def is_compaction_failure_cooldown_active(
     cooldown_until, error = result
     if cooldown_until is None:
         return False, None
-    now = datetime.now(timezone.utc)
-    until = cooldown_until if cooldown_until.tzinfo is not None else cooldown_until.replace(tzinfo=timezone.utc)
-    if until <= now:
+    if as_utc(cooldown_until) <= datetime.now(timezone.utc):
         return False, None
     return True, error

@@ -12,7 +12,7 @@ Workspace 批量整理 HITL 执行层：校验 organize-plan.json、dry-run 预�
 | `validation.py` | 核心 | 6 层路径安全 + scope/depth/collision/duplicate-src/mtime 校验 | ✅ |
 | `apply.py` | 核心 | dry-run / apply / rollback；失败 mid-batch 自动逆移 | ✅ |
 | `job_store.py` | 辅助 | JSON job 持久化（`state_dir/organize_jobs`）+ TTL 清理 | ✅ |
-| `wikilink.py` | 辅助 | apply/rollback 后 workspace 内 `[[wikilink]]` 目标重写 | ✅ |
+| `wikilink.py` | 辅助 | apply/rollback 后 workspace 内 `[[wikilink]]` 目标重写；链接按位置线性扫描（`_wikilinks`），未闭合的 `[[` 不会拖慢整份笔记 | ✅ |
 
 ## 依赖关系
 

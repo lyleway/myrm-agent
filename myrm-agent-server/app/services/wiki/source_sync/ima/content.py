@@ -4,6 +4,7 @@
 - .client::ImaClient / .media::download_media (POS: ima reads)
 - app.services.wiki.source_sync.content_convert::bytes_to_wiki_markdown (POS: pdf/docx/office/text conversion)
 - myrm_agent_harness web_fetch_tools.crawl + wiki ingress asset localization (POS: web pages, WeChat articles, images)
+- myrm_agent_harness.utils.markdown_links::markdown_links (POS: linear-time Markdown image scan)
 
 [OUTPUT]
 - ImaContent / ImaUnsupported / ImaDuplicate: the three outcomes of resolving an item
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING
 from myrm_agent_harness.toolkits.web_fetch import web_fetch_tools
 from myrm_agent_harness.toolkits.web_fetch.extractors import WEIXIN_BODY_TRUNCATED_MARKER
 from myrm_agent_harness.toolkits.wiki.pipeline.ingress.asset_store import localize_public_markdown_images
+from myrm_agent_harness.utils.markdown_links import markdown_links
 
 from app.services.wiki.source_sync.content_convert import bytes_to_wiki_markdown
 from app.services.wiki.source_sync.publish_helpers import build_frontmatter
@@ -46,7 +48,7 @@ WEB_FETCH_TIMEOUT_S = 90.0
 
 # PDF and slide decks are reduced to their text; layout, shapes and embedded pictures are not carried over.
 _LAYOUT_FLATTENED_TYPES = frozenset({1, 4})
-_REMOTE_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(\s*<?https?://", re.IGNORECASE)
+_REMOTE_ADDRESS_RE = re.compile(r"\s*<?https?://", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,9 +86,17 @@ async def _html_to_markdown(html: str, *, base_url: str) -> str:
     return await asyncio.to_thread(convert)
 
 
+def _has_remote_image(markdown: str) -> bool:
+    """Whether an image of ``markdown`` still points at an http(s) address, ``![alt](https://…`` (``<`` allowed)."""
+    return any(
+        _REMOTE_ADDRESS_RE.match(markdown, image.end)
+        for image in markdown_links(markdown, image=True, label_min=0, target_min=None)
+    )
+
+
 async def _localize_images(structure: WikiStructure, body: str, *, base_url: str, raw_relative: str) -> tuple[str, list[str]]:
     localized, _ = await localize_public_markdown_images(structure, body, base_url=base_url, raw_relative=raw_relative)
-    return localized, (["images_remote"] if _REMOTE_IMAGE_RE.search(localized) else [])
+    return localized, (["images_remote"] if _has_remote_image(localized) else [])
 
 
 async def _web_content(url: str, *, type_label: str, structure: WikiStructure, raw_relative: str) -> ImaContent:

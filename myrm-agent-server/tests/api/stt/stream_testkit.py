@@ -71,9 +71,9 @@ def stored_voice_settings(
             return_value=MagicMock(requires_strict_ws_auth=strict_auth),
         ),
         patch(
-            "app.core.channel_bridge.config_loader.load_user_configs",
+            "app.core.channel_bridge.config_loader.load_voice_config_only",
             new_callable=AsyncMock,
-            return_value=MagicMock(voice_dict={}),
+            return_value={},
             side_effect=load_error,
         ),
         patch("app.core.channel_bridge.config_parsers.extract_voice_config", return_value=extracted),

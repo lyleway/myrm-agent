@@ -7,7 +7,7 @@
  *
  * [OUTPUT]
  * - useDesktopFolderDrop: Hook to handle native Tauri folder drag-and-drop grants
- * - normalizeDesktopPath: Normalizes Windows/POSIX paths to standard forward slashes
+ * - normalizeDesktopPath: Normalizes Windows/POSIX paths to forward slashes without a trailing slash, keeping every folder name as dropped
  *
  * [POS]
  * Desktop native folder drag-and-drop handler for zero-friction workspace directory grants.
@@ -22,15 +22,15 @@ import { refreshSessionAccessRoots } from '@/lib/sessionAccessRefresh';
 import useChatStore from '@/store/useChatStore';
 
 /**
- * Normalizes Windows backslashes to forward slashes and strips trailing slashes (except root).
+ * Normalizes Windows backslashes to forward slashes and strips trailing slashes (except root). The text is otherwise
+ * the dropped path exactly: whitespace at an end belongs to a folder name, and a blank text names no folder.
  */
 export function normalizeDesktopPath(rawPath: string): string {
-  const trimmed = rawPath.trim();
-  if (!trimmed) {
+  if (!rawPath.trim()) {
     return '';
   }
 
-  let normalized = trimmed.replace(/\\+/g, '/');
+  let normalized = rawPath.replace(/\\+/g, '/');
   // Collapse multiple consecutive slashes (except initial // for UNC if any)
   normalized = normalized.replace(/(?!^)\/+/g, '/');
 

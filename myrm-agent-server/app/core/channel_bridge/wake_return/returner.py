@@ -14,7 +14,8 @@
 IM carrier of the wake-turn port, registered while the channel gateway runs. A chat the memory does not know (it
 started in the app, or before the last restart) is left alone: its reply is in the chat for the web UI. The reply is
 cleaned the way the answer to an IM message is before it leaves the app: boundary markers removed, and the workspace
-files it names attached.
+files it names attached. The reply names the chat it was written into (the wake turn's own chat), and the router links
+that chat from it.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ class ChannelWakeReplyReturner:
         if not reply:
             return
         content, media = await _with_deliverables(chat_id, reply, origin)
-        delivered = await self._gateway.deliver_followup(origin, content, media)
+        delivered = await self._gateway.deliver_followup(origin, content, media, stored_chat_id=chat_id)
         logger.info("Wake turn reply returned to %s: delivered=%s, session=%s", origin.channel, delivered, chat_id)
 
 

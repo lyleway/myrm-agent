@@ -3,6 +3,7 @@
 [INPUT]
 - core.structure.WikiStructure (POS: vault directory layout)
 - core.security.http.secure_fetch (POS: server-side public asset fetch)
+- myrm_agent_harness.utils.markdown_links (POS: linear-time Markdown image scan and rewrite)
 
 [OUTPUT]
 - store_clip_assets, localize_public_markdown_images, rewrite_markdown_asset_refs
@@ -16,7 +17,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import mimetypes
-import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -25,6 +25,7 @@ from myrm_agent_harness.core.security.http.secure_fetch import (
     secure_get,
 )
 from myrm_agent_harness.toolkits.wiki.core.structure import WikiStructure
+from myrm_agent_harness.utils.markdown_links import markdown_links, replace_markdown_links
 
 from .types import ClipAssetInput, IngressAssetStats
 
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 _MAX_CLIP_ASSETS = 20
 _MAX_ASSET_BYTES = 5 * 1024 * 1024
 _MAX_MEDIA_ASSET_BYTES = 500 * 1024 * 1024
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 _CONTENT_TYPE_EXT: dict[str, str] = {
     "image/png": ".png",
@@ -77,6 +77,11 @@ def _asset_relpath_from_raw(raw_relative: str, asset_filename: str) -> str:
     raw_parts = len(Path(raw_relative).parent.parts)
     ups = [".."] * (raw_parts + 1)
     return "/".join([*ups, "wiki", "assets", asset_filename])
+
+
+def _image_reference(target: str) -> str:
+    """The address in an image target: what stands before the optional title."""
+    return target.strip().split(" ", 1)[0]
 
 
 def store_asset_bytes(
@@ -148,8 +153,8 @@ async def localize_public_markdown_images(
     skipped = 0
     failed = 0
     seen: set[str] = set()
-    for match in _MARKDOWN_IMAGE_RE.finditer(markdown):
-        raw_ref = match.group(1).strip().split(" ", 1)[0]
+    for image in markdown_links(markdown, image=True, label_min=0):
+        raw_ref = _image_reference(image.target(markdown))
         if raw_ref.startswith("data:") or raw_ref in seen:
             continue
         seen.add(raw_ref)
@@ -208,15 +213,10 @@ def rewrite_markdown_asset_refs(
     if not url_to_filename:
         return markdown
 
-    def _replace(match: re.Match[str]) -> str:
-        full = match.group(0)
-        alt_match = re.match(r"!\[(.*?)\]", full)
-        alt = alt_match.group(1) if alt_match else ""
-        ref = match.group(1).strip().split(" ", 1)[0]
-        filename = url_to_filename.get(ref)
+    def _replace(alt: str, target: str, original: str) -> str:
+        filename = url_to_filename.get(_image_reference(target))
         if not filename:
-            return full
-        rel = _asset_relpath_from_raw(raw_relative, filename)
-        return f"![{alt}]({rel})"
+            return original
+        return f"![{alt}]({_asset_relpath_from_raw(raw_relative, filename)})"
 
-    return _MARKDOWN_IMAGE_RE.sub(_replace, markdown)
+    return replace_markdown_links(markdown, _replace, image=True, label_min=0)

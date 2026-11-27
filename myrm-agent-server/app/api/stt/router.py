@@ -133,12 +133,12 @@ async def transcribe_audio(
 
 async def _load_user_voice_config(user_id: str) -> VoiceConfig | None:
     """Load VoiceConfig from the user's config store."""
-    from app.core.channel_bridge.config_loader import load_user_configs
+    from app.core.channel_bridge.config_loader import load_voice_config_only
     from app.core.channel_bridge.config_parsers import extract_voice_config
 
     try:
-        configs = await load_user_configs()
-        return extract_voice_config(configs.voice_dict)
+        # Not load_user_configs(): it refuses without a default model, and transcription needs none.
+        return extract_voice_config(await load_voice_config_only())
     except Exception:
         logger.exception("Failed to load voice config for sandbox user")
         return None

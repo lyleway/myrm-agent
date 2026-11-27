@@ -1,6 +1,6 @@
 """A reply that no message just asked for is delivered the way the answer to a message is; a conversation is busy while its turn runs.
 
-The real router delivers; the bus, the topic store, the web hand-off lookup and the data-plane ledger are recorders.
+The real router delivers; the bus, the topic store, the web hand-off and the data-plane ledger are recorders.
 """
 
 from __future__ import annotations
@@ -15,7 +15,15 @@ import pytest
 
 from app.channels.routing.router import AgentRouter
 from app.channels.routing.session_gate import SessionGateConfig
-from app.channels.types import InboundMessage, MediaAttachment, MediaType, OutboundMessage, ReplyMode, TopicContext
+from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
+    InboundMessage,
+    MediaAttachment,
+    MediaType,
+    OutboundMessage,
+    ReplyMode,
+    TopicContext,
+)
 
 
 def _topics(topic: TopicContext | None) -> MagicMock:
@@ -34,11 +42,11 @@ class _Delivery:
             agent_executor=MagicMock(),
             topic_resolver=_topics(topic),
         )
-        self.handoff_for: list[InboundMessage] = []
+        self.handed_off: list[tuple[OutboundMessage, InboundMessage]] = []
         self.draft = AsyncMock()
 
         async def with_handoff(result: OutboundMessage, msg: InboundMessage) -> OutboundMessage:
-            self.handoff_for.append(msg)
+            self.handed_off.append((result, msg))
             return result
 
         monkeypatch.setattr(self.router, "_attach_web_handoff", with_handoff)
@@ -48,6 +56,9 @@ class _Delivery:
     @property
     def sent(self) -> list[OutboundMessage]:
         return [call.args[0] for call in self.bus.publish_outbound.await_args_list]
+
+
+_STORED_CHAT = "chat-db-1"
 
 
 def _origin(*, chat_id: str | None = "chat-1", thread_id: str | None = None) -> InboundMessage:
@@ -71,7 +82,7 @@ def delivery(monkeypatch: pytest.MonkeyPatch) -> _Delivery:
 async def test_the_reply_goes_to_the_chat_and_thread_the_conversation_lives_in(delivery: _Delivery) -> None:
     origin = _origin(thread_id="topic-7")
 
-    assert await delivery.router.deliver_followup(origin, "The research is done.") is True
+    assert await delivery.router.deliver_followup(origin, "The research is done.", stored_chat_id=_STORED_CHAT) is True
 
     (sent,) = delivery.sent
     assert (sent.channel, sent.recipient_id, sent.thread_id, sent.user_id) == ("telegram", "chat-1", "topic-7", "owner")
@@ -81,23 +92,36 @@ async def test_the_reply_goes_to_the_chat_and_thread_the_conversation_lives_in(d
 
 @pytest.mark.asyncio
 async def test_a_direct_message_without_a_chat_id_is_answered_to_the_sender(delivery: _Delivery) -> None:
-    assert await delivery.router.deliver_followup(_origin(chat_id=None), "done") is True
+    assert await delivery.router.deliver_followup(_origin(chat_id=None), "done", stored_chat_id=_STORED_CHAT) is True
 
     assert [sent.recipient_id for sent in delivery.sent] == ["u1"]
 
 
 @pytest.mark.asyncio
-async def test_the_reply_carries_the_web_hand_off_like_any_reply(delivery: _Delivery) -> None:
+async def test_the_reply_carries_the_web_hand_off_of_the_chat_it_names_like_any_reply(delivery: _Delivery) -> None:
     origin = _origin()
 
-    await delivery.router.deliver_followup(origin, "done")
+    await delivery.router.deliver_followup(origin, "done", stored_chat_id=_STORED_CHAT)
 
-    assert delivery.handoff_for == [origin]
+    ((reply, handed_off_for),) = delivery.handed_off
+    assert handed_off_for == origin
+    assert reply.metadata is not None
+    assert reply.metadata[METADATA_STORED_CHAT_KEY] == _STORED_CHAT
+
+
+@pytest.mark.asyncio
+async def test_the_apps_own_chat_gets_no_web_hand_off(delivery: _Delivery) -> None:
+    """The web UI already is the conversation: the button only belongs to replies that go out over an IM channel."""
+    origin = dataclasses.replace(_origin(), channel="web")
+
+    assert await delivery.router.deliver_followup(origin, "done", stored_chat_id=_STORED_CHAT) is True
+
+    assert delivery.handed_off == []
 
 
 @pytest.mark.asyncio
 async def test_a_silent_reply_is_not_sent(delivery: _Delivery) -> None:
-    assert await delivery.router.deliver_followup(_origin(), "[SILENT]") is False
+    assert await delivery.router.deliver_followup(_origin(), "[SILENT]", stored_chat_id=_STORED_CHAT) is False
 
     assert delivery.sent == []
 
@@ -106,7 +130,7 @@ async def test_a_silent_reply_is_not_sent(delivery: _Delivery) -> None:
 async def test_a_topic_that_was_disabled_since_gets_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     delivery = _Delivery(monkeypatch, TopicContext(topic_id="chat-1", enabled=False))
 
-    assert await delivery.router.deliver_followup(_origin(), "done") is False
+    assert await delivery.router.deliver_followup(_origin(), "done", stored_chat_id=_STORED_CHAT) is False
 
     assert delivery.sent == []
     delivery.draft.assert_not_awaited()
@@ -127,7 +151,10 @@ def _attachment(path: Path, *, ephemeral: bool) -> MediaAttachment:
 async def test_the_attachments_travel_with_the_reply(delivery: _Delivery) -> None:
     attached = _attachment(_temp_file(), ephemeral=False)
     try:
-        assert await delivery.router.deliver_followup(_origin(), "The chart is attached.", (attached,)) is True
+        assert (
+            await delivery.router.deliver_followup(_origin(), "The chart is attached.", (attached,), stored_chat_id=_STORED_CHAT)
+            is True
+        )
 
         (sent,) = delivery.sent
         assert sent.media == (attached,)
@@ -141,7 +168,10 @@ async def test_a_topic_that_was_disabled_since_leaves_no_temp_attachment_behind(
     path = _temp_file()
 
     try:
-        assert await delivery.router.deliver_followup(_origin(), "done", (_attachment(path, ephemeral=True),)) is False
+        sent = await delivery.router.deliver_followup(
+            _origin(), "done", (_attachment(path, ephemeral=True),), stored_chat_id=_STORED_CHAT
+        )
+        assert sent is False
 
         assert not path.exists()
     finally:
@@ -156,7 +186,7 @@ async def test_a_topic_that_holds_replies_for_review_gets_a_draft_and_the_reply_
     delivery = _Delivery(monkeypatch, topic)
     origin = _origin()
 
-    assert await delivery.router.deliver_followup(origin, "Refund approved.") is False
+    assert await delivery.router.deliver_followup(origin, "Refund approved.", stored_chat_id=_STORED_CHAT) is False
 
     assert delivery.sent == []
     delivery.draft.assert_awaited_once()
@@ -173,7 +203,7 @@ async def test_a_reply_that_cannot_be_held_for_review_is_withheld_never_sent_unr
     delivery = _Delivery(monkeypatch, TopicContext(topic_id="chat-1", reply_mode=ReplyMode.DRAFT_REVIEW))
     delivery.draft.side_effect = RuntimeError("approval store down")
 
-    assert await delivery.router.deliver_followup(_origin(), "Refund approved.") is False
+    assert await delivery.router.deliver_followup(_origin(), "Refund approved.", stored_chat_id=_STORED_CHAT) is False
 
     assert delivery.sent == []
 

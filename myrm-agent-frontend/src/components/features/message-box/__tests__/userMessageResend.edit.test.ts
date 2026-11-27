@@ -12,6 +12,7 @@ import { addInputHistory } from '@/hooks/message-input/useInputHistory';
 import { ApiError } from '@/lib/api';
 import { truncateAfterMessage, type TruncateResult } from '@/services/chat';
 import { showI18nToast } from '@/services/i18nToastService';
+import { refreshCompactionAfterHistoryChange } from '@/store/chat/compactionAfterHistoryChange';
 import type { ChatState, Message } from '@/store/chat/types';
 import useChatStore from '@/store/useChatStore';
 import { resendEditedUserMessage } from '../userMessageResend';
@@ -37,6 +38,8 @@ vi.mock('@/services/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/chat')>();
   return { ...actual, truncateAfterMessage: vi.fn() };
 });
+
+vi.mock('@/store/chat/compactionAfterHistoryChange', () => ({ refreshCompactionAfterHistoryChange: vi.fn() }));
 
 vi.mock('@/services/i18nToastService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/i18nToastService')>();
@@ -95,6 +98,7 @@ beforeEach(() => {
   resetResendWorld();
   vi.mocked(truncateAfterMessage).mockReset();
   vi.mocked(truncateAfterMessage).mockResolvedValue(CUT_DONE);
+  vi.mocked(refreshCompactionAfterHistoryChange).mockClear();
 });
 
 afterEach(async () => {
@@ -116,6 +120,12 @@ describe('resendEditedUserMessage', () => {
     expect(transcript()).toEqual(['r-1', 'r-1']);
     // Like any normal send, the request takes the composer's own attachments, not those of the replaced bubble.
     expect(sentRequest()).toEqual({ content: 'summarize only chapter 3', attachments: undefined });
+  });
+
+  it('re-reads the compaction summary the cut may have dropped', async () => {
+    await edit(edited, 'summarize only chapter 3');
+
+    expect(refreshCompactionAfterHistoryChange).toHaveBeenCalledWith(CHAT_ID);
   });
 
   it('keeps the explicit skill activation of the original message', async () => {
@@ -207,6 +217,7 @@ describe('resendEditedUserMessage', () => {
       expect(sentRequest().content).toBe('summarize only chapter 3');
       expect(transcript()).toEqual(['r-1', 'r-1']);
       expect(showI18nToast).not.toHaveBeenCalled();
+      expect(refreshCompactionAfterHistoryChange).not.toHaveBeenCalled();
     });
   });
 

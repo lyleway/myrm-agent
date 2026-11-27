@@ -1,8 +1,8 @@
 """``/new`` opens a conversation that commands and turns keep resolving to, under every reset policy.
 
 The conversation is stored when ``/new`` runs, under a key no reset policy derives, so whatever follows (a command, a turn
-at once, a turn hours later, a handoff, the button that continues a reply in the browser, a peer next door) resolves
-against stored rows and not against a marker waiting in memory. The reset policy decides only how long it lasts. These
+at once, a turn hours later, a handoff, a peer next door) resolves against stored rows and not against a marker waiting
+in memory. The reset policy decides only how long it lasts. These
 tests run the real resolver, command resolution and chat service over a real database.
 
 Every database costs seconds to build, so a test that holds for each reset policy runs the policies side by side in one
@@ -18,8 +18,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.routing.pipeline import RouterDeliveryMixin
-from app.channels.types import ActionButton, InboundMessage, OutboundMessage, is_started_session_key, started_session_key
+from app.channels.types import InboundMessage, is_started_session_key, started_session_key
 from app.core.channel_bridge.agent_executor.session import build_channel_session_key
 from app.core.channel_bridge.command_session import resolve_command_session_key, start_conversation
 from app.database.models.chat import Chat
@@ -169,30 +168,6 @@ async def test_the_conversation_is_opened_for_the_agent_that_serves_the_chat(db_
     assert key.startswith("telegram:group:g1:agent:agent-c:e=s")
     started = await ChatService.get_channel_chat_by_key(key)
     assert started is not None and started.agent_id == "agent-c"
-
-
-@pytest.mark.asyncio
-async def test_the_browser_button_of_a_reply_links_the_conversation_opened_by_new(db_session: AsyncSession) -> None:
-    """Under every reset policy the button links the conversation the next turn writes to, not the ended one."""
-
-    async def button_to(chat_id: str, *, locale: str) -> tuple[tuple[ActionButton, ...], ...]:
-        return ((ActionButton(label="Continue", action_id="web:continue_chat", url=f"https://app.test/{chat_id}"),),)
-
-    for name, person in _PEOPLE.items():
-        msg = _dm(f"u-{name}")
-        reply = OutboundMessage(channel="telegram", recipient_id=msg.sender_id, content="done", user_id="uid1")
-        with (
-            stubbed_stores({}, personal=person),
-            patch("app.remote_access.mobile_deep_link.resolve_web_handoff_components", button_to),
-        ):
-            ended_id = await _converse(db_session, await resolve_command_session_key(msg))
-            await start_conversation(msg)
-            started = await ChatService.get_channel_chat_by_key(await resolve_command_session_key(msg))
-
-            delivered = await RouterDeliveryMixin._attach_web_handoff(reply, msg)
-
-        assert started is not None and started.id != ended_id, name
-        assert delivered.components == await button_to(started.id, locale="en"), name
 
 
 # --- how long it lasts -------------------------------------------------------------------------------------------------

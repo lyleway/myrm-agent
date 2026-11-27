@@ -13,7 +13,7 @@
 | `compaction.py` | 模块 | 压缩摘要、归档只读、context pins/branches CRUD、snapshot bookmark fork | ✅ |
 | `copilot.py` | 模块 | Co-Pilot API：run-digest GET、advisor ask/messages/clear（提问先过风控闸门，被拦返回 400 `risk_held`，既不入线程也不调模型） | ✅ |
 | `core/` | 模块 | 会话核心路由，按资源拆 4 个子路由（crud / recall / pins / session）：列表（分页/来源/项目过滤）、创建/更新/删除、批量删除、`/recall/search`（@chat SSOT）、`/recall/entries`、recall exclusion、置顶与排序、Fission 拓扑、workspace、session-skills、active-MOA preset、delivery contracts、tags；出口仍只导出 `router`。见 [core/_ARCH.md](core/_ARCH.md) | — |
-| `session_access_roots.py` | 路由 | 会话目录授权端点：`POST /{chat_id}/session-access-roots`（桌面拖拽授权；可写危险根、部署边界外的路径等被服务端拒绝的授权答 403）与 `PATCH`（撤销） | ✅ |
+| `session_access_roots.py` | 路由 | 会话目录授权端点：`POST /{chat_id}/session-access-roots`（桌面拖拽授权；可写危险根、部署边界外的路径等被服务端拒绝的授权答 403）与 `PATCH`（撤销）；路径按原文使用、不去空白（名字以空格结尾的文件夹授予与撤销的是它本身），请求模型只拒绝全空白的路径（422） | ✅ |
 | `fork.py` | 模块 | Fork conversation from specific message index. | ✅ |
 | `handoff.py` | 模块 | Web→Channel handoff API. | ✅ |
 | `import_session.py` | 模块 | 跨工具（Claude Code / Codex / Hermes）历史会话纯净转录本导入与即刻续聊 API，支持文件上传与文本流解析，自动脱敏并保持静态 Prompt Cache 前缀；转录自带的 cwd 不可信，过宽或不存在时丢弃（回到会话自己的沙箱工作区），显式 `target_workspace` 过宽则 400 | ✅ |

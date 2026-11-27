@@ -13,7 +13,8 @@
 [OUTPUT]
 - RouterExecutionMixin: ``_resolve_topic``, ``_prepare_execution_context`` and ``_execute_prepared_context``,
   ``deliver_followup`` (the one way to say something, with its attachments, in a conversation that no message just
-  asked for) and ``is_session_busy`` (whether a message sent there would queue behind a running turn)
+  asked for; the caller names the stored chat the reply belongs to) and ``is_session_busy`` (whether a message sent
+  there would queue behind a running turn)
 
 [POS]
 Execution segment of ``AgentRouter``, composed into it via multiple inheritance. It builds on ``RouterDeliveryMixin``
@@ -50,6 +51,7 @@ from app.channels.routing.router_models import (
 from app.channels.routing.session_gate import gate_key
 from app.channels.routing.topic_binding import resolve_bound_topic
 from app.channels.types import (
+    METADATA_STORED_CHAT_KEY,
     InboundMessage,
     MediaAttachment,
     TopicContext,
@@ -90,14 +92,20 @@ class RouterExecutionMixin(RouterDeliveryMixin):
         return await resolve_bound_topic(self._topic_resolver, msg)
 
     async def deliver_followup(
-        self: RouterExecutionHost, origin: InboundMessage, content: str, media: tuple[MediaAttachment, ...] = ()
+        self: RouterExecutionHost,
+        origin: InboundMessage,
+        content: str,
+        media: tuple[MediaAttachment, ...] = (),
+        *,
+        stored_chat_id: str,
     ) -> bool:
         """Say ``content`` with ``media`` in the conversation ``origin`` came from, though no message just asked for it.
 
-        The reply goes out like the answer to a message: the silent-reply filter, the web hand-off button and draft
-        review all apply (a topic that holds replies for review gets a draft, and the reply is withheld when it cannot
-        be held), and a topic that has been disabled since gets nothing. The temp files of ``ephemeral`` attachments
-        belong to the delivery from here on: a reply that is not sent leaves none behind.
+        ``stored_chat_id`` is the stored chat the reply was produced in (the database chat id): the web hand-off button
+        links it. The reply goes out like the answer to a message: the silent-reply filter, the web hand-off button and
+        draft review all apply (a topic that holds replies for review gets a draft, and the reply is withheld when it
+        cannot be held), and a topic that has been disabled since gets nothing. The temp files of ``ephemeral``
+        attachments belong to the delivery from here on: a reply that is not sent leaves none behind.
 
         Returns True when the reply was sent to the channel.
         """
@@ -110,7 +118,10 @@ class RouterExecutionMixin(RouterDeliveryMixin):
             discard_ephemeral_media(media)
             return False
         reply = dataclasses.replace(
-            origin.get_or_create_correlation_context().create_reply(content, media=media), recipient_id=chat_id
+            origin.get_or_create_correlation_context().create_reply(
+                content, media=media, metadata={METADATA_STORED_CHAT_KEY: stored_chat_id}
+            ),
+            recipient_id=chat_id,
         )
         return await self._deliver_agent_result(reply, None, origin, chat_id, 0.0, False, topic_ctx=topic_ctx)
 

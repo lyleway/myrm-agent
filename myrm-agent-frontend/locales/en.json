@@ -20257,6 +20257,7 @@
     "mcpServiceName": "Service Name",
     "mcpServiceNamePlaceholder": "Enter service name",
     "mcpNameRequired": "Service name is required",
+    "mcpNameConflict": "This name matches the existing service \"{name}\" (names that differ only in symbols or spaces count as the same). Please choose another name",
     "mcpUrlRequired": "URL is required",
     "mcpUrlInvalid": "Invalid URL format",
     "mcpCommandRequired": "Command is required",

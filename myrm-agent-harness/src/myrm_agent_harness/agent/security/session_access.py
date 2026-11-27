@@ -3,7 +3,7 @@
 [INPUT]
 - core.security.types::AccessRoot, PathPolicy
 - core.context_vars::access_grants_var, session_access_roots_var (POS: the run's grants, shared with the sandbox executor)
-- judged_paths::judged_file_paths (POS: every file a file tool may open: the typed ones and the respelling of a read)
+- judged_paths::opened_file_paths (POS: the file each path argument of a file tool opens, which a grant covers and no other spelling)
 
 [OUTPUT]
 - get_session_access_roots / set_session_access_roots / grant_session_access_root
@@ -26,7 +26,7 @@ import os
 from dataclasses import replace
 
 from myrm_agent_harness.agent.security.checks import check_path_policy
-from myrm_agent_harness.agent.security.judged_paths import judged_file_paths
+from myrm_agent_harness.agent.security.judged_paths import opened_file_paths
 from myrm_agent_harness.agent.security.types import (
     AccessRoot,
     PathPolicy,
@@ -175,12 +175,12 @@ def plan_directory_grants(
 ) -> list[AccessRoot]:
     """The directories "also grant folder access" would add or upgrade for this call, each once.
 
-    One per directory of a file the call may open (``judged_file_paths``) outside the allowed zones; a write into
+    One per directory of a file the call opens (``opened_file_paths``) outside the allowed zones; a write into
     a held read-only folder offers its upgrade to writable. Files inside the workspace or an allowed root need no
     grant, so a batched call does not spend the per-session grant limit on them; a directory the grant would be
     refused (forbidden zone, limit reached, a write over a home directory or a policy that allows no grants) is
     not offered either, so the card never promises a folder the grant then drops. ``permission`` is the call's
-    permission type: it decides whether the grant is read-write and which files the call may open. ``policy`` is
+    permission type: it decides whether the grant is read-write and which files the call opens. ``policy`` is
     the effective one for the turn.
     """
     if not policy.allow_directory_grants:
@@ -191,7 +191,7 @@ def plan_directory_grants(
     room = _MAX_GRANTS_PER_SESSION - len(current)
     planned: dict[str, AccessRoot] = {}
     new_roots = 0
-    for raw_path in judged_file_paths(permission, tool_input, workspace_root):
+    for raw_path in opened_file_paths(permission, tool_input, workspace_root):
         action, _ = check_path_policy(raw_path, policy, workspace_root, require_write=writable)
         if action != PermissionAction.ASK:
             continue
@@ -233,10 +233,10 @@ def grant_paths_once(
     policy: PathPolicy,
     workspace_root: str | None,
 ) -> list[str]:
-    """Open the files an approved call may open outside the allowed zones, until the next model response.
+    """Open the files an approved call opens outside the allowed zones, until the next model response.
 
     The person approved this call, so the executor must let it reach what it opens: the files it names and, for
-    a read, the spelling it opens in place of one that names no file (``judged_file_paths``). Nothing wider than
+    a read, the spelling it opens in place of one that names no file (``opened_file_paths``). Nothing wider than
     those files opens, and nothing a session grant or a policy already covers needs it. A path the deployment
     never lets a grant widen (``_grant_refused``) stays closed, as it is in the plan.
     """
@@ -247,7 +247,7 @@ def grant_paths_once(
     effective = merge_path_policy_with_session_access(policy)
     opened: dict[str, AccessRoot] = {_realpath(root.path): root for root in grants.once}
     named: list[str] = []
-    for raw_path in judged_file_paths(permission, tool_input, workspace_root):
+    for raw_path in opened_file_paths(permission, tool_input, workspace_root):
         action, _ = check_path_policy(raw_path, effective, workspace_root, require_write=writable)
         path = _resolve_named_path(raw_path, workspace_root)
         if action != PermissionAction.ASK or not path or _grant_refused(path, policy, writable=writable):

@@ -7,10 +7,12 @@
 - FILE_ARG_KEYS: every argument name a file tool receives its files under
 - PATHS_ALIAS_KEYS: the single-path spellings ``file_read_tool`` accepts for its ``paths`` list
 - coerce_path_list: an array argument as a list, reading a string that holds a JSON array the way the tool does (``url_args`` reads ``urls`` with it too)
-- file_arg_values: each non-empty path string among those arguments, passed as a string, a JSON array string or a list, as sent and without the whitespace around it
+- typed_file_args: each non-empty path string among those arguments, passed as a string, a JSON array string or a list, exactly as sent: the text a file tool opens
+- file_arg_values: the typed paths, each followed by its spelling without the whitespace around it
 - READ_RANGE_PATTERN: the one grammar of the ``:START-END`` line-range selector after a file name (groups: file, start, end)
 - strip_read_range: the file a path argument names: the path without its ``:START-END`` line-range selector
 - is_url: whether a path is a network URL, which file tools refuse
+- names_host_file: whether a path argument names a file on the host: not a network URL and not a virtual namespace
 - host_file_paths: the host-filesystem paths a call may open, in every form a reader could open them
 
 [POS]
@@ -84,21 +86,28 @@ def coerce_path_list(value: object) -> list[object] | None:
     return None
 
 
-def file_arg_values(args: dict[str, object]) -> Iterator[str]:
-    """Yield every non-empty path string in the arguments, as sent and then without the whitespace around it.
+def typed_file_args(args: dict[str, object]) -> Iterator[str]:
+    """Yield every non-empty path string in the arguments exactly as sent.
 
-    The file tools open the text exactly as sent, so ``"a "`` is a file of its own and a name made only of
-    whitespace is a file name. The trimmed spelling is yielded too: a tool whose path does not exist opens that
-    spelling instead (``find_existing_unicode_path``). Judging both can only tighten a verdict.
+    The file tools open this text: ``"a "`` is a file of its own and a name made only of whitespace is a file name.
     """
     for key in FILE_ARG_KEYS:
         for item in coerce_path_list(args.get(key)) or ():
-            if not isinstance(item, str) or not item:
-                continue
-            yield item
-            trimmed = item.strip()
-            if trimmed and trimmed != item:
-                yield trimmed
+            if isinstance(item, str) and item:
+                yield item
+
+
+def file_arg_values(args: dict[str, object]) -> Iterator[str]:
+    """Yield every typed path, each followed by its spelling without the whitespace around it.
+
+    A tool whose path does not exist opens the trimmed spelling instead (``find_existing_unicode_path``), so a
+    verdict that judges both can only tighten.
+    """
+    for item in typed_file_args(args):
+        yield item
+        trimmed = item.strip()
+        if trimmed and trimmed != item:
+            yield trimmed
 
 
 def strip_read_range(path: str) -> str:
@@ -116,6 +125,14 @@ def is_url(path: str) -> bool:
     return path.lower().startswith(_URL_SCHEMES)
 
 
+def names_host_file(path: str) -> bool:
+    """Whether a path argument names a file on the host: not a network URL and not a virtual namespace.
+
+    A scheme or namespace counts only at the start of the text; after a space it is a name on the host.
+    """
+    return not (is_url(path) or path.startswith(_VIRTUAL_PREFIXES))
+
+
 def host_file_paths(args: dict[str, object]) -> list[str]:
     """The host-filesystem paths the arguments may open, each in every form a reader could open it.
 
@@ -125,7 +142,7 @@ def host_file_paths(args: dict[str, object]) -> list[str]:
     """
     paths: list[str] = []
     for raw in file_arg_values(args):
-        if is_url(raw) or raw.startswith(_VIRTUAL_PREFIXES):
+        if not names_host_file(raw):
             continue
         for candidate in (strip_read_range(raw), raw.split(":", 1)[0]):
             if candidate and candidate not in paths:
