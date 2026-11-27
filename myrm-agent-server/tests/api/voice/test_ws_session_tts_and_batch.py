@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, create_autospec, patch
 import pytest
 from fastapi import WebSocketDisconnect
 
-from app.api.voice import ws_session
+from app.api.voice import ws_session_batch
 from app.api.voice.agent_bridge import VoiceAgentBridge
 from app.api.voice.ws_session import _VoiceSession
 from app.channels.types import VoiceConfig
@@ -115,7 +115,7 @@ class TestSpeechStreaming:
 
 class TestBatchSpeechToText:
     async def test_a_silent_browser_closes_the_session_after_the_idle_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(ws_session, "_SESSION_IDLE_TIMEOUT", 0.01)
+        monkeypatch.setattr(ws_session_batch, "_SESSION_IDLE_TIMEOUT", 0.01)
         session = _session(hang=True)
 
         await session._run_batch_stt()
