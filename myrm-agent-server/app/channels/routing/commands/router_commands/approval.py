@@ -16,8 +16,9 @@
 [POS]
 Router approval mixin segment. Validates reaction/button approvals and builds harness-compatible resume_value for
 LangGraph interrupt resume. A person's answer ends the chat's open request in ``_pending_approvals`` before the run
-resumes. The ends of a request without an answer (the timeout, a new turn in its session) are in
-``router_commands_approval_end``.
+resumes. Who may answer is decided where the answer is taken (``_may_decide``), the same way for a typed word, a
+reaction and a button click: in a group only the member who asked. The ends of a request without an answer (the
+timeout, a new turn in its session) are in ``router_commands_approval_end``.
 """
 
 from __future__ import annotations
@@ -64,6 +65,28 @@ async def _reply_text(bus: MessageBus, msg: InboundMessage, chat_id: str, text_k
     )
 
 
+def _may_decide(msg: InboundMessage, requester_id: str | None) -> bool:
+    """Whether the sender of ``msg`` may decide an approval asked by the member ``requester_id``.
+
+    A DM is one person's chat with the bot, so whoever writes there decides. In a group only the member who asked
+    does. A missing identity never matches: nobody qualifies when ``msg`` names no sender, or when no member is known
+    to have asked (``requester_id`` is ``""`` or ``None``).
+    """
+    if not msg.is_group:
+        return True
+    return bool(msg.sender_id) and msg.sender_id == requester_id
+
+
+def _log_refusal(msg: InboundMessage, requester_id: str | None) -> None:
+    logger.info(
+        "Approval answer refused: sender=%s requester=%s channel=%s chat=%s",
+        msg.sender_id,
+        requester_id,
+        msg.channel,
+        msg.chat_id,
+    )
+
+
 class RouterCommandsApprovalMixin:
     """Mixin: reaction/button approval and decision resume payloads."""
 
@@ -78,9 +101,7 @@ class RouterCommandsApprovalMixin:
         return state_key in self._pending_approvals
 
     def _is_reaction_approval_valid(self: RouterCommandsHost, msg: InboundMessage) -> bool:
-        """Validate an inbound emoji reaction as an approval command.
-
-        Layered checks (a single failure aborts the approval):
+        """Whether an inbound emoji reaction answers the chat's open approval request.
 
         1. **Pending approval gate** — the chat must wait on an approval
            request. Reactions on stale messages are silently dropped.
@@ -88,47 +109,15 @@ class RouterCommandsApprovalMixin:
            reaction metadata it must equal the stored approval message id;
            otherwise the reaction targets some other message (e.g. an old
            bot reply) and is ignored.
-        3. **Approver authorisation** — the reacting ``sender_id`` must match
-           either the original requester captured on the active task or one of
-           the explicitly configured ``approval_co_approvers``. This blocks
-           bystanders in group chats from inadvertently or maliciously
-           approving someone else's high-privilege action.
 
-        Direct messages (``is_group == False``) skip step 3 because the chat
-        is 1:1 with the requester and bystander attacks are impossible.
+        Who may answer is not decided here: ``_handle_approval_command`` decides it when it takes the request.
         """
         chat_id = msg.chat_id or msg.sender_id
-        state_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
-
-        active = self._active_tasks.get(state_key)
-        if active is None or state_key not in self._pending_approvals:
+        stored_mid = self._pending_approvals.card_message_id(routing_state_key(msg.channel, chat_id, msg.thread_id))
+        if stored_mid is None:
             return False
-
         target_mid = msg.metadata.get("target_message_id")
-        stored_mid = self._pending_approvals.card_message_id(state_key)
-        if target_mid and stored_mid and str(target_mid) != stored_mid:
-            return False
-
-        if not msg.is_group:
-            return True
-
-        actor = msg.sender_id or ""
-        if not actor:
-            return False
-        if active.requester_id and actor == active.requester_id:
-            return True
-        if actor in self._approval_co_approvers:
-            return True
-
-        logger.info(
-            "Reaction approval denied for actor %s on %s/%s (requester=%s, co_approvers=%d)",
-            actor,
-            msg.channel,
-            chat_id,
-            active.requester_id,
-            len(self._approval_co_approvers),
-        )
-        return False
+        return not (target_mid and stored_mid and str(target_mid) != stored_mid)
 
     async def _handle_approval_command(
         self: RouterCommandsHost,
@@ -149,6 +138,11 @@ class RouterCommandsApprovalMixin:
 
         Supports both single and batch decisions; LangGraph resumes the
         interrupted graph state via ``Command(resume=resume_value)``.
+
+        The request is taken only by someone who may decide it (``_may_decide``, against the member whose turn asked
+        it): the answer of anyone else is dropped and the request stays open, with no reply that would show the chat
+        an approval is pending. The check runs after the last ``await`` of this handler and directly before the
+        request is taken, so the member judged is the one whose request is taken.
         """
         chat_id = msg.chat_id or msg.sender_id
         session_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
@@ -175,6 +169,10 @@ class RouterCommandsApprovalMixin:
 
         resume_value: dict[str, object] = {"decisions": decisions}
 
+        asked = self._pending_approvals.get(session_key)
+        if asked is not None and not _may_decide(msg, asked.message.sender_id):
+            _log_refusal(msg, asked.message.sender_id)
+            return
         answered = self._pending_approvals.pop(session_key)
         if answered is None:
             # The wait ended while the decision was being checked (the timeout resumed the run, or /stop ended it).
@@ -199,9 +197,9 @@ class RouterCommandsApprovalMixin:
         Steps:
           1. Parse action ("approve" / "deny") and approval_id from content.
           2. Authorise the clicker. A held channel reply (``outbound_draft``)
-             is decided by the owner alone; for any other approval, group
-             bystanders are ignored unless they are the task's requester or a
-             co-approver.
+             is decided by the owner alone; any other approval by the member
+             whose turn asked it (``_may_decide``), and, in a group where no
+             turn of the chat asked it, by the owner.
           3. Resolve via ``ApprovalRegistry`` (only PENDING records; for an
              already-resolved approval the card is edited to say so and the
              handler exits). Resolving a held reply also sends or releases it.
@@ -224,12 +222,13 @@ class RouterCommandsApprovalMixin:
 
         chat_id = msg.chat_id or msg.sender_id
         session_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
-        active = self._active_tasks.get(session_key)
 
         from app.services.approvals.registry import ApprovalRegistry
 
         # --- Authorisation ---
         pending = await ApprovalRegistry.get_approval(approval_id)
+        active = self._active_tasks.get(session_key)
+        requester = active.requester_id if active is not None else None
         if pending is not None and pending.action_type == _OUTBOUND_DRAFT:
             # No agent task of this chat waits on a held reply, so the requester rule below cannot apply, and
             # everyone who can see the card (any group member, any DM sender) would otherwise get to decide.
@@ -245,18 +244,15 @@ class RouterCommandsApprovalMixin:
                     )
                 )
                 return
-        elif active and msg.is_group:
-            # Group bystander protection.
-            actor = msg.sender_id or ""
-            requester = active.requester_id or ""
-            if actor and requester and actor != requester and actor not in self._approval_co_approvers:
-                logger.info(
-                    "Action button approval denied: actor=%s requester=%s channel=%s",
-                    actor,
-                    requester,
-                    msg.channel,
-                )
+        elif msg.is_group and requester is None:
+            # No turn of this chat asked it, so there is no member to compare with, and everyone in the group who can
+            # see the card would otherwise get to decide: the owner does, as for a held reply.
+            if not await self._check_admin_permission(msg):
+                _log_refusal(msg, requester)
                 return
+        elif not _may_decide(msg, requester):
+            _log_refusal(msg, requester)
+            return
 
         # --- Resolve in DB ---
         record = await ApprovalRegistry.resolve_approval(

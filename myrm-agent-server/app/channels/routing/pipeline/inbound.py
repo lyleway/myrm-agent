@@ -108,7 +108,9 @@ class RouterInboundMixin:
     def _claim_approval_input(self: RouterInboundHost, msg: InboundMessage) -> bool:
         """Hand an answer to an approval (a button click, a reaction, a typed word) to the approval handlers.
 
-        A reaction never starts a turn, so one that answers no open request is dropped here.
+        A reaction never starts a turn, so one that answers no open request is dropped here. Whether the sender may
+        decide is the handlers' question (``_may_decide``): an answer they refuse is claimed all the same, so it is
+        never read as chat text.
         """
         if msg.metadata.get("callback_prefix") == "act" and isinstance(msg.content, str) and msg.content.startswith("approval:"):
             asyncio.create_task(self._handle_action_button_approval(msg))

@@ -5,22 +5,22 @@ Verifies the three pillars of the reaction approval contract:
 1.  ``parse_approval_command`` recognises the unified three-tier emoji /
     text alphabet (``allow_once`` / ``allow_always`` / ``deny``) including
     skin-tone modifiers and variation selectors.
-2.  ``RouterCommandsMixin._is_reaction_approval_valid`` enforces the
-    requester / co-approver allow-list in group chats while staying
-    permissive in 1:1 DMs.
+2.  ``RouterCommandsMixin._is_reaction_approval_valid`` accepts a reaction
+    only while the chat waits on an approval and only when it targets that
+    approval's message.
 3.  ``RouterCommandsMixin._handle_approval_command`` translates each tier
     into the harness ``apply_approval_decisions`` payload contract and
     routes the resume message back through the session gate.
 
 These tests exercise the mixin directly with light-weight stubs so the
 suite remains fast and deterministic without spinning up a real router.
+Who may answer is covered through the real router in
+``test_approval_authority.py``.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,49 +44,23 @@ from tests.support.risk_gate import API_KEY_RULE, SECRET, build_service_with_rul
 # ---------------------------------------------------------------------------
 
 
-def _make_active_task(
-    requester_id: str = "alice",
-    *,
-    channel: str = "slack",
-    chat_id: str = "C1",
-) -> _ActiveTask:
-    """Construct a stubbed ``_ActiveTask`` with a benign already-done task."""
-    loop = asyncio.new_event_loop()
-    try:
-        future = loop.create_future()
-        future.set_result(None)
-    finally:
-        loop.close()
-
-    return _ActiveTask(
-        task=future,  # type: ignore[arg-type]
-        cancel_token=MagicMock(),
-        channel=channel,
-        chat_id=chat_id,
-        placeholder_id=None,
-        started_at=0.0,
-        requester_id=requester_id,
-    )
-
-
 @dataclass(slots=True)
 class _MixinHost(RouterCommandsMixin):
     """Minimal stub satisfying ``RouterCommandsHost`` for the mixin under test."""
 
     _active_tasks: dict[str, _ActiveTask] = field(default_factory=dict)
     _pending_approvals: PendingApprovals = field(default_factory=empty_registry)
-    _approval_co_approvers: frozenset[str] = field(default_factory=frozenset)
     _bus: MagicMock = field(default_factory=MagicMock)
     _gate: MagicMock = field(default_factory=MagicMock)
 
 
-def _host(**overrides: Any) -> _MixinHost:  # noqa: ANN401
+def _host() -> _MixinHost:
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     bus.edit_channel_message = AsyncMock()
     gate = MagicMock()
     gate.submit = MagicMock()
-    return _MixinHost(_bus=bus, _gate=gate, **overrides)
+    return _MixinHost(_bus=bus, _gate=gate)
 
 
 def _reaction(
@@ -151,52 +125,30 @@ class TestThreeTierVocabulary:
 
 
 # ---------------------------------------------------------------------------
-# 2. Sender authorisation in `_is_reaction_approval_valid`
+# 2. `_is_reaction_approval_valid`: the reaction answers the chat's open request
 # ---------------------------------------------------------------------------
 
 
-class TestReactionAuthorisation:
-    def _setup(self, *, co_approvers: frozenset[str] = frozenset()) -> _MixinHost:
-        host = _host(_approval_co_approvers=co_approvers)
-        key = routing_session_key("slack", "C1")
-        host._active_tasks[key] = _make_active_task("alice")
-        host._pending_approvals.register(key, asked_in("slack", "C1", card_message_id="M1"), None)
+class TestReactionValidity:
+    def _setup(self) -> _MixinHost:
+        host = _host()
+        host._pending_approvals.register(routing_session_key("slack", "C1"), asked_in("slack", "C1", card_message_id="M1"), None)
         return host
 
-    def test_dm_bypasses_sender_check(self) -> None:
-        host = self._setup()
-        msg = _reaction(sender_id="bob", is_group=False)
-        assert host._is_reaction_approval_valid(msg) is True
+    def test_reaction_to_the_approval_message_is_valid(self) -> None:
+        assert self._setup()._is_reaction_approval_valid(_reaction()) is True
 
-    def test_group_requester_is_allowed(self) -> None:
-        host = self._setup()
-        msg = _reaction(sender_id="alice")
-        assert host._is_reaction_approval_valid(msg) is True
-
-    def test_group_bystander_is_denied(self) -> None:
-        host = self._setup()
-        msg = _reaction(sender_id="bob")
-        assert host._is_reaction_approval_valid(msg) is False
-
-    def test_group_co_approver_is_allowed(self) -> None:
-        host = self._setup(co_approvers=frozenset({"oncall"}))
-        msg = _reaction(sender_id="oncall")
-        assert host._is_reaction_approval_valid(msg) is True
+    def test_reaction_that_names_no_target_message_is_valid(self) -> None:
+        msg = _reaction()
+        del msg.metadata["target_message_id"]
+        assert self._setup()._is_reaction_approval_valid(msg) is True
 
     def test_target_message_mismatch_is_denied(self) -> None:
-        host = self._setup()
-        msg = _reaction(sender_id="alice", target_message_id="OTHER")
-        assert host._is_reaction_approval_valid(msg) is False
+        msg = _reaction(target_message_id="OTHER")
+        assert self._setup()._is_reaction_approval_valid(msg) is False
 
-    def test_no_active_task_is_denied(self) -> None:
-        host = _host()
-        msg = _reaction(sender_id="alice")
-        assert host._is_reaction_approval_valid(msg) is False
-
-    def test_empty_sender_is_denied(self) -> None:
-        host = self._setup()
-        msg = _reaction(sender_id="")
-        assert host._is_reaction_approval_valid(msg) is False
+    def test_chat_that_waits_on_no_approval_is_denied(self) -> None:
+        assert _host()._is_reaction_approval_valid(_reaction()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -208,8 +160,8 @@ class TestHandleApprovalContract:
     def _setup(self) -> tuple[_MixinHost, InboundMessage]:
         host = _host()
         key = routing_session_key("slack", "C1")
-        host._active_tasks[key] = _make_active_task("alice")
-        host._pending_approvals.register(key, asked_in("slack", "C1", card_message_id="MSGID"), None)
+        asked = asked_in("slack", "C1", sender_id="alice", is_group=True, card_message_id="MSGID")
+        host._pending_approvals.register(key, asked, None)
         msg = _reaction(sender_id="alice")
         return host, msg
 

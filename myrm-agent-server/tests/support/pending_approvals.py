@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Protocol
 from unittest.mock import AsyncMock, MagicMock
 
 from app.channels.routing.pending_approvals import PendingApproval, PendingApprovals
 from app.channels.routing.router import AgentRouter
+from app.channels.routing.router_models import _ActiveTask
 from app.channels.types import InboundMessage
 
 
@@ -79,6 +81,25 @@ def asked_in(
         metadata={"locale": locale},
     )
     return PendingApproval(card_message_id=card_message_id, message=message, user_id=user_id)
+
+
+def finished_turn(requester_id: str = "u1", *, channel: str = "telegram", chat_id: str = "c1") -> _ActiveTask:
+    """The registry entry of a turn started by ``requester_id`` that has finished: it stays while its approval is open."""
+    loop = asyncio.new_event_loop()
+    try:
+        done = loop.create_future()
+        done.set_result(None)
+    finally:
+        loop.close()
+    return _ActiveTask(
+        task=done,  # type: ignore[arg-type]
+        cancel_token=MagicMock(),
+        channel=channel,
+        chat_id=chat_id,
+        placeholder_id=None,
+        started_at=0.0,
+        requester_id=requester_id,
+    )
 
 
 def empty_registry() -> PendingApprovals:
