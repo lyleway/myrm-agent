@@ -164,39 +164,42 @@ async def test_the_reply_is_still_delivered_when_the_button_cannot_be_built(monk
     assert not patched.components
 
 
-async def test_btw_notifier_delivers_handoff_for_a_source_chat(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``_deliver`` attaches the handoff button for the task's originating Chat UUID."""
-    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
-
-    session_key = "telegram:btw-notify-peer-7"
-    chat = await ChatService.get_or_create_channel_chat(session_key, "telegram")
-
+@pytest.fixture
+def sent_messages(monkeypatch: pytest.MonkeyPatch) -> list[OutboundMessage]:
+    """The messages the channel bus is asked to send."""
     sent: list[OutboundMessage] = []
 
     async def _capture(msg: OutboundMessage) -> None:
         sent.append(msg)
 
-    monkeypatch.setattr(
-        "app.core.channel_bridge.channel_gateway.bus.send_now",
-        _capture,
-    )
+    monkeypatch.setattr("app.core.channel_bridge.channel_gateway.bus.send_now", _capture)
+    return sent
 
-    notifier = BtwTaskNotifier(ServerEventBus())
-    await notifier._deliver(
-        {
-            "channel": "telegram",
-            "chat_id": "btw-notify-peer-7",
-            "source_chat_id": chat.id,
-            "task_id": "task-1",
-            "status": "completed",
-            "title": "Background task",
-            "result": "done",
-            "locale": "en",
-        }
-    )
 
-    assert sent, "the notification must still be delivered"
-    components = sent[-1].components or ()
+def _task_done_event(**overrides: str) -> dict[str, object]:
+    """A finished-background-task event for an IM peer, with ``overrides`` applied."""
+    return {
+        "channel": "telegram",
+        "chat_id": "btw-notify-peer-7",
+        "task_id": "task-1",
+        "status": "completed",
+        "title": "Background task",
+        "result": "done",
+        "locale": "en",
+        **overrides,
+    }
+
+
+async def test_btw_notifier_delivers_handoff_for_a_source_chat(sent_messages: list[OutboundMessage]) -> None:
+    """``_deliver`` attaches the handoff button for the task's originating Chat UUID."""
+    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
+
+    chat = await ChatService.get_or_create_channel_chat("telegram:btw-notify-peer-7", "telegram")
+
+    await BtwTaskNotifier(ServerEventBus())._deliver(_task_done_event(source_chat_id=chat.id))
+
+    assert sent_messages, "the notification must still be delivered"
+    components = sent_messages[-1].components or ()
     assert components, "the originating chat must get the handoff button"
     btn = components[-1][0]
     assert isinstance(btn, ActionButton)
@@ -204,44 +207,28 @@ async def test_btw_notifier_delivers_handoff_for_a_source_chat(monkeypatch: pyte
     assert "btw-notify-peer-7" not in btn.url
 
 
-async def test_btw_notifier_btw_branch_skips_handoff(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_btw_notifier_btw_branch_skips_handoff(sent_messages: list[OutboundMessage]) -> None:
     """The BTW branch carries an IM peer in ``chat_id``, so there is no Chat row to link to."""
     from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
 
-    sent: list[OutboundMessage] = []
-
-    async def _capture(msg: OutboundMessage) -> None:
-        sent.append(msg)
-
-    monkeypatch.setattr("app.core.channel_bridge.channel_gateway.bus.send_now", _capture)
-
-    notifier = BtwTaskNotifier(ServerEventBus())
-    await notifier._deliver(
-        {
-            "channel": "telegram",
-            "chat_id": "im-peer-not-a-uuid",
-            "background_source": "btw",
-            "task_id": "task-2",
-            "status": "completed",
-            "title": "Background task",
-            "result": "done",
-            "locale": "en",
-        }
+    await BtwTaskNotifier(ServerEventBus())._deliver(
+        _task_done_event(chat_id="im-peer-not-a-uuid", background_source="btw", task_id="task-2")
     )
 
-    assert sent, "the notification must still be delivered"
-    assert not (sent[-1].components or ()), "an IM peer must not be resolved as a Chat UUID"
+    assert sent_messages, "the notification must still be delivered"
+    assert not (sent_messages[-1].components or ()), "an IM peer must not be resolved as a Chat UUID"
 
 
-async def test_btw_notifier_no_task_id_skips_handoff() -> None:
-    """btw_notifier only attaches handoff when task_id is present (L103)."""
-    task_id = ""
-    components: tuple[tuple[object, ...], ...] = ()
-    if task_id:
-        from app.remote_access.mobile_deep_link import resolve_web_handoff_components
+async def test_btw_notifier_without_a_task_id_skips_handoff(sent_messages: list[OutboundMessage]) -> None:
+    """A notification that names no task links no chat, even when it carries a source chat."""
+    from app.core.channel_bridge.btw_notifier import BtwTaskNotifier
 
-        components = await resolve_web_handoff_components("some-id", locale="en")
-    assert not components
+    chat = await ChatService.get_or_create_channel_chat("telegram:btw-no-task-peer", "telegram")
+
+    await BtwTaskNotifier(ServerEventBus())._deliver(_task_done_event(source_chat_id=chat.id, task_id=""))
+
+    assert sent_messages, "the notification must still be delivered"
+    assert not (sent_messages[-1].components or ())
 
 
 async def test_idempotent_get_or_create() -> None:
