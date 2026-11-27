@@ -1,14 +1,16 @@
 """MCP stdio environment variable security guard.
 
 Provides:
-- ``is_dangerous_env_key``: Checks if an environment variable key represents a high-risk
-  injection vector (dynamic linker, runtime hooks, proxy, TLS bypass, package manager redirection,
-  git command hijacking). Supports case-insensitive normalization and prefix/wildcard detection.
+- ``is_dangerous_env_key``: Checks if an environment variable key is a name an MCP server process must not
+  receive: an exact name or name family of the dangerous-environment blacklist (dynamic linker, language runtimes,
+  shell startup, git program hooks, git environment configuration ``GIT_CONFIG_*``, proxies, TLS bypass,
+  package-source redirection, compilers, tokens) or any name carrying ``VAULT_MASTER_KEY``. Names are compared
+  case-insensitively.
 - ``sanitize_mcp_env``: Pure function that strips dangerous environment variables from a
   dictionary before subprocess spawning, returning the sanitized dictionary and list of blocked keys.
 
 [INPUT]
-- myrm_agent_harness.toolkits.code_execution.security.blacklist (POS: core dangerous env definitions)
+- myrm_agent_harness.toolkits.code_execution.security.blacklist::DANGEROUS_ENV_VARS, DANGEROUS_ENV_PREFIXES (POS: the names and name families an MCP server's environment must not carry)
 
 [OUTPUT]
 - is_dangerous_env_key: Check if a single environment variable key is dangerous

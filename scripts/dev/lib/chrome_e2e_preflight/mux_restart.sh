@@ -13,7 +13,8 @@ _mux_attach_timeout_restart_allowed() {
 }
 
 _mux_parallel_load_blocks_global_restart() {
-  # UBDP-6: health SSOT — unhealthy mux always allows restart; only HEALTHY+parallel blocks.
+  # Policy lives in mux/health.py: an unhealthy daemon may always be restarted; a healthy one is protected while
+  # parallel contexts or wave leases are active, or while its load cannot be read.
   if PYTHONPATH="${SCRIPT_DIR}/lib:${PYTHONPATH:-}" "${PREFLIGHT_PY}" \
     "${SCRIPT_DIR}/lib/mux/health.py" restart-blocked 2>/dev/null; then
     return 0

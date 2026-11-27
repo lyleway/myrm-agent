@@ -5,8 +5,9 @@ import os
 
 from mcp.server import MCPServer
 
-# Only these names are ever looked at, so the server cannot leak anything else about the host environment. The report counts
-# them instead of printing ``NAME=state`` pairs: the tool-output redaction masks the value after a name like ``GIT_CONFIG_KEY_0``.
+# Only these names are ever looked at, so the server cannot leak anything else about the host environment. The report
+# carries counts, not ``NAME=state`` pairs: the tool-output redaction masks the value after a name like
+# ``GIT_CONFIG_KEY_0``, so such a pair would not survive it.
 _GIT_CONFIG_NAMES = ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0")
 _CONTROL_NAME = "E2E_PROBE_CONTROL"
 

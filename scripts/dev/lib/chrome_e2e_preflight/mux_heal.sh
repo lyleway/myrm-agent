@@ -140,7 +140,7 @@ _heal_mux_under_parallel_attach_load() {
 
 _heal_mux_request_timeout_drift() {
   [[ "${MUX_USING}" -eq 1 ]] || return 0
-  # UBDP-6: reap zombie mux (alive pid without socket) before heal/restart decisions.
+  # Reap a zombie mux (alive pid without socket) before heal/restart decisions.
   if PYTHONPATH="${SCRIPT_DIR}/lib:${PYTHONPATH:-}" "${PREFLIGHT_PY}" \
     "${SCRIPT_DIR}/lib/mux/health.py" reap >/dev/null 2>&1; then
     :

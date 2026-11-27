@@ -112,7 +112,8 @@ pub fn stop_frontend_monitor(app: &AppHandle) {
 ///
 /// Prevents host-machine pollution (conda PYTHONPATH, nvm NODE_OPTIONS, corporate
 /// HTTP_PROXY, dynamic linker injection, etc.) from leaking into Myrm runtimes.
-/// Mirrors the harness-layer blacklist in `myrm_agent_harness/.../blacklist.py`.
+/// The harness keeps its own name tables for the processes it starts
+/// (`myrm_agent_harness/core/security/process_env`); this list is the desktop shell's own.
 pub const TOXIC_ENV_VARS: &[&str] = &[
     "PYTHONPATH",
     "PYTHONHOME",
