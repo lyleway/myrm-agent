@@ -73,8 +73,12 @@ class TestAuthStatus:
         assert codex["installed"] is False
         assert codex["authenticated"] is False
         assert "readyForDelegation" not in codex
-        assert codex["loginStrategy"] == "device_code"
+        assert codex["loginStrategy"] == "browser_oauth"
         assert codex["scriptableLogin"] is True
+        assert codex["needsCodeInput"] is False
+        claude = backends["claude"]
+        assert claude["loginStrategy"] == "paste_code"
+        assert claude["needsCodeInput"] is True
 
     def test_status_names_the_transport_each_agent_runs_over(self, client):
         detector = MagicMock()

@@ -38,7 +38,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 from tests.toolkits.acp._fake_anthropic import FakeAnthropicApi
 from tests.toolkits.acp._fake_model_apis import FakeResponsesApi
-from tests.toolkits.acp.cli_contract import cli_binary
+from tests.toolkits.acp.cli_contract import CLAUDE_OAUTH, CODEX_API_KEY, cli_binary
 from tests.toolkits.acp.runtime.acp._fakes import MemorySessionStore
 from tests.toolkits.acp.runtime.acp._real_agents import SCRIPTED_AGENTS, scripted_pool
 from tests.toolkits.acp.runtime.codex._real import STUB_KEY, codex_config_toml
@@ -49,17 +49,6 @@ _REPLY = "hello from the scripted model"
 _TURN_SECONDS = 90
 # What a CLI keeps in a home of the user's when nothing relocates it.
 _CLI_HOMES = (".claude", ".claude.json", ".codex", ".gemini", ".qwen")
-# Content each CLI itself accepts as a login without contacting any server.
-_CLAUDE_OAUTH = {
-    "claudeAiOauth": {
-        "accessToken": "sk-ant-oat01-contract",
-        "refreshToken": "sk-ant-ort01-contract",
-        "expiresAt": 4102444800000,
-        "scopes": ["user:inference"],
-        "subscriptionType": "max",
-    }
-}
-_CODEX_API_KEY = {"OPENAI_API_KEY": "sk-contract-0000000000000000000000000000"}
 
 # One turn of an agent run as an account: (the account, the process's own home, the workspace, the session store).
 TurnAs = Callable[[Account, Path, Path, CliSessionStore | None], Awaitable[list[RuntimeEvent]]]
@@ -210,7 +199,7 @@ async def _login_report(account: Account, process_home: Path) -> LoginReport | N
 
 
 def _store_login(account: Account) -> None:
-    content = _CLAUDE_OAUTH if account.backend == "claude" else _CODEX_API_KEY
+    content = CLAUDE_OAUTH if account.backend == "claude" else CODEX_API_KEY
     CredentialStore(account.env({"HOME": str(account.home)})).import_credential(account.backend, json.dumps(content))
 
 

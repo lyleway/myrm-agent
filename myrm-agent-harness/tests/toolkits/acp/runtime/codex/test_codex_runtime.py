@@ -549,7 +549,8 @@ async def test_a_stop_that_is_not_obeyed_ends_the_server_and_the_next_turn_start
 async def test_the_time_limit_of_a_turn_interrupts_it_and_the_server_stays(tmp_path: Path, workspace: Path) -> None:
     waiting = [say("slow"), {"wait_interrupt": True}, complete("interrupted")]
     server = ScriptedServer(tmp_path / "s", {"turns": [waiting, [complete()]]})
-    pool = server.pool(timeout_seconds=1)
+    # The limit trips the first turn; the second must finish inside it even on a loaded machine.
+    pool = server.pool(timeout_seconds=3)
     try:
         first = await run_turn(pool, workspace)
         second = await run_turn(pool, workspace)

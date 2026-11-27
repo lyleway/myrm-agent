@@ -77,7 +77,7 @@ const hostedStatus = {
   transport: 'cli',
   authenticated: false,
   authStatus: 'not_authenticated',
-  loginStrategy: 'device_code',
+  loginStrategy: 'browser_oauth',
   scriptableLogin: true,
   needsCodeInput: false,
   subscriptionLoginAllowed: false,

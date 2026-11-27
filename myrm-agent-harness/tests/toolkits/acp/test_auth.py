@@ -1,26 +1,21 @@
 """Tests for the ACP subscription auth subsystem.
 
-Covers auth profiles, credential detection/import/clear, the interactive login
-session driver, and auth_mode-aware environment sanitization.
+Covers auth profiles, credential detection/import/clear, and auth_mode-aware
+environment sanitization. The interactive login session is in ``test_login_session``.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import (
-    AuthEventType,
-    AuthProfile,
     AuthStatus,
-    CliLoginSession,
     CredentialStorageDisabledError,
     CredentialStore,
-    LoginStrategy,
     known_backends,
     profile_for,
 )
@@ -147,17 +142,17 @@ class TestProfiles:
 
 
 class TestCredentialStore:
-    def test_state_not_authenticated(self, tmp_path) -> None:
+    def test_state_not_authenticated(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         state = store.state("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
         assert state.authenticated is False
 
-    def test_state_unknown_backend(self, tmp_path) -> None:
+    def test_state_unknown_backend(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.state("mystery").status is AuthStatus.UNKNOWN
 
-    def test_import_then_authenticated(self, tmp_path) -> None:
+    def test_import_then_authenticated(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         state = store.import_credential("codex", '{"tokens": {"access_token": "abc"}}')
         assert state.status is AuthStatus.AUTHENTICATED
@@ -167,50 +162,50 @@ class TestCredentialStore:
         assert json.loads(written.read_text())["tokens"]["access_token"] == "abc"
 
     @pytest.mark.skipif(not _POSIX, reason="POSIX file permissions")
-    def test_import_sets_owner_only_perms(self, tmp_path) -> None:
+    def test_import_sets_owner_only_perms(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
         mode = (tmp_path / ".codex" / "auth.json").stat().st_mode & 0o777
         assert mode == 0o600
 
-    def test_import_env_override_home(self, tmp_path) -> None:
+    def test_import_env_override_home(self, tmp_path: Path) -> None:
         persistent = tmp_path / "persistent" / ".codex"
         store = CredentialStore({"HOME": str(tmp_path), "CODEX_HOME": str(persistent)})
         store.import_credential("codex", '{"x": 1}')
         assert (persistent / "auth.json").is_file()
 
-    def test_import_claude_credentials_file(self, tmp_path) -> None:
+    def test_import_claude_credentials_file(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("claude", '{"claudeAiOauth": {"accessToken": "t"}}')
         assert (tmp_path / ".claude" / ".credentials.json").is_file()
 
-    def test_import_empty_raises(self, tmp_path) -> None:
+    def test_import_empty_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="empty"):
             store.import_credential("codex", "   ")
 
-    def test_import_invalid_json_raises(self, tmp_path) -> None:
+    def test_import_invalid_json_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="not valid JSON"):
             store.import_credential("codex", "not json")
 
-    def test_import_unknown_backend_raises(self, tmp_path) -> None:
+    def test_import_unknown_backend_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="No auth profile"):
             store.import_credential("mystery", '{"x": 1}')
 
     @pytest.mark.parametrize("bad", ["../escape.json", "sub/dir.json", ".."])
-    def test_import_bad_filename_raises(self, tmp_path, bad: str) -> None:
+    def test_import_bad_filename_raises(self, tmp_path: Path, bad: str) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="Invalid credential filename"):
             store.import_credential("codex", '{"x": 1}', filename=bad)
 
-    def test_import_empty_filename_uses_default(self, tmp_path) -> None:
+    def test_import_empty_filename_uses_default(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}', filename="")
         assert (tmp_path / ".codex" / "auth.json").is_file()
 
-    def test_clear_removes_credentials(self, tmp_path) -> None:
+    def test_clear_removes_credentials(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
         assert store.is_authenticated("codex") is True
@@ -218,38 +213,38 @@ class TestCredentialStore:
         assert state.status is AuthStatus.NOT_AUTHENTICATED
         assert store.is_authenticated("codex") is False
 
-    def test_clear_idempotent(self, tmp_path) -> None:
+    def test_clear_idempotent(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.clear("codex").status is AuthStatus.NOT_AUTHENTICATED
 
-    def test_empty_credential_file_not_authenticated(self, tmp_path) -> None:
+    def test_empty_credential_file_not_authenticated(self, tmp_path: Path) -> None:
         cred = tmp_path / ".codex" / "auth.json"
         cred.parent.mkdir(parents=True)
         cred.write_text("")
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.is_authenticated("codex") is False
 
-    def test_import_oversized_credential_raises(self, tmp_path) -> None:
+    def test_import_oversized_credential_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         oversized = '{"x": "' + "a" * (300 * 1024) + '"}'
         with pytest.raises(ValueError, match="exceeds"):
             store.import_credential("codex", oversized)
 
-    def test_clear_unknown_backend_raises(self, tmp_path) -> None:
+    def test_clear_unknown_backend_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="No auth profile"):
             store.clear("mystery")
 
-    def test_clear_survives_unlink_oserror(self, tmp_path, monkeypatch) -> None:
+    def test_clear_survives_unlink_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         store.import_credential("codex", '{"x": 1}')
 
         real_unlink = tmp_path.__class__.unlink
 
-        def _flaky_unlink(self, *args, **kwargs):
+        def _flaky_unlink(self: Path, missing_ok: bool = False) -> None:
             if self.name.endswith("auth.json"):
                 raise OSError("permission denied")
-            return real_unlink(self, *args, **kwargs)
+            real_unlink(self, missing_ok=missing_ok)
 
         monkeypatch.setattr(tmp_path.__class__, "unlink", _flaky_unlink)
 
@@ -332,181 +327,3 @@ class TestBuildSafeEnvAuthMode:
         )
         env = build_safe_env(cfg, base_env={"OPENAI_API_KEY": "from-host", "PATH": "/bin"})
         assert env["OPENAI_API_KEY"] == "injected"
-
-
-_LOGIN_OK_SCRIPT = (
-    "import os, pathlib;"
-    "print('To sign in, visit https://auth.example.com/device and enter ABCD-1234');"
-    "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-    "p.parent.mkdir(parents=True, exist_ok=True);"
-    "p.write_text('{\"ok\": true}')"
-)
-
-_LOGIN_FAIL_SCRIPT = "import sys; sys.stderr.write('login failed\\n'); sys.exit(3)"
-
-
-def _codex_login_profile(login_args: tuple[str, ...]) -> AuthProfile:
-    return AuthProfile(
-        backend="codex",
-        home_env="CODEX_HOME",
-        home_dir=".codex",
-        credential_files=("auth.json",),
-        login_strategy=LoginStrategy.DEVICE_CODE,
-        login_args=login_args,
-        logout_args=None,
-        needs_code_input=False,
-        api_key_env=("OPENAI_API_KEY",),
-    )
-
-
-class TestCliLoginSession:
-    @pytest.mark.asyncio
-    async def test_non_scriptable_yields_import_prompt(self) -> None:
-        profile = profile_for("gemini")
-        assert profile is not None
-        session = CliLoginSession("gemini", profile)
-        events = [e async for e in session.run()]
-        assert len(events) == 1
-        assert events[0].type is AuthEventType.PROMPT
-        assert "import" in events[0].message.lower()
-
-    @pytest.mark.asyncio
-    async def test_successful_login_persists_and_succeeds(self, tmp_path) -> None:
-        codex_home = tmp_path / ".codex"
-        profile = _codex_login_profile(("-c", _LOGIN_OK_SCRIPT))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(codex_home)},
-        )
-        events = [e async for e in session.run()]
-        types = [e.type for e in events]
-        assert AuthEventType.SUCCESS in types
-
-        prompts = [e for e in events if e.type is AuthEventType.PROMPT]
-        assert any(e.url == "https://auth.example.com/device" for e in prompts)
-        assert any(e.code == "ABCD-1234" for e in prompts)
-        assert (codex_home / "auth.json").is_file()
-
-    @pytest.mark.asyncio
-    async def test_failed_login_emits_error(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", _LOGIN_FAIL_SCRIPT))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-
-    @pytest.mark.asyncio
-    async def test_missing_executable_emits_error(self, tmp_path) -> None:
-        profile = _codex_login_profile(("login",))
-        session = CliLoginSession(
-            "/nonexistent/codex-binary-xyz",
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert any(e.type is AuthEventType.ERROR for e in events)
-
-    @pytest.mark.asyncio
-    async def test_login_timeout_emits_error(self, tmp_path) -> None:
-        # Never exits: forces the asyncio.timeout path (L139-142).
-        sleepy = "import time; time.sleep(60)"
-        profile = _codex_login_profile(("-c", sleepy))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-            timeout_seconds=1,
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-        assert "timed out" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_finished_without_credential_emits_error(self, tmp_path) -> None:
-        # Exits 0 but never writes a credential file (L150-153).
-        noop = "pass"
-        profile = _codex_login_profile(("-c", noop))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert events[-1].type is AuthEventType.ERROR
-        assert "no credential was persisted" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_feed_forwards_line_to_stdin(self, tmp_path) -> None:
-        # Reads one stdin line and prints it back; exercises feed() (L157-166).
-        echo_stdin = (
-            "import sys, os, pathlib;"
-            "line = sys.stdin.readline();"
-            "print('received:' + line.strip());"
-            "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-            "p.parent.mkdir(parents=True, exist_ok=True);"
-            "p.write_text('{\"ok\": true}')"
-        )
-        profile = _codex_login_profile(("-c", echo_stdin))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        iterator = session.run()
-        first = await anext(iterator)  # STATUS: process spawned, stdin open
-        assert first.type is AuthEventType.STATUS
-        # The child blocks on stdin.readline(); unblock it by feeding a line now.
-        await session.feed("ABCD-EFGH")
-        rest = [e async for e in iterator]
-        events = [first, *rest]
-        assert any(e.type is AuthEventType.SUCCESS for e in events)
-        assert any("received:ABCD-EFGH" in e.message for e in events)
-
-    @pytest.mark.asyncio
-    async def test_feed_after_process_exit_is_noop(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", "pass"))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        _ = [e async for e in session.run()]
-        # Process is gone: feed must not raise (guarded by proc is None / closing stdin).
-        await session.feed("ABCD-EFGH")
-
-    @pytest.mark.asyncio
-    async def test_cancel_terminates_process_group(self, tmp_path) -> None:
-        profile = _codex_login_profile(("-c", "import time; time.sleep(60)"))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        iterator = session.run()
-        await anext(iterator)  # STATUS event: process spawned
-        await session.cancel()
-        # cancel() is idempotent and safe after termination.
-        await session.cancel()
-
-    @pytest.mark.asyncio
-    async def test_classify_skips_blank_line(self, tmp_path) -> None:
-        # A blank console line must not surface as an event (L175-176).
-        blank_line = (
-            "import sys, os, pathlib;"
-            "print('');"
-            "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-            "p.parent.mkdir(parents=True, exist_ok=True);"
-            "p.write_text('{\"ok\": true}')"
-        )
-        profile = _codex_login_profile(("-c", blank_line))
-        session = CliLoginSession(
-            sys.executable,
-            profile,
-            base_env={**os.environ, "CODEX_HOME": str(tmp_path / ".codex")},
-        )
-        events = [e async for e in session.run()]
-        assert not any(e.message == "" for e in events)

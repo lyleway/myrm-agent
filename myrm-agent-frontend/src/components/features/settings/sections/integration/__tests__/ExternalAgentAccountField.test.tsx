@@ -284,5 +284,19 @@ describe('ExternalAgentAccountField', () => {
       expect(onDeleted).not.toHaveBeenCalled();
       expect(picker()).toHaveTextContent('work');
     });
+
+    it('keeps the account and says why when its CLI could not log out of it', async () => {
+      mocks.remove.mockRejectedValue(new ApiError('kept', 409));
+      const { onChange, onDeleted } = renderField({ initial: 'work' });
+
+      await userEvent.click(deleteButton());
+      await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'delete' }));
+
+      expect(mocks.toast.error).toHaveBeenCalledWith('accountDeleteKept');
+      expect(mocks.toast.success).not.toHaveBeenCalled();
+      expect(onChange).not.toHaveBeenCalled();
+      expect(onDeleted).not.toHaveBeenCalled();
+      expect(picker()).toHaveTextContent('work');
+    });
   });
 });
