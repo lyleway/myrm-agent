@@ -141,10 +141,11 @@ export const inferStageLabel = (step: ProgressItem, t: TranslateFn): string => {
 };
 
 // `delegation_<agent>_<kind>` steps of a delegation to an external agent: its status line, one of its tool calls,
-// or a title-only notice (the conversation it had earlier did not continue, the images were not handed to it, or the
-// turn ended before the agent finished: its turn limit, its reply length limit, or its refusal).
+// or a title-only notice (the conversation it had earlier did not continue, the images were not handed to it, the
+// user's memory was not handed to it or it never connected to it, or the turn ended before the agent finished: its
+// turn limit, its reply length limit, or its refusal).
 const DELEGATION_STEP_RE =
-  /^delegation_(.+)_(status|tool|session_expired|session_workspace_changed|images_not_sent|turn_limit|max_tokens|refusal)$/;
+  /^delegation_(.+)_(status|tool|session_expired|session_workspace_changed|images_not_sent|mcp_not_attached|mcp_not_connected|turn_limit|max_tokens|refusal)$/;
 
 type DelegationKind =
   | 'status'
@@ -152,6 +153,8 @@ type DelegationKind =
   | 'session_expired'
   | 'session_workspace_changed'
   | 'images_not_sent'
+  | 'mcp_not_attached'
+  | 'mcp_not_connected'
   | 'turn_limit'
   | 'max_tokens'
   | 'refusal';

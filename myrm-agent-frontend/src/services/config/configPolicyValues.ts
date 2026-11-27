@@ -54,6 +54,11 @@ export interface ExternalAgentConfig {
    * subscription never mix. Absent: the login the CLI already has on this machine.
    */
   account?: string;
+  /**
+   * The user chose to let this agent read their memory and knowledge base, never to change them. Only an explicit
+   * `true` is a consent; absent is no.
+   */
+  shareMemory?: boolean;
 }
 
 /**

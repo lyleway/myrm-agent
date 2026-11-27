@@ -14,6 +14,7 @@ import {
   envRowProblems,
   isValidAccountName,
   knownBackendOfCommand,
+  memoryNeedsTrustedFolder,
   newEnvRow,
   normalizePermissionMode,
   permissionHintKey,
@@ -99,6 +100,20 @@ describe('cleanAgent', () => {
   it('stores an API key as the auth mode where subscription login is not allowed', () => {
     expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), false).authMode).toBe('api_key');
     expect(cleanAgent(toDraft(stored({ authMode: undefined })), false).authMode).toBe('api_key');
+  });
+
+  it('stores sharing memory only as the explicit true of a consent', () => {
+    expect(cleanAgent(toDraft(stored({ shareMemory: true }))).shareMemory).toBe(true);
+    expect(cleanAgent(toDraft(stored({ shareMemory: false })))).not.toHaveProperty('shareMemory');
+    expect(cleanAgent(toDraft(stored()))).not.toHaveProperty('shareMemory');
+  });
+
+  it('does not take a stored value that is not a boolean true for a consent', () => {
+    for (const value of ['true', 'yes', 1, {}]) {
+      const agent = { ...stored(), shareMemory: value } as unknown as ExternalAgentConfig;
+
+      expect(cleanAgent(toDraft(agent))).not.toHaveProperty('shareMemory');
+    }
   });
 });
 
@@ -342,5 +357,19 @@ describe('accounts', () => {
 
       expect(detachAccount(agents, 'claude', 'work')).toBe(agents);
     });
+  });
+});
+
+describe('memoryNeedsTrustedFolder', () => {
+  it('is true for Gemini CLI wherever it lives and whatever its extension', () => {
+    expect(memoryNeedsTrustedFolder('gemini')).toBe(true);
+    expect(memoryNeedsTrustedFolder('/usr/local/bin/gemini')).toBe(true);
+    expect(memoryNeedsTrustedFolder('C:\\tools\\gemini.cmd')).toBe(true);
+  });
+
+  it('is false for the other agents and for a command that only carries its name', () => {
+    for (const command of ['claude', 'codex', 'qwen', 'gemini-wrapper', '']) {
+      expect(memoryNeedsTrustedFolder(command)).toBe(false);
+    }
   });
 });
