@@ -11,6 +11,10 @@ import uvicorn
 from myrm_agent_harness.agent.skill_agent import wait_all_background_tasks
 from myrm_agent_harness.api import track_background_task
 from myrm_agent_harness.api.hooks import configure_background_job_store, get_background_job_store
+from myrm_agent_harness.toolkits.code_execution.workspace.storage_root_bind import (
+    bind_workspace_storage_root,
+    workspace_storage_fs_root_strict,
+)
 
 from tests.support.process_state_isolation import forget_tasks_of_closed_loops
 
@@ -55,6 +59,24 @@ def test_a_run_that_started_jobs_leaves_the_job_ledger_bound(tmp_path: Path) -> 
 
 
 def test_the_test_after_it_finds_no_job_ledger_bound() -> None:
+    assert get_background_job_store() is None
+
+
+# Another pair: the first binds the workspace root the way a synchronous fixture does, in the thread's own context where
+# nothing releases it, and starts a job in the ledger that is then bound from it; the second finds neither the root nor
+# the ledger, so it does not read the job.
+def test_a_synchronous_fixture_leaves_the_workspace_root_bound(tmp_path: Path) -> None:
+    bind_workspace_storage_root(tmp_path)
+    ledger = get_background_job_store()
+    assert ledger is not None
+    ledger.insert_running(job_id="leaked", pid=1, session_id="chat", command="sleep 60", started_at=1.0)
+
+    assert [record.job_id for record in ledger.list_recent()] == ["leaked"]
+
+
+def test_the_test_after_it_finds_no_workspace_root_bound() -> None:
+    with pytest.raises(RuntimeError):
+        workspace_storage_fs_root_strict()
     assert get_background_job_store() is None
 
 

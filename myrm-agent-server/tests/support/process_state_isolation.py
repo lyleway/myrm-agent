@@ -106,6 +106,13 @@ def _isolate_settings_singleton() -> Iterator[None]:
         module.get_settings()
 
 
+def forget_workspace_storage_root() -> None:
+    """Unbind the workspace storage root of the thread's own context."""
+    module = sys.modules.get("myrm_agent_harness.toolkits.code_execution.workspace.storage_root_bind")
+    if module is not None:
+        module._workspace_storage_fs_root.set(None)
+
+
 def forget_background_job_store() -> None:
     """Unbind the process-wide background job ledger, so the next ask binds it again from the run it comes from."""
     module = sys.modules.get("myrm_agent_harness.agent.meta_tools.bash._background.job_store")
@@ -114,11 +121,14 @@ def forget_background_job_store() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_background_job_store() -> Iterator[None]:
-    """The first ask for the job ledger binds it, for the rest of the process, to the workspace of the run that asked,
-    and the jobs that run started stay in it: a later test that lists the jobs of its own registry then reads the
-    rows of tests that ran before it."""
+def _isolate_workspace_root_and_job_ledger() -> Iterator[None]:
+    """The first ask for the job ledger binds it, for the rest of the process, to the workspace root of the run that
+    asked, and the jobs that run started stay in it: a later test that lists the jobs of its own registry then reads
+    the rows of tests that ran before it. A synchronous fixture or test runs in the thread's own context, so a root
+    it binds and never releases stays bound for every test after it, and each of them binds the ledger to that root
+    again."""
     yield
+    forget_workspace_storage_root()
     forget_background_job_store()
 
 
