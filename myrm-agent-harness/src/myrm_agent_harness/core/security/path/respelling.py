@@ -9,6 +9,7 @@ the respelling alike, so what the read opens is always a file some verdict has s
 - path.filesystem::is_blocked_device_path, is_network_or_nt_path (POS: Generic filesystem path safety — no product protection policy)
 - path.rules::is_sensitive_file (POS: Protected-path policy)
 - path.typed_path::spelled_path (POS: The one definition of which file a tool opens for the text it was given)
+- utils.unicode_normalize::normalize (POS: Unicode normalization in time linear in the text, the one entry for text that can come from a model)
 
 [OUTPUT]
 - generate_unicode_path_candidates: the distinct spellings of a path over 7 normalization stages, in stage order
@@ -22,11 +23,11 @@ from __future__ import annotations
 
 import os
 import re
-import unicodedata
 
 from myrm_agent_harness.core.security.path.filesystem import is_blocked_device_path, is_network_or_nt_path
 from myrm_agent_harness.core.security.path.rules import is_sensitive_file
 from myrm_agent_harness.core.security.path.typed_path import spelled_path
+from myrm_agent_harness.utils.unicode_normalize import normalize
 
 __all__ = ("find_existing_unicode_path", "generate_unicode_path_candidates")
 
@@ -90,24 +91,24 @@ def generate_unicode_path_candidates(raw_path: str) -> list[str]:
     base = stage0 or raw_path
 
     # Stage 1: NFC
-    _add(unicodedata.normalize("NFC", base))
+    _add(normalize("NFC", base))
 
     # Stage 2: NFD
-    _add(unicodedata.normalize("NFD", base))
+    _add(normalize("NFD", base))
 
     # Stage 3: NFKC
-    _add(unicodedata.normalize("NFKC", base))
+    _add(normalize("NFKC", base))
 
     # Stage 4: NFKD
-    _add(unicodedata.normalize("NFKD", base))
+    _add(normalize("NFKD", base))
 
     # Stage 5: Custom Unicode character mapping
     mapped = _PATH_UNICODE_RE.sub(lambda m: _PATH_UNICODE_MAP[m.group()], base)
     _add(mapped)
 
     # Stage 6: Combined mapping + NFKC/NFC
-    _add(unicodedata.normalize("NFC", mapped))
-    _add(unicodedata.normalize("NFKC", mapped))
+    _add(normalize("NFC", mapped))
+    _add(normalize("NFKC", mapped))
 
     # Stage 7: Collapsed slashes
     for c in list(candidates):
