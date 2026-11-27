@@ -115,6 +115,7 @@ class _BootstrapShellReady(_BootstrapBinding):
         polls = 0
         while time.monotonic() < deadline:
             polls += 1
+            self._touch_bootstrap_progress("wait_shell_ready")
             try:
                 state = await self.evaluate(
                     PAGE_PROBE_JS,

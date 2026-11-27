@@ -209,6 +209,9 @@ class CdpChatBootstrap(_BootstrapSurface):
                     last = probe
                 else:
                     last = {"probeError": probe}
+        # The stages above ended within their own deadlines (or were skipped for lack of budget); the
+        # contract's first guard check must not charge their silence to the contract.
+        self._touch_bootstrap_progress("cdp_bootstrap")
         await self._maybe_apply_shared_ui_session_contract(deadline=deadline)
         from e2e_session_runtime.lifecycle import complete_bootstrap_phase
 

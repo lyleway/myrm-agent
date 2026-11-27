@@ -171,15 +171,24 @@ class _BootstrapClock(CdpChatTransport):
                 f"(phase={phase})"
             )
 
-    def _shell_probe_progress(self, *, polls: int, started: float, phase: str) -> None:
-        import sys
+    @staticmethod
+    def _touch_bootstrap_progress(node: str) -> None:
+        """Tell the BODY stall guard that a bootstrap wait is still polling.
 
+        Every wait ends at its own deadline, but under host load a single poll takes tens of seconds, so waits
+        that stay silent add up past the stall cap and fail the next guard check although each returned in time.
+        """
         try:
             from e2e_session_runtime.lifecycle import touch_wall_progress
 
-            touch_wall_progress(current_node=phase)
+            touch_wall_progress(current_node=node)
         except ImportError:
             pass
+
+    def _shell_probe_progress(self, *, polls: int, started: float, phase: str) -> None:
+        import sys
+
+        self._touch_bootstrap_progress(phase)
 
         elapsed = int(time.monotonic() - started)
         last_logged = getattr(self, "_last_shell_probe_log_sec", -1)

@@ -125,6 +125,7 @@ class _BootstrapBinding(_BootstrapClock):
         """Wait until MessageInput hydrates. Skip reload — MCP-owned tabs detach on reload."""
         deadline = time.monotonic() + min(timeout_sec, 60.0)
         while time.monotonic() < deadline:
+            self._touch_bootstrap_progress("wait_react_hydration")
             try:
                 hydrated = await self.evaluate(
                     """(() => {
@@ -190,6 +191,7 @@ class _BootstrapBinding(_BootstrapClock):
             except (TimeoutError, RuntimeError):
                 pass
             while time.monotonic() < deadline:
+                self._touch_bootstrap_progress("wait_providers_hydrated")
                 try:
                     probe = await self.evaluate(
                         """(() => ({
@@ -208,6 +210,7 @@ class _BootstrapBinding(_BootstrapClock):
 
         deadline = time.monotonic() + timeout_sec
         while time.monotonic() < deadline:
+            self._touch_bootstrap_progress("wait_providers_hydrated")
             try:
                 probe = await self.evaluate(
                     MODEL_PROBE_JS, intent=EvaluateIntent.SYNC_PROBE
