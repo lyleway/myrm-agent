@@ -30,6 +30,7 @@
 - `tests/core/channel_bridge/test_execute_finalize_errors.py` — 失败回合按错误类型回复成员安全文案加参考编号、不泄露提供方原文与账单状态、随成员语言、原文按同一参考编号进日志、已流出的文字保留并附失败文案与标记（复用 `test_execute_finalize._finalize`）；失败回复带失败回合标记、账户指引只在传入时替换文案
 - `tests/core/channel_bridge/test_executor_error_replies.py` — 通用异常只回成员安全文案加参考编号并带失败标记、原始异常按同一参考编号进日志；可信所有者私聊得到账户指引，访客、配对成员与群聊只得通用文案（含 BYOK 与托管计费措辞的区别）；`MyrmLLMError` 诊断只到所有者私聊；回合有聊天之后失败的回复（配置不全、所有者与访客的 LLM 错误、通用异常四条分支）带上该聊天 id，回合在有聊天之前失败的不带
 - `tests/core/channel_bridge/test_executor_faq_reply.py` — FAQ 命中的回答原样回到提问的会话（回复关联到原消息），不属于任何聊天、不带聊天 id
+- `tests/core/channel_bridge/test_executor_faq_intercept.py` — FAQ 查询本身：命中则返回答案并按条目记一次命中；在已搜索的语料里未命中记一次未命中且不给答案；没有语料不记数；没有拦截器直接交给智能体；拦截器建不起来或查询抛错一律当作没有答案、不回错误
 - `tests/core/channel_bridge/test_deliverable_scanner.py` — 路径扫描、超限压缩/提示与文本剥离
 - `tests/core/channel_bridge/test_deliverable_media.py` — 附件大小上限格式化与渐进压缩（透明保留、失败回退）
 - `tests/core/channel_bridge/test_stream_events.py` — harness 流事件映射；致命错误事件的原始文本与错误类型记录（后一条错误覆盖前一条、缺失或未知的类型按 UNKNOWN）；模型切换重放替换半截回答、工具步骤之前的文字保留；loop guard 暂停只记 `tool_stuck_paused` 不出卡片，真实审批与其他事件不会被当成暂停

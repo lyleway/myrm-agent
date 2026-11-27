@@ -2,30 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import patch
 
 from myrm_agent_harness.observability.diagnostics.protocols import HealthReport
 
 from app.core.infra.health.health_presenter import present_health_report
-from app.platform_utils.deployment_capabilities import DeploymentCapabilities
+from app.platform_utils.deployment_capabilities import DeploymentCapabilities, get_deployment_capabilities
+
+
+def _capabilities(*, is_sandbox_instance: bool) -> DeploymentCapabilities:
+    """The deployment's capabilities with the one flag these tests are about set: a flag added later never breaks them."""
+    return replace(get_deployment_capabilities(), is_sandbox_instance=is_sandbox_instance)
 
 
 def _sandbox_caps() -> DeploymentCapabilities:
-    return DeploymentCapabilities(
-        allows_local_skills=False,
-        requires_api_key_auth=True,
-        uses_platform_budget=True,
-        validates_mcp_response_size=True,
-        uses_config_encryption=True,
-        requires_strict_ws_auth=True,
-        uses_cp_entitlements=True,
-        trust_cp_proxy_identity=True,
-        enables_auth_audit=True,
-        default_metrics_enabled=True,
-        runs_sandbox_startup_validation=True,
-        skips_webui_model_preflight=True,
-        is_sandbox_instance=True,
-    )
+    return _capabilities(is_sandbox_instance=True)
 
 
 def test_sandbox_system_resources_fix_suggestion_rewritten() -> None:
@@ -44,21 +36,7 @@ def test_sandbox_system_resources_fix_suggestion_rewritten() -> None:
 
 
 def _local_caps() -> DeploymentCapabilities:
-    return DeploymentCapabilities(
-        allows_local_skills=True,
-        requires_api_key_auth=False,
-        uses_platform_budget=False,
-        validates_mcp_response_size=False,
-        uses_config_encryption=False,
-        requires_strict_ws_auth=False,
-        uses_cp_entitlements=False,
-        trust_cp_proxy_identity=False,
-        enables_auth_audit=False,
-        default_metrics_enabled=False,
-        runs_sandbox_startup_validation=False,
-        skips_webui_model_preflight=False,
-        is_sandbox_instance=False,
-    )
+    return _capabilities(is_sandbox_instance=False)
 
 
 def test_local_system_resources_unchanged() -> None:
