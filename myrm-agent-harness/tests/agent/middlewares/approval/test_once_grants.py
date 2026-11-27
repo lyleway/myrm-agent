@@ -109,6 +109,18 @@ async def test_approving_a_read_opens_the_file_it_opens_in_place_of_a_quoted_pat
     assert reachable_access_roots() == grants.once
 
 
+async def test_approving_a_write_opens_the_file_named_with_a_range_like_suffix_as_typed(
+    run: tuple[Path, Path, AccessGrants],
+) -> None:
+    # Only a read cuts ``:3-9`` off a path; a write creates the file whose name ends that way.
+    _, outside, grants = run
+    call = _call("file_write_tool", {"file_path": f"{outside}/log.txt:3-9"})
+
+    await _decide(call, "file_write", {"type": "approve", "extensions": {}}, _POLICY)
+
+    assert _once_paths(grants) == [(os.path.join(outside, "log.txt:3-9"), True)]
+
+
 async def test_approving_a_write_opens_nothing_for_a_quoted_path_since_it_opens_exactly_that_text(
     run: tuple[Path, Path, AccessGrants],
 ) -> None:
@@ -135,6 +147,21 @@ async def test_approving_a_read_opens_the_file_a_whitespace_named_link_opens(
 
     assert _once_paths(grants) == [(os.path.join(outside, "a.csv"), False)]
     assert [root.path for root in grants.session] == [str(outside)]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot create names that end in a space")
+async def test_approving_a_search_of_a_folder_whose_name_ends_in_a_space_opens_that_folder_alone(
+    run: tuple[Path, Path, AccessGrants],
+) -> None:
+    # The trimmed spelling names nothing: the verdict judges it, but the search opens the text it was given.
+    _, outside, grants = run
+    folder = outside / "d "
+    folder.mkdir()
+    call = _call("grep_tool", {"pattern": "x", "path": str(folder)})
+
+    await _decide(call, "file_read", {"type": "approve", "extensions": {}}, _POLICY)
+
+    assert _once_paths(grants) == [(str(folder), False)]
 
 
 async def test_the_toggle_also_keeps_the_folder_for_the_session(run: tuple[Path, Path, AccessGrants]) -> None:
