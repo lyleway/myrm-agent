@@ -24,6 +24,7 @@ from .allowed_tools_recovery import (
     router as allowed_tools_recovery_fixture_router,
 )
 from .artifact_share import router as artifact_share_fixture_router
+from .channel_chat import router as channel_chat_fixture_router
 from .chat_share import router as chat_share_fixture_router
 from .clarify_refresh import router as clarify_refresh_fixture_router
 from .context_retention import (
@@ -63,6 +64,7 @@ router.include_router(deliverable_fixture_router)
 router.include_router(copilot_fixture_router)
 router.include_router(clarify_refresh_fixture_router)
 router.include_router(chat_share_fixture_router)
+router.include_router(channel_chat_fixture_router)
 router.include_router(artifact_share_fixture_router)
 router.include_router(installed_app_fixture_router)
 router.include_router(file_edit_batch_fixture_router)

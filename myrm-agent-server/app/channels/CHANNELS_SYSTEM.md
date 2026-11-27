@@ -201,7 +201,7 @@ wechat_d4e5f6   ← 额外实例 2
    - 媒体（渠道不支持 `media`）与文档（渠道不支持 `file_upload`）→ 有 `url` 时追加 `"[Image: {url}]"` 形式的文字行（类型名取 `MediaType` 的值并首字母大写），只有本地路径时追加「未发送附件」提示（`attachment_omitted_note`），两者都没有的直接去掉
 3. **国际化**：通过 `get_locale_from_metadata()` 归一化 locale（中文区分 `zh-CN` 与 `zh-TW`），catalog 渲染按引擎回退链取文案（`zh-TW` → `zh` → `zh-Hant` → `zh-CN` → `en`，随捆绑目录落到 `zh-CN`；默认 en，业务层经 `metadata["locale"]` 注入）
 4. **日志记录**：INFO级别记录降级事件，格式：`Downgrading components/media for channel 'whatsapp': buttons, quick_replies(2) → text fallback`（被降级的媒体计为 `media(N)`）
-5. **文本追加**：将 fallback 文本追加到 `msg.content` 末尾，用 `\n\n` 分隔
+5. **文本追加**：将 fallback 文本追加到 `msg.content` 末尾，用 `\n\n` 分隔；写进正文的链接按钮的链接（选择菜单与按钮同行时，也记其中按钮的链接）另记在出站元数据 `metadata[METADATA_SYSTEM_LINKS_KEY]`（`types/components.py`；此前已记的保留并合并）。它们是系统自己的链接而不是回复引用的出处，出站内容门（§7.5）据此不探测，「在网页继续」按钮降成的文字链接因此不会被标成死链
 
 **示例**：
 
@@ -439,7 +439,7 @@ MessageBus 出站管线（队列 publish_outbound 与直发 send_now 共用同�
     ├── DurableOutboundGate.save (IM 渠道，web/chat 跳过)
     ├── 路由解析 (云托管 CP egress 优先，仅纯文本；否则本地渠道；DISABLED/STOPPED/未注册 → 队列保留 obligation，send_now 直接抛错)
     ├── prepare_outbound(msg, 路由能力) = withhold_sensitive_attachments (密钥/凭据附件拦截) → downgrade_components (组件/媒体降级) → 出站风险门
-    ├── [仅队列分发] 内容门：死链仅注释，不拦截
+    ├── [仅队列分发] 内容门：死链仅注释，不拦截（系统链接不探测）
     └── Channel.send()  (send_with_retry 指数退避，partial delivery 不重试)
         ├── render(msg, render_style) → chunks
         ├── [平台限制] 超出单次 API 上限时分 batch 多次 send（如 LINE 每请求 ≤5 条 message）
@@ -461,7 +461,7 @@ MessageBus 出站管线（队列 publish_outbound 与直发 send_now 共用同�
 - 已知局限：多段文本在后段失败时，其后的附件不再发送且不在错误中具名；WhatsApp 桥接对媒体无送达回执，仅能确认已交给桥接进程。
 - `send_now` 是严格直发：成功返回平台 id（无 id 渠道返回 `None`），失败先按队列同一套规则结算（DLQ、永久失败回调、释放 obligation）再抛错；`send_tracked` 是其宽松封装（失败返回 `None`），用于只需要消息 id 的场景（如审批消息后续编辑）。cron、btw、目标终态通知、出站通知均走 `send_now`；cron 投递还会把产出里提到的工作区文件作为附件一并发出并附网页接力按钮（`core/cron/adapters/channel_deliverables.py`，纯文本路由降级为说明与链接）。
 - 临时附件所有权：`MediaAttachment.ephemeral=True` 标记为送达而生成的临时文件（截图、压缩图、TTS 音频）；交给总线后由总线在终态统一删除，生产方不得先删。删除时机：送达 ack 之后；部分送达时删除已送达者、保留失败者；被能力降级或被路由丢弃的附件；无磁盘记录可重放的丢弃（队列满、渠道不可用且无 durable 记录，`DurableOutboundGate.retains`）。其余失败路径保留文件，供 DLQ 手动重试引用。仅删除系统临时目录内的文件（`discard_ephemeral_media`）。
-- 占位符编辑（`MessageEffects.edit_placeholder`）与普通出站同样先 `prepare_outbound`；回复只渲染一次，之后每个分片都用 `mark_rendered` 标记为「已渲染」（首片交给 `edit_placeholder_message`，其余经总线发出），`render()` 对带标记的消息原样返回其文本，所以渠道再调一次 `render()` 也不会把工具摘要、来源、标题再加一遍；编辑只改文本，附件随后以纯媒体消息经总线发送（带重试、持久化与部分送达处理），额外文本分片不携带附件/按钮；编辑失败（渠道抛出 `ChannelSendError`；声明 `capabilities.edit` 的渠道不得吞掉失败）时整条回复（含附件）改走正常发布，占位消息清理时先尝试编辑、失败再删除。
+- 占位符编辑（`MessageEffects.edit_placeholder`）与普通出站同样先 `prepare_outbound`；回复只渲染一次，之后每个分片都用 `mark_rendered` 标记为「已渲染」（首片交给 `edit_placeholder_message`，其余经总线发出），`render()` 对带标记的消息原样返回其文本，所以渠道再调一次 `render()` 也不会把工具摘要、来源、标题再加一遍；编辑带首片正文，声明 `buttons` 的渠道（Slack、Telegram、飞书、Teams）把回复的按钮一并放进这次编辑（Slack 的 blocks、Telegram 的行内键盘、飞书的卡片、Teams 的 Adaptive Card），其余渠道的按钮已被 `prepare_outbound` 降成正文里的文字；附件随后以纯媒体消息经总线发送（带重试、持久化与部分送达处理），额外文本分片不携带附件/按钮；编辑失败（渠道抛出 `ChannelSendError`；声明 `capabilities.edit` 的渠道不得吞掉失败）时整条回复（含附件）改走正常发布，占位消息清理时先尝试编辑、失败再删除。
 
 
 **出站媒体 SSRF 防护**：`MediaAttachment.url` 可能来自 Agent 生成内容（受 prompt injection 影响），
@@ -469,6 +469,8 @@ MessageBus 出站管线（队列 publish_outbound 与直发 send_now 共用同�
 集成 `core.security.guards.ssrf.async_validate_url_for_ssrf`（scheme 白名单 + hostname 黑名单 + DNS 解析 + IP 网络黑名单）。
 
 **出站敏感附件闸**：附件来源（交付物扫描、工具产物、Agent 回复）都不检查文件是什么，IM 聊天又没有确认环节，所以 `prepare_outbound` 的第一步 `withhold_sensitive_attachments`（`core/outbound_attachment_guard.py`）拒发密钥/凭据类本地文件：复用 harness `is_sensitive_file`（大小写不敏感、fail-closed），同时检查符号链接目标；`.key` 仅在文件是 ZIP（Keynote）时放行；系统生成的 `ephemeral` 临时文件与 URL 附件不检查。被拦附件从消息中移除，正文追加本地化说明（`attachment_withheld_note`，中英两语），WARNING 日志只记录文件名。它是安全带而非分类器：按文件名匹配，改名后的密钥会漏过；`config.json`、`*.db` 等误伤按 fail-closed 接受。闸在能力降级之前，收件人看到的是真实原因而非"不支持附件"。
+
+**网页接力按钮（「在网页继续」）**：非 web 渠道的回复在送出前由路由器的投递段（`RouterDeliveryMixin._deliver_agent_result` → `_attach_web_handoff`）追加一个 `web:continue_chat` 链接按钮，指向这条回复所属的聊天（`{公网地址}/{聊天 id}`；公网地址取自 `resolve_public_link_base()`，在线隧道优先，其次公网 Ingress，两者都没有就不挂按钮；挂载出错只记 DEBUG，不阻塞回复）。聊天 id 只认回复自己带的 `metadata[METADATA_STORED_CHAT_KEY]`（`types/session.py`）：只有回合知道它跑在哪个会话（别名路由到的智能体、续跑审批所属的会话），路由器不推断。写入方是产出回复的一方：执行器的流式回复（`execute_finalize`）、回合有了聊天之后的失败回复（`execute_errors.in_stored_chat`）、没有消息问起的跟进回复（`deliver_followup`；唤醒回合的回复经 `ChannelWakeReplyReturner` 走它，回合先落库再交出回复，落库出错只记日志，回复照常送出，按钮仍指向该唤醒回合的聊天）。FAQ 命中的回答与回合在有聊天之前就失败的回复没有聊天可指，不带按钮，入站消息只决定按钮的语言。按钮与其他组件一样经 `prepare_outbound`：渠道不支持按钮就降成正文里的文字链接（记为系统链接，见 §3.3 与 §7.5）；占位消息被替换时按钮随编辑一起送出（见上文占位符编辑）。不经路由器的发送方——`/btw` 后台任务完成通知（`btw_notifier`）、目标终态通知（`goal_terminal_notifier`）、cron 交付物（`channel_deliverables`）——各自调用同一个 `resolve_web_handoff_components` 挂按钮。
 
 ### 6.3 流式输出
 
@@ -484,7 +486,7 @@ StreamCoordinator
         ↓
     edit_placeholder(chunk)
         ↓
-    最终 edit_placeholder(full_reply，仅文本；附件随后以纯媒体消息送出)
+    最终 edit_placeholder(full_reply，正文与按钮；附件随后以纯媒体消息送出)
 ```
 
 ---
@@ -532,6 +534,7 @@ StreamCoordinator
 - 空闲 recover 只重注入**当前可投递**的记录（`OutboundPublisher.can_deliver`，与路由解析同源）：渠道未注册/禁用/停止时记录留在磁盘，恢复在 `enable_channel`/重启时进行。否则重注入的记录只会被分发循环再次释放，空闲轮询每轮重注入同一记录形成约 1Hz 空转并反复刷 WARNING
 - 队列分发对每条消息单独隔离（`_dispatch_one`）：准备阶段（路由解析、内容门、限速）抛出时把该条 **结算为失败**（ack 磁盘条目 + DLQ + 永久失败回调，正文保留供手动重试），而不是仅释放 obligation——释放会让磁盘条目留在 pending，空闲 recover 每轮重注入同一毒消息形成空转
 - 出站内容门 `probe_url` **永不抛出**（除取消）：被 HTTP 客户端拒绝的 URL（如 `httpx.InvalidURL`、`StreamError`，均非 `RequestError` 子类）一律落为不可达，绝不中断消息投递
+- 出站内容门不探测系统自己的链接：降级写进正文的链接按钮的链接记在 `metadata[METADATA_SYSTEM_LINKS_KEY]`（§3.3），`check_message` 从正文提取链接后先去掉这些再探测，所以它们不会被标成死链；回复自己引用的链接照常探测，旁边有系统链接也一样（`tests/channels/test_outbound_gate.py` 与 `test_outbound_system_link_dispatch.py` 守住）
 - 分发循环与网关健康循环经 `spawn_observed_task` 创建（崩溃留带堆栈的 ERROR），网关按指数退避重启已死的分发循环（同 router 自愈）；健康巡检迭代渠道字典的**快照**，凭据热替换不会中断整轮
 - `ChannelHealth.consecutive_failures` 累计到 2 次后，ERROR / DEGRADED 渠道由网关重启：这个计数由渠道自己在 `health_check` 里记失败（网关对已经记过的那次检查不再重复记，没记的才补记），出站发送失败也计入同一个计数；每个渠道有自己的退避窗口（随连续失败次数从 5 秒翻倍到 300 秒并带抖动），窗口在发出重启时开启，渠道恢复健康、被移除或被重载后清除；IDLE 渠道（未配置或按需启动）不重启，STOPPED / DISABLED 不巡检
 - 网关停止渠道（健康重启、`disable_channel`、`remove_channel`、`reload_channel`、关闭网关）一律经 `stop_channel`：最多等 10 秒，超时或出错只记 WARNING 并继续后续步骤；`stop()` 对平台的请求在丢包网络里要等满客户端超时（Telegram 的 `stop()` 会清草稿、删命令，每次请求最多等 30 秒），不设上限会拖住整条巡检（其余渠道、router、分发循环）、凭据保存与关闭；被放弃的 `stop()` 停在原地，之后的步骤不会执行，所以渠道的 `stop()` 先释放自己的任务与连接并置为 STOPPED，网络善后（清草稿、结算流式卡片、删命令）放最后（`BaseChannel.stop` 的契约；Telegram、钉钉、飞书由 `tests/channels/providers/test_stop_releases_connection_contract.py` 守住）

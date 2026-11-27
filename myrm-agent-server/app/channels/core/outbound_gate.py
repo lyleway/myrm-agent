@@ -3,9 +3,12 @@
 Extracts external URLs from outbound messages, probes them concurrently via
 fast HTTP HEAD (with GET-range fallback on 403/405), caches results with TTL,
 and appends a soft warning for links that look dead. The message itself is never withheld.
+The links the system wrote into the content from the message's own link buttons are not probed:
+they are not references the reply cites.
 
 [INPUT]
 - channels.i18n::channel_t, get_locale_from_metadata (POS: localized dead-link warning)
+- channels.types.components::METADATA_SYSTEM_LINKS_KEY (POS: metadata key of the links a text fallback wrote into the content)
 - channels.types.messages::OutboundMessage
 
 [OUTPUT]
@@ -30,6 +33,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.channels.i18n import channel_t, get_locale_from_metadata
+from app.channels.types.components import METADATA_SYSTEM_LINKS_KEY
 from app.channels.types.messages import OutboundMessage
 
 logger = logging.getLogger(__name__)
@@ -73,6 +77,14 @@ class LinkProbeResult:
     is_alive: bool
     status_code: int | None
     error: str | None = None
+
+
+def _system_links(msg: OutboundMessage) -> frozenset[str]:
+    """The links the system wrote into ``msg`` itself, from its buttons: not references the reply cites, so not probed."""
+    written = (msg.metadata or {}).get(METADATA_SYSTEM_LINKS_KEY)
+    if not isinstance(written, (tuple, list)):
+        return frozenset()
+    return frozenset(url for url in written if isinstance(url, str))
 
 
 class OutboundContentGate:
@@ -217,7 +229,8 @@ class OutboundContentGate:
         if not self._enabled or not msg.content:
             return True, []
 
-        urls = self.extract_urls(msg.content)
+        system_links = _system_links(msg)
+        urls = [url for url in self.extract_urls(msg.content) if url not in system_links]
         if not urls:
             return True, []
 

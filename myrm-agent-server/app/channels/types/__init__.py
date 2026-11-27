@@ -5,6 +5,7 @@ Re-exports all public symbols so callers can use a single import:
 """
 
 from .components import (
+    METADATA_SYSTEM_LINKS_KEY,
     ActionButton,
     ButtonStyle,
     ComponentRow,
@@ -96,6 +97,7 @@ __all__ = [
     "METADATA_NOTIFY_KEY",
     "METADATA_RESUME_SESSION_KEY",
     "METADATA_STORED_CHAT_KEY",
+    "METADATA_SYSTEM_LINKS_KEY",
     "ActionButton",
     "ApprovalExpiry",
     "ButtonStyle",

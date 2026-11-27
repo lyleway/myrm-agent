@@ -184,8 +184,8 @@ class MessageEffects:
 
         Prefers edit_placeholder_message (rich formatting with full message context)
         when the channel supports it, falling back to edit_message with text content.
-        An edit carries text only, so attachments follow as a message of their own through
-        the bus (retry, durable record and partial-delivery handling included).
+        An edit carries the first chunk of text and, where the channel declares native buttons, the reply's buttons;
+        attachments cannot ride on it and follow as a message of their own through the bus.
         Falls back to a normal outbound publish if editing fails entirely, and then removes the placeholder, which
         would otherwise stay behind announcing a reply that is not there.
         """

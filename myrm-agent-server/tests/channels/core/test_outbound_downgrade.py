@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from app.channels.core.outbound_prepare import downgrade_components
 from app.channels.types import (
+    METADATA_SYSTEM_LINKS_KEY,
     ActionButton,
     ChannelCapabilities,
     OutboundMessage,
@@ -47,6 +50,35 @@ class TestDowngradeComponents:
         result = downgrade_components(msg, ch.capabilities, channel_name=ch.name)
         assert result.components == ()
         assert result.content == "Review:\n\n• Open → https://example.com/a"
+
+    def test_the_links_written_from_buttons_are_named_as_the_system_links_of_the_message(self) -> None:
+        """The dead-link gate must tell the links the system wrote from the ones the reply cites."""
+        first = ActionButton(label="Open", action_id="artifact:open", url="https://example.com/a")
+        second = ActionButton(label="Docs", action_id="docs:open", url="https://example.com/b")
+        msg = make_out(content="See https://cited.example.org/x", components=((first,), (second,)))
+        result = downgrade_components(msg, ChannelCapabilities(buttons=False), channel_name="fake")
+        assert result.metadata == {METADATA_SYSTEM_LINKS_KEY: ("https://example.com/a", "https://example.com/b")}
+        assert "https://cited.example.org/x" in result.content
+
+    def test_a_select_menu_row_written_as_text_names_the_links_of_its_buttons_too(self) -> None:
+        link = ActionButton(label="Open", action_id="artifact:open", url="https://example.com/a")
+        menu = SelectMenu(action_id="test:sel", placeholder="Pick", options=(SelectOption(label="A", value="a"),))
+        msg = make_out(components=((menu, link),))
+        result = downgrade_components(msg, ChannelCapabilities(buttons=True, select_menus=False), channel_name="fake")
+        assert result.metadata == {METADATA_SYSTEM_LINKS_KEY: ("https://example.com/a",)}
+
+    def test_links_named_by_an_earlier_downgrade_stay_named(self) -> None:
+        link = ActionButton(label="Open", action_id="artifact:open", url="https://example.com/b")
+        msg = make_out(components=((link,),))
+        msg = dataclasses.replace(msg, metadata={"locale": "en", METADATA_SYSTEM_LINKS_KEY: ("https://example.com/a",)})
+        result = downgrade_components(msg, ChannelCapabilities(buttons=False), channel_name="fake")
+        assert result.metadata == {"locale": "en", METADATA_SYSTEM_LINKS_KEY: ("https://example.com/a", "https://example.com/b")}
+
+    def test_a_downgrade_that_wrote_no_link_names_none(self) -> None:
+        callback_only = ActionButton(label="OK", action_id="test:ok")
+        msg = make_out(content="Choose:", components=((callback_only,),))
+        result = downgrade_components(msg, ChannelCapabilities(buttons=False), channel_name="fake")
+        assert result.metadata is None
 
     def test_select_menu_downgraded_independently(self) -> None:
         ch = FakeChannel(caps=ChannelCapabilities(buttons=True, select_menus=False))
@@ -177,8 +209,6 @@ class TestDowngradeComponents:
         assert "选项:" in result_zh.content or "• 选项:" in result_zh.content
 
     def test_media_downgraded_when_unsupported(self) -> None:
-        import dataclasses
-
         from app.channels.types import MediaAttachment, MediaType
 
         ch = FakeChannel(caps=ChannelCapabilities(media=False))
@@ -192,8 +222,6 @@ class TestDowngradeComponents:
         assert "Attachment not sent: video.mp4 (not supported in this chat)" in result.content
 
     def test_media_kept_when_supported(self) -> None:
-        import dataclasses
-
         from app.channels.types import MediaAttachment, MediaType
 
         ch = FakeChannel(caps=ChannelCapabilities(media=True))
@@ -205,8 +233,6 @@ class TestDowngradeComponents:
         assert "[Image: https://example.com/img.png]" not in result.content
 
     def test_mixed_components_and_media_downgraded_correctly(self) -> None:
-        import dataclasses
-
         from app.channels.types import MediaAttachment, MediaType
 
         # Channel supports buttons but NOT media
@@ -230,8 +256,6 @@ class TestDowngradeComponents:
         assert "[Image: https://example.com/img.png]" in result.content
 
     def test_empty_media_list_ignored(self) -> None:
-        import dataclasses
-
         ch = FakeChannel(caps=ChannelCapabilities(media=False))
         msg = make_out(content="Hello")
         msg = dataclasses.replace(msg, media=())

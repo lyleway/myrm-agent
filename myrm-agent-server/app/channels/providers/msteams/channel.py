@@ -22,7 +22,8 @@ Outbound: Bot Framework connector API (text/adaptive card/file attachment)
 
 [POS]
 MSTeams Bot channel implementation. Supports message edit/delete, Adaptive Card interactive
-components, file attachments, typing indicator, and placeholder streaming progress.
+components, file attachments, typing indicator, and placeholder streaming progress. A final reply with buttons
+replaces its placeholder as the Adaptive Card ``send`` makes of it, so the edit does not drop the buttons.
 """
 
 from __future__ import annotations
@@ -213,6 +214,10 @@ class MSTeamsChannel(MSTeamsInboundMixin, BaseChannel):
         return last_id or attachment_id
 
     async def edit_message(self, chat_id: str, message_id: str, text: str) -> None:
+        await self._update_activity(chat_id, message_id, {"type": "message", "text": text})
+
+    async def _update_activity(self, chat_id: str, message_id: str, payload: dict[str, object]) -> None:
+        """Replace the activity ``message_id`` with ``payload``; a refused edit raises so the caller can send instead."""
         decoded = decode_message_key(message_id)
         if decoded:
             activity_id, service_url, conversation_id = decoded
@@ -224,12 +229,7 @@ class MSTeamsChannel(MSTeamsInboundMixin, BaseChannel):
         if not service_url:
             raise ChannelSendError(f"Teams has no service URL for conversation {chat_id}", channel=self.name, retriable=False)
 
-        if not await self._api.update_activity(
-            service_url,
-            conversation_id,
-            activity_id,
-            {"type": "message", "text": text},
-        ):
+        if not await self._api.update_activity(service_url, conversation_id, activity_id, payload):
             raise ChannelSendError("Teams did not accept the message edit", channel=self.name, retriable=False)
 
     async def delete_message(self, chat_id: str, message_id: str) -> None:
@@ -277,7 +277,13 @@ class MSTeamsChannel(MSTeamsInboundMixin, BaseChannel):
     ) -> None:
         chunks = render(msg, self.render_style)
         final_text = chunks[0] if chunks else (msg.content or "")
-        await self.edit_message(chat_id, message_id, final_text)
+        # The buttons of the reply ride in the card, as in ``send``: an edit of text alone would drop them.
+        payload: dict[str, object] = (
+            build_adaptive_card_activity(msg.components, msg.quick_replies, final_text)
+            if msg.components or msg.quick_replies
+            else {"type": "message", "text": final_text}
+        )
+        await self._update_activity(chat_id, message_id, payload)
 
     # ── Typing indicator ───────────────────────────────────────
 

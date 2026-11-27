@@ -3,14 +3,14 @@
 [INPUT]
 - channels.core.outbound_attachment_guard::withhold_sensitive_attachments (POS: key/credential attachment guard)
 - channels.i18n::channel_t, get_locale_from_metadata (POS: channel-scoped localized text)
-- channels.types::OutboundMessage, ChannelCapabilities, CorrelationContext, MediaType (POS: channel message value types)
+- channels.types::OutboundMessage, ChannelCapabilities, CorrelationContext, MediaType, METADATA_SYSTEM_LINKS_KEY (POS: channel message value types)
 - services.risk.detection::get_detection_service (POS: stateful risk detection engine with compiled regex cache)
 
 [OUTPUT]
 - set_correlation_context / get_correlation_context: implicit routing lineage across async tasks
 - apply_correlation_context: corrects drifted routes from the active lineage
 - prepare_outbound: sensitive-attachment guard + capability downgrade + risk gate, the one preparation step shared by every outbound path
-- downgrade_components: interactive component and media downgrade (appends text fallback when channel lacks support)
+- downgrade_components: interactive component and media downgrade (appends text fallback when channel lacks support; names the links it wrote from link buttons in ``metadata[METADATA_SYSTEM_LINKS_KEY]``)
 - apply_outbound_risk_gate: content safety detection before send (reuses RiskDetectionService)
 - delivery_unconfirmed: whether a ``send()`` result proves delivery on the channel's declared contract
 - undelivered_part / partial_failure_note: the attachments-only remainder and in-band note after a partial delivery
@@ -34,6 +34,7 @@ import uuid
 from app.channels.core.outbound_attachment_guard import withhold_sensitive_attachments
 from app.channels.i18n import channel_t, get_locale_from_metadata
 from app.channels.types import (
+    METADATA_SYSTEM_LINKS_KEY,
     ActionButton,
     ChannelCapabilities,
     ComponentRow,
@@ -149,6 +150,11 @@ def prepare_outbound(msg: OutboundMessage, capabilities: ChannelCapabilities, *,
     return apply_outbound_risk_gate(downgrade_components(guarded, capabilities, channel_name=channel_name))
 
 
+def _button_links(row: ComponentRow) -> list[str]:
+    """The links of the link buttons of ``row``: what ``render_components_as_text`` writes into the content for it."""
+    return [c.url for c in row if isinstance(c, ActionButton) and c.url]
+
+
 def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities, *, channel_name: str) -> OutboundMessage:
     """Downgrade interactive components and unsupported media to text when the route lacks native support.
 
@@ -203,6 +209,7 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
     locale = get_locale_from_metadata(msg.metadata)
     changed = False
     fallback_parts: list[str] = []
+    system_links: list[str] = []
     kept_rows: list[ComponentRow] = []
     downgraded_types: list[str] = []
 
@@ -214,6 +221,7 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
             text = render_components_as_text((row,), locale=locale)
             if text:
                 fallback_parts.append(text)
+                system_links.extend(_button_links(row))
             changed = True
             if "select_menus" not in downgraded_types:
                 downgraded_types.append("select_menus")
@@ -221,6 +229,7 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
             text = render_components_as_text((row,), locale=locale)
             if text:
                 fallback_parts.append(text)
+                system_links.extend(_button_links(row))
             changed = True
             if "buttons" not in downgraded_types:
                 downgraded_types.append("buttons")
@@ -272,12 +281,18 @@ def downgrade_components(msg: OutboundMessage, capabilities: ChannelCapabilities
     )
 
     suffix = "\n\n" + "\n".join(fallback_parts) if fallback_parts else ""
+    metadata = msg.metadata
+    if system_links:
+        written = metadata.get(METADATA_SYSTEM_LINKS_KEY) if metadata else None
+        earlier = tuple(written) if isinstance(written, (tuple, list)) else ()
+        metadata = {**(metadata or {}), METADATA_SYSTEM_LINKS_KEY: (*earlier, *system_links)}
     return dataclasses.replace(
         msg,
         content=msg.content + suffix,
         components=tuple(kept_rows),
         quick_replies=keep_quick_replies,
         media=keep_media,
+        metadata=metadata,
     )
 
 
