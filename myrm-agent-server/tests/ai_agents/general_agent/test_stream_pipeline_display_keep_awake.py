@@ -82,7 +82,6 @@ async def _run_once(*, desktop_session: object | None) -> list[bool]:
         patch("app.ai_agents.general_agent.factory.build_general_agent", side_effect=fake_build),
         patch.object(wrapper, "_build_runtime_context", return_value={"session_id": "sess-ka", "query": "hello"}),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch("app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence"),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", recording_hold),
         patch("app.services.web_fetch.binding.open_web_fetch_escalation_context", noop_async_context),
     ):

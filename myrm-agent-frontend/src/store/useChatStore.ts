@@ -13,7 +13,13 @@
 import { enableMapSet } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { ChatState, Message, DEFAULT_ENABLED_BUILTIN_TOOLS, type BuiltinToolId } from '@/store/chat/types';
+import {
+  ChatState,
+  Message,
+  DEFAULT_ENABLED_BUILTIN_TOOLS,
+  isBuiltinToolId,
+  type BuiltinToolId,
+} from '@/store/chat/types';
 export type { Message, File, ProgressItem, ChatHistoryItem, PaginationInfo, AgentConfig } from '@/store/chat/types';
 import { normalizeArchiveRestoreActions } from './chat/archiveRestoreActions';
 import { generateStreamRequestMessageId } from './chat/streamRequestMessageId';
@@ -76,14 +82,15 @@ function readStoredBuiltinTools(): BuiltinToolId[] {
   }
 
   try {
-    const parsed = JSON.parse(stored) as BuiltinToolId[];
+    const parsed = JSON.parse(stored) as string[];
     const legacyMinimal: BuiltinToolId[] = ['web_search', 'memory'];
     const isLegacyMinimal =
       parsed.length === legacyMinimal.length && legacyMinimal.every((toolId) => parsed.includes(toolId));
     if (isLegacyMinimal) {
       return [...DEFAULT_ENABLED_BUILTIN_TOOLS];
     }
-    return parsed;
+    // Stored lists outlive tool retirements; the server rejects a retired ID in any Agent-mode request.
+    return parsed.filter(isBuiltinToolId);
   } catch {
     return [...DEFAULT_ENABLED_BUILTIN_TOOLS];
   }

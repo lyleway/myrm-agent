@@ -48,7 +48,6 @@ class TestSkillAnalyzeRemoved:
             registry=registry,
             file_access_mode=FileAccessMode.NONE,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
 
         resolved_names = {t.name for t in registry.resolve()}
@@ -82,7 +81,6 @@ class TestSkillAnalyzeRemoved:
             registry=registry,
             file_access_mode=FileAccessMode.FULL,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
         sync_discover_capability_tool(registry, skills=many_skills)
 

@@ -6,7 +6,7 @@ CI 门禁脚本与 baseline 数据。由 GitHub Actions 与 `run_architecture_ga
 
 | 文件 | 地位 | 职责 |
 |------|------|------|
-| `check_profile_capability_escalation.py` | 核心 | AST 静态审计内置安全配置与 Agent 模板，阻断 PR 越权与提权放宽 |
+| `check_profile_capability_escalation.py` | 核心 | 审计服务器实际创建的内置安全配置（导入 `profile_manager._BUILTIN_PROFILES` 求值而不是解析源码：Read Only 的权限来自函数调用，字面量解析读不了，一读就抛异常）：Read Only 必须拒绝全部写文件、执行代码与浏览器改动类动作，Workspace 不得直接放行 shell / 代码 / MCP，两者都不得开启 YOLO，每个配置必须显式列出 capabilities，没有可审计的配置同样失败；阻断 PR 越权与提权放宽。`tests/architecture/test_profile_capability_gate.py` 在架构套件里独立跑同一审计，并用变异配置证明它会失败 |
 | `check_pyright_unbound.py` | 核心 | 解析 pyright JSON，阻断 `reportUnboundVariable` / `reportUndefinedVariable`（“变量先用后赋值”类 bug） |
 | `install_promtool.sh` | 核心 | 安装固定版本（含 sha256 校验）的 `promtool` 到 `/usr/local/bin`；架构门禁与默认 pytest 两个 workflow 共用，因为 Prometheus 规则测试在 CI 缺少 promtool 时直接失败 |
 | `lib_harness_deps.sh` | 核心 | 共享 harness 感知 `uv sync`（本地树 / PyPI）：解析同仓的 `myrm-agent-harness/` 目录并 `uv sync --frozen --group dev`（harness 由 `uv.lock` 作为 editable path source 提供） |

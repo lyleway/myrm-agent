@@ -39,7 +39,6 @@ from myrm_agent_harness.agent.skills.runtime.catalog_display import (
     resolve_catalog_display_skills,
 )
 
-from .answer_user_tool import create_answer_user_tool, request_answer_user_tool
 from .bash import create_bash_code_execute_tool, create_bash_process_tool
 from .file_ops import (
     create_file_edit_tool,
@@ -68,7 +67,6 @@ def get_meta_tools(
     registry: ToolRegistry | None = None,
     file_access_mode: FileAccessMode = FileAccessMode.FULL,
     enable_shell_tools: bool = True,
-    enable_answer_tool: bool = False,
     available_tool_names: frozenset[str] | None = None,
     available_tool_groups: frozenset[str] | None = None,
     skill_instances: dict[str, SkillInstance] | None = None,
@@ -177,12 +175,6 @@ def get_meta_tools(
         else:
             logger.info(" skill_select_tool 未加载(skill_backend 未提供)")
 
-    if enable_answer_tool:
-        tools.append(create_answer_user_tool(locale=locale))
-        logger.info(" request_answer_user_tool 已加载")
-    else:
-        logger.info(" request_answer_user_tool 已跳过 (enable_answer_tool=False)")
-
     if resolved_file_access in (FileAccessMode.FULL, FileAccessMode.WORKSPACE_READ_ONLY):
         # Tool order is part of the cached prompt prefix: FULL keeps read, write, edit, glob, grep.
         can_write = resolved_file_access == FileAccessMode.FULL
@@ -243,5 +235,4 @@ __all__ = [
     "create_skill_market_tool",
     "create_subagent_control_tool",
     "get_meta_tools",
-    "request_answer_user_tool",
 ]

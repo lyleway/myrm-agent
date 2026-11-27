@@ -1,7 +1,7 @@
 """Live integration tests for SSRF protection on the real DNS path.
 
 Key-path validation is unmocked: real DNS resolution, real private-IP range
-checks, real FetchEngine crawl entry guards. No scrapling-dependent fetch is
+checks, real FetchEngine crawl entry guards. No curl_cffi-dependent fetch is
 performed, so the suite is safe with or without the ``[web]`` extra.
 """
 

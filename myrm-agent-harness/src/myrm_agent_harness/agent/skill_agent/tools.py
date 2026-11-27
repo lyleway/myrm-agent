@@ -76,7 +76,6 @@ class SkillAgentToolsMixin:
     _default_skill_instances: dict[str, str]
     _file_access_mode: FileAccessMode
     _enable_shell_tools: bool
-    _enable_answer_tool: bool
     _enable_planning: bool
     _available_tool_names: frozenset[str] | None
     _available_tool_groups: frozenset[str] | None
@@ -138,7 +137,6 @@ class SkillAgentToolsMixin:
             registry=registry,
             file_access_mode=self._file_access_mode,
             enable_shell_tools=self._enable_shell_tools,
-            enable_answer_tool=self._enable_answer_tool,
             available_tool_names=self._available_tool_names,
             available_tool_groups=self._available_tool_groups,
             skill_instances=skill_instance_by_name or None,

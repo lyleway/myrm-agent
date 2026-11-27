@@ -1,7 +1,7 @@
 """迁移语句清单第 3 段：``MIGRATION_STATEMENTS`` 自第 180 位起，新语句追加在本文件末尾。
 
 [INPUT]
-app.database.migrations._sql_constants::九条冻结 SQL 常量 (POS: 遗留数据修复语句，本段按位置引用)
+app.database.migrations._sql_constants::十二条冻结 SQL 常量 (POS: 遗留数据修复语句，本段按位置引用)
 app.database.personality_style_merge::MERGE_AGENT_PERSONALITY_STYLE_INTO_SYSTEM_PROMPT_SQL (POS: 沟通风格并入 system_prompt 的冻结语句)
 
 [OUTPUT]
@@ -22,6 +22,9 @@ from ._sql_constants import (
     PAUSE_STALLED_ONCE_CRON_JOBS_SQL,
     REARM_STALLED_CRON_JOBS_SQL,
     REJECT_LEGACY_TOOL_STUCK_APPROVALS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL,
     STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL,
     STRIP_RETIRED_RESPONSE_LOCALE_POLICY_SQL,
 )
@@ -187,4 +190,8 @@ MIGRATION_STATEMENTS_3: list[str] = [
     # name. New DBs get the column from create_all; this append-only ALTER covers existing databases, whose rows stay
     # NULL: the path of a file registered earlier is unknown.
     "ALTER TABLE artifacts ADD COLUMN source_path VARCHAR(1024)",
+    # The search agent's answer-gate tool is gone, so its ID leaves every stored capability list.
+    STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL,
+    STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL,
 ]

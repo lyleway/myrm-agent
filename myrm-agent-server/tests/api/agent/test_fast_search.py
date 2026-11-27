@@ -43,7 +43,17 @@ class TestFastSearchPrompt:
         prompt = get_fast_search_agent_prompt(search_depth="deep")
         assert "<deep_search_mode>" in prompt
         assert "web_fetch_tool" in prompt
-        assert "request_answer_user_tool" in prompt
+        assert "request_answer_user_tool" not in prompt
+
+    def test_deep_mode_zh_has_suffix_without_answer_tool(self):
+        from app.ai_agents.prompts.fast_search_agent_prompt import (
+            get_fast_search_agent_prompt,
+        )
+
+        prompt = get_fast_search_agent_prompt(search_depth="deep", locale="zh-CN")
+        assert "<deep_search_mode>" in prompt
+        assert "web_fetch_tool" in prompt
+        assert "request_answer_user_tool" not in prompt
 
     def test_default_is_normal(self):
         from app.ai_agents.prompts.fast_search_agent_prompt import (

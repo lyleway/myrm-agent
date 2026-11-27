@@ -35,11 +35,11 @@ search 模式通过 `_SEARCH_PROMPT_BASE`（normal）+ `SEARCH_DEEP_SUFFIX`（de
 
 通用防御规则（XML 工具调用防御、上下文优先检查、工具使用纪律等）由框架层
 `agent_core_rules.py` 的 `AGENT_CORE_RULES` 提供，业务层仅包含
-身份定义和 `request_answer_user_tool` 自审规则。
+身份定义和显式工具调用规则。
 
 工具规则解耦（Self-contained Tooling）：
 - 记忆工具（`memory_save_tool` 等）的使用规则内聚于工具自身的 Description 中，System Prompt 保持纯净，不耦合记忆规则，杜绝状态组合膨胀与幽灵工具调用。
-- `enable_answer_tool`：控制 identity 和 ruleset 中 answer_tool 引导的注入（4 组静态单例 Map：is_zh × enable_answer_tool）。
+- 核心提示词按语言预构建为 2 组静态单例 Map（is_zh），同一 mode + locale 始终返回同一字符串对象。
 
 架构决策记录（ADR）：对话人格双语 vs 工具契约统一英文单例
 - **双语对话人格**：业务层 System Prompt（`CORE_SYSTEM_PROMPT_*`）支持中英双语，保证大模型面向用户的回复语气、风格与语言习惯自然贴合用户设定。

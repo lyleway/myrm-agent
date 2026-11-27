@@ -38,10 +38,10 @@ _SEARCH_BUILTIN_AGENTS: tuple[_BuiltInAgentSpec, ...] = (
     _BuiltInAgentSpec(
         id="builtin-deep-search",
         name="Deep Search",
-        description="Thorough multi-source research — reads full pages, cross-references, and self-validates answers.",
+        description="Thorough multi-source research — reads full pages and cross-references sources.",
         icon_id="search-deep",
         system_prompt="",
-        enabled_builtin_tools=("web_search", "answer_tool"),
+        enabled_builtin_tools=("web_search",),
         prompt_mode="search",
         engine_params={"max_tool_calls": 20},
         max_iterations=50,

@@ -154,7 +154,6 @@ class GeneralAgentParams(BaseAgentParams):
     enable_wiki: bool = False
     enable_kanban: bool = False
     enable_cron_eager: bool = False
-    enable_answer_tool: bool = False
     enable_planning: bool = False
     enable_external_cli: bool = False
     enable_skill_market: bool = False

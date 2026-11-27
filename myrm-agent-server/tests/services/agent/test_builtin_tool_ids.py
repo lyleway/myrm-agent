@@ -16,6 +16,7 @@ from app.services.agent.builtin_specs.builtin_tool_ids import (
     DEFAULT_ENABLED_BUILTIN_TOOLS,
     InvalidBuiltinToolIdsError,
     normalize_enabled_builtin_tools,
+    strip_legacy_builtin_tool_ids,
 )
 from app.services.agent.params.models import AgentConfigRequest
 
@@ -56,8 +57,8 @@ def test_default_tools_match_frontend_contract() -> None:
         "memory",
         "structured_clarify",
     )
-    assert len(BUILTIN_TOOL_ID_SET) == 18
-    assert len(BUILTIN_TOOL_IDS) == 16
+    assert len(BUILTIN_TOOL_ID_SET) == 17
+    assert len(BUILTIN_TOOL_IDS) == 15
 
 
 def test_normalize_strips_agent_baseline_ids() -> None:
@@ -156,6 +157,21 @@ def test_normalize_rejects_legacy_web_crawl() -> None:
         normalize_enabled_builtin_tools(["web_search", "web_crawl"])
 
 
+def test_normalize_rejects_retired_answer_tool() -> None:
+    assert "answer_tool" not in BUILTIN_TOOL_ID_SET
+    with pytest.raises(InvalidBuiltinToolIdsError, match="legacy IDs.*answer_tool"):
+        normalize_enabled_builtin_tools(["web_search", "answer_tool"])
+
+
+def test_strip_legacy_drops_retired_answer_tool_on_read_path() -> None:
+    assert strip_legacy_builtin_tool_ids(["web_search", "answer_tool", "memory"]) == ["web_search", "memory"]
+
+
+def test_agent_config_request_rejects_retired_answer_tool() -> None:
+    with pytest.raises(ValidationError):
+        AgentConfigRequest(enabled_builtin_tools=["answer_tool"])
+
+
 def test_normalize_rejects_unknown_ids() -> None:
     with pytest.raises(InvalidBuiltinToolIdsError, match="unknown IDs"):
         normalize_enabled_builtin_tools(["web_search", "not_a_real_tool"])
@@ -228,6 +244,16 @@ def test_builtin_initializer_specs_exclude_agent_baseline_tools() -> None:
             continue
         overlap = baseline.intersection(spec.enabled_builtin_tools)
         assert not overlap, f"{spec.id!r} must not persist baseline tools {sorted(overlap)}"
+
+
+def test_builtin_initializer_specs_use_valid_tool_ids() -> None:
+    """Presets are re-synced into the DB on every startup without validation, so this test is their gate."""
+    from app.services.agent.builtin_specs.builtin_initializer import _BUILTIN_AGENTS
+
+    for spec in _BUILTIN_AGENTS:
+        if spec.enabled_builtin_tools is None:
+            continue
+        assert normalize_enabled_builtin_tools(spec.enabled_builtin_tools) == list(spec.enabled_builtin_tools), spec.id
 
 
 def test_optional_builtin_tools_validator_accepts_none() -> None:

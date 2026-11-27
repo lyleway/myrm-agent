@@ -35,7 +35,6 @@ _UI_TOOLS: frozenset[str] = frozenset()
 _READ_ONLY_TOOL_ALLOWLIST: frozenset[str] = frozenset(
     {
         "ask_question_tool",
-        "request_answer_user_tool",
         "web_search_tool",
         "web_fetch_tool",
         "memory_search_tool",

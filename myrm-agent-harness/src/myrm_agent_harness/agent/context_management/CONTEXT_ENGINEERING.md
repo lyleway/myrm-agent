@@ -719,7 +719,7 @@ Logits Masking（解码阶段）:
 |------|--------|---------|---------|---------|
 | **CORE** | 极高 | 几乎不变 | 最高 | `web_fetch_tool`, `bash_code_execute_tool`, `file_*`, `glob_tool`, `grep_tool` |
 | **HIGH_PRIORITY** | 高 | 很少变 | 高 | `web_search_tool`, `memory_*`, `skill_select_tool` |
-| **EXTENDED** | 中 | 偶尔变 | 中 | `todo_write`, `request_answer_user_tool`, 浏览器/MCP 动态工具 |
+| **EXTENDED** | 中 | 偶尔变 | 中 | `todo_write`, 浏览器/MCP 动态工具 |
 
 #### 分层结构示例
 

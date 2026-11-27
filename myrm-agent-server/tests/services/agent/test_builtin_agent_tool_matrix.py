@@ -10,7 +10,7 @@ from app.services.agent.builtin_specs.builtin_initializer import (
     _TOOL_DATA_VIZ,
     _TOOL_DEFAULT,
     _TOOL_DESIGN,
-    _TOOL_RESEARCH,
+    _TOOL_MINIMAL,
 )
 
 
@@ -36,9 +36,9 @@ def test_cli_visual_matches_coding_tools() -> None:
     assert cli.enabled_builtin_tools == _TOOL_CODING
 
 
-def test_research_analyst_has_answer_tool() -> None:
+def test_research_analyst_has_default_tools() -> None:
     researcher = next(spec for spec in _BUILTIN_AGENTS if spec.id == "builtin-researcher")
-    assert researcher.enabled_builtin_tools == _TOOL_RESEARCH
+    assert researcher.enabled_builtin_tools == _TOOL_MINIMAL
 
 
 def test_general_assistant_has_default_tools() -> None:

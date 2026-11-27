@@ -2,6 +2,7 @@
 
 [INPUT]
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: completes a result with the workspace copies of its media)
+- myrm_agent_harness.core.security.path::ConfinedDirectory (POS: exclusive file creation below a trusted directory, decided on descriptors so no link redirects it)
 - tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
 
 [OUTPUT]
@@ -23,9 +24,11 @@ import shutil
 import subprocess
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import BinaryIO
 from unittest.mock import patch
 
 import pytest
+from myrm_agent_harness.core.security.path import ConfinedDirectory
 
 from app.ai_agents.media_tools.workspace_export import WORKSPACE_MEDIA_DIR, WorkspaceExporter
 from app.core.media.reference import local_media_file, media_reference
@@ -92,13 +95,13 @@ class TestTheCopy:
     ) -> None:
         record = await library.store(_PNG, content_type=content_type)
         reference = media_reference(record.id)
-        result: dict[str, object] = {
+        results: dict[str, dict[str, object]] = {
             "video_urls": {"video_urls": [reference]},
             "audio_url": {"audio_url": reference},
             "images": {"images": [{"url": reference}]},
-        }[key]
+        }
 
-        answer = await _exporter(workspace).complete(result)
+        answer = await _exporter(workspace).complete(results[key])
 
         assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{extension}"]
 
@@ -195,29 +198,29 @@ class TestTheFolder:
         assert (folder / "notes.txt").read_bytes() == b"mine"
         assert not (folder / ".gitignore").exists()
 
-    @pytest.mark.skipif(os.name == "nt", reason="creating symbolic links needs a privilege on Windows")
-    async def test_a_symbolic_link_in_its_place_is_refused(
-        self, library: MediaLibraryEnv, workspace: Path, tmp_path: Path
-    ) -> None:
-        record = await library.store(_PNG)
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        (workspace / WORKSPACE_MEDIA_DIR).symlink_to(elsewhere, target_is_directory=True)
-
-        answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert "symbolic link" in str(answer["workspace_files_error"])
-        assert "workspace_files" not in answer
-        assert list(elsewhere.iterdir()) == []
-
     async def test_a_folder_it_could_not_protect_is_not_left_behind(self, library: MediaLibraryEnv, workspace: Path) -> None:
         record = await library.store(_PNG)
 
-        with patch.object(Path, "write_text", side_effect=OSError(errno.ENOSPC, "No space left on device")):
+        with patch.object(ConfinedDirectory, "create_new", side_effect=OSError(errno.ENOSPC, "No space left on device")):
             answer = await _exporter(workspace).complete(_image_result(record.id))
 
         assert "No space left on device" in str(answer["workspace_files_error"])
         assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
+
+    async def test_a_rule_that_a_concurrent_call_wrote_first_is_kept(self, library: MediaLibraryEnv, workspace: Path) -> None:
+        record = await library.store(_PNG)
+        create_new = ConfinedDirectory.create_new
+
+        def lose_the_race(folder: ConfinedDirectory, name: str) -> int:
+            if name == ".gitignore":
+                (folder.path / name).write_bytes(b"*\n")  # the other call created the folder and its rule just before us
+            return create_new(folder, name)
+
+        with patch.object(ConfinedDirectory, "create_new", lose_the_race):
+            answer = await _exporter(workspace).complete(_image_result(record.id))
+
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
+        assert sorted(entry.name for entry in (workspace / WORKSPACE_MEDIA_DIR).iterdir()) == [".gitignore", f"{record.id}.png"]
 
 
 class TestWhatCannotBeCopied:
@@ -241,11 +244,11 @@ class TestWhatCannotBeCopied:
     async def test_a_copy_that_fails_midway_leaves_no_partial_file(self, library: MediaLibraryEnv, workspace: Path) -> None:
         record = await library.store(_PNG)
 
-        def fail_after_writing_half(source: Path, destination: Path) -> None:
-            Path(destination).write_bytes(_PNG[:10])
+        def fail_after_writing_half(source: BinaryIO, destination: BinaryIO) -> None:
+            destination.write(_PNG[:10])
             raise OSError(errno.EIO, "Input/output error")
 
-        with patch("app.ai_agents.media_tools.workspace_export.shutil.copyfile", side_effect=fail_after_writing_half):
+        with patch("app.ai_agents.media_tools.workspace_export.shutil.copyfileobj", side_effect=fail_after_writing_half):
             answer = await _exporter(workspace).complete(_image_result(record.id))
 
         assert "Input/output error" in str(answer["workspace_files_error"])

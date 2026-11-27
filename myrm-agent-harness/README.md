@@ -481,7 +481,6 @@ agent = await create_skill_agent(
     spec,
     llm_config=LLMConfig(model="gpt-4", api_key="sk-..."),
     enable_shell_tools=True,  # 默认：True
-    enable_answer_tool=False,  # 默认：False
     enable_planning=False,  # 默认：False
 )
 ```

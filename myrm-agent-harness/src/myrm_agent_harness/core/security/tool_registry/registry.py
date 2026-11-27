@@ -167,7 +167,6 @@ BUILTIN_TOOL_NAMES: frozenset[str] = frozenset(
         "skill_search_tool",
         "browser_interact_tool",
         "browser_manage_tool",
-        "request_answer_user_tool",
         "todo_write",
         "desktop_snapshot_tool",
         "desktop_interact_tool",
@@ -273,7 +272,6 @@ TOOL_GROUP_MAP: dict[str, frozenset[str]] = {
         }
     ),
     "planning": frozenset({"todo_write"}),
-    "answer_tool": frozenset({"request_answer_user_tool"}),
     "structured_clarify": frozenset({"ask_question_tool"}),
     "cron": frozenset({"cron_manage_tool"}),
     "image_generation": frozenset({"image_tool"}),
@@ -348,7 +346,6 @@ TOOL_CANONICAL_PARAMS: dict[str, list[str]] = {
     "cron_manage_tool": ["action", "job_id", "name_filter"],
     "delegate_task_tool": ["mode", "agent_type"],
     "invoke_acp_agent_tool": ["agent_name"],
-    "request_answer_user_tool": [],
     "subagent_control_tool": ["action", "task_id"],
     "todo_write": ["merge"],
 }

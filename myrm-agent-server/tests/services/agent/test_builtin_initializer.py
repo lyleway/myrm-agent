@@ -358,7 +358,7 @@ async def test_search_agents_have_correct_extended_fields(test_db: sessionmaker)
     assert not fast.system_prompt
 
     deep = agents["builtin-deep-search"]
-    assert deep.enabled_builtin_tools == ["web_search", "answer_tool"]
+    assert deep.enabled_builtin_tools == ["web_search"]
     assert deep.prompt_mode == "search"
     assert deep.engine_params == {"max_tool_calls": 20}
     assert deep.max_iterations == 50

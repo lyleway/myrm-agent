@@ -501,8 +501,7 @@ def _layer_counts(report: ScanReport) -> dict[str, int]:
     """Aggregate layer counts across harness static dict + server bootstrap.
 
     The bootstrap is parsed via AST so the count is accurate even when
-    the server tool layers diverge from harness defaults (e.g., `request_answer_user_tool`
-    moves to CORE under server-owned registration).
+    the server tool layers diverge from harness defaults.
     """
     counts = Counter(load_registered_layers().values())
     return {

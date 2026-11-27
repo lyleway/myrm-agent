@@ -56,7 +56,7 @@ Chat 级 `BuiltExecutionUnit` 池（SkillAgent + 它的执行器 + BrowserSessio
 | 输出 | 输入字段（均在指纹中） |
 |------|------------------------|
 | LLM 实例（主/兜底/推理/轻量/视觉/视频） | model/base_url/max_context_tokens/supports_vision/supports_video/custom_model_def + temperature + model_kwargs（凭据/传输头剔除后，见排除项）+ credential_pool_strategy（固化进 CredentialPool） |
-| system_prompt | prompt_mode / engine_params / search_depth（经 max_iterations/engine_params 间接覆盖）/ unattended_mode / enable_answer_tool |
+| system_prompt | prompt_mode / engine_params / search_depth（经 max_iterations/engine_params 间接覆盖）/ unattended_mode |
 | tool_groups | 全部 `enable_*` flag + file_access_mode + image/video/tts params 存在性 |
 | skill_ids / skill_configs | skill_ids / skill_configs / skill_config_version / credential_track（技能后端按该轨道的凭证池判定凭证门禁技能是否列出，同 chat 的 POOLED 单元不得跨轨道复用） |
 | mcp_servers / openapi_services | mcp_config / openapi_services |

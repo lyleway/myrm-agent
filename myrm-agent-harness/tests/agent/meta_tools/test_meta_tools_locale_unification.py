@@ -10,10 +10,6 @@ from langchain_core.tools.base import _get_runnable_config_param
 
 from myrm_agent_harness.agent.config.file_io import FileIOConfig
 from myrm_agent_harness.agent.meta_tools import get_meta_tools
-from myrm_agent_harness.agent.meta_tools.answer_user_tool import (
-    create_answer_user_tool,
-    resolve_answer_user_tool_description,
-)
 from myrm_agent_harness.agent.meta_tools.bash.bash_code_execute_tool import (
     create_bash_code_execute_tool,
 )
@@ -161,16 +157,6 @@ def test_skill_meta_tools_descriptions_locale_resolution() -> None:
     assert "在当前 Agent 已绑定的技能库" in disc_zh.description
 
 
-def test_answer_user_tool_locale_resolution() -> None:
-    assert "Call only when you can confidently deliver" in resolve_answer_user_tool_description(None)
-    assert "仅在当你可以自信地提供完美的满分答案时调用" in resolve_answer_user_tool_description("zh-CN")
-
-    ans_en = create_answer_user_tool(locale="en")
-    assert "Call only when you can confidently deliver" in ans_en.description
-    ans_zh = create_answer_user_tool(locale="zh-CN")
-    assert "仅在当你可以自信地提供完美的满分答案时调用" in ans_zh.description
-
-
 def test_get_meta_tools_passes_locale() -> None:
     # EN (default)
     registry_en = ToolRegistry()
@@ -178,7 +164,6 @@ def test_get_meta_tools_passes_locale() -> None:
         skills=[],
         registry=registry_en,
         enable_shell_tools=True,
-        enable_answer_tool=True,
         locale="en",
     )
     descriptions_en = {t.name: t.description for t in tools_en}
@@ -189,7 +174,6 @@ def test_get_meta_tools_passes_locale() -> None:
     assert "Search file contents" in descriptions_en["grep_tool"]
     assert "Run a shell command or Python code." in descriptions_en["bash_code_execute_tool"]
     assert "Manage background bash processes" in descriptions_en["bash_process_tool"]
-    assert "Call only when you can confidently deliver" in descriptions_en["request_answer_user_tool"]
 
     # ZH
     registry_zh = ToolRegistry()
@@ -197,7 +181,6 @@ def test_get_meta_tools_passes_locale() -> None:
         skills=[],
         registry=registry_zh,
         enable_shell_tools=True,
-        enable_answer_tool=True,
         locale="zh-CN",
     )
     descriptions_zh = {t.name: t.description for t in tools_zh}
@@ -208,7 +191,6 @@ def test_get_meta_tools_passes_locale() -> None:
     assert "搜索文件内容" in descriptions_zh["grep_tool"]
     assert "执行 Shell 命令或 Python 代码。" in descriptions_zh["bash_code_execute_tool"]
     assert "管理通过 bash_code_execute_tool" in descriptions_zh["bash_process_tool"]
-    assert "仅在当你可以自信地提供完美的满分答案时调用" in descriptions_zh["request_answer_user_tool"]
 
 
 def test_agent_runtime_spec_and_config_prompt_locale() -> None:

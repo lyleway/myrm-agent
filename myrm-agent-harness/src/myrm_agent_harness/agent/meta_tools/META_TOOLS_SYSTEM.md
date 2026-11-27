@@ -73,12 +73,6 @@
 
 两者 tool description 互相指向，避免 LLM 调错入口；`skill_search_tool` 命中结果以 `<BoundSkills>` XML 包裹（与 description 语义一致）。CI 门禁：`tests/architecture/test_skill_tool_boundary.py`；装配集成：`tests/integration/test_skill_tool_boundary_wiring.py`。
 
-根目录独立工具：
-
-| 文件 | 职责 |
-|------|------|
-| `answer_user_tool.py` | 完成阶段门控信号（配合 `completion_guard`） |
-
 > 运行时诊断由业务层 Settings Doctor UI + `/health/doctor` API 提供（`observability/diagnostics/probes.py`），不作为 Agent meta_tool。
 
 ---

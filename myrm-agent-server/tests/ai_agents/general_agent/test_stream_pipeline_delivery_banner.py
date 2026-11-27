@@ -70,7 +70,6 @@ async def _turn_handed_to_the_agent(channel_name: str, typed: str) -> object:
         patch("app.ai_agents.general_agent.factory.build_general_agent", side_effect=fake_build),
         patch.object(wrapper, "_build_runtime_context", return_value={"session_id": "sess-banner", "query": typed}),
         patch("app.platform_utils.get_artifact_processor") as artifact_mock,
-        patch("app.ai_agents.general_agent.agent_middlewares.tool_selection_middleware.reset_answer_tool_convergence"),
         patch("app.services.infra.sleep_inhibitor.SleepInhibitor.hold", noop_async_context),
         patch("app.services.web_fetch.binding.open_web_fetch_escalation_context", noop_async_context),
     ):

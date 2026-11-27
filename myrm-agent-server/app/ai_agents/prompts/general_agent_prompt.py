@@ -15,7 +15,7 @@ GeneralAgent 核心系统提示词。支持两档 Prompt Mode（full/search）�
 同一 mode + locale 的 prompt 字符串跨用户稳定以最大化 KV Cache 命中率。
 通用防御规则（XML 防御、上下文优先、工具使用纪律等）由框架层
 agent_core_rules.py 的 AGENT_CORE_RULES 提供，此处仅包含业务层特有的
-身份定义和 answer_tool 自审规则。工具规则由各工具自身 Schema 自包含承载，
+身份定义和显式工具调用规则。工具规则由各工具自身 Schema 自包含承载，
 核心系统提示词保持纯净解耦。
 """
 
@@ -61,34 +61,15 @@ SEARCH_DEEP_SUFFIX_ZH: str = _DEEP_SEARCH_SUFFIX_ZH
 # =============================================================================
 
 # --- 英文人设（Default EN） ---
-_IDENTITY_CORE_EN = """
+_IDENTITY_EN = """
 <identity>
 You are a powerful, pragmatic, and versatile AI assistant. Your core responsibility is to solve complex problems and accomplish tasks by leveraging your own knowledge, reasoning, and creativity alongside rich external tools and skills.
 Your answers should be **factually accurate**, timely, and genuinely useful to the user.
-"""
 
-_IDENTITY_SUFFIX_WITH_ANSWER_TOOL_EN = """
-When conditions to reply are met, call request_answer_user_tool to request answering the user.
 </identity>
 """
 
-_IDENTITY_SUFFIX_WITHOUT_ANSWER_TOOL_EN = """
-</identity>
-"""
-
-_RULESET_WITH_ANSWER_TOOL_EN = """
-<ruleset>
-  <rule name="answer_tool_required" priority="high">
-    When reply conditions are met, you must call request_answer_user_tool and pass self-audit before answering the user.
-    Exceptions: simple greetings, text processing, basic arithmetic, timeless general knowledge explanations.
-  </rule>
-  <rule name="explicit_tool_request" priority="high">
-    When the user explicitly asks to invoke a specific tool, invoke it immediately rather than answering directly.
-  </rule>
-</ruleset>
-"""
-
-_RULESET_WITHOUT_ANSWER_TOOL_EN = """
+_RULESET_EN = """
 <ruleset>
   <rule name="explicit_tool_request" priority="high">
     When the user explicitly asks to invoke a specific tool, invoke it immediately rather than answering directly.
@@ -97,74 +78,43 @@ _RULESET_WITHOUT_ANSWER_TOOL_EN = """
 """
 
 # --- 中文人设（Chinese ZH） ---
-_IDENTITY_CORE_ZH = """
+_IDENTITY_ZH = """
 <identity>
 你是一个功能强大且求真务实的通用AI智能助手。你的核心职责是利用你卓越的自身能力（知识、逻辑、创造力）以及丰富的外部工具和技能，为用户解决各种复杂问题和任务。
 你的答案应当**事实准确**、时效性强，并对用户真正有用。
-"""
 
-_IDENTITY_SUFFIX_WITH_ANSWER_TOOL_ZH = """
-当达到可回复条件时，必须先调用 request_answer_user_tool 工具请求回答用户。
 </identity>
 """
 
-_IDENTITY_SUFFIX_WITHOUT_ANSWER_TOOL_ZH = """
-</identity>
-"""
-
-_RULESET_WITH_ANSWER_TOOL_ZH = """
-<ruleset>
-  <rule name="answer_tool_required" priority="high">
-    当达到可回复条件时，必须调用 request_answer_user_tool 自审通过后才能回答用户。
-    例外：简单问候、文本处理、基础计算、不涉及时效性的常识解释。
-  </rule>
-  <rule name="explicit_tool_request" priority="high">
-    用户明确要求调用具体工具时，必须立即调用，不能直接回答。
-  </rule>
-</ruleset>
-"""
-
-_RULESET_WITHOUT_ANSWER_TOOL_ZH = """
+_RULESET_ZH = """
 <ruleset>
   <rule name="explicit_tool_request" priority="high">
     用户明确要求调用具体工具时，必须立即调用，不能直接回答。
   </rule>
 </ruleset>
 """
-
-
-def _build_identity_and_rules(enable_answer_tool: bool, is_zh: bool) -> str:
-    if is_zh:
-        suffix = _IDENTITY_SUFFIX_WITH_ANSWER_TOOL_ZH if enable_answer_tool else _IDENTITY_SUFFIX_WITHOUT_ANSWER_TOOL_ZH
-        ruleset = _RULESET_WITH_ANSWER_TOOL_ZH if enable_answer_tool else _RULESET_WITHOUT_ANSWER_TOOL_ZH
-        return f"{_IDENTITY_CORE_ZH}{suffix}{ruleset}"
-    suffix = _IDENTITY_SUFFIX_WITH_ANSWER_TOOL_EN if enable_answer_tool else _IDENTITY_SUFFIX_WITHOUT_ANSWER_TOOL_EN
-    ruleset = _RULESET_WITH_ANSWER_TOOL_EN if enable_answer_tool else _RULESET_WITHOUT_ANSWER_TOOL_EN
-    return f"{_IDENTITY_CORE_EN}{suffix}{ruleset}"
 
 
 def _build_prompt_map(
-    identity: str,
+    identity_and_rules: str,
     *,
     is_zh: bool,
 ) -> dict[PromptMode, str]:
     if is_zh:
-        full = "\n".join([identity, AGENT_RESPONSE_RULES_ZH, TASK_INTEGRITY_RULES_ZH])
+        full = "\n".join([identity_and_rules, AGENT_RESPONSE_RULES_ZH, TASK_INTEGRITY_RULES_ZH])
         return {"full": full, "search": _SEARCH_BASE_ZH}
-    full = "\n".join([identity, AGENT_RESPONSE_RULES_EN, TASK_INTEGRITY_RULES_EN])
+    full = "\n".join([identity_and_rules, AGENT_RESPONSE_RULES_EN, TASK_INTEGRITY_RULES_EN])
     return {"full": full, "search": _SEARCH_BASE_EN}
 
 
-# 预构建 4 个静态 Map（is_zh × enable_answer_tool），
-# 每个组合跨用户始终返回同一字符串对象以保证 KV Cache 稳定。
-_PROMPT_MAPS: dict[tuple[bool, bool], dict[PromptMode, str]] = {
-    (False, True): _build_prompt_map(_build_identity_and_rules(True, False), is_zh=False),
-    (False, False): _build_prompt_map(_build_identity_and_rules(False, False), is_zh=False),
-    (True, True): _build_prompt_map(_build_identity_and_rules(True, True), is_zh=True),
-    (True, False): _build_prompt_map(_build_identity_and_rules(False, True), is_zh=True),
+# 预构建 2 个静态 Map（按是否中文），
+# 每种语言跨用户始终返回同一字符串对象以保证 KV Cache 稳定。
+_PROMPT_MAPS: dict[bool, dict[PromptMode, str]] = {
+    False: _build_prompt_map(f"{_IDENTITY_EN}{_RULESET_EN}", is_zh=False),
+    True: _build_prompt_map(f"{_IDENTITY_ZH}{_RULESET_ZH}", is_zh=True),
 }
 
-CORE_SYSTEM_PROMPT: str = _PROMPT_MAPS[(False, True)]["full"]
+CORE_SYSTEM_PROMPT: str = _PROMPT_MAPS[False]["full"]
 
 # =============================================================================
 # API 函数
@@ -174,7 +124,6 @@ CORE_SYSTEM_PROMPT: str = _PROMPT_MAPS[(False, True)]["full"]
 def get_core_system_prompt(
     mode: PromptMode = "full",
     *,
-    enable_answer_tool: bool = True,
     locale: str | None = None,
 ) -> str:
     """获取核心层 System Prompt (Layer 1)
@@ -183,17 +132,12 @@ def get_core_system_prompt(
         mode: 提示词模式
             - full: 完整规则（默认），适合通用场景
             - search: 搜索模式，轻量搜索专用提示词
-        enable_answer_tool: 是否包含 request_answer_user_tool 引导规则
         locale: 语言区域代码，如 "zh-CN" / "en"（默认 "en" 英文）
 
     Returns:
         核心 System Prompt（同一参数组合跨用户缓存稳定）
     """
-    zh = is_chinese(locale)
-    prompt_map = _PROMPT_MAPS.get(
-        (zh, enable_answer_tool),
-        _PROMPT_MAPS[(False, True)],
-    )
+    prompt_map = _PROMPT_MAPS[is_chinese(locale)]
     return prompt_map.get(mode, prompt_map["full"])
 
 

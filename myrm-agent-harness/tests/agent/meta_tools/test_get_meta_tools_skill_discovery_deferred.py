@@ -28,7 +28,6 @@ class TestSkillMarketNotInGetMetaTools:
             registry=registry,
             file_access_mode=FileAccessMode.NONE,
             enable_shell_tools=False,
-            enable_answer_tool=False,
         )
 
         returned_names = {t.name for t in tools}
