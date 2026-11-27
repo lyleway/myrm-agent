@@ -72,7 +72,7 @@
       "model": "gpt-image-2.6-sunburst",
       "prompt": "a red fox in the snow",
       "latency_ms": 8200,
-      "workspace_files": ["_generated/media_img_1.png"]
+      "workspace_files": ["./_generated/media_img_1.png"]
     },
     "video_result": {
       "video_urls": ["media://media_vid_1"],
@@ -80,7 +80,7 @@
       "model": "veo-3.1-fast-generate-preview",
       "prompt": "waves at sunset",
       "latency_ms": 61000,
-      "workspace_files": ["_generated/media_vid_1.mp4"]
+      "workspace_files": ["./_generated/media_vid_1.mp4"]
     },
     "speech_result": {
       "status": "success",
@@ -90,7 +90,7 @@
       "audio_url": "media://media_tts_1",
       "duration_seconds": 3.2,
       "message": "Audio generated; it appears in the chat for the user to play.",
-      "workspace_files": ["_generated/media_tts_1.mp3"]
+      "workspace_files": ["./_generated/media_tts_1.mp3"]
     },
     "task_entry": { "kind": "image", "task_id": "task_img_1" },
     "stored_entry": {
@@ -144,7 +144,7 @@
         "model": "gpt-image-2.6-sunburst",
         "prompt": "add a red scarf",
         "latency_ms": 7400,
-        "workspace_files": ["_generated/media_edit_1.png"]
+        "workspace_files": ["./_generated/media_edit_1.png"]
       },
       "entries": [{ "kind": "image", "media": "media://media_edit_1", "model": "gpt-image-2.6-sunburst" }]
     },
@@ -181,7 +181,7 @@
         "model": "eleven_turbo_v2_5",
         "audio_url": "media://media_tts_1",
         "duration_seconds": 3.2,
-        "workspace_files": ["_generated/media_tts_1.mp3"]
+        "workspace_files": ["./_generated/media_tts_1.mp3"]
       },
       "entries": [
         { "kind": "tts", "media": "media://media_tts_1", "model": "eleven_turbo_v2_5", "duration_seconds": 3.2 }
@@ -217,7 +217,7 @@
         "task_id": "task_vid_1",
         "task_type": "video_generate",
         "status": "succeeded",
-        "result": { "video_urls": ["media://media_vid_1"], "workspace_files": ["_generated/media_vid_1.mp4"] }
+        "result": { "video_urls": ["media://media_vid_1"], "workspace_files": ["./_generated/media_vid_1.mp4"] }
       },
       "entries": []
     },
