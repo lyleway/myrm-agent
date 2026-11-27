@@ -758,7 +758,7 @@ def test_execution_fingerprint_stable_when_external_agent_credentials_rotate() -
 
 def test_execution_fingerprint_changes_when_model_kwargs_change() -> None:
     """model_kwargs (temperature/max_tokens/reasoning_effort) are frozen into the
-    LLM instance at build time (builder.py:125-135, manager.py:238), so changing
+    LLM instance at build time (LLMManager.get_llm_from_config), so changing
     them must bust the POOLED cache."""
     wrapper = _base_wrapper()
     base_fp = compute_execution_fingerprint(wrapper)
@@ -782,7 +782,7 @@ def test_execution_fingerprint_changes_when_model_kwargs_change() -> None:
 
 def test_execution_fingerprint_changes_when_temperature_field_changes() -> None:
     """The top-level temperature field is frozen into the LLM instance at build
-    time (builder.py:132-133), so a change must bust the POOLED cache."""
+    time (LLMManager.get_llm_from_config), so a change must bust the POOLED cache."""
     wrapper = _base_wrapper()
     none_fp = compute_execution_fingerprint(wrapper)
     wrapper.model_cfg = ModelConfig(
@@ -848,8 +848,8 @@ def test_execution_fingerprint_stable_when_model_kwargs_credentials_rotate() -> 
 
 def test_execution_fingerprint_changes_when_credential_pool_strategy_changes() -> None:
     """credential_pool_strategy is frozen into CredentialPool at build time
-    (manager.py:192, credential_pool.py:142-144) and drives acquire() dispatch
-    every call (key_pool_llm.py:100), so changing it must bust the POOLED cache
+    (LLMManager._get_pooled_llm, CredentialPool.__init__) and drives acquire()
+    dispatch every call (KeyPoolLLM), so changing it must bust the POOLED cache
     — in both the ModelConfig field and the providers_dict camelCase key."""
     wrapper = _base_wrapper()
     wrapper.model_cfg = ModelConfig(
