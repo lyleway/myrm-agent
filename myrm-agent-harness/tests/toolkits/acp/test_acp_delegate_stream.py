@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from myrm_agent_harness.toolkits.acp.acp_agent_tools import _run_turn_and_collect
+from myrm_agent_harness.toolkits.acp.delegate_report import STOP_NOTES
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
     AcpErrorCode,
@@ -60,12 +61,12 @@ class TestNativeTurnLimit:
 
         async def stream(name, task, session_id, *, workspace, mode="persistent", permissions=None):
             yield create_event(RuntimeEventType.TEXT_DELTA, session_id, content="partial findings")
-            yield _error(session_id, AcpErrorCode.MAX_TURNS, "Reached maximum number of turns (7)")
+            yield create_event(RuntimeEventType.DONE, session_id, stop_reason=StopReason.MAX_TURN_REQUESTS)
 
         pool.run_turn = stream
         result, meta = await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
 
-        assert result == "partial findings\n\n[stopped — max turns limit reached (7/7)]"
+        assert result == f"partial findings\n\n{STOP_NOTES[StopReason.MAX_TURN_REQUESTS]}"
         assert meta["errors"] == 0
 
     @pytest.mark.asyncio

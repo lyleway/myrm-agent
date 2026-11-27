@@ -15,7 +15,7 @@ from typing import get_args
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import CliDialect, dialect_for
+from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock
 from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeConfig
@@ -28,13 +28,10 @@ _UNKNOWN_ID = "11111111-2222-4333-8444-555555555555"
 _AT_SESSION_LOOKUP = "No conversation found"
 
 
-def _launch(binary: str, mode: PermissionMode) -> tuple[CliDialect, list[str]]:
+def _launch(binary: str, mode: PermissionMode) -> list[str]:
     """The command line ``CliRuntime`` builds for a turn in ``mode``, exactly as its own method assembles it."""
     config = RuntimeConfig(backend_type="cli", command=binary, permission_mode=mode, max_turns=3)
-    runtime = CliRuntime("claude", config, workspace="/tmp/ws")
-    dialect = dialect_for(binary)
-    assert dialect is not None, "claude has no dialect"
-    return dialect, runtime._launch_args(binary, dialect)
+    return CliRuntime("claude", config, workspace="/tmp/ws")._launch_args(binary)
 
 
 @pytest.fixture(scope="module")
@@ -51,8 +48,7 @@ def _assert_reaches_the_session_lookup(argv: list[str], stdin_text: str | None, 
 @pytest.mark.parametrize("mode", get_args(PermissionMode))
 def test_claude_parses_the_turn_command_line_of_every_permission_mode(mode: PermissionMode, probe_home: Path) -> None:
     binary = cli_binary("claude")
-    dialect, args = _launch(binary, mode)
-    resumed = dialect.with_resume(args, _UNKNOWN_ID)
+    resumed = claude.with_resume(_launch(binary, mode), _UNKNOWN_ID)
     assert resumed is not None
 
     _assert_reaches_the_session_lookup(resumed, "hello", probe_home)
@@ -63,10 +59,9 @@ def test_claude_parses_the_image_turn_command_line_of_every_permission_mode(
     mode: PermissionMode, probe_home: Path
 ) -> None:
     binary = cli_binary("claude")
-    dialect, args = _launch(binary, mode)
     block = ImageBlock(media_type="image/png", data="iVBORw0KGgo=")
-    with_images, stdin_text = dialect.with_image_blocks(args, "what is this", [block])
-    resumed = dialect.with_resume(with_images, _UNKNOWN_ID)
+    with_images, stdin_text = claude.with_image_blocks(_launch(binary, mode), "what is this", [block])
+    resumed = claude.with_resume(with_images, _UNKNOWN_ID)
     assert resumed is not None
 
     _assert_reaches_the_session_lookup(resumed, stdin_text, probe_home)
@@ -74,8 +69,7 @@ def test_claude_parses_the_image_turn_command_line_of_every_permission_mode(
 
 def test_a_flag_the_cli_does_not_have_is_not_taken_for_a_turn(probe_home: Path) -> None:
     binary = cli_binary("claude")
-    dialect, args = _launch(binary, "safe")
-    resumed = dialect.with_resume([*args, "--not-a-flag-of-claude"], _UNKNOWN_ID)
+    resumed = claude.with_resume([*_launch(binary, "safe"), "--not-a-flag-of-claude"], _UNKNOWN_ID)
     assert resumed is not None
 
     code, output = run_probe(resumed, probe_env(probe_home), probe_home, stdin_text="hello")

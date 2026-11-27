@@ -241,10 +241,6 @@ class _TurnTranslator:
         if code is AcpErrorCode.CANCELLED:
             self.outcome = _Outcome.CANCELLED
             return []
-        if code is AcpErrorCode.MAX_TURNS:
-            # The agent stopped at its own limit with its work and session intact: a stop to report, not a failure.
-            self.outcome = _Outcome.TURN_LIMIT
-            return []
         self.outcome = _Outcome.FAILED
         if isinstance(error, AcpError):
             guidance = delegate_error_event(

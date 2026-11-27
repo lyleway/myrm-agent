@@ -1,4 +1,4 @@
-"""The environment a CLI turn runs in: what the dialect adds and what the operator can still decide."""
+"""The environment a CLI turn runs in: what Claude adds and what the operator can still decide."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _child_env(fake_cli: FakeCli, name: str = "claude") -> dict[str, str]:
     return env
 
 
-class TestDialectDefaults:
+class TestClaudeDefaults:
     @pytest.mark.asyncio
     async def test_claude_is_told_not_to_wait_for_background_tasks(self, fake_cli: FakeCli) -> None:
         await run_turn(make_runtime(fake_cli))
@@ -26,13 +26,13 @@ class TestDialectDefaults:
         assert _child_env(fake_cli)["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] == "1"
 
     @pytest.mark.asyncio
-    async def test_a_cli_without_a_dialect_gets_no_claude_setting(self, fake_cli: FakeCli) -> None:
+    async def test_another_cli_gets_no_claude_setting(self, fake_cli: FakeCli) -> None:
         await run_turn(make_runtime(fake_cli, "my-agent"))
 
         assert "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS" not in _child_env(fake_cli, "my-agent")
 
     @pytest.mark.asyncio
-    async def test_the_configured_env_beats_a_dialect_default(self, fake_cli: FakeCli) -> None:
+    async def test_the_configured_env_beats_a_claude_default(self, fake_cli: FakeCli) -> None:
         runtime = make_runtime(fake_cli, env={"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "0"})
 
         await run_turn(runtime)

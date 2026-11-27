@@ -52,15 +52,26 @@ def test_a_process_we_stopped_is_a_cancellation_whatever_it_exited_with() -> Non
     assert error.code is AcpErrorCode.CANCELLED
 
 
-def test_the_turn_limit_is_named_with_the_cli_own_text() -> None:
-    by_subtype = _classify(_result(subtype="error_max_turns", message="Reached maximum number of turns (3)"))
-    by_reason = _classify(_result(terminal_reason="max_turns"))
+def test_running_out_of_turns_is_no_failure_whatever_the_exit_code() -> None:
+    by_subtype = _result(subtype="error_max_turns", message="Reached maximum number of turns (3)")
+    by_reason = _result(terminal_reason="max_turns")
 
-    assert by_subtype is not None
-    assert by_subtype.code is AcpErrorCode.MAX_TURNS
-    assert by_subtype.message == "Reached maximum number of turns (3)"
-    assert by_reason is not None
-    assert by_reason.code is AcpErrorCode.MAX_TURNS
+    assert by_subtype.hit_turn_limit
+    assert by_reason.hit_turn_limit
+    assert _classify(by_subtype, returncode=1) is None
+    assert _classify(by_reason, returncode=0) is None
+
+
+def test_a_result_that_names_no_turn_limit_did_not_hit_one() -> None:
+    assert not _result(subtype="error_during_execution", terminal_reason="api_error").hit_turn_limit
+    assert not _result(is_error=False, subtype="success", terminal_reason="completed").hit_turn_limit
+
+
+def test_a_process_we_stopped_after_the_turn_limit_is_still_a_cancellation() -> None:
+    error = _classify(_result(subtype="error_max_turns"), killed=True)
+
+    assert error is not None
+    assert error.code is AcpErrorCode.CANCELLED
 
 
 def test_a_run_stopped_for_a_rejected_login_is_an_auth_failure_not_a_cancellation() -> None:

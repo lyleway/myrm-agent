@@ -65,7 +65,6 @@ class AcpErrorCode(StrEnum):
     TIMEOUT = "timeout"
     RATE_LIMITED = "rate_limited"
     PROCESS_CRASHED = "process_crashed"
-    MAX_TURNS = "max_turns"
     CANCELLED = "cancelled"
     UNKNOWN = "unknown"
 

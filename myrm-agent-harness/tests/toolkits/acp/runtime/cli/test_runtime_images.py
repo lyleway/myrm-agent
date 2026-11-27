@@ -1,4 +1,4 @@
-"""Image files reach a CLI the way its dialect wants: Claude takes base64 blocks on stdin."""
+"""Image files reach a CLI the way it wants them: Claude takes base64 blocks on stdin."""
 
 from __future__ import annotations
 

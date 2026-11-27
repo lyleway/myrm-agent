@@ -103,7 +103,10 @@ async def test_a_status_update_with_nothing_for_the_user_leaves_the_status_step_
 
 async def test_reaching_the_turn_limit_is_a_stop_and_not_an_error() -> None:
     pool = ScriptedPool(
-        playing(scripted_event(RuntimeEventType.TEXT_DELTA, content="half"), scripted_error(AcpErrorCode.MAX_TURNS))
+        playing(
+            scripted_event(RuntimeEventType.TEXT_DELTA, content="half"),
+            scripted_event(RuntimeEventType.DONE, stop_reason=StopReason.MAX_TURN_REQUESTS.value),
+        )
     )
 
     events = await stream_turn(pool)
@@ -144,22 +147,6 @@ async def test_a_turn_the_agent_ended_early_becomes_a_title_only_notice(reason: 
     assert AgentEventType.ERROR.value not in event_types(events)
     assert (events[-2]["step_key"], events[-2]["status"]) == ("delegation_claude_status", "completed")
     assert events[-1]["type"] == MESSAGE_END
-
-
-async def test_an_agent_that_stopped_at_its_own_turn_limit_ends_like_one_that_reported_the_limit() -> None:
-    pool = ScriptedPool(
-        playing(
-            scripted_event(RuntimeEventType.TEXT_DELTA, content="half"),
-            scripted_event(RuntimeEventType.DONE, stop_reason=StopReason.MAX_TURN_REQUESTS.value),
-        )
-    )
-
-    events = await stream_turn(pool)
-
-    assert AgentEventType.ERROR.value not in event_types(events)
-    status, notice = events[-3], events[-2]
-    assert (status["step_key"], status["status"]) == ("delegation_claude_status", "completed")
-    assert (notice["step_key"], notice["status"], notice["data"]) == ("delegation_claude_turn_limit", "completed", [])
 
 
 @pytest.mark.parametrize("stop_reason", [StopReason.END_TURN.value, StopReason.CANCELLED.value, "something_new", None])

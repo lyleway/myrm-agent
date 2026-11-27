@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import dialect_for
+from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.process import spawn_managed_process
@@ -31,11 +31,9 @@ needs_claude = pytest.mark.skipif(_CLAUDE is None, reason="claude CLI not instal
 @needs_claude
 @pytest.mark.asyncio
 async def test_claude_refuses_an_unknown_session_before_announcing_anything(tmp_path: Path) -> None:
-    dialect = dialect_for("claude")
-    assert dialect is not None
     # The command line of a real turn: an unknown flag would make the CLI fail on its usage, not on the session.
     base = [str(_CLAUDE), "-p", "--output-format", "stream-json", "--verbose"]
-    args = dialect.with_resume(dialect.with_max_turns(dialect.with_partial_messages(base), 3), _UNKNOWN_ID)
+    args = claude.with_resume(claude.with_max_turns(claude.with_partial_messages(base), 3), _UNKNOWN_ID)
     assert args is not None
     parser = TurnParser("s1")
     (tmp_path / "claude-config").mkdir()
