@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.api.web_push.schemas import (
     WebPushSubscriptionRequest,
     WebPushTestRequest,
+    WebPushTestResponse,
     WebPushUnsubscribeRequest,
     WebPushVapidKeyResponse,
 )
@@ -78,3 +79,9 @@ class TestWebPushTestRequest:
     def test_custom_click_url(self) -> None:
         req = WebPushTestRequest(url="/session-abcdef12?approval=ap-test-1")
         assert req.url == "/session-abcdef12?approval=ap-test-1"
+
+
+class TestWebPushTestResponse:
+    def test_serialization(self) -> None:
+        resp = WebPushTestResponse(delivered=1, subscriptions=2, failures=["HTTP 403 Forbidden"])
+        assert resp.model_dump() == {"delivered": 1, "subscriptions": 2, "failures": ["HTTP 403 Forbidden"]}

@@ -31,3 +31,11 @@ class WebPushTestRequest(BaseModel):
     title: str = "Test Notification"
     body: str = "This is a test push notification from Myrm AI."
     url: str = "/settings/system"
+
+
+class WebPushTestResponse(BaseModel):
+    """How many registered devices the test push reached, and the distinct reasons it missed the others."""
+
+    delivered: int
+    subscriptions: int
+    failures: list[str]

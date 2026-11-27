@@ -1,7 +1,7 @@
 /**
  * [INPUT]
  * - @/store/useBudgetExceededStore (POS: 工作单元用尽对话框)
- * - ./backupAlertToast (POS: 备份失败 toast 与组件标识)
+ * - ./failureAlertToast (POS: 备份与浏览器推送持续失败的 toast 与组件标识)
  *
  * [OUTPUT]
  * - alertEventHandlers: 健康告警与预算告警事件的处理器表
@@ -12,9 +12,11 @@
 import {
   BACKUP_ALERT_COMPONENT,
   CLOUD_SYNC_ALERT_COMPONENT,
+  WEB_PUSH_ALERT_COMPONENT,
   showBackupFailureToast,
   showCloudSyncFailureToast,
-} from '@/hooks/globalEvents/backupAlertToast';
+  showWebPushFailureToast,
+} from '@/hooks/globalEvents/failureAlertToast';
 import { useBudgetExceededStore } from '@/store/useBudgetExceededStore';
 import { mutate as mutateSwr } from 'swr';
 
@@ -31,6 +33,8 @@ const handleHealthAlert: GlobalEventHandler = (payload, { t, router, pushToast, 
     showBackupFailureToast({ t, router, toast: pushToast, notifyIfLeader });
   } else if (component === CLOUD_SYNC_ALERT_COMPONENT && status === 'fail') {
     showCloudSyncFailureToast({ t, router, toast: pushToast, notifyIfLeader });
+  } else if (component === WEB_PUSH_ALERT_COMPONENT && status === 'fail') {
+    showWebPushFailureToast({ t, router, toast: pushToast, notifyIfLeader });
   } else if (status === 'fail') {
     pushToast.error(t('healthAlertFail', { component, layer }), {
       description: `${message}${fixSuggestion ? `\n${t('healthAlertTip', { tip: fixSuggestion })}` : ''}`,

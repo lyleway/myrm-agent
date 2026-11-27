@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { BACKUP_ALERT_COMPONENT, CLOUD_SYNC_ALERT_COMPONENT } from '@/hooks/globalEvents/backupAlertToast';
+import {
+  BACKUP_ALERT_COMPONENT,
+  CLOUD_SYNC_ALERT_COMPONENT,
+  WEB_PUSH_ALERT_COMPONENT,
+} from '@/hooks/globalEvents/failureAlertToast';
 import {
   emit,
   installGlobalEventsLifecycle,
@@ -14,7 +18,7 @@ describe('useGlobalEvents: alerts', () => {
   installGlobalEventsLifecycle();
 
   describe('health_alert', () => {
-    it('routes the backup and cloud sync failures to their dedicated toasts', () => {
+    it('routes the backup, cloud sync and web push failures to their dedicated toasts', () => {
       mountGlobalEvents();
       const deps = {
         t: expect.any(Function),
@@ -25,9 +29,11 @@ describe('useGlobalEvents: alerts', () => {
 
       emit('health_alert', { component: BACKUP_ALERT_COMPONENT, status: 'fail' });
       emit('health_alert', { component: CLOUD_SYNC_ALERT_COMPONENT, status: 'fail' });
+      emit('health_alert', { component: WEB_PUSH_ALERT_COMPONENT, status: 'fail' });
 
       expect(mocks.showBackupFailureToast).toHaveBeenCalledWith(deps);
       expect(mocks.showCloudSyncFailureToast).toHaveBeenCalledWith(deps);
+      expect(mocks.showWebPushFailureToast).toHaveBeenCalledWith(deps);
       expect(mocks.toast.error).not.toHaveBeenCalled();
     });
 
@@ -63,10 +69,12 @@ describe('useGlobalEvents: alerts', () => {
       emit('health_alert', { component: 'db', status: 'fail', message: 'down' });
       emit('health_alert', { component: 'db', status: 'ok', message: 'fine' });
       emit('health_alert', { component: BACKUP_ALERT_COMPONENT, status: 'ok' });
+      emit('health_alert', { component: WEB_PUSH_ALERT_COMPONENT, status: 'ok' });
 
       expect(mocks.toast.error).toHaveBeenCalledTimes(1);
       expect(toastOptions(mocks.toast.error).description).toBe('down');
       expect(mocks.showBackupFailureToast).not.toHaveBeenCalled();
+      expect(mocks.showWebPushFailureToast).not.toHaveBeenCalled();
     });
   });
 
