@@ -2,8 +2,9 @@
 
 Every link is the production one: the stdio server and the connection pool that files a record for each tool it
 lists, the skill generator that names and numbers the skills, the skill registry a script's import resolves through,
-the approval stage that reads the record into the card, and the proxy that runs the call. Each of them was tested
-against a hand-built stand-in of its neighbour, and the stand-ins agreed on a key the real chain never produced.
+the approval stage that reads the record into the card, and the proxy that runs the call. Nothing stands in for a
+neighbour: a stand-in agrees with the link next to it on whatever key it is handed, while the real chain agrees only
+on the key it actually produces.
 
 [INPUT]
 - tests.support.mcp_testkit.annotations_probe_server (POS: a real server declaring every kind of hint, run as a stdio child)

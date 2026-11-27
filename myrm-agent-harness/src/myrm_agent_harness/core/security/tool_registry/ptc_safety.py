@@ -11,11 +11,11 @@
 [POS]
 Process-wide store filled when an MCP server's tools are discovered and read when a tool call is scheduled or
 approved. The key is the prefixed name ``mcp__{server}__{tool}``, the identity the permission rules, the loop
-guard and the connection pool already use for a tool: a name has one record, and registering it again replaces
-the record. A script's ``from <skill> import <function>`` reaches the same key through the proxy's own name
-resolution, so scheduling, approval and execution agree on which tool a call is. It is split out of
-``registry.py`` to keep that file under the line limit; ``registry.py`` re-exports every symbol so the flat
-import surface is unchanged.
+guard and the connection pool use for a tool: a name has one record, and registering it again replaces the
+record. A script's ``from <skill> import <function>`` reaches the same key through the proxy's own name
+resolution, so scheduling, approval and execution agree on which tool a call is. ``registry.py`` re-exports
+every symbol, so consumers import the store from that one flat module; the store lives in this file to keep
+``registry.py`` under the line limit.
 """
 
 from __future__ import annotations

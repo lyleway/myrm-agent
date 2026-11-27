@@ -330,7 +330,7 @@ def _reset_ptc_safety_registry() -> Iterator[None]:
 
     Connecting an MCP server registers per-tool safety metadata in a process-wide table. Left behind,
     it makes the compliance audit report a ghost server and lets an unrelated tool with the same name
-    resolve to another server's read-only annotations, which skips approval.
+    resolve to another test's safety record, which changes how that tool is scheduled and guarded.
     """
     from myrm_agent_harness.core.security.tool_registry.registry import _PTC_LOCK, _PTC_TOOL_SAFETY
 

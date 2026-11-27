@@ -3,8 +3,7 @@
 The hooks that persist ``tool_start`` and ``tool_end`` fire in the executor task and write to the event logger the
 run bound in its first step. The merge steps the stream in tasks of its own, so only a merge that keeps one context
 across the steps lets that logger reach the tools. Without it the log holds ``tasks_steps`` only and the tool
-analytics (durations, call counts) stay empty, which is how the local logs of a few weeks went unnoticed.
-``test_sse_merge_context.py`` pins the context of the merge with plain generators; this file runs the whole chain,
+analytics (durations, call counts) stay empty. ``test_sse_merge_context.py`` pins the context of the merge with plain generators; this file runs the whole chain,
 with only the model scripted: agent loop, tool middleware, hooks, event log.
 """
 
