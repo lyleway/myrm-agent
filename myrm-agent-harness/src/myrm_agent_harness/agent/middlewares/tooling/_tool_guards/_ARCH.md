@@ -10,7 +10,7 @@
 |------|------|------|-------|
 | `__init__.py` | 门面 | 导出 `PreCallResult` / `run_pre_call_guards` / `run_post_call_guards` | ✅ |
 | `shared.py` | 核心 | 循环守卫 STATUS 事件、`PreCallResult` 状态载体 | ✅ |
-| `pre_call.py` | 核心 | 急停、熔断、循环、回合预算、steering、信任与 PII 检查；调用不存在的工具时，只有本次运行绑定了 `skill_select_tool`，错误里才附带指向它的技能提示 | ✅ |
+| `pre_call.py` | 核心 | 熔断、急停、已停止的请求不再启动调用（紧随急停检查、先于循环守卫登记，返回「未启动」结果，如排在冲突闸门里、Stop 之后才轮到的调用；急停保留自己的拒绝与审计）、循环、回合预算、steering、信任与 PII 检查；调用不存在的工具时，只有本次运行绑定了 `skill_select_tool`，错误里才附带指向它的技能提示 | ✅ |
 | `post_call.py` | 核心 | 结果进入对话的第一步，先让文本可被 UTF-8 编码：非 UTF-8 的文件名在 Python 里是孤立代理项，循环守卫的结果哈希与超预算结果的落盘都按严格 UTF-8 编码、会因它抛 `UnicodeEncodeError`，所以换成 `U+FFFD`（与发往模型时的替换一致；本来就可编码的结果保持同一个对象，状态与附加字段不变）；随后是预算截断、投毒检测、污点、hook 校验与循环记录 | ✅ |
 
 ## 依赖关系

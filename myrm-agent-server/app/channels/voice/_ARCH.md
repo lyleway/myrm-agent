@@ -12,7 +12,7 @@ Video attachments (.mp4/.webm) are transcribed via the same STT pipeline.
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Voice subsystem: STT transcription, TTS synthesis, and voice message routing. | — |
-| handler.py | Core | Voice processing module. STT for voice and video, TTS synthesis (audio attachment is `ephemeral`, deleted by the bus after delivery), download dispatching. | ✅ |
+| handler.py | Core | Voice processing module. STT for voice and video, TTS synthesis (audio attachment is `ephemeral`, deleted by the bus after delivery), download dispatching. The `[[tts:…]]` directives and `[[tts:text]]…[[/tts:text]]` blocks of a reply are read by linear scans (`_tts_directives`, `_tts_text_blocks`), so a reply made of unclosed openers costs time proportional to its length. | ✅ |
 | stt/ | Core | 入站语音转文字子包（5 个提供方）：common（大小上限/文件类型）、models（模型默认值与语言字段）、local（faster-whisper）、providers（云端提供方）、core（分发与回退）；支持内存字节输入，零磁盘延迟。详见 [stt/_ARCH.md](stt/_ARCH.md) | ✅ |
 | tts/ | Core | 出站文本转语音子包：common（可用性/常量/临时文件）、core（单次/流式入口）、providers（各提供方请求与流式实现）；门面保持原导入面。详见 [tts/_ARCH.md](tts/_ARCH.md) | ✅ |
 

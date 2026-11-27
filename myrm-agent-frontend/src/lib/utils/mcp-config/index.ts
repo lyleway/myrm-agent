@@ -12,6 +12,7 @@ export {
   normalizeMCPServiceConfigs,
 } from './mcpConfigNormalizer';
 export { parseMCPConfigsFromJSON, parseServerConfig } from './mcpConfigParser';
+export { findSameMcpServer, partitionByMcpIdentity, uniqueMcpName } from './mcpServerIdentity';
 export {
   formatMcpFindingWithField,
   formatMcpGateBlockedMessage,

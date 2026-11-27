@@ -10,6 +10,7 @@ building:
 [INPUT]
 - mcp (POS: MCP SDK 2.x — Client, StdioServerParameters)
 - placeholders::resolve_stdio_launch (POS: MCP stdio env/cwd/placeholder resolution)
+- config::mcp_tool_prefix (POS: the tool prefix a server name stands for; one prefix per server in a run)
 
 [OUTPUT]
 - MCPClientManager: MCP client config conversion and target building
@@ -31,6 +32,8 @@ from typing import TYPE_CHECKING, Protocol
 from myrm_agent_harness.core.security.http.redirect_guard import (
     create_mcp_redirect_guard_event_hooks,
 )
+
+from .config import mcp_tool_prefix
 
 if TYPE_CHECKING:
     import httpx2
@@ -164,13 +167,26 @@ class MCPClientManager:
     ) -> dict[str, MCPServerConfigProtocol]:
         """Validate configs and inject auth headers; returns name→config mapping.
 
-        Configs that fail validation are logged and skipped.
+        Configs that fail validation are logged and skipped. Every tool of a server carries the server's tool
+        prefix (``mcp_tool_prefix``) and the registry, approvals and permission rules key on it, so the first valid
+        config of a prefix keeps it: a later config with the same prefix is logged as an error and skipped.
         """
         result: dict[str, MCPServerConfigProtocol] = {}
+        owners: dict[str, str] = {}
         for cfg in mcp_config:
             try:
                 MCPClientManager.build_client_target(cfg)
+                prefix = mcp_tool_prefix(cfg.name)
+                if prefix in owners:
+                    logger.error(
+                        "MCP server %r skipped: its tool prefix %s is already used by server %r",
+                        cfg.name,
+                        prefix,
+                        owners[prefix],
+                    )
+                    continue
                 await MCPClientManager._inject_auth_headers_into_config(cfg)
+                owners[prefix] = cfg.name
                 result[cfg.name] = cfg
             except Exception as e:
                 logger.error("Failed to configure MCP server %s: %s", cfg.name, e)

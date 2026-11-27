@@ -11,7 +11,7 @@
 | `__init__.py` | 门面 | 对外唯一入口，导出 `extract_*` / `build_*` / `resolve_*` / `merge_*` | ✅ |
 | `common.py` | 支撑 | 数值兜底、模型配置合并、视频能力推断 | ✅ |
 | `retrieval.py` | 模块 | embedding / reranker 配置解析 | ✅ |
-| `mcp.py` | 模块 | MCP 配置解析与组织级合并 | ✅ |
+| `mcp.py` | 模块 | MCP 配置解析与组织级合并：组织服务器排在用户服务器之后，用户服务器与某个组织服务器共用工具名前缀（`mcp_tool_prefix` 相同）时被剔除并记 WARNING，组织策略不会被同名的用户服务器顶替 | ✅ |
 | `voice.py` | 模块 | 语音与朗读配置 | ✅ |
 | `session.py` | 模块 | 会话策略 | ✅ |
 | `search.py` | 模块 | 搜索配置解析与可用性探测 | ✅ |

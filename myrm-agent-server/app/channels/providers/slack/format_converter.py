@@ -4,7 +4,7 @@ Handles special character escaping, Slack token protection, link conversion,
 and CJK formatting boundary insertion.
 
 [INPUT]
-- none (imports no other project module)
+- myrm_agent_harness.utils.markdown_links::replace_markdown_links (POS: Markdown link scan in time linear in the text)
 
 [OUTPUT]
 - str: Slack mrkdwn-formatted text
@@ -19,8 +19,8 @@ to ten backticks closes at a bare run at least as long), so a block fenced by fo
 blocks it documents show as text. Text the agent writes never notifies a
 whole channel, workspace or user group: ``<!here>``, ``<!channel>``, ``<!everyone>`` and ``<!subteam^ID>``
 are escaped wherever they appear, and a Markdown link cannot aim at a mention, a channel or a special token.
-The spans that run from an opening ``<`` or ``[`` to a closing mark are found by scans that resume where the last one
-stopped, because a pattern that restarts from every opener reads to the end of the line each time when no closer
+The ``<...>`` spans are found by scans that resume where the last one stopped, and the Markdown links by the shared
+linear scan, because a pattern that restarts from every opener reads to the end of the line each time when no closer
 follows: a line of 40,000 ``<`` takes seconds that way and a few milliseconds here.
 """
 
@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
+
+from myrm_agent_harness.utils.markdown_links import replace_markdown_links
 
 _ANGLE_END_RE = re.compile(r"[>\n]")
 # A fence line (CommonMark): a run of three to ten backticks and an info string that holds none. Tildes stay text, for
@@ -83,28 +85,6 @@ def _broadcast_tokens(text: str) -> Iterator[tuple[int, int]]:
                 yield candidate, end
                 break
             candidate += 1
-
-
-def _markdown_links(line: str) -> Iterator[tuple[int, int, int]]:
-    """The ``(start, label_end, end)`` of each ``[label](url)`` in ``line``; ``label`` and ``url`` are not empty.
-
-    ``label`` runs to the first ``]`` after the ``[`` and ``url`` to the first ``)`` after the ``(``. Every ``[`` up
-    to a ``]`` that no ``(`` follows meets that same ``]``, so the scan resumes after it.
-    """
-    position = 0
-    while (start := line.find("[", position)) != -1:
-        label_end = line.find("]", start + 1)
-        if label_end == -1:
-            return  # no ``]`` ahead: no later ``[`` has one either
-        if label_end == start + 1 or not line.startswith("(", label_end + 1):
-            position = label_end
-            continue
-        end = line.find(")", label_end + 2)
-        if end == -1:
-            return  # no ``)`` ahead: no later link closes either
-        if end > label_end + 2:
-            yield start, label_end, end + 1
-        position = end + 1
 
 
 def _is_allowed_slack_token(token: str) -> bool:
@@ -272,14 +252,7 @@ def _convert_markdown_link(label: str, target: str, original: str) -> str:
 
 def _convert_markdown_links(line: str) -> str:
     """``line`` with each Markdown link written as a Slack link."""
-    pieces: list[str] = []
-    last_end = 0
-    for start, label_end, end in _markdown_links(line):
-        pieces.append(line[last_end:start])
-        pieces.append(_convert_markdown_link(line[start + 1 : label_end], line[label_end + 2 : end - 1], line[start:end]))
-        last_end = end
-    pieces.append(line[last_end:])
-    return "".join(pieces)
+    return replace_markdown_links(line, _convert_markdown_link)
 
 
 def md_to_slack_mrkdwn(text: str) -> str:

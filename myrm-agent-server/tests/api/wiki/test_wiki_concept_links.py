@@ -188,15 +188,15 @@ def test_get_concept_links_error_handling(client: TestClient):
 def test_heading_markdown_syntax_stripping_and_alias_caching(tmp_path: Path):
     """Verify that headings with rich markdown formatting are stripped cleanly and alias cache works."""
     from myrm_agent_harness.toolkits.wiki.core.structure import WikiStructure
-    from myrm_agent_harness.toolkits.wiki.retrieval.graph_store import _clean_heading_text
+    from myrm_agent_harness.toolkits.wiki.retrieval.heading_text import clean_heading_text
 
     # 1. Test markdown syntax stripping
     raw_heading = "## 4.2 **核心网关** 下的 `TokenBucket` [自适应限流](https://example.com/ratelimit)"
-    cleaned = _clean_heading_text(raw_heading)
+    cleaned = clean_heading_text(raw_heading)
     assert cleaned == "4.2 核心网关 下的 TokenBucket 自适应限流"
 
     raw_heading_2 = "### 架构演进 [[链路设计|全景图]] ~~废弃逻辑~~"
-    cleaned_2 = _clean_heading_text(raw_heading_2)
+    cleaned_2 = clean_heading_text(raw_heading_2)
     assert cleaned_2 == "架构演进 全景图 废弃逻辑"
 
     # 2. Test alias mtime shared cache

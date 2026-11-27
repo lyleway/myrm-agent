@@ -1,4 +1,5 @@
-"""The converter's scans for ``<...>`` and ``[label](url)`` find what the patterns they replace found, in linear time.
+"""The converter's scans for ``<...>`` find what the patterns they replace found, and its links and mentions come out as
+the patterns gave them, in linear time.
 
 The patterns below are the ones the scans replace. They are the reference, not the code under test: backtracking from
 every opener makes a line of unclosed ``<`` or ``[`` cost the square of its length. The scans must return the same
@@ -23,7 +24,6 @@ from app.channels.providers.slack.format_converter import (
     _escape_slack_content,
     _escape_slack_segment,
     _is_allowed_slack_token,
-    _markdown_links,
     md_to_slack_mrkdwn,
     neutralize_broadcast_mentions,
 )
@@ -118,34 +118,6 @@ class TestSameSpansAsTheBacktrackingPatterns:
     )
     def test_angle_spans_examples(self, text: str, spans: list[tuple[int, int]]) -> None:
         assert list(_angle_spans(text)) == spans
-
-    def test_markdown_links_on_every_short_text(self) -> None:
-        for text in _every_string(("[", "]", "(", ")", "a"), 7):
-            assert list(_markdown_links(text)) == [(m.start(), m.end(1), m.end()) for m in _REFERENCE_LINK.finditer(text)], repr(
-                text
-            )
-
-    def test_markdown_links_on_random_text(self) -> None:
-        for text in _random_strings(_LINK_PIECES, 40_000, 14, seed=2):
-            assert list(_markdown_links(text)) == [(m.start(), m.end(1), m.end()) for m in _REFERENCE_LINK.finditer(text)], repr(
-                text
-            )
-
-    @pytest.mark.parametrize(
-        ("text", "spans"),
-        [
-            ("[a](b)", [(0, 2, 6)]),
-            ("[[a](b)", [(0, 3, 7)]),  # the label runs to the first ``]``, so it holds the second ``[``
-            ("[a]()", []),
-            ("[](b)", []),
-            ("[a] (b)", []),
-            ("[a](b(c)", [(0, 2, 8)]),  # the url runs to the first ``)``
-            ("[a](b", []),
-            ("[a](b) and [c](d)", [(0, 2, 6), (11, 13, 17)]),
-        ],
-    )
-    def test_markdown_links_examples(self, text: str, spans: list[tuple[int, int, int]]) -> None:
-        assert list(_markdown_links(text)) == spans
 
 
 class TestSameTextAsTheBacktrackingPatterns:

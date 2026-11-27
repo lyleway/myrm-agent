@@ -2,6 +2,7 @@
 
 [INPUT]
 - myrm_agent_harness.core.events::THINKING_TAG_NAMES (POS: canonical thinking tag name set)
+- myrm_agent_harness.utils.markdown_links::replace_markdown_links (POS: Markdown link scan in time linear in the text)
 
 [OUTPUT]
 - extract_safe_regions(): Extract pattern matches outside code blocks
@@ -13,12 +14,13 @@
 - with_protected_code_blocks(): Run a text transform while code blocks stay untouched
 - md_to_plaintext(): Convert markdown to plain text based on RenderStyle
 - FENCED_BLOCK_RE / fenced_block_html(): Fenced code block and its ``<pre>`` markup for the HTML channels (Telegram, Matrix)
+- markdown_links_to_html(): Markdown links of HTML-escaped text as ``<a href>`` anchors, for the HTML channels (Telegram, Matrix)
 
 [POS]
 Universal text utilities. Provides code-block-aware text processing,
 format downgrade functions (LaTeX stripping, table conversion, HTML fence
 replacement, plaintext conversion), thinking tag removal, and the fenced block
--> ``<pre>`` rendering that the HTML channels share.
+-> ``<pre>`` and Markdown link -> ``<a>`` rendering that the HTML channels share.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from myrm_agent_harness.core.events import THINKING_TAG_NAMES
+from myrm_agent_harness.utils.markdown_links import replace_markdown_links
 
 if TYPE_CHECKING:
     from re import Match
@@ -42,7 +45,6 @@ _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _STRIKE_RE = re.compile(r"~~(.+?)~~")
-_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 _BLOCKQUOTE_RE = re.compile(r"^>\s?", re.MULTILINE)
 
 _SURROGATE_RE = re.compile("[\ud800-\udfff]")
@@ -152,6 +154,17 @@ def fenced_block_html(block: Match[str]) -> str:
     if not language:
         return f"<pre>{code}</pre>"
     return f'<pre><code class="language-{html.escape(language[0])}">{code}</code></pre>'
+
+
+def markdown_links_to_html(text: str) -> str:
+    """``text`` (HTML-escaped already) with each Markdown link written as ``<a href="target">label</a>``.
+
+    A target never holds a placeholder (NUL, which the HTML converters use to set protected spans apart): a "link" to
+    a protected span is no href with markup in it.
+    """
+    return replace_markdown_links(
+        text, lambda label, target, _original: f'<a href="{target}">{label}</a>', reject_in_target="\x00"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,5 +292,5 @@ def md_to_plaintext(text: str, style: RenderStyle) -> str:
     result = _STRIKE_RE.sub(r"\1", result)
     result = _BLOCKQUOTE_RE.sub(" ", result)
     if not style.supports_links:
-        result = _LINK_RE.sub(r"\1", result)
+        result = replace_markdown_links(result, lambda label, _target, _original: label)
     return result

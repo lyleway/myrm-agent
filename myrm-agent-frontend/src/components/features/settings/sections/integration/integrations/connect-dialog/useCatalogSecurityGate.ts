@@ -2,6 +2,7 @@
  * [INPUT]
  * - @/hooks/settings/useMcpSecurityGate (POS: MCP 启用前的安全扫描闸门与扫描摘要)
  * - @/lib/utils/mcp-config::formatMcpGateBlockedMessage (POS: 闸门拒绝原因的用户文案)
+ * - @/lib/utils/mcp-config::findSameMcpServer (POS: 已有服务占着同一工具名前缀的判定)
  * - @/hooks/shared/useToast (POS: 全局 toast)
  *
  * [OUTPUT]
@@ -16,7 +17,7 @@ import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from '@/hooks/shared/useToast';
 import { buildLastScanSummary, gateMcpEnable } from '@/hooks/settings/useMcpSecurityGate';
-import { formatMcpGateBlockedMessage } from '@/lib/utils/mcp-config';
+import { findSameMcpServer, formatMcpGateBlockedMessage } from '@/lib/utils/mcp-config';
 import type { MCPScanResult, MCPServiceConfig } from '@/store/config/types';
 
 interface CatalogSecurityGateInput {
@@ -55,8 +56,7 @@ export function useCatalogSecurityGate({
             : config.keepaliveInterval,
       };
       // The service may have been added elsewhere while the acknowledgement dialog was open.
-      const exists = mcpConfigs.some((c) => c.name === finalConfig.name);
-      if (!exists) {
+      if (!findSameMcpServer(mcpConfigs, finalConfig.name)) {
         setMCPConfigs([...mcpConfigs, finalConfig]);
       }
       toast({ title: t('connectSuccess', { name: entryName }) });
