@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.channels.core.allow_policy import AllowPolicy, ChatPolicy, FilterReason
+from app.channels.types import InboundMessage
 from tests.channels.providers.telegram.telegram_channel_factories import make_channel
 
 
@@ -64,6 +66,56 @@ class TestParseUpdateCallbackQuery:
             },
         }
         assert ch._parse_update(raw) is None
+
+
+def _tap(message: dict[str, object] | None) -> InboundMessage:
+    """What the channel builds from a tap on ``qr:hello`` of ``message`` (a tap that names no message when ``None``)."""
+    ch = make_channel()
+    ch._client = MagicMock()
+    ch._client.answer_callback_query = AsyncMock()
+    ch._background_tasks = set()
+    callback_query: dict[str, object] = {"id": "cbq_chat", "from": {"id": 42}, "data": "qr:hello"}
+    if message is not None:
+        callback_query["message"] = message
+    msg = ch._parse_update({"update_id": 21, "callback_query": callback_query})
+    assert msg is not None
+    return msg
+
+
+def _in_chat(chat_type: str) -> dict[str, object]:
+    return {"message_id": 5, "chat": {"id": -100, "type": chat_type}}
+
+
+class TestCallbackQueryChat:
+    """A tap belongs to the chat it happened in, and in a group it addresses the bot the way a mention does."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("chat_type", "is_group"),
+        [("group", True), ("supergroup", True), ("private", False), ("channel", False)],
+    )
+    async def test_the_chat_type_decides_the_group_flag_and_the_mention(self, chat_type: str, is_group: bool) -> None:
+        msg = _tap(_in_chat(chat_type))
+
+        assert (msg.is_group, msg.mentioned) == (is_group, is_group)
+        assert msg.chat_id == "-100"
+
+    @pytest.mark.asyncio
+    async def test_a_tap_that_names_no_message_names_no_chat(self) -> None:
+        msg = _tap(None)
+
+        assert (msg.chat_id, msg.is_group, msg.mentioned) == ("", False, False)
+
+    @pytest.mark.asyncio
+    async def test_a_group_tap_passes_the_default_policy_that_asks_a_group_for_a_mention(self) -> None:
+        assert AllowPolicy().evaluate(_tap(_in_chat("supergroup"))) is None
+
+    @pytest.mark.asyncio
+    async def test_a_tap_is_judged_by_the_policy_of_its_chat_kind(self) -> None:
+        policy = AllowPolicy(group_policy=ChatPolicy.DENY)
+
+        assert policy.evaluate(_tap(_in_chat("supergroup"))) is FilterReason.CHAT_DENIED
+        assert policy.evaluate(_tap(_in_chat("private"))) is None
 
 
 class TestParseUpdateLocation:

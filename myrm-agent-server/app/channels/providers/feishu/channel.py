@@ -8,6 +8,7 @@
 - app.channels.providers.feishu.inbound::FeishuInboundMixin (POS: webhook / websocket event handling)
 - app.channels.core.reaction_ledger::ReactionLedger (POS: remembers the reaction id added per message so an empty emoji deletes it)
 - app.channels.providers.feishu.reactions::FEISHU_REACTION_GLYPHS (POS: glyphs Feishu has an emoji_type for)
+- app.channels.providers.feishu.group_chats::GroupChatMemory (POS: the group chats typed messages came from, so a card click is judged by its chat)
 - app.channels.providers.feishu.outbound::FeishuOutboundMixin (POS: message send, media upload, placeholder cards)
 - app.channels.core.base::BaseChannel (POS: Channel abstraction layer. All providers inherit this class; Gateway manages them uniformly. Supports outbound (send) and inbound (on_inbound callback) bidirectional communication. Providers may declare credential_spec and from_credentials for self-contained credential management.)
 - app.channels.core.inbound_pipeline::DedupMode (POS: message deduplication mode of the inbound pipeline)
@@ -48,6 +49,7 @@ from app.channels.types import (
 )
 
 from .api import FeishuClient
+from .group_chats import GroupChatMemory
 from .inbound import FeishuInboundMixin
 from .outbound import FeishuOutboundMixin
 from .reactions import FEISHU_REACTION_GLYPHS
@@ -155,6 +157,7 @@ class FeishuChannel(FeishuOutboundMixin, FeishuInboundMixin, BaseChannel):
         self._apply_bot_policy(bot_policy)
         self._client = FeishuClient(self._app_id, self._app_secret, use_lark=use_lark)
         self._user_resolver = FeishuUserResolver(self._client)
+        self._group_chats = GroupChatMemory()
         self._ws_transport: FeishuWSTransport | None = None  # lazy import
         self._reactions = ReactionLedger()  # reaction ids, so an empty emoji can remove what was added
 

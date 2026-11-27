@@ -71,10 +71,10 @@ def _may_decide(msg: InboundMessage, asked: PendingApproval) -> bool:
     """Whether the sender of ``msg`` may answer the chat's open request ``asked``.
 
     The request is the message of the turn that asked, so it says who asked. The chat counts as a group when the request
-    or the answer says so: a flag is only evidence when it says group, because a channel that cannot tell reports a
-    direct chat (Telegram does for every button click). In a DM whoever writes decides; in a group only the member who
-    asked. A missing identity never matches: nobody qualifies when ``msg`` names no sender, or when no member is known
-    to have asked.
+    or the answer says so: a flag is only evidence when it says group, because a channel that cannot tell what chat an
+    event came from reports a direct chat. In a DM whoever writes decides; in a group only the member who asked. A
+    missing identity never matches: nobody qualifies when ``msg`` names no sender, or when no member is known to have
+    asked.
     """
     if not (asked.message.is_group or msg.is_group):
         return True
