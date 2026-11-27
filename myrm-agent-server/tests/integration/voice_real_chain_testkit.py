@@ -1,9 +1,9 @@
-"""Real-socket kit for the dictation and voice-session endpoints.
+"""Real-socket kit for the voice endpoints: dictation, voice session, upload transcription and read-aloud.
 
-The browser side is a real WebSocket client. The server side is the production STT and voice routers under a real uvicorn
-socket, with the voice settings stored through the real ``PUT /config/voice`` route, so a frame travels the path a browser's
-does. Deepgram is the one party that cannot be real here (``.env.test`` holds no credentials for it): its stand-in is a
-WebSocket server on a real local socket that follows Deepgram's close semantics, ``CloseStream`` makes it flush the results
+The browser side is a real WebSocket / HTTP client. The server side is the production STT, TTS and voice routers under a real
+uvicorn socket, with the voice settings stored through the real ``PUT /config/voice`` route, so a request travels the path a
+browser's does. Deepgram is the one party that cannot be real here (``.env.test`` holds no credentials for it): its stand-in is
+a WebSocket server on a real local socket that follows Deepgram's close semantics, ``CloseStream`` makes it flush the results
 it still holds and then end the stream.
 """
 
@@ -45,13 +45,17 @@ class _Server(uvicorn.Server):
 
 
 def production_app() -> FastAPI:
-    """The routers dictation depends on, mounted on the prefixes ``app/api/router.py`` gives them."""
+    """The voice routers and the settings route they read, mounted on the prefixes ``app/api/router.py`` gives them."""
     from app.api.config.router import router as config_router
+    from app.api.stt.router import router as stt_router
     from app.api.stt.ws_stream import router as stt_ws_router
+    from app.api.tts.router import router as tts_router
     from app.api.voice.ws_session import router as voice_ws_router
 
     app = FastAPI()
     app.include_router(config_router, prefix="/api/v1/config")
+    app.include_router(stt_router, prefix="/api/v1/stt")
+    app.include_router(tts_router, prefix="/api/v1/tts")
     app.include_router(stt_ws_router, prefix="/ws/stt")
     app.include_router(voice_ws_router, prefix="/ws/voice")
     return app
@@ -113,9 +117,16 @@ def voice_settings(*, provider: str, api_key: str = "") -> dict[str, object]:
     }
 
 
+@contextlib.asynccontextmanager
+async def http_client(host: str, *, timeout: float = _HTTP_TIMEOUT_SECONDS) -> AsyncIterator[httpx.AsyncClient]:
+    """The page's HTTP client for the server at ``host``."""
+    async with httpx.AsyncClient(base_url=f"http://{host}", timeout=timeout) as client:
+        yield client
+
+
 async def save_voice_settings(host: str, settings: dict[str, object]) -> None:
     """Store ``settings`` the way the settings page does."""
-    async with httpx.AsyncClient(base_url=f"http://{host}", timeout=_HTTP_TIMEOUT_SECONDS) as client:
+    async with http_client(host) as client:
         reply = await client.put("/api/v1/config/voice", json={"deviceId": "web", "value": settings})
     reply.raise_for_status()
 

@@ -1,11 +1,12 @@
-"""Dictation and voice session over real sockets: browser client → production routers → settings in the database → speech-to-text.
+"""Voice endpoints over real sockets: browser client → production routers → settings in the database → speech-to-text.
 
-Nothing between the browser and the provider is replaced: the WebSocket client and the uvicorn server talk over real TCP,
-the settings travel through ``PUT /config/voice`` into the test database, and the key-less ``local`` provider runs the real
-faster-whisper model on real speech (a system voice reading a sentence). The two tests that need the speech skip on a host
-without ``say`` or without the cached ``base`` model. Deepgram cannot be real here (``.env.test`` holds no credentials for it),
-so its tests face a stand-in WebSocket server that follows Deepgram's close semantics: what the stand-in transcribes is
-scripted, what the server does with the frames, the close and the disconnects is the code under test.
+Nothing between the browser and the provider is replaced: the WebSocket / HTTP client and the uvicorn server talk over real
+TCP, the settings travel through ``PUT /config/voice`` into the test database (no LLM provider is configured, as for a user
+who has set up voice first), and the key-less ``local`` provider runs the real faster-whisper model on real speech (a system
+voice reading a sentence). The three tests that need the speech skip on a host without ``say`` or without the cached ``base``
+model. Deepgram cannot be real here (``.env.test`` holds no credentials for it), so its tests face a stand-in WebSocket server
+that follows Deepgram's close semantics: what the stand-in transcribes is scripted, what the server does with the frames, the
+close and the disconnects is the code under test.
 """
 
 from __future__ import annotations
@@ -21,10 +22,11 @@ import pytest
 from myrm_agent_harness.core.features import _reset_for_testing
 
 from app.channels.voice.stt import models as stt_models
-from tests.integration.stt_real_chain_testkit import (
+from tests.integration.voice_real_chain_testkit import (
     DeepgramStandIn,
     browser,
     deepgram_stand_in,
+    http_client,
     production_app,
     receive_event,
     receive_until_closed,
@@ -136,6 +138,26 @@ async def test_voice_session_transcribes_each_utterance_with_the_local_model(spo
     for utterance in utterances:
         assert utterance["type"] == "stt_final"
         _assert_spoken(utterance["text"])
+
+
+async def test_the_upload_route_transcribes_real_speech_with_the_local_model(spoken_wav: bytes, local_whisper: None) -> None:
+    async with serving(production_app()) as host:
+        await save_voice_settings(host, voice_settings(provider="local"))
+        async with http_client(host, timeout=_MODEL_TIMEOUT_SECONDS) as page:
+            reply = await page.post("/api/v1/stt/transcribe", files={"file": ("dictation.wav", spoken_wav, "audio/wav")})
+
+    assert reply.status_code == 200
+    _assert_spoken(reply.json()["text"])
+
+
+async def test_read_aloud_finds_the_saved_voice_settings() -> None:
+    """The provider override is invalid on purpose: the route rejects it only after it has loaded the saved settings."""
+    async with serving(production_app()) as host:
+        await save_voice_settings(host, voice_settings(provider="local"))
+        async with http_client(host) as page:
+            reply = await page.post("/api/v1/tts/synthesize", json={"text": "Hello", "provider": "no-such-provider"})
+
+    assert (reply.status_code, reply.json()["detail"]) == (400, "Invalid provider: no-such-provider")
 
 
 async def test_dictation_delivers_the_final_results_the_provider_flushes_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
