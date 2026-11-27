@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import io
 import json
+from typing import cast
 
 import pytest
 
 from myrm_agent_harness.agent.meta_tools.file_ops.utils import document_reader
 from myrm_agent_harness.agent.meta_tools.file_ops.utils.document_reader import read_document_as_text
+from myrm_agent_harness.toolkits.code_execution.executors.base import CodeExecutor
 
 _NEXT_STEP = "parse_mode='content'"
 
@@ -42,9 +44,8 @@ def _workbook(rows: int = 3) -> bytes:
 
 
 async def _read(parse_mode: str | None) -> str:
-    return await read_document_as_text(
-        "data/sales.xlsx", _BytesExecutor({"data/sales.xlsx": _workbook()}), parse_mode=parse_mode
-    )
+    executor = cast(CodeExecutor, _BytesExecutor({"data/sales.xlsx": _workbook()}))
+    return await read_document_as_text("data/sales.xlsx", executor, parse_mode=parse_mode)
 
 
 class TestExcelStructureNextStep:

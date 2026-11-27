@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
 
 from myrm_agent_harness.agent.meta_tools.file_ops.file_edit_tool import create_file_edit_tool
 from myrm_agent_harness.agent.meta_tools.file_ops.file_read_tool import create_file_read_tool
@@ -43,7 +44,9 @@ def _property_names(schema: object) -> Iterator[str]:
 
 @pytest.mark.parametrize("tool_name", sorted(_FILE_TOOLS))
 def test_no_file_tool_parameter_is_command_shaped(tool_name: str) -> None:
-    schema = _FILE_TOOLS[tool_name]().get_input_schema().model_json_schema()
+    input_schema = _FILE_TOOLS[tool_name]().get_input_schema()
+    assert issubclass(input_schema, BaseModel)
+    schema = input_schema.model_json_schema()
 
     offenders = sorted({name for name in _property_names(schema) if _COMMAND_SHAPED.search(name)})
 

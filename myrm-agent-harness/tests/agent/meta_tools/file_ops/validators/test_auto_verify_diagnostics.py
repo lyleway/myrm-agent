@@ -12,7 +12,7 @@ from myrm_agent_harness.agent.meta_tools.file_ops.validators.auto_verify import 
 
 
 class TestParsePyrightOutput:
-    def test_valid_json_output(self):
+    def test_valid_json_output(self) -> None:
         raw = """{
             "generalDiagnostics": [
                 {
@@ -31,7 +31,7 @@ class TestParsePyrightOutput:
         assert result[0].severity == "error"
         assert "namee" in result[0].message
 
-    def test_filters_warnings(self):
+    def test_filters_warnings(self) -> None:
         raw = """{
             "generalDiagnostics": [
                 {
@@ -52,17 +52,17 @@ class TestParsePyrightOutput:
         assert len(result) == 1
         assert result[0].severity == "error"
 
-    def test_invalid_json_falls_back_to_text_output(self):
+    def test_invalid_json_falls_back_to_text_output(self) -> None:
         raw = "src/main.py:5:12 - error: Type 'str' is not assignable"
         result = _parse_pyright_output(raw)
         assert len(result) == 1
 
-    def test_empty_diagnostics(self):
+    def test_empty_diagnostics(self) -> None:
         raw = '{"generalDiagnostics": []}'
         result = _parse_pyright_output(raw)
         assert len(result) == 0
 
-    def test_missing_range_fields_uses_defaults(self):
+    def test_missing_range_fields_uses_defaults(self) -> None:
         """Pyright diag with missing range/start fields defaults to line=1, col=1."""
         raw = '{"generalDiagnostics": [{"file": "x.py", "severity": "error", "message": "err"}]}'
         result = _parse_pyright_output(raw)
@@ -70,7 +70,7 @@ class TestParsePyrightOutput:
         assert result[0].line == 1
         assert result[0].col == 1
 
-    def test_missing_file_field_uses_empty(self):
+    def test_missing_file_field_uses_empty(self) -> None:
         """Pyright diag missing file field defaults to empty string."""
         raw = '{"generalDiagnostics": [{"severity": "error", "message": "err", "range": {"start": {"line": 0, "character": 0}}}]}'
         result = _parse_pyright_output(raw)
@@ -79,7 +79,7 @@ class TestParsePyrightOutput:
 
 
 class TestParsePyrightTextOutput:
-    def test_text_format(self):
+    def test_text_format(self) -> None:
         raw = "src/main.py:5:12 - error: Cannot access attribute"
         result = _parse_pyright_text_output(raw)
         assert len(result) == 1
@@ -88,23 +88,23 @@ class TestParsePyrightTextOutput:
         assert result[0].col == 12
         assert "Cannot access attribute" in result[0].message
 
-    def test_multiple_errors(self):
+    def test_multiple_errors(self) -> None:
         raw = "src/a.py:1:1 - error: First error\nsrc/b.py:2:3 - error: Second error\n"
         result = _parse_pyright_text_output(raw)
         assert len(result) == 2
 
-    def test_ignores_non_error_lines(self):
+    def test_ignores_non_error_lines(self) -> None:
         raw = "Compiling...\nDone. No errors found."
         result = _parse_pyright_text_output(raw)
         assert len(result) == 0
 
-    def test_tsc_style_lines_are_not_diagnostics(self):
+    def test_tsc_style_lines_are_not_diagnostics(self) -> None:
         raw = "src/app.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'."
         assert _parse_pyright_text_output(raw) == []
 
 
 class TestFilterDiagnostics:
-    def test_filters_by_file(self):
+    def test_filters_by_file(self) -> None:
         diags = [
             Diagnostic(file="src/main.py", line=5, col=1, severity="error", message="err"),
             Diagnostic(file="src/other.py", line=3, col=1, severity="error", message="err"),
@@ -113,7 +113,7 @@ class TestFilterDiagnostics:
         assert len(result) == 1
         assert result[0].file == "src/main.py"
 
-    def test_filters_by_edit_range(self):
+    def test_filters_by_edit_range(self) -> None:
         diags = [
             Diagnostic(file="main.py", line=5, col=1, severity="error", message="near edit"),
             Diagnostic(file="main.py", line=100, col=1, severity="error", message="far away"),
@@ -122,19 +122,19 @@ class TestFilterDiagnostics:
         assert len(result) == 1
         assert result[0].line == 5
 
-    def test_margin_of_10_lines(self):
+    def test_margin_of_10_lines(self) -> None:
         diags = [
             Diagnostic(file="main.py", line=20, col=1, severity="error", message="within margin"),
         ]
         result = _filter_diagnostics(diags, "main.py", 15, 15)
         assert len(result) == 1
 
-    def test_respects_max_limit(self):
+    def test_respects_max_limit(self) -> None:
         diags = [Diagnostic(file="main.py", line=i, col=1, severity="error", message=f"err {i}") for i in range(1, 20)]
         result = _filter_diagnostics(diags, "main.py", None, None)
         assert len(result) == 5
 
-    def test_no_range_reports_all_errors_in_file(self):
+    def test_no_range_reports_all_errors_in_file(self) -> None:
         diags = [
             Diagnostic(file="main.py", line=1, col=1, severity="error", message="e1"),
             Diagnostic(file="main.py", line=50, col=1, severity="error", message="e2"),
@@ -143,7 +143,7 @@ class TestFilterDiagnostics:
         result = _filter_diagnostics(diags, "main.py", None, None)
         assert len(result) == 3
 
-    def test_excludes_non_error_severity(self):
+    def test_excludes_non_error_severity(self) -> None:
         """Non-error severities are excluded even if in range."""
         diags = [
             Diagnostic(file="main.py", line=5, col=1, severity="warning", message="w"),
@@ -154,7 +154,7 @@ class TestFilterDiagnostics:
         assert len(result) == 1
         assert result[0].severity == "error"
 
-    def test_endswith_path_matching(self):
+    def test_endswith_path_matching(self) -> None:
         """Diagnostics with absolute paths match when file_path is relative suffix."""
         diags = [
             Diagnostic(file="/home/user/project/src/main.py", line=1, col=1, severity="error", message="e"),
@@ -162,7 +162,7 @@ class TestFilterDiagnostics:
         result = _filter_diagnostics(diags, "src/main.py", None, None)
         assert len(result) == 1
 
-    def test_reverse_endswith_path_matching(self):
+    def test_reverse_endswith_path_matching(self) -> None:
         """file_path is absolute, diagnostic has relative path."""
         diags = [
             Diagnostic(file="src/main.py", line=1, col=1, severity="error", message="e"),
@@ -172,7 +172,7 @@ class TestFilterDiagnostics:
 
 
 class TestFormatDiagnostics:
-    def test_basic_format(self):
+    def test_basic_format(self) -> None:
         diags = [
             Diagnostic(file="src/main.py", line=5, col=12, severity="error", message="Type mismatch"),
         ]
