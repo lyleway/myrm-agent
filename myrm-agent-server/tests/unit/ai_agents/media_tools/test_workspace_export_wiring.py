@@ -3,7 +3,7 @@
 [INPUT]
 - app.ai_agents.media_tools.image_agent_tool / video_agent_tool / tts_agent_tool (POS: the tools whose results gain ``workspace_files``)
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: the gate that decides whose task is exported)
-- tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
+- tests.unit.ai_agents.media_tools.conftest::library, workspace (POS: a real media library on a throwaway database and local storage; an empty workspace folder)
 - myrm_agent_harness.core.security.detection::redact_leaks (POS: the credential redaction the agent stack applies to every tool result)
 
 [OUTPUT]
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,6 +35,7 @@ from myrm_agent_harness.toolkits.llms.tts import TTSConfig
 from myrm_agent_harness.toolkits.llms.video import VideoGenerationConfig
 from myrm_agent_harness.toolkits.tasks import Task, TaskStatus
 from PIL import Image
+from pydantic import SecretStr
 
 from app.ai_agents.media_tools.image_agent_tool import create_image_generation_tool
 from app.ai_agents.media_tools.tts_agent_tool import create_tts_tool
@@ -42,25 +43,14 @@ from app.ai_agents.media_tools.video_agent_tool import create_video_generation_t
 from app.ai_agents.media_tools.workspace_export import WORKSPACE_MEDIA_DIR, WorkspaceExporter
 from app.core.media.reference import media_reference
 from app.tasks.serializer import serialize_media_task
-from tests.support.media_library_env import MediaLibraryEnv, media_library_env
+from tests.support.media_library_env import MediaLibraryEnv
 
 _RESULTS = "app.ai_agents.media_tools.task_results"
 _IMAGE_MODULE = "app.ai_agents.media_tools.image_agent_tool"
-_TTS_CONFIG = TTSConfig(provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key="test-key")
+_TTS_CONFIG = TTSConfig(
+    provider="elevenlabs", model="eleven_flash_v2_5", voice="21m00Tcm4TlvDq8ikWAM", api_key=SecretStr("test-key")
+)
 _BYTES = b"the generated media"
-
-
-@pytest.fixture
-async def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[MediaLibraryEnv]:
-    async with media_library_env(tmp_path / "storage", monkeypatch) as env:
-        yield env
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    return root
 
 
 def _png() -> bytes:
@@ -139,7 +129,8 @@ async def _status(tool: BaseTool, *tasks: Task, **arguments: object) -> dict[str
     store = MagicMock()
     store.get_task = AsyncMock(side_effect=list(tasks))
     with patch(f"{_RESULTS}.media_task_store", return_value=store):
-        return json.loads(await tool.ainvoke({"action": "status", "task_id": "t1", **arguments}))
+        answer: dict[str, object] = json.loads(await tool.ainvoke({"action": "status", "task_id": "t1", **arguments}))
+    return answer
 
 
 class TestWhoseTaskIsExported:
@@ -231,7 +222,7 @@ class TestStatus:
             answer = await _status(kind.make_tool(workspace), _task(kind, None), _task(kind, result), wait_seconds=5)
 
         assert answer["status"] == "succeeded"
-        assert answer["result"]["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]
+        assert answer["result"] == {**result, "workspace_files": [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]}
 
     @_KINDS
     @pytest.mark.parametrize(("task_user", "task_chat"), [("user-2", "chat-1"), ("user-1", "chat-2"), ("user-1", None)])

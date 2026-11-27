@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import io
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,7 +11,7 @@ from PIL import Image
 
 from app.ai_agents.media_tools.media_persist import create_media_persist_callback
 from app.core.media.reference import parse_media_reference
-from tests.support.media_library_env import MediaLibraryEnv, media_library_env
+from tests.support.media_library_env import MediaLibraryEnv
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,12 +33,6 @@ def _png() -> bytes:
     buffer = io.BytesIO()
     Image.new("RGB", (16, 16), "red").save(buffer, "PNG")
     return buffer.getvalue()
-
-
-@pytest.fixture
-async def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[MediaLibraryEnv]:
-    async with media_library_env(tmp_path / "storage", monkeypatch) as env:
-        yield env
 
 
 async def test_a_stored_image_is_returned_as_its_reference_and_keeps_its_metadata(library: MediaLibraryEnv) -> None:

@@ -3,7 +3,7 @@
 [INPUT]
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: completes a result with the workspace copies of its media)
 - myrm_agent_harness.core.security.path::open_directory_beneath, ConfinedDirectory (POS: exclusive file creation below a trusted directory, decided on descriptors so no link redirects it)
-- tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
+- tests.unit.ai_agents.media_tools.conftest::library, workspace (POS: a real media library on a throwaway database and local storage; an empty workspace folder)
 
 [OUTPUT]
 Fails when a link that takes the place of the copies' folder, before or during a copy, receives a file or has one of its
@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO
@@ -31,26 +31,13 @@ from myrm_agent_harness.core.security.path import ConfinedDirectory, open_direct
 
 from app.ai_agents.media_tools.workspace_export import WORKSPACE_MEDIA_DIR, WorkspaceExporter
 from app.core.media.reference import media_reference
-from tests.support.media_library_env import MediaLibraryEnv, media_library_env
+from tests.support.media_library_env import MediaLibraryEnv
 
 pytestmark = pytest.mark.skipif(os.name == "nt", reason="creating symbolic links needs a privilege on Windows")
 
 _PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
 _THE_USERS = b"the user's own file"
 _SWAPPED_OUT = "swapped-out"
-
-
-@pytest.fixture
-async def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[MediaLibraryEnv]:
-    async with media_library_env(tmp_path / "storage", monkeypatch) as env:
-        yield env
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    return root
 
 
 @pytest.fixture

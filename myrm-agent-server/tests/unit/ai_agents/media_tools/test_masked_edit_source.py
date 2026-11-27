@@ -2,7 +2,7 @@
 
 [INPUT]
 - app.ai_agents.media_tools.image_agent_tool::create_image_generation_tool (POS: the ``edit`` action under test)
-- tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
+- tests.unit.ai_agents.media_tools.conftest::library (POS: a real media library on a throwaway database and local storage)
 
 [OUTPUT]
 Fails when the source of a masked edit is shrunk or left sideways while its mask keeps the original size, when an edit
@@ -18,8 +18,7 @@ from __future__ import annotations
 import io
 import json
 import os
-from collections.abc import AsyncIterator, Iterator
-from pathlib import Path
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,17 +28,11 @@ from PIL import Image
 
 from app.ai_agents.media_tools.image_agent_tool import create_image_generation_tool
 from app.core.media.reference import media_reference
-from tests.support.media_library_env import MediaLibraryEnv, media_library_env
+from tests.support.media_library_env import MediaLibraryEnv
 
 _MODEL = "gpt-image-2.6-sunburst"
 _EDITED = ImageResult(url=None, b64_json=None, revised_prompt=None, model=_MODEL, persisted_ref="media://media_edited")
 _EXIF_ORIENTATION = 0x0112
-
-
-@pytest.fixture
-async def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[MediaLibraryEnv]:
-    async with media_library_env(tmp_path / "storage", monkeypatch) as env:
-        yield env
 
 
 @pytest.fixture
@@ -91,7 +84,10 @@ async def _edit(library: MediaLibraryEnv, source: bytes, *, mask: bytes | None =
     }
     if mask is not None:
         arguments["mask_url"] = media_reference((await library.store(mask, content_type="image/png")).id)
-    return json.loads(await create_image_generation_tool(ImageGenerationConfig(model=_MODEL)).ainvoke(arguments))
+    answer: dict[str, object] = json.loads(
+        await create_image_generation_tool(ImageGenerationConfig(model=_MODEL)).ainvoke(arguments)
+    )
+    return answer
 
 
 def _sent(provider_edit: AsyncMock) -> tuple[bytes, bytes | None]:

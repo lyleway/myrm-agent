@@ -850,7 +850,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/media/test_media_file_endpoint.py` | 模块 | `/media/{id}/file` 与批量路由对真实本地存储：文件带类型、文件名与永不过期的缓存头；Range 取到恰好那一段，浏览器播放前的 `bytes=0-1` 探针得 2 字节，开放区间到文件末尾，超出文件末尾的区间被拒；未知 id、文件已从磁盘消失都是 404；没有本地路径的存储整体读出并带同样的头、缺文件同样 404；批量删除只计找到的并删掉其文件，批量标签整体替换 |
 | `core/media/test_reference.py` | 模块 | `media://<id>` 引用：协议与前缀一致，引用往返记录 id，非媒体引用没有记录 id；加载器返回存下的字节，库里没有该 id、记录还在而文件已丢时抛错；本地文件查询返回存下的那个文件，库里没有该 id、文件已丢、存储键逃出存储根时抛错，存储不在本地磁盘时为 `None` |
 | `core/media/test_selection.py` | 模块 | 「选了才挂工具」的判定：目录里的每个图像模型、已注册供应商列出的每个模型都算已选，空值与已退役的图像模型不算；视频要供应商与其模型对得上，TTS 要受支持的供应商加模型加音色，缺一项或供应商不受支持都不算已选 |
-| `unit/ai_agents/media_tools/_ARCH.md` | 模块 | 媒体生成工具的单元测试清单（三个工具、交付契约、落库回调、引用解析策略、工作区副本及其文件夹被换成链接时的写入边界），见子目录清单 |
+| `unit/ai_agents/media_tools/_ARCH.md` | 模块 | 媒体生成工具的单元测试清单（三个工具、交付契约、落库回调、引用解析策略、工作区副本、其文件夹的建立与文件夹被换成链接时的写入边界），见子目录清单 |
 | `blocking_io/test_media_workspace_export.py` | 模块 | 工作区副本的文件系统工作（查文件、建目录、复制）不占事件循环：首次复制、重复调用（已有副本）与条目已丢的错误路径都在 blockbuster 门下通过 |
 | `unit/tasks/test_payload_values.py` | 单元 | 任务载荷快照的类型化读取：可选字符串只保留非空白串并去空白，字符串列表只保留列表里的非空串，可选整数拒绝 bool，可选 bool 只收真正的 bool |
 | `e2e/test_workspace_trust_folder_gate_chrome_e2e.py` | 模块 | Chrome FolderGate（3 例）：项目 chip 右键 → 设置工作目录 → 选择文件夹 → 键入含敌意文件的目录（FIFO `SKILL.md`、64 MiB 稀疏 `mcp.json` 与 `.myrm/config.toml`）→ 使用此文件夹。其一（SHARED+NAMESPACE_WRITE）：弹窗 30 s 内显示该目录与诚实文件的计数（技能 1、规则 1、MCP 1、含 `.myrm` 配置）后取消；其二（PRIVATE+GLOBAL_WRITE，信任记录是全局写；参数化「信任并关联」「不信任并关联」各一例）：点按钮后 30 s 内该项目的工作目录落为该目录、弹窗关闭、信任列表里该目录为 TRUSTED / RESTRICTED 且带 manifest 哈希，`finally` 删除信任记录与项目。等选择器载入主目录后再键入、键入与回车分两次求值（React 在微任务里提交输入）；`finally` 打开 FIFO 写端放行可能被卡住的后端线程；仅 POSIX |

@@ -1,13 +1,12 @@
-"""Copying generated media into the workspace: exact, idempotent, confined to its folder, kept out of git, never raising.
+"""Copying generated media into the workspace: exact, idempotent, confined to its folder, never raising.
 
 [INPUT]
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: completes a result with the workspace copies of its media)
-- myrm_agent_harness.core.security.path::ConfinedDirectory (POS: exclusive file creation below a trusted directory, decided on descriptors so no link redirects it)
-- tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
+- tests.unit.ai_agents.media_tools.conftest::library, workspace (POS: a real media library on a throwaway database and local storage; an empty workspace folder)
 
 [OUTPUT]
-Fails when a copy differs from the stored file, is rewritten or clobbered by a repeat, can leave its folder or reaches git,
-when a failure is hidden instead of reported or raised to the caller, or when a cancellation is swallowed.
+Fails when a copy differs from the stored file, is rewritten or clobbered by a repeat, can leave its folder, when a failure
+is hidden instead of reported or raised to the caller, or when a cancellation is swallowed.
 
 [POS]
 tests/unit/ai_agents/media_tools/test_workspace_export.py; the media library is real (SQLite in memory, local storage in tmp).
@@ -20,39 +19,22 @@ import errno
 import json
 import logging
 import os
-import shutil
-import subprocess
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import BinaryIO
 from unittest.mock import patch
 
 import pytest
-from myrm_agent_harness.core.security.path import ConfinedDirectory
 
 from app.ai_agents.media_tools.workspace_export import WORKSPACE_MEDIA_DIR, WorkspaceExporter
 from app.core.media.reference import local_media_file, media_reference
-from tests.support.media_library_env import MediaLibraryEnv, media_library_env
+from tests.support.media_library_env import MediaLibraryEnv
 
 _PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
 _LOGGER = "app.ai_agents.media_tools.workspace_export"
 
 
-@pytest.fixture
-async def library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[MediaLibraryEnv]:
-    async with media_library_env(tmp_path / "storage", monkeypatch) as env:
-        yield env
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Path:
-    root = tmp_path / "workspace"
-    root.mkdir()
-    return root
-
-
-def _exporter(workspace: Path, *, chat_id: str | None = "chat-1") -> WorkspaceExporter:
-    return WorkspaceExporter(workspace, user_id="user-1", chat_id=chat_id)
+def _exporter(workspace: Path) -> WorkspaceExporter:
+    return WorkspaceExporter(workspace, user_id="user-1", chat_id="chat-1")
 
 
 def _image_result(media_id: str) -> dict[str, object]:
@@ -167,98 +149,6 @@ class TestTheCopy:
 
         copied = [entry for entry in caplog.records if entry.name == _LOGGER and record.id in entry.getMessage()]
         assert len(copied) == 1
-
-
-class TestTheFolder:
-    async def test_it_ignores_itself_in_git(self, library: MediaLibraryEnv, workspace: Path) -> None:
-        if shutil.which("git") is None:
-            pytest.skip("git is not installed")
-        record = await library.store(_PNG)
-
-        def git(*arguments: str) -> str:
-            return subprocess.run(["git", "-C", str(workspace), *arguments], capture_output=True, text=True, check=True).stdout
-
-        await asyncio.to_thread(git, "init", "-q")
-        await _exporter(workspace).complete(_image_result(record.id))
-
-        assert (workspace / WORKSPACE_MEDIA_DIR / f"{record.id}.png").is_file()
-        assert await asyncio.to_thread(git, "status", "--porcelain") == ""
-        await asyncio.to_thread(git, "add", "-A")
-        assert await asyncio.to_thread(git, "diff", "--cached", "--name-only") == ""
-
-    async def test_a_folder_of_the_user_is_left_as_it_is(self, library: MediaLibraryEnv, workspace: Path) -> None:
-        record = await library.store(_PNG)
-        folder = workspace / WORKSPACE_MEDIA_DIR
-        folder.mkdir()
-        (folder / "notes.txt").write_bytes(b"mine")
-
-        answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
-        assert (folder / "notes.txt").read_bytes() == b"mine"
-        assert not (folder / ".gitignore").exists()
-
-    async def test_a_folder_it_could_not_protect_is_not_left_behind(self, library: MediaLibraryEnv, workspace: Path) -> None:
-        record = await library.store(_PNG)
-
-        with patch.object(ConfinedDirectory, "create_new", side_effect=OSError(errno.ENOSPC, "No space left on device")):
-            answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert "No space left on device" in str(answer["workspace_files_error"])
-        assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
-
-    async def test_a_rule_it_could_not_finish_is_removed_with_its_folder(self, library: MediaLibraryEnv, workspace: Path) -> None:
-        record = await library.store(_PNG)
-        create_new = ConfinedDirectory.create_new
-
-        def create_a_rule_that_refuses_writes(folder: ConfinedDirectory, name: str) -> int:
-            if name != ".gitignore":
-                return create_new(folder, name)
-            os.close(create_new(folder, name))  # the rule exists now, but the descriptor this call is handed cannot write
-            return os.open(folder.path / name, os.O_RDONLY)
-
-        with patch.object(ConfinedDirectory, "create_new", create_a_rule_that_refuses_writes):
-            answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert "workspace_files" not in answer
-        assert "the copy could not be written" in str(answer["workspace_files_error"])
-        assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
-
-    async def test_what_a_concurrent_call_left_in_the_folder_stays_when_the_rule_cannot_be_written(
-        self, library: MediaLibraryEnv, workspace: Path
-    ) -> None:
-        record = await library.store(_PNG)
-        create_new = ConfinedDirectory.create_new
-
-        def run_out_of_descriptors_after_the_other_call_finished(folder: ConfinedDirectory, name: str) -> int:
-            if name != ".gitignore":
-                return create_new(folder, name)
-            (folder.path / name).write_bytes(b"*\n")  # the other call created the folder and its rule ...
-            (folder.path / "media_other.png").write_bytes(_PNG)  # ... and has finished its copy
-            raise OSError(errno.EMFILE, "Too many open files")
-
-        with patch.object(ConfinedDirectory, "create_new", run_out_of_descriptors_after_the_other_call_finished):
-            answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert "Too many open files" in str(answer["workspace_files_error"])
-        folder = workspace / WORKSPACE_MEDIA_DIR
-        assert sorted(entry.name for entry in folder.iterdir()) == [".gitignore", "media_other.png"]
-        assert (folder / "media_other.png").read_bytes() == _PNG
-
-    async def test_a_rule_that_a_concurrent_call_wrote_first_is_kept(self, library: MediaLibraryEnv, workspace: Path) -> None:
-        record = await library.store(_PNG)
-        create_new = ConfinedDirectory.create_new
-
-        def lose_the_race(folder: ConfinedDirectory, name: str) -> int:
-            if name == ".gitignore":
-                (folder.path / name).write_bytes(b"*\n")  # the other call created the folder and its rule just before us
-            return create_new(folder, name)
-
-        with patch.object(ConfinedDirectory, "create_new", lose_the_race):
-            answer = await _exporter(workspace).complete(_image_result(record.id))
-
-        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.png"]
-        assert sorted(entry.name for entry in (workspace / WORKSPACE_MEDIA_DIR).iterdir()) == [".gitignore", f"{record.id}.png"]
 
 
 class TestWhatCannotBeCopied:

@@ -17,9 +17,10 @@ as ``media://`` references that code tools cannot open. A copy (never a link) is
 cannot reach the media library's original, and a ``.gitignore`` keeps the copies out of the user's repository. The
 server writes into a folder the agent's sandbox can also write, so the folder is opened once without following a link,
 and the folder's ``.gitignore`` and every temporary file are created through that open folder: swapping its name for a
-link afterwards redirects none of them. Names are looked up again only to see whether a copy exists, to publish a copy
-by rename and to remove a folder left empty after a failure; a swapped folder holds no temporary file for the rename,
-so nothing is published.
+link afterwards redirects none of them. Calls on one workspace take turns while that folder is made, so none finds a
+folder that another is still giving its rule. Names are looked up again only to see whether a copy exists, to publish a
+copy by rename and to remove a folder left empty after a failure; a swapped folder holds no temporary file for the
+rename, so nothing is published.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ import logging
 import os
 import re
 import shutil
+import threading
+import weakref
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from uuid import uuid4
@@ -58,33 +61,47 @@ class _ExportError(Exception):
     """A media item that could not be copied; the message says why, in words meant for the model."""
 
 
+# Calls on one workspace take turns while its folder is found, made and given its ignore rule or removed again, so none
+# meets a folder that another is in the middle of. Calls on other workspaces never wait for them, and an entry vanishes
+# once nobody holds its lock.
+_FOLDER_LOCKS: weakref.WeakValueDictionary[Path, threading.Lock] = weakref.WeakValueDictionary()
+_FOLDER_LOCKS_GUARD = threading.Lock()
+
+
+def _folder_lock(workspace_root: Path) -> threading.Lock:
+    with _FOLDER_LOCKS_GUARD:
+        return _FOLDER_LOCKS.setdefault(workspace_root, threading.Lock())
+
+
 def _open_folder(workspace_root: Path) -> ConfinedDirectory:
     """Open the folder of the copies, creating it with its git-ignore rule when it is absent; the caller closes it.
 
     A link in place of the folder is refused. A folder that exists is left alone, and one that could not be given
-    its ignore rule is removed again unless something else lives in it.
+    its ignore rule is removed again unless something else lives in it. Calls on the same workspace take turns here,
+    so none finds a folder that another is still giving its rule or removing.
     """
-    try:
-        return open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,), create=False)
-    except FileNotFoundError:
-        pass  # absent: created below, unless a concurrent call gets there first
-    folder = open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,))
-    try:
-        _write_ignore_rule(folder)
-    except OSError:
-        folder.close()
-        # Not recursive: opening the folder cannot tell whether this call created it, and a concurrent call may have
-        # put its copies there already.
-        with contextlib.suppress(OSError):
-            os.rmdir(folder.path)
-        raise
-    return folder
+    with _folder_lock(workspace_root):
+        try:
+            return open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,), create=False)
+        except FileNotFoundError:
+            pass  # absent: created below, unless a process outside this one gets there first
+        folder = open_directory_beneath(workspace_root, (WORKSPACE_MEDIA_DIR,))
+        try:
+            _write_ignore_rule(folder)
+        except OSError:
+            folder.close()
+            # Not recursive: opening the folder cannot tell whether this call created it, and the agent's sandbox may
+            # have put files there since.
+            with contextlib.suppress(OSError):
+                os.rmdir(folder.path)
+            raise
+        return folder
 
 
 def _write_ignore_rule(folder: ConfinedDirectory) -> None:
     """Give ``folder`` its ``.gitignore``.
 
-    A rule that a concurrent call wrote first stays. One that this call created and could not finish is removed.
+    A rule that a process outside this one wrote first stays. One that this call created and could not finish is removed.
     """
     try:
         descriptor = folder.create_new(_GITIGNORE)
