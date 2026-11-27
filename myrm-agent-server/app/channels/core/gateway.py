@@ -19,7 +19,8 @@ and backoff restarts are ``ChannelHealthMixin`` (``gateway_health.py``).
 
 [OUTPUT]
 - ChannelGateway: singleton gateway managing all channel lifecycles; ``deliver_followup`` hands the router a reply (with
-  its attachments) no message just asked for, and ``is_session_busy`` says whether a conversation is running a turn
+  its attachments, and the stored chat it belongs to) no message just asked for, and ``is_session_busy`` says whether a
+  conversation is running a turn
 
 [POS]
 Channel system entry point. Starts and stops the channels, the router and the bus, and replays the inbound journal at start.
@@ -206,15 +207,18 @@ class ChannelGateway(ChannelInstancesMixin):
         if self._router is not None:
             self._router.set_reaction_policy(policy)
 
-    async def deliver_followup(self, origin: InboundMessage, content: str, media: tuple[MediaAttachment, ...] = ()) -> bool:
+    async def deliver_followup(
+        self, origin: InboundMessage, content: str, media: tuple[MediaAttachment, ...] = (), *, stored_chat_id: str
+    ) -> bool:
         """Say ``content`` with ``media`` in the conversation ``origin`` came from, under the delivery rules of a normal reply.
 
+        ``stored_chat_id`` is the stored chat the reply was produced in; the router links it from the reply.
         Returns True when the reply was sent; False when it was withheld or the router is not enabled.
         """
         if self._router is None:
             discard_ephemeral_media(media)
             return False
-        return await self._router.deliver_followup(origin, content, media)
+        return await self._router.deliver_followup(origin, content, media, stored_chat_id=stored_chat_id)
 
     def is_session_busy(self, origin: InboundMessage) -> bool:
         """Whether the conversation ``origin`` came from is running a turn; False when the router is not enabled."""

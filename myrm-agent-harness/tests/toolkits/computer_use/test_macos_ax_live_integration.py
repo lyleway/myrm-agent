@@ -50,7 +50,9 @@ def test_live_foreground_snapshot_builds_refs() -> None:
 
     assert snapshot.meta.scope == "foreground"
     assert snapshot.meta.app_name, "foreground app_name must be populated"
-    assert snapshot.meta.app_id, "foreground bundle id must be populated"
+    # The frontmost process may be a command-line GUI program without a bundle id; that reads back empty, never as
+    # AppleScript's `missing value` placeholder.
+    assert snapshot.meta.app_id != "missing value", "a missing bundle id must read back empty"
     for ref in snapshot.refs.values():
         assert ref.bbox.width > 0 and ref.bbox.height > 0
         assert ref.ref_id.startswith("d")

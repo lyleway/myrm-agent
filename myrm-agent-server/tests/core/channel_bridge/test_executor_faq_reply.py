@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.channels.types import InboundMessage, OutboundMessage, TopicContext
+from app.channels.types import METADATA_STORED_CHAT_KEY, InboundMessage, OutboundMessage, TopicContext
 from app.core.channel_bridge.agent_executor.execute_preamble.types import PrepareChannelExecutionResult
 from app.core.channel_bridge.agent_executor.executor import ChannelAgentExecutor
 
@@ -66,6 +66,14 @@ async def test_faq_answer_is_routed_back_to_the_asking_chat(turn: SimpleNamespac
     assert reply.reply_to_id == "msg-7"
     assert reply.thread_id == "thread-3"
     turn.prepare.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_faq_answer_names_no_stored_chat_because_no_chat_holds_it(turn: SimpleNamespace) -> None:
+    (reply,) = await _events(TopicContext(topic_id="chat-1", agent_id="agent-1"))
+
+    assert isinstance(reply, OutboundMessage)
+    assert METADATA_STORED_CHAT_KEY not in (reply.metadata or {})
 
 
 @pytest.mark.asyncio

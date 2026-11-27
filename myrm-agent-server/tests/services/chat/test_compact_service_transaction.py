@@ -65,7 +65,7 @@ def chat_id() -> Iterator[str]:
 async def _seed_chat(db: PolicyDb, chat_id: str) -> None:
     messages = [
         MessageDTO(
-            id=f"{chat_id}-m{index}",
+            id=f"msg-{chat_id}-{index}",
             chat_id=chat_id,
             role="user" if index % 2 == 0 else "assistant",
             content=f"message {index}",
@@ -176,7 +176,7 @@ async def test_the_pipeline_persist_stores_the_summary_when_another_writer_commi
     summary.to_json.return_value = _SUMMARY
 
     async def persist() -> None:
-        await persist_compaction(chat_id, summary, f"{chat_id}-m{_MESSAGES - 1}", 100)
+        await persist_compaction(chat_id, summary, f"msg-{chat_id}-{_MESSAGES - 1}", 100)
 
     rebuild_index = patch("app.services.chat.compact.persist.ConversationRecallIndexService.rebuild_chat", AsyncMock())
     with rebuild_index:
@@ -184,7 +184,7 @@ async def test_the_pipeline_persist_stores_the_summary_when_another_writer_commi
 
     stored = await _stored_chat(policy_db, chat_id)
     assert stored.compacted_summary == _SUMMARY
-    assert stored.compacted_before_id == f"{chat_id}-m{_MESSAGES - 1}"
+    assert stored.compacted_before_id == f"msg-{chat_id}-{_MESSAGES - 1}"
 
 
 @pytest.mark.asyncio

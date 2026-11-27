@@ -3,6 +3,7 @@
 [INPUT]
 - app.database.connection::get_session_factory (POS: database connection management; the factory ``get_session()`` draws from)
 - app.database.factory::register_sqlite_transaction_events (POS: the deferred-read / immediate-write policy)
+- app.database.migrations::ensure_raw_sql_schema (POS: the tables and triggers outside the ORM metadata)
 - app.database.models::Base (POS: ORM metadata of every table)
 - app.database.models::UserConfig (POS: user configuration table; the row the lock-holding writer inserts)
 
@@ -37,6 +38,7 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database.factory import register_sqlite_transaction_events
+from app.database.migrations import ensure_raw_sql_schema
 from app.database.models import Base, UserConfig
 
 BUSY_TIMEOUT_MS = 5_000
@@ -89,7 +91,7 @@ def _set_sqlite_pragma(dbapi_conn: sqlite3.Connection, _record: object) -> None:
 
 @asynccontextmanager
 async def policy_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[PolicyDb]:
-    """Create every table on a policy-running database that ``get_session()`` then hands out."""
+    """Create every table (ORM and raw SQL) on a policy-running database that ``get_session()`` then hands out."""
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{path}",
         connect_args={"check_same_thread": False},
@@ -111,6 +113,8 @@ async def policy_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncI
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # The tables outside the ORM (conversation recall, full-text search) are written by units the tests run, too.
+    await ensure_raw_sql_schema(engine)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("app.database.connection.get_session_factory", lambda: factory)
     try:

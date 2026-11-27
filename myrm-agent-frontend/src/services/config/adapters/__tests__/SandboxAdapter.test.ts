@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getAuthToken } from '@/lib/guest';
-import { RESPONSE_BODY_DEADLINE_MS } from '@/services/config/adapters/BaseAdapter';
+import { RESPONSE_BODY_DEADLINE_MS, type DeadlineAnswer } from '@/services/config/adapters/BaseAdapter';
 import { SandboxConfigAdapter } from '@/services/config/adapters/SandboxAdapter';
 import { ConfigSyncError, DEFAULT_PERSONAL_SETTINGS, type ConfigChange } from '@/services/config/types';
 import {
@@ -23,6 +23,11 @@ vi.mock('@/lib/guest', () => ({
 
 const reply = (status: number, body: unknown = {}) =>
   ({ ok: status >= 200 && status < 300, status, statusText: `HTTP ${status}`, json: async () => body }) as Response;
+
+/** The private request call every public method goes through; no public method reads the answer it makes up. */
+interface AuthFetching {
+  authFetch(path: string): Promise<DeadlineAnswer>;
+}
 
 const CHANGES: ConfigChange[] = [
   {
@@ -234,6 +239,18 @@ describe('SandboxConfigAdapter', () => {
         newVersions: new Map([['chatSettings', '2000_1']]),
         error: undefined,
       });
+    });
+  });
+
+  describe('a request made without a session token', () => {
+    it('is answered 401 on the spot, without sending anything, by an answer that has no body to read', async () => {
+      vi.mocked(getAuthToken).mockReturnValue(null);
+
+      const { response, readJson } = await (adapter as unknown as AuthFetching).authFetch('/config');
+
+      expect(response.status).toBe(401);
+      expect(fetch).not.toHaveBeenCalled();
+      await expect(readJson()).rejects.toBeInstanceOf(SyntaxError);
     });
   });
 
