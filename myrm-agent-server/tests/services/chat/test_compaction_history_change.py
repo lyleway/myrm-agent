@@ -4,7 +4,8 @@ A summary is derived from the messages written before it. Once retry, regenerate
 rewind rewrites the history from some turn on, a summary written at or after that turn may carry what was removed or
 replaced and is dropped; one written before it covers only untouched turns and stays, or every regenerate in a long chat
 would discard all older context. Rows a change deleted also leave the recall index, whose text only grows otherwise.
-A compaction that picked its boundary before the change must not store a summary of rows that are gone.
+A compaction that picked its boundary before the change must not store a summary of rows that are gone, and a reply
+the change replaced must not be read into the next summary.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from app.database.models import Chat, Message
 from app.database.repositories.chat_repo import ChatRepository
 from app.services.chat.chat_service import ChatService
 from app.services.chat.compact.history_change import settle_compaction_after_history_change
+from app.services.chat.compact.message_io import db_messages_to_langchain, load_compactable_messages
 from app.services.chat.compact.persist import do_persist_to_db
 from app.services.chat.conversation_recall_index_service import ConversationRecallIndexService
 
@@ -282,3 +284,14 @@ class TestACompactionThatPickedItsBoundaryBeforeAChange:
         stored = await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "", TOKENS_SAVED)
 
         assert stored == "a2"
+
+
+class TestWhatTheNextCompactionReads:
+    async def test_a_reply_a_regenerate_replaced_is_not_summarized(self, db_session: AsyncSession) -> None:
+        await _seed(db_session, regenerated=True)
+        chat = await db_session.get(Chat, CHAT_ID)
+
+        rows = await load_compactable_messages(db_session, chat)
+
+        assert [row.id for row in rows] == ["u1", "a1", "u2", "a2b"]
+        assert DELETED_ANSWER not in [message.content for message in db_messages_to_langchain(rows)]

@@ -4,6 +4,7 @@
 - _base::_ChatServiceBase (POS: repository 协议和访问器)
 - conversation_recall_index_service::ConversationRecallIndexService (POS: Conversation Recall 索引生命周期服务)
 - compact.persist::do_persist_to_db (POS: 所有压缩写入者共用的落库入口)
+- compact.service::tokens_replaced_by_summary (POS: 累计节省统计的统一口径：被新摘要取代的旧摘要与边界之后的消息)
 - compact._time::as_utc (POS: SQLite 无时区时间的 UTC 归一)
 - app.core.channel_bridge.model_resolver::enrich_model_context_window (POS: 模型真实上下文窗口enricher)
 
@@ -18,6 +19,7 @@ Compaction drain 编排层。提供 compaction summary 字段更新、后台 dra
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -26,12 +28,31 @@ from app.database.repositories.uow import UnitOfWork
 from ._base import _ChatServiceBase
 from .compact._time import as_utc
 from .compact.persist import do_persist_to_db
+from .compact.service import tokens_replaced_by_summary
 from .conversation_recall_index_service import ConversationRecallIndexService
 
 if TYPE_CHECKING:
     from langchain_core.messages import BaseMessage
 
+    from app.database.dto import MessageDTO
+
 logger = logging.getLogger(__name__)
+
+
+def _to_langchain(rows: Sequence[MessageDTO]) -> list[BaseMessage]:
+    """Rows of the active branch as the messages the summarizer reads, tool results included."""
+    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+    messages: list[BaseMessage] = []
+    for row in rows:
+        if row.role == "user":
+            messages.append(HumanMessage(content=row.content))
+        elif row.role == "assistant":
+            messages.append(AIMessage(content=row.content))
+        elif row.role == "tool":
+            tool_call_id = row.extra_data.get("tool_call_id", "") if row.extra_data else ""
+            messages.append(ToolMessage(content=row.content, tool_call_id=str(tool_call_id)))
+    return messages
 
 
 class _ChatCompactionMixin(_ChatServiceBase):
@@ -88,17 +109,7 @@ class _ChatCompactionMixin(_ChatServiceBase):
                 if msg.id == snapshot_id:
                     break
 
-            from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-            langchain_msgs: list[BaseMessage] = []
-            for m in target_msgs:
-                if m.role == "user":
-                    langchain_msgs.append(HumanMessage(content=m.content))
-                elif m.role == "assistant":
-                    langchain_msgs.append(AIMessage(content=m.content))
-                elif m.role == "tool":
-                    tc_id = m.extra_data.get("tool_call_id", "") if m.extra_data else ""
-                    langchain_msgs.append(ToolMessage(content=m.content, tool_call_id=str(tc_id)))
+            langchain_msgs = _to_langchain(target_msgs)
 
             from myrm_agent_harness.agent.context_management.infra.schemas import (
                 ContextConfig,
@@ -108,7 +119,6 @@ class _ChatCompactionMixin(_ChatServiceBase):
             )
             from myrm_agent_harness.toolkits.llms import llm_manager
             from myrm_agent_harness.utils.text_utils import get_token_count
-            from myrm_agent_harness.utils.token_estimation import estimate_messages_tokens
 
             from app.core.channel_bridge.config_loader import load_user_configs
 
@@ -148,7 +158,11 @@ class _ChatCompactionMixin(_ChatServiceBase):
             _, summary = await generate_structured_summary(langchain_msgs, llm, chat_id, config=context_config)
 
             summary_json = summary.to_json()
-            tokens_saved = max(estimate_messages_tokens(langchain_msgs) - get_token_count(summary_json), 0)
+            # Measured as compact_chat measures it: the rows the stored summary already covers were counted when it was
+            # stored, and counting them again would inflate the running total.
+            boundary_index = next((i for i, row in enumerate(target_msgs) if row.id == chat.compacted_before_id), -1)
+            replaced = tokens_replaced_by_summary(_to_langchain(target_msgs[boundary_index + 1 :]), chat.compacted_summary)
+            tokens_saved = max(replaced - get_token_count(summary_json), 0)
 
             async with UnitOfWork() as uow:
                 session = uow.session

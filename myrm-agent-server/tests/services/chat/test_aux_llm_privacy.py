@@ -144,7 +144,7 @@ class TestOfflineCompaction:
             get_latest_message=AsyncMock(
                 return_value=SimpleNamespace(id="m2", created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1))
             ),
-            get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None)),
+            get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None, compacted_summary=None)),
             get_all_messages=AsyncMock(return_value=stored),
         )
         persist = AsyncMock(return_value="m2")
