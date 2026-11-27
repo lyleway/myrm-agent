@@ -267,6 +267,8 @@ async def create_fast_lane_stream(
     from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
     from myrm_agent_harness.api import AgentEventType
     from myrm_agent_harness.toolkits.llms import llm_manager
+    from myrm_agent_harness.utils.token_economics.cache_savings import calculate_cache_savings_usd
+    from myrm_agent_harness.utils.token_economics.usage_fields import extract_cache_write_tokens, extract_cached_tokens
 
     from app.core.utils.chat_utils import convert_chat_history
 
@@ -339,20 +341,11 @@ async def create_fast_lane_stream(
                 completion_tokens = usage.get("output_tokens", 0)
                 total_tokens = usage.get("total_tokens", 0)
 
-                prompt_details = usage.get("prompt_tokens_details") or {}
-                cached_tokens = 0
-                cache_write_tokens = 0
-                if isinstance(prompt_details, dict):
-                    cached_tokens = prompt_details.get("cached_tokens", 0) or 0
-                    cache_write_tokens = prompt_details.get("cache_creation_input_tokens", 0) or 0
-                if not cached_tokens:
-                    # Not a ``UsageMetadata`` field, so the value is untyped: only an int counts.
-                    flat_cached = usage.get("cached_tokens", 0)
-                    cached_tokens = flat_cached if isinstance(flat_cached, int) else 0
-
+                # The cache counts are provider-supplied and not ``UsageMetadata`` fields: the shared reader
+                # keeps one payload at one interpretation for this event, the cost figure and the savings.
+                cached_tokens = extract_cached_tokens(usage)
+                cache_write_tokens = extract_cache_write_tokens(usage)
                 cache_hit_rate = round(cached_tokens / prompt_tokens, 4) if prompt_tokens > 0 else 0.0
-
-                from myrm_agent_harness.utils.token_economics.cache_savings import calculate_cache_savings_usd
 
                 active_model = getattr(params, "model", None) or getattr(llm, "model_name", None)
                 net_savings = calculate_cache_savings_usd(usage, active_model)

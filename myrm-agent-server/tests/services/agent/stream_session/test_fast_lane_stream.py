@@ -149,7 +149,43 @@ async def test_a_top_level_cached_count_is_used_when_the_details_carry_none() ->
 
 
 @pytest.mark.asyncio
-async def test_a_top_level_cached_count_that_is_not_an_integer_counts_as_none() -> None:
+async def test_a_cached_count_given_as_a_numeric_string_is_a_number() -> None:
     data = await _token_usage(_PlainModel(_usage(input_tokens=1000, output_tokens=5, total_tokens=1005, cached_tokens="500")))
 
+    assert (data["cached_tokens"], data["cache_hit_rate"]) == (500, 0.5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"cached_tokens": "many"},
+        {"cached_tokens": float("nan")},
+        {"cached_tokens": True},
+        {"prompt_tokens_details": {"cached_tokens": "many"}},
+        {"prompt_tokens_details": {"cached_tokens": float("nan")}},
+        {"prompt_tokens_details": {"cached_tokens": float("inf")}},
+    ],
+    ids=["flat-text", "flat-nan", "flat-bool", "details-text", "details-nan", "details-inf"],
+)
+async def test_a_cached_count_that_is_not_a_finite_number_counts_as_none(fields: dict[str, object]) -> None:
+    data = await _token_usage(_PlainModel(_usage(input_tokens=1000, output_tokens=5, total_tokens=1005, **fields)))
+
     assert (data["cached_tokens"], data["cache_hit_rate"]) == (0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_the_counts_are_read_the_way_cost_computation_reads_them() -> None:
+    data = await _token_usage(
+        _PlainModel(
+            _usage(
+                input_tokens=1000,
+                output_tokens=5,
+                total_tokens=1005,
+                cache_read_input_tokens=800,
+                cache_creation_input_tokens=100,
+            )
+        )
+    )
+
+    assert (data["cached_tokens"], data["cache_write_tokens"], data["cache_hit_rate"]) == (800, 100, 0.8)

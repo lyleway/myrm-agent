@@ -1,4 +1,4 @@
-"""Provider-cache token extraction shared by cost computation and usage tracking.
+"""Provider-cache token extraction shared by cost computation, usage tracking, cache savings and the Fast Lane usage event.
 
 Different providers report the same cache quantities under different keys: the transport
 normalises OpenAI/Anthropic/Gemini/DeepSeek into ``prompt_tokens_details.*``, some adapters
@@ -6,6 +6,9 @@ keep a top-level ``cache_read_tokens`` / ``cache_write_tokens`` pair, and raw
 Anthropic payloads use ``cache_read_input_tokens`` / ``cache_creation_input_tokens``.
 Cost computation and ``TokenTracker`` must read the same number from the same
 payload, otherwise the billed cost and the reported cache hit rate disagree.
+A malformed count (non-numeric text, NaN, infinity, a boolean, a negative number)
+reads as 0 instead of raising: the payload comes from a provider, so one bad field
+must not break the stream that reports it.
 
 [INPUT]
 - collections.abc::Mapping (POS: provider usage payloads, plain dicts or model dumps)
@@ -18,8 +21,9 @@ payload, otherwise the billed cost and the reported cache hit rate disagree.
 
 [POS]
 Single reader for provider cache accounting fields. Framework-neutral and safe for
-any layer to import; the LLM adapters, the cost engine and ``TokenTracker`` all
-delegate here so one payload always yields one interpretation.
+any layer to import; the LLM adapters, the cost engine, ``TokenTracker``, the cache
+savings figure and the server's Fast Lane usage event all delegate here so one
+payload always yields one interpretation.
 """
 
 from __future__ import annotations

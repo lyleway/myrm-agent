@@ -59,6 +59,34 @@ def test_flat_cached_tokens_field_is_the_fallback() -> None:
     assert savings == pytest.approx(0.0027, abs=1e-9)
 
 
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"cache_read_input_tokens": 1000, "cache_creation_input_tokens": 500},
+        {"cache_read_tokens": 1000, "cache_write_tokens": 500},
+    ],
+    ids=["anthropic-names", "adapter-aliases"],
+)
+def test_every_spelling_of_the_cache_counts_is_priced_the_same(usage: dict[str, object]) -> None:
+    assert calculate_cache_savings_usd(usage, _CACHING) == pytest.approx(0.002325, abs=1e-9)
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"cached_tokens": float("nan")},
+        {"cached_tokens": float("inf")},
+        {"cached_tokens": True},
+        {"cached_tokens": "many"},
+        {"prompt_tokens_details": {"cached_tokens": float("nan"), "cache_creation_input_tokens": float("inf")}},
+        {"prompt_tokens_details": {"cached_tokens": "many"}},
+    ],
+    ids=["flat-nan", "flat-inf", "flat-bool", "flat-text", "details-nan-inf", "details-text"],
+)
+def test_a_count_that_is_not_a_finite_number_prices_as_none(usage: dict[str, object]) -> None:
+    assert calculate_cache_savings_usd(usage, _CACHING) == 0.0
+
+
 def test_model_without_cache_read_price_returns_zero() -> None:
     assert calculate_cache_savings_usd(_details(1000), _NO_CACHE_PRICE) == 0.0
 

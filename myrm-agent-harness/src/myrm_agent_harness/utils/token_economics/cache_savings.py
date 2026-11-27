@@ -2,7 +2,7 @@
 
 [INPUT]
 - toolkits.llms.catalog::model_info (POS: per-token input, cache-read and cache-write prices)
-- usage mapping (prompt_tokens_details.cached_tokens / cache_creation_input_tokens, or flat cached_tokens)
+- .usage_fields::extract_cached_tokens / extract_cache_write_tokens (POS: single reader of provider cache accounting fields)
 
 [OUTPUT]
 - calculate_cache_savings_usd: estimated net savings of the cache for one call
@@ -18,21 +18,7 @@ from collections.abc import Mapping
 
 from myrm_agent_harness.toolkits.llms.catalog import model_info
 
-
-def _count(value: object) -> int:
-    return int(value) if isinstance(value, (int, float)) else 0
-
-
-def _cache_tokens(usage: Mapping[str, object]) -> tuple[int, int]:
-    """(cache-read tokens, cache-write tokens) from the nested details, falling back to the flat field."""
-    details = usage.get("prompt_tokens_details")
-    read = write = 0
-    if isinstance(details, Mapping):
-        read = _count(details.get("cached_tokens"))
-        write = _count(details.get("cache_creation_input_tokens"))
-    if not read and not write:
-        read = _count(usage.get("cached_tokens"))
-    return read, write
+from .usage_fields import extract_cache_write_tokens, extract_cached_tokens
 
 
 def _price(info: Mapping[str, object], key: str) -> float | None:
@@ -47,8 +33,9 @@ def calculate_cache_savings_usd(usage: Mapping[str, object], model: str | None) 
     """
     if not model or not usage:
         return 0.0
-    read_tokens, write_tokens = _cache_tokens(usage)
-    if read_tokens <= 0 and write_tokens <= 0:
+    read_tokens = extract_cached_tokens(usage)
+    write_tokens = extract_cache_write_tokens(usage)
+    if not read_tokens and not write_tokens:
         return 0.0
     info = model_info(model)
     if info is None:

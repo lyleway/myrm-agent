@@ -41,6 +41,14 @@ class TestExtractCachedTokens:
         assert extract_cached_tokens({"cache_read_tokens": -5}) == 0
         assert extract_cached_tokens({"cache_read_tokens": "many"}) == 0
 
+    @pytest.mark.parametrize("raw", [float("nan"), float("inf"), True, "many"])
+    def test_a_value_that_is_not_a_finite_number_counts_as_none(self, raw: object) -> None:
+        assert extract_cached_tokens({"prompt_tokens_details": {"cached_tokens": raw}}) == 0
+        assert extract_cached_tokens({"cached_tokens": raw}) == 0
+
+    def test_a_numeric_string_is_a_number(self) -> None:
+        assert extract_cached_tokens({"cached_tokens": "500"}) == 500
+
 
 class TestExtractCacheWriteTokens:
     def test_reads_anthropic_creation_field(self) -> None:
@@ -56,6 +64,11 @@ class TestExtractCacheWriteTokens:
 
     def test_missing_yields_zero(self) -> None:
         assert extract_cache_write_tokens({"prompt_tokens": 10}) == 0
+
+    @pytest.mark.parametrize("raw", [float("nan"), float("inf"), True, "many"])
+    def test_a_value_that_is_not_a_finite_number_counts_as_none(self, raw: object) -> None:
+        assert extract_cache_write_tokens({"prompt_tokens_details": {"cache_creation_input_tokens": raw}}) == 0
+        assert extract_cache_write_tokens({"cache_write_tokens": raw}) == 0
 
 
 class TestExtractCostTokens:
