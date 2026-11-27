@@ -5,7 +5,7 @@
 - app.database.models::Chat, Message (POS: ORM compaction metadata)
 - app.services.chat.conversation_recall_index_service::ConversationRecallIndexService (POS: post-compact index rebuild)
 - compact._constants::COMPACTION_FAILURE_COOLDOWN_SECONDS (POS: cooldown duration)
-- compact._time::as_utc (POS: zone-safe cooldown comparison)
+- app.core.utils.time_utils::as_utc (POS: zone-safe cooldown comparison)
 
 [OUTPUT]
 - do_persist_to_db: compaction metadata write under the write lock (caller commits)
@@ -25,10 +25,10 @@ from typing import Protocol, cast
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils.time_utils import as_utc
 from app.database.factory import acquire_write_lock
 from app.database.models import Chat, Message
 from app.services.chat.compact._constants import COMPACTION_FAILURE_COOLDOWN_SECONDS
-from app.services.chat.compact._time import as_utc
 from app.services.chat.conversation_recall_index_service import (
     ConversationRecallIndexService,
 )

@@ -7,7 +7,7 @@
 - services.chat.chat_title::generate_chat_title, generate_fallback_title, call_llm_for_title (POS: Chat title generation layer decoupled from turn management)
 - services.chat.session_continuity_service::hold_session_for_continuity, pause_active_goal_for_rewind, invalidate_chat_checkpoint (POS: Server-layer adapter for truncate/undo/retry/rewind checkpoint consistency; holds the chat while a rewind runs)
 - services.chat.rewind_files::snapshot_pre_rewind, restore_pre_rewind_snapshot, revert_files_for_messages, cleanup_orphan_snapshots (POS: File side of a chat rewind: the protective snapshot, the file revert and the snapshot cleanup)
-- services.chat.compact.history_change::settle_compaction_after_history_change (POS: Runs in the transaction of every history rewrite so the compaction summary and its messages never disagree)
+- services.chat.compact_service::settle_compaction_after_history_change (POS: Runs in the transaction of every history rewrite so the compaction summary and its messages never disagree)
 
 [OUTPUT]
 - _ChatTurnMixin: 重试、撤销、截断、重新生成、兄弟切换、原子回滚自愈
@@ -28,7 +28,7 @@ from app.database.repositories.uow import UnitOfWork
 
 from ._base import _ChatServiceBase
 from .chat_helpers import RegenerateResult, RetryResult, RewindResult, TruncateResult, UndoResult
-from .compact.history_change import settle_compaction_after_history_change
+from .compact_service import settle_compaction_after_history_change
 from .rewind_files import (
     cleanup_orphan_snapshots,
     restore_pre_rewind_snapshot,

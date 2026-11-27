@@ -3,7 +3,7 @@
 [INPUT]
 - app.database.models::Chat (POS: compaction metadata)
 - app.services.chat.conversation_recall_index_service::ConversationRecallIndexService (POS: index rebuild after deletion)
-- compact._time::as_utc (POS: zone-safe comparison)
+- app.core.utils.time_utils::as_utc (POS: zone-safe comparison)
 
 [OUTPUT]
 - settle_compaction_after_history_change: drop a summary the changed history made stale, refresh the recall index
@@ -20,8 +20,8 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.utils.time_utils import as_utc
 from app.database.models import Chat
-from app.services.chat.compact._time import as_utc
 from app.services.chat.conversation_recall_index_service import ConversationRecallIndexService
 
 

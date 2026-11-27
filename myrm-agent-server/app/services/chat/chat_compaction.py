@@ -3,9 +3,9 @@
 [INPUT]
 - _base::_ChatServiceBase (POS: repository 协议和访问器)
 - conversation_recall_index_service::ConversationRecallIndexService (POS: Conversation Recall 索引生命周期服务)
-- compact.persist::do_persist_to_db (POS: 所有压缩写入者共用的落库入口)
-- compact.service::tokens_replaced_by_summary (POS: 累计节省统计的统一口径：被新摘要取代的旧摘要与边界之后的消息)
-- compact._time::as_utc (POS: SQLite 无时区时间的 UTC 归一)
+- compact_service::do_persist_to_db (POS: 所有压缩写入者共用的落库入口)
+- compact_service::tokens_replaced_by_summary (POS: 累计节省统计的统一口径：被新摘要取代的旧摘要与边界之后的消息)
+- app.core.utils.time_utils::as_utc (POS: SQLite 无时区时间的 UTC 归一)
 - app.core.channel_bridge.model_resolver::enrich_model_context_window (POS: 模型真实上下文窗口enricher)
 
 [OUTPUT]
@@ -23,12 +23,11 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from app.core.utils.time_utils import as_utc
 from app.database.repositories.uow import UnitOfWork
 
 from ._base import _ChatServiceBase
-from .compact._time import as_utc
-from .compact.persist import do_persist_to_db
-from .compact.service import tokens_replaced_by_summary
+from .compact_service import do_persist_to_db, tokens_replaced_by_summary
 from .conversation_recall_index_service import ConversationRecallIndexService
 
 if TYPE_CHECKING:
