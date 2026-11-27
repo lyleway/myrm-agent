@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -74,7 +75,9 @@ class TestGrantUpgrade:
 
 @pytest.mark.parametrize("held", [None, False, True], ids=["nothing-held", "held-read-only", "held-writable"])
 @pytest.mark.parametrize("permission", ["file_read", "file_write"], ids=["read-call", "write-call"])
-def test_every_folder_the_plan_offers_is_one_the_grant_changes(tmp_path, held: bool | None, permission: str) -> None:
+def test_every_folder_the_plan_offers_is_one_the_grant_changes(
+    tmp_path: Path, held: bool | None, permission: str
+) -> None:
     """The card never promises a folder the grant then leaves as it was, whatever the folder already held."""
     set_session_access_roots(())
     workspace = tmp_path / "ws"
@@ -84,7 +87,7 @@ def test_every_folder_the_plan_offers_is_one_the_grant_changes(tmp_path, held: b
     if held is not None:
         grant_session_access_root(AccessRoot(path=str(docs), writable=held), workspace_root=str(workspace))
     policy = merge_path_policy_with_session_access(PathPolicy(forbidden_paths=frozenset(), access_roots=()))
-    call = {"file_path": f"{docs}/out.txt"}
+    call: dict[str, object] = {"file_path": f"{docs}/out.txt"}
 
     offered = [
         root.path

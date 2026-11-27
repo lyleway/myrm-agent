@@ -26,7 +26,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TypedDict
 
 from sqlalchemy import delete, select, update
 
@@ -38,6 +38,18 @@ _GONE_STATUS_CODES = frozenset({404, 410})
 
 # requests treats timeout=None as "wait forever", which would pin an executor thread on a stalled push service.
 _PUSH_REQUEST_TIMEOUT_SECONDS = 10
+
+
+class _SubscriptionKeys(TypedDict):
+    p256dh: str
+    auth: str
+
+
+class _SubscriptionInfo(TypedDict):
+    """A subscription in the shape pywebpush reads it."""
+
+    endpoint: str
+    keys: _SubscriptionKeys
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,7 +225,7 @@ class WebPushService:
 
         Returns None once the push service accepted the push, otherwise the reason it did not (see ``_failure_reason``).
         """
-        subscription_info: dict[str, Any] = {
+        subscription_info: _SubscriptionInfo = {
             "endpoint": endpoint,
             "keys": {"p256dh": p256dh, "auth": auth},
         }
