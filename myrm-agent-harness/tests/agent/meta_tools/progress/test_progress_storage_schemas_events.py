@@ -171,6 +171,11 @@ def test_parse_todo_payload_tolerates_missing_id_and_synonym_keys() -> None:
     assert items[0].content == "Auto task without explicit id"
 
 
+def test_parse_todo_payload_falls_back_to_the_id_when_a_new_item_has_no_content() -> None:
+    items = parse_todo_payload([{"id": "a", "status": "pending"}])
+    assert [(item.id, item.content) for item in items] == [("a", "a")]
+
+
 def test_merge_todo_items_falls_back_to_id_when_content_empty() -> None:
     merged = merge_todo_items([], [TodoItem(id="1", content="")], merge=False)
     assert len(merged) == 1

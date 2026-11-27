@@ -6,7 +6,8 @@
 
 [OUTPUT]
 - Cases proving the sync follows the workspace a chat runs in and never touches another chat's list.
-- Cases proving the plan a chat shows is its own list, and the plan archived on its branch only when it has no list.
+- Cases proving the plan a chat shows is its own list, and the plan archived on its branch only when it has no list or
+  its workspace cannot be found.
 - Cases proving a failure to read the database or the list is skipped over with a WARNING, not dropped silently.
 """
 
@@ -209,3 +210,33 @@ async def test_an_unreadable_list_is_warned_about_and_the_plan_of_the_branch_ans
 
     assert store is not None and store.goal == "Branch plan"
     assert _warnings(caplog) == [f"Failed to read workspace todos for session {_CHAT_A}: denied"]
+
+
+@pytest.mark.asyncio
+async def test_a_chat_whose_workspace_cannot_be_found_shows_the_plan_of_its_branch() -> None:
+    with (
+        patch(f"{_SYNC_LOGGER}.find_chat_workspace_root", new=AsyncMock(return_value=None)),
+        patch(_READ_TODOS) as read_todos,
+        patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[_message_with(_CHAT_A, _list("Branch plan", "b1"))])),
+    ):
+        store = await resolve_session_todo_store(_CHAT_A)
+
+    assert store is not None and store.goal == "Branch plan"
+    read_todos.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failure_reading_the_messages_skips_the_sync_and_is_warned_about(
+    project_workspace: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    write_todos_sync_to_workspace(project_workspace, _list("Later plan", "late"), _CHAT_A)
+
+    with (
+        patch(_GET_ALL_MESSAGES, new=AsyncMock(side_effect=sqlite3.OperationalError(_LOCKED))),
+        caplog.at_level(logging.WARNING, logger=_SYNC_LOGGER),
+    ):
+        await sync_workspace_todos_for_active_branch(_CHAT_A)
+
+    kept = read_todos_sync_from_workspace(project_workspace, _CHAT_A)
+    assert kept is not None and kept.goal == "Later plan"
+    assert _warnings(caplog) == [f"Failed to sync workspace todos for active branch on chat {_CHAT_A}: {_LOCKED}"]

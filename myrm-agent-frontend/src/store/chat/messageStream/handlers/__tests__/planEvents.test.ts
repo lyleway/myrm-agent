@@ -13,6 +13,7 @@ import { parseSseEnvelope } from '@/store/chat/schema';
 import useChatStore from '@/store/useChatStore';
 import { useFeatureGateStore } from '@/store/useFeatureGateStore';
 import { handleMessageStream } from '../../handleMessageStream';
+import { planEvents } from '../planEvents';
 
 const OPEN_CHAT = 'chat-open';
 const BACKGROUND_CHAT = 'chat-background';
@@ -70,5 +71,12 @@ describe('plan_update stream event', () => {
     await receivePlanUpdate(OPEN_CHAT);
 
     expect(usePlanStore.getState().plan).toBeNull();
+  });
+
+  it('lets every other event through to the next handler', async () => {
+    const ctx = { data: { type: 'tasks_steps' }, state: streamOf(OPEN_CHAT) } as never;
+
+    await expect(planEvents(ctx)).resolves.toBeNull();
+    expect(fetchPlan).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,7 @@ model and read the events it emits.
 - agent.streaming.stream_executor::StreamExecutor (POS: consumes the graph's custom stream and dispatches SSE events)
 - tests.support.shipped_graph (POS: the agent a run builds, over a scripted model)
 - tests.agent.streaming.scripted_agent (POS: executor harness)
+- tests.agent.streaming.custom_chunk (POS: one custom chunk through the real dispatcher)
 
 [OUTPUT]
 - Cases: one snapshot per accepted todo_write and none for a rejected one, the snapshot equals the plan file, and the
@@ -29,6 +30,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from myrm_agent_harness.agent.meta_tools.progress.storage import read_todos_sync_from_workspace
 from myrm_agent_harness.agent.meta_tools.progress.todo_write_tool import create_todo_write_tool
 from myrm_agent_harness.agent.streaming.types import AgentStreamEvent
+from tests.agent.streaming.custom_chunk import dispatch_custom_chunk
 from tests.agent.streaming.scripted_agent import TRACKER_PATH, RecordingCompactor, make_context, make_executor
 from tests.support.shipped_graph import shipped_agent, shipped_session
 
@@ -110,20 +112,13 @@ async def test_a_rejected_todo_write_emits_no_plan_update(tmp_path: Path) -> Non
     assert read_todos_sync_from_workspace(str(tmp_path)) is None
 
 
-async def _dispatched(chunk_data: object) -> list[AgentStreamEvent]:
-    ctx = make_context(MagicMock(), {})
-    executor = make_executor(ctx)
-    await executor._dispatch_chunk(("custom", chunk_data), ctx, [])
-    return _emitted(executor._compactor)
-
-
 async def test_the_dispatcher_forwards_a_plan_snapshot_with_its_message_id() -> None:
     snapshot = {"goal": "Migrate", "revision": 3, "todos": []}
 
-    events = await _dispatched({"name": PLAN_UPDATE, "data": snapshot})
+    events = await dispatch_custom_chunk({"name": PLAN_UPDATE, "data": snapshot})
 
     assert [(event.type, event.data, event.messageId) for event in events] == [(PLAN_UPDATE, snapshot, "msg")]
 
 
 async def test_the_dispatcher_drops_a_plan_payload_that_is_not_a_snapshot() -> None:
-    assert await _dispatched({"name": PLAN_UPDATE, "data": "not a mapping"}) == []
+    assert await dispatch_custom_chunk({"name": PLAN_UPDATE, "data": "not a mapping"}) == []
