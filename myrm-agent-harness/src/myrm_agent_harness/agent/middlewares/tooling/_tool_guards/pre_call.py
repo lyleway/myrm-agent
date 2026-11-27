@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
 
 from langchain.agents.middleware import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -37,7 +37,7 @@ from myrm_agent_harness.agent.middlewares.tooling._tool_helpers import (
 )
 from myrm_agent_harness.agent.security.audit import record_decision
 from myrm_agent_harness.agent.security.guards.estop import EStopLevel, check_estop
-from myrm_agent_harness.agent.security.guards.loop_guard import LoopAction
+from myrm_agent_harness.agent.security.guards.loop_guard import LoopAction, LoopGuard
 from myrm_agent_harness.agent.security.guards.tool_turn_budget_guard import (
     TurnBudgetAction,
     get_tool_turn_budget_guard,
@@ -68,7 +68,7 @@ async def run_pre_call_guards(
     tool_name: str,
     tool_call_id: str,
     tool_args: dict[str, object],
-    get_loop_guard_fn: Any = None,
+    get_loop_guard_fn: Callable[[], LoopGuard] | None = None,
 ) -> ToolMessage | PreCallResult:
     """Execute all pre-call guards. Returns ToolMessage if blocked, PreCallResult to proceed."""
     from myrm_agent_harness.agent.hooks.executor import fire_hook
@@ -86,9 +86,9 @@ async def run_pre_call_guards(
         set_current_message_id(active_message_id)
 
     if get_loop_guard_fn is None:
-        from myrm_agent_harness.agent.middlewares.tooling.tool_interceptor_middleware import (
-            get_loop_guard as get_loop_guard_fn,
-        )
+        from myrm_agent_harness.agent.middlewares.tooling.tool_interceptor_middleware import get_loop_guard
+
+        get_loop_guard_fn = get_loop_guard
 
     pre_hook_result = await fire_hook(
         HookEvent.PRE_TOOL_USE,

@@ -228,11 +228,21 @@ async def test_a_cleanup_that_takes_seconds_is_not_cut_off_by_the_production_gra
 
 
 @pytest.mark.asyncio
-async def test_a_stop_is_reported_to_the_stream_with_the_reason_it_had(token: CancellationToken) -> None:
+@pytest.mark.parametrize(
+    ("reason", "reported"),
+    [
+        (CancelReason.USER_CANCELLED, "user_cancelled"),
+        (CancelReason.TIMEOUT, "timeout"),
+        (CancelReason.DISCONNECT, "session_ended"),
+    ],
+)
+async def test_a_stop_is_reported_to_the_stream_with_the_reason_it_had(
+    token: CancellationToken, reason: CancelReason, reported: str
+) -> None:
     sink = _RecordingSink()
     set_tool_progress_sink(sink)
     try:
-        stopper = asyncio.create_task(_stop_after(token, 0.05, CancelReason.DISCONNECT))
+        stopper = asyncio.create_task(_stop_after(token, 0.05, reason))
         await execute_with_retry(_request(), _SilentCall(), "mcp_probe", "tc_1", allowed_domains=None)
         await stopper
     finally:
@@ -243,7 +253,7 @@ async def test_a_stop_is_reported_to_the_stream_with_the_reason_it_had(token: Ca
     data = cancelled[0]["data"]
     assert isinstance(data, dict)
     assert data["tool_name"] == "mcp_probe"
-    assert data["cancel_reason"] == "session_ended"
+    assert data["cancel_reason"] == reported
     assert not [event for event in sink.events if event["type"] == AgentEventType.TOOL_TIMEOUT.value]
 
 

@@ -8,6 +8,7 @@
 - agent.middlewares._session_context (POS: Middleware session context)
 - agent.streaming.types::AgentEventType (POS: Agent event type definitions)
 - utils.errors::ToolError (POS: Framework-level tool errors)
+- core.security.redact::redact_sensitive_text (POS: Public facade of the redaction domain)
 - agent.middlewares.tooling._request_stop::request_stopped (POS: the one predicate for a stopped request, shared with the pre-call guard)
 - agent.middlewares.tooling._tool_execution_lifecycle::report_tool_cancelled (POS: hook + stream event + result for a cancelled tool call)
 - utils.runtime.cancel_hook::DeadlineCut, cut_deadline_on_cancel (POS: end a timeout scope when the request token is cancelled)
@@ -32,7 +33,6 @@ import contextlib
 import random
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from langchain.agents.middleware import ToolCallRequest
 from langchain_core.messages import ToolMessage
@@ -118,7 +118,7 @@ async def execute_with_retry(
     tool_call = getattr(request, "tool_call", None)
     tool_args = tool_call.get("args") if isinstance(tool_call, dict) else None
     timeout = get_tool_timeout(tool_name, tool_args)
-    error_history: list[dict[str, Any]] = []
+    error_history: list[dict[str, str | float]] = []
     start_time = time.time()
 
     for attempt in range(2):

@@ -18,3 +18,6 @@
 - `post_call.py` → `shared.py`
 - `post_call.py` → `utils/text_sanitizer.py`（`encodable_text`）
 - `pre_call.py` → `shared.py`
+- `pre_call.py` → `../_circuit_breaker.py`（`check_circuit_breaker`）
+- `pre_call.py` → `../_request_stop.py`（`check_request_stopped`）
+- `pre_call.py` → `../_tool_helpers/`（PII 与信任衰减检查、`make_error_msg`）
