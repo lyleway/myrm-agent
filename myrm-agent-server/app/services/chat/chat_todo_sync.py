@@ -8,11 +8,12 @@
 - app.services.chat.effective_workspace::find_chat_workspace_root (POS: the workspace a chat's runs work in)
 
 [OUTPUT]
-- resolve_session_todo_store: Resolves authoritative todo store with branch-fold priority
+- resolve_session_todo_store: The plan a chat shows: its list in the workspace, else the plan folded from its active branch
 - sync_workspace_todos_for_active_branch: Realigns workspace progress file with current active branch messages
 
 [POS]
-Provides service-layer business logic for active conversation branch todo folding
+Provides service-layer business logic for the plan a chat shows (the list its agent reads and writes, with the
+plan archived on the active conversation branch as the fallback)
 and physical workspace alignment after conversation tree mutations (rewind, retry, undo, sibling switch).
 A chat's list lives in the workspace its runs work in (a project's directory is shared by all its chats),
 under the chat's own directory, so the sync never reads or rewrites another chat's list.
@@ -46,35 +47,40 @@ async def _resolve_workspace_root_safely(chat_id: str) -> str | None:
     return str(root) if root is not None else None
 
 
-async def resolve_session_todo_store(session_id: str) -> TodoStore | None:
-    """Resolve authoritative TodoStore with active conversation branch priority.
-
-    Strategy:
-    1. Query all active messages on the current conversation branch and fold them.
-       This isolates forked branches and automatically adapts to rewound message history.
-    2. Fallback to physical workspace file if message folding yielded no todo state.
-    """
-    from app.services.chat.chat_service import ChatService
-
-    try:
-        messages = await ChatService.get_all_messages(session_id)
-        if messages:
-            branch_store = fold_branch_todo_state(messages)
-            if branch_store is not None:
-                return branch_store
-    except Exception as exc:
-        logger.warning("Failed to fold todo state from conversation branch %s: %s", session_id, exc)
-
+async def _read_workspace_store(session_id: str) -> TodoStore | None:
+    """The chat's own list in the workspace its runs work in; None when it has none or cannot be read."""
     chat_id = to_rest_chat_id(session_id)
     workspace_root = await _resolve_workspace_root_safely(chat_id) if chat_id else None
     if not chat_id or not workspace_root:
         return None
-
     try:
         return read_todos_sync_from_workspace(workspace_root, chat_id)
     except Exception as exc:
-        logger.warning("Failed to read fallback workspace todos for session %s: %s", session_id, exc)
+        logger.warning("Failed to read workspace todos for session %s: %s", session_id, exc)
         return None
+
+
+async def _fold_branch_store(session_id: str) -> TodoStore | None:
+    """The plan archived with the messages of the active conversation branch."""
+    from app.services.chat.chat_service import ChatService
+
+    try:
+        messages = await ChatService.get_all_messages(session_id)
+        return fold_branch_todo_state(messages) if messages else None
+    except Exception as exc:
+        logger.warning("Failed to fold todo state from conversation branch %s: %s", session_id, exc)
+        return None
+
+
+async def resolve_session_todo_store(session_id: str) -> TodoStore | None:
+    """The plan a chat shows: its list in the workspace, else the plan archived on its active branch.
+
+    The list is what the agent reads and writes, so it is what the user sees, and answering from it costs one file
+    read instead of loading the conversation. A chat without a list (its workspace was recycled, or it was restored
+    from an archive) shows the plan folded from the messages of its active branch.
+    """
+    store = await _read_workspace_store(session_id)
+    return store if store is not None else await _fold_branch_store(session_id)
 
 
 async def sync_workspace_todos_for_active_branch(chat_id: str) -> None:

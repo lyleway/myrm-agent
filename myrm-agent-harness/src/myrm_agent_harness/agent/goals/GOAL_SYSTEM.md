@@ -82,20 +82,20 @@ Goal System 负责管理长期任务（Long-running Tasks）的生命周期、�
   - **Judge feedback 注入**：当 Semantic Judge 判定未完成时，其 reason（截断至 200 字符）被注入到 continuation prompt 的 "Previous evaluation feedback" 块中，使 Agent 直接知道哪里未达标而无需自行重新审视。
   - **Fidelity 防目标缩水**：明确告知 Agent 此目标跨轮持续，不要缩小目标范围或用更窄方案替代原始目标。
   - **Evidence-based 防历史幻觉**：要求以当前文件系统和外部状态为权威源，检查实际状态后再依赖对话上下文。
-  - **Progress visibility**：多步任务中主动调用 `todo_write`，通过 `tasks_steps` SSE 推送前端 `ProgressSteps` / `GoalControlPlane`。
+  - **Progress visibility**：多步任务中主动调用 `todo_write`；每次写入后推一条 `plan_update` SSE 快照，右栏 `GoalControlPlane` 收到后重新读取计划。
   - **8 步 Audit Protocol**：含证据分级（证明/矛盾/弱证据/缺失）、范围匹配（窄检查不支撑宽声明）、必须证明完成而非仅未发现问题。
   - **Convergence awareness**：当 `convergence_window` 已设置且轮次足够时，注入收敛引导指令："如果连续多轮无新发现，主动声明 COMPLETE 并说明 convergence reason"。引导 agent 主动识别递减回报并优雅结束。
   - 行为指令：采取下一步行动、完成时声明、阻塞时报告。
 
 ### 6. todo_write (动态进度更新)
 - 主 Agent 通过 `todo_write` 创建/合并/完成 todo 项（支持 `pending` / `in_progress` / `completed` / `cancelled` / `blocked` 状态）。
-- 工具返回简短摘要作为 `ToolMessage`；内部 emit `tasks_steps`（`todo_step_*` / `progress_root`）供 Server SSE 转发。
+- 工具返回简短摘要作为 `ToolMessage`；计划文件写好后 emit 一条 `plan_update`（整份快照 `{goal, revision, todos}`，`progress/events.py::emit_plan_update`），经 `utils.event_utils.emit_custom_event_sync` 写入运行的 `custom` 流，由流分发器转给前端。
 - 当任务标记为 `blocked` 时，释放 `in_progress` 单并发占用，支持动态自愈重规划。
 - `progress_middleware` 的焦点优先落在 `in_progress`、其次 `pending` 项，`blocked` 项不作为焦点；仍有 `blocked` 项时追加重规划提示，只剩 `blocked` 项时提示把无法达成的项标为 `cancelled` 或更新步骤；`CompletionGuard` 精准引导模型裁剪不可解的阻塞任务，避免盲目重试。
 
 ### 7. GoalControlPlane (前端全局控制面)
 - xl+ 视口：Chat 右侧持久化 todo 侧栏；移动端依赖聊天气泡内 ProgressSteps。
-- REST `GET /goals/{chat_id}/plan` + SSE `todo_step_*` 双通道更新打勾状态。
+- REST `GET /goals/{chat_id}/plan` 提供计划（先读该 chat 自己的计划文件，没有再取活动分支折叠出的计划）；SSE `plan_update` 只当「计划变了」的信号，前端据此重新读取，不套用事件载荷。
 - 展示运行时 todo 列表与 execution summary；无计划审批步骤。
 
 ## 交互流程

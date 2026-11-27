@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ from myrm_agent_harness.agent.meta_tools.file_ops.observers.snapshot_observer im
 
 
 @pytest.fixture(autouse=True)
-def reset_store():
+def reset_store() -> Iterator[None]:
     """Reset singleton between tests."""
     SnapshotStore.reset()
     yield
@@ -28,36 +29,36 @@ def reset_store():
 
 
 class TestSnapshotStore:
-    def test_singleton(self):
+    def test_singleton(self) -> None:
         s1 = SnapshotStore.get()
         s2 = SnapshotStore.get()
         assert s1 is s2
 
-    def test_reset(self):
+    def test_reset(self) -> None:
         s1 = SnapshotStore.get()
         SnapshotStore.reset()
         s2 = SnapshotStore.get()
         assert s1 is not s2
 
-    def test_record_and_get(self):
+    def test_record_and_get(self) -> None:
         store = SnapshotStore.get()
         snap = FileSnapshot(path="/a.py", operation=SnapshotOp.MODIFY, original_content="old")
         assert store.record("s1", "m1", snap)
         assert store.get_message_snapshots("s1", "m1") == [snap]
 
-    def test_record_create_no_content(self):
+    def test_record_create_no_content(self) -> None:
         store = SnapshotStore.get()
         snap = FileSnapshot(path="/new.py", operation=SnapshotOp.CREATE, original_content=None)
         assert store.record("s1", "m1", snap)
         assert snap.size_bytes == 0
 
-    def test_file_size_limit(self):
+    def test_file_size_limit(self) -> None:
         store = SnapshotStore.get()
         big_content = "x" * (MAX_FILE_BYTES + 1)
         snap = FileSnapshot(path="/big.py", operation=SnapshotOp.MODIFY, original_content=big_content)
         assert not store.record("s1", "m1", snap)
 
-    def test_record_skipped_metadata(self):
+    def test_record_skipped_metadata(self) -> None:
         store = SnapshotStore.get()
         store.record_skipped("s1", "m1", "/big.py", SnapshotOp.MODIFY, SnapshotSkipReason.FILE_TOO_LARGE)
         snaps = store.get_message_snapshots("s1", "m1")
@@ -67,13 +68,13 @@ class TestSnapshotStore:
         assert snaps[0].size_bytes == 0
         assert store.total_bytes == 0
 
-    def test_record_skipped_dedup(self):
+    def test_record_skipped_dedup(self) -> None:
         store = SnapshotStore.get()
         store.record_skipped("s1", "m1", "/big.py", SnapshotOp.MODIFY, SnapshotSkipReason.FILE_TOO_LARGE)
         store.record_skipped("s1", "m1", "/big.py", SnapshotOp.MODIFY, SnapshotSkipReason.STORE_FULL)
         assert len(store.get_message_snapshots("s1", "m1")) == 1
 
-    def test_total_store_limit(self):
+    def test_total_store_limit(self) -> None:
         store = SnapshotStore.get()
         chunk = "x" * (MAX_FILE_BYTES - 1)
         count = 0
@@ -85,7 +86,7 @@ class TestSnapshotStore:
         final_snap = FileSnapshot(path="/overflow.py", operation=SnapshotOp.MODIFY, original_content=chunk)
         assert not store.record("s1", "overflow", final_snap)
 
-    def test_get_session_snapshots(self):
+    def test_get_session_snapshots(self) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "a"))
         store.record("s1", "m2", FileSnapshot("/b.py", SnapshotOp.MODIFY, "b"))
@@ -93,7 +94,7 @@ class TestSnapshotStore:
         assert "m1" in session
         assert "m2" in session
 
-    def test_remove_message(self):
+    def test_remove_message(self) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "old"))
         assert store.total_bytes > 0
@@ -101,7 +102,7 @@ class TestSnapshotStore:
         assert len(removed) == 1
         assert store.total_bytes == 0
 
-    def test_clear_session(self):
+    def test_clear_session(self) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "a"))
         store.record("s1", "m2", FileSnapshot("/b.py", SnapshotOp.MODIFY, "b"))
@@ -109,13 +110,13 @@ class TestSnapshotStore:
         assert count == 2
         assert store.total_bytes == 0
 
-    def test_empty_queries(self):
+    def test_empty_queries(self) -> None:
         store = SnapshotStore.get()
         assert store.get_message_snapshots("none", "none") == []
         assert store.get_session_snapshots("none") == {}
 
     @pytest.mark.asyncio
-    async def test_persist_skipped_to_disk(self):
+    async def test_persist_skipped_to_disk(self) -> None:
         store = SnapshotStore.get()
         store.record_skipped("s1", "m1", "/big.py", SnapshotOp.MODIFY, SnapshotSkipReason.FILE_TOO_LARGE)
 
@@ -129,7 +130,7 @@ class TestSnapshotStore:
             assert snaps[0].original_content is None
 
     @pytest.mark.asyncio
-    async def test_merge_skipped_from_disk(self):
+    async def test_merge_skipped_from_disk(self) -> None:
         store = SnapshotStore.get()
         store.record_skipped("s1", "m1", "/big.py", SnapshotOp.MODIFY, SnapshotSkipReason.FILE_TOO_LARGE)
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -144,7 +145,7 @@ class TestSnapshotStore:
             assert snaps[0].revertible is False
 
     @pytest.mark.asyncio
-    async def test_persist_to_disk(self):
+    async def test_persist_to_disk(self) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "content"))
 
@@ -159,7 +160,7 @@ class TestSnapshotStore:
             assert snaps[0].original_content == "content"
 
     @pytest.mark.asyncio
-    async def test_load_from_disk(self):
+    async def test_load_from_disk(self) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "orig"))
 
@@ -173,7 +174,7 @@ class TestSnapshotStore:
             assert snaps[0].original_content == "orig"
 
     @pytest.mark.asyncio
-    async def test_merge_session_from_disk(self):
+    async def test_merge_session_from_disk(self) -> None:
         SnapshotStore.reset()
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "orig"))
@@ -193,7 +194,7 @@ class TestSnapshotStore:
 
 class TestContextVars:
     @pytest.fixture(autouse=True)
-    def _isolated_message_id(self):
+    def _isolated_message_id(self) -> Iterator[None]:
         """Restore the observer's message-id ContextVar so ids set here never reach later tests."""
         from myrm_agent_harness.agent.meta_tools.file_ops.observers.snapshot_observer import _current_message_id
 
@@ -201,11 +202,11 @@ class TestContextVars:
         yield
         _current_message_id.reset(token)
 
-    def test_set_and_get_message_id(self):
+    def test_set_and_get_message_id(self) -> None:
         set_current_message_id("test-msg-123")
         assert get_current_message_id() == "test-msg-123"
 
-    def test_auto_generate_message_id(self):
+    def test_auto_generate_message_id(self) -> None:
         """In a fresh context, get_current_message_id generates a new msg_ ID."""
         import contextvars
 
@@ -213,14 +214,14 @@ class TestContextVars:
 
         ctx = contextvars.copy_context()
 
-        def _set_none_and_get():
+        def _set_none_and_get() -> str:
             _current_message_id.set(None)
             return get_current_message_id()
 
         msg_id = ctx.run(_set_none_and_get)
         assert msg_id.startswith("msg_")
 
-    def test_isolation_between_contexts(self):
+    def test_isolation_between_contexts(self) -> None:
         """Different contextvars contexts should have independent message IDs."""
         import contextvars
 
@@ -245,7 +246,7 @@ class TestDiskCleanup:
     """Tests for on-disk snapshot cleanup."""
 
     @pytest.mark.asyncio
-    async def test_remove_persisted_message(self, tmp_path):
+    async def test_remove_persisted_message(self, tmp_path: Path) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "old"))
         await store.persist_to_disk(str(tmp_path), "s1", "m1")
@@ -257,7 +258,7 @@ class TestDiskCleanup:
         assert not snap_file.exists()
 
     @pytest.mark.asyncio
-    async def test_clear_persisted_session(self, tmp_path):
+    async def test_clear_persisted_session(self, tmp_path: Path) -> None:
         store = SnapshotStore.get()
         store.record("s1", "m1", FileSnapshot("/a.py", SnapshotOp.MODIFY, "old"))
         store.record("s1", "m2", FileSnapshot("/b.py", SnapshotOp.CREATE, None))
@@ -273,11 +274,11 @@ class TestDiskCleanup:
         assert not session_dir.exists()
 
     @pytest.mark.asyncio
-    async def test_remove_nonexistent_message_no_error(self, tmp_path):
+    async def test_remove_nonexistent_message_no_error(self, tmp_path: Path) -> None:
         store = SnapshotStore.get()
         await store.remove_persisted_message(str(tmp_path), "s1", "nonexistent")
 
     @pytest.mark.asyncio
-    async def test_clear_nonexistent_session_no_error(self, tmp_path):
+    async def test_clear_nonexistent_session_no_error(self, tmp_path: Path) -> None:
         store = SnapshotStore.get()
         await store.clear_persisted_session(str(tmp_path), "nonexistent")

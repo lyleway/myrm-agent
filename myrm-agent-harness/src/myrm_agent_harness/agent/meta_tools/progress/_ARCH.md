@@ -15,7 +15,7 @@ SSOT: `{workspace_root}/.myrm/progress/<chat>/todos.json` — one list per chat.
 | `__init__.py` | Package | Public exports for progress meta-tool | ✅ |
 | `schemas.py` | Config | `TodoItem`, `TodoStore`, plan-compat adapter for Goal API | ✅ |
 | `storage.py` | Core | Read/write/merge/delete a chat's todos in the workspace (atomic write via `infra.atomic_write`); `todo_scope` maps a chat id to its directory, defaulting to the running chat (`chat_id_var`); `workspace_todos_exist` is true when any chat has a list; every write first makes `.myrm/progress/` ignore itself in git (`ensure_scratch_dir`), so a plan never reaches the `git status` of the user's project | ✅ |
-| `events.py` | Core | Emit `tasks_steps` for ProgressSteps UI and attach `tool_result_details` for session-tree binding | ✅ |
+| `events.py` | Core | `emit_plan_update`: after each `todo_write` wrote the file, put the whole plan (`{goal, revision, todos}`) on the run's custom stream as one `plan_update` event; the stream dispatcher forwards it and the plan panel re-reads the plan the server serves. An emit failure is logged at WARNING and never fails the write | ✅ |
 | `todo_write_tool.py` | Core | LangChain `todo_write` factory (main agent, no sub-agent LLM) | ✅ |
 
 ## Constraints
@@ -26,7 +26,7 @@ SSOT: `{workspace_root}/.myrm/progress/<chat>/todos.json` — one list per chat.
 - **Smart Focus Scheduling**: `ProgressMiddleware` automatically bypasses `blocked` items and prioritizes actionable `in_progress` or `pending` tasks as `Current focus`, appending non-blocking replanning guidance.
 - **Precision Completion Diagnostics**: `ProgressMiddleware` distinguishes actionable from blocked items, offering targeted guidance to cancel permanently unfulfillable items via `todo_write(merge=true)` when all remaining items are blocked.
 - **Partial Update Support**: In `merge=True` mode, `content` and `status` are independently optional for existing items; omitting `content` preserves the existing description, while omitting `status` preserves the existing lifecycle status (e.g. `in_progress`). New items require `content`.
-- **Monotonic Revision Sequence**: `TodoStore` maintains a monotonic `revision` counter incremented on each write, emitted in `tasks_steps` SSE payloads, and exported via `to_plan_compat()` to guarantee end-to-end client-side state ordering and race condition immunity.
+- **Monotonic Revision Sequence**: `TodoStore` maintains a monotonic `revision` counter incremented on each write, emitted in `plan_update` SSE payloads, and exported via `to_plan_compat()` to guarantee end-to-end client-side state ordering and race condition immunity.
 - **Self-Healing Error Diagnostics**: Invalid status values return the complete list of valid enum values to facilitate agent self-correction.
 
 ## Bind conditions
@@ -36,13 +36,13 @@ SSOT: `{workspace_root}/.myrm/progress/<chat>/todos.json` — one list per chat.
 ## Server hydrate (myrm-agent-server)
 
 - `app/services/chat/effective_workspace.find_chat_workspace_root` — the workspace a chat's runs work in (its project's directory, its own workspace, or its `chat_{id}` sandbox); the server reads, rewrites and stashes todos there, always for the one chat (`to_rest_chat_id`)
-- `GET /api/v1/goals/{chat_id}/plan` — the folded conversation branch first, else the chat's own list; returns plan-compat shape for GoalControlPlane
+- `GET /api/v1/goals/{chat_id}/plan` — the chat's own list first, else the plan folded from its active conversation branch; returns plan-compat shape for GoalControlPlane
 
 ## Key Dependencies
 
 - `agent.middlewares._session_context` (workspace root)
 - `toolkits.code_execution.utils.scratch_dir` (the self-ignoring `.myrm/progress/` directory)
-- LangGraph `dispatch_custom_event` for SSE progress
+- `utils.event_utils.emit_custom_event_sync` (puts `plan_update` on the run's custom stream)
 
 ## Do not place here
 

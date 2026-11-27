@@ -148,7 +148,7 @@ async def test_the_result_names_the_copy_of_the_audio_in_the_workspace(
 
     assert payload["status"] == "success"
     assert payload["audio_url"] == media_reference(record.id)
-    assert payload["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.mp3"]
+    assert payload["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.mp3"]
     assert (workspace / WORKSPACE_MEDIA_DIR / f"{record.id}.mp3").read_bytes() == _AUDIO
 
 

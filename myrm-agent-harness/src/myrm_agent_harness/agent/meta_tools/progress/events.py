@@ -1,77 +1,37 @@
-"""Progress SSE helpers — emit `tasks_steps` for ProgressSteps UI.
+"""Progress SSE helper — one ``plan_update`` snapshot per todo_write.
 
 [INPUT]
-- progress.schemas::TodoItem, TodoStatus, TodoStore (POS: todo models)
-- langchain_core.callbacks.manager::dispatch_custom_event (POS: SSE bridge)
+- progress.schemas::TodoStore (POS: todo models)
+- core.events.types::AgentEventType (POS: names of the events the stream dispatcher forwards)
+- utils.event_utils::emit_custom_event_sync (POS: custom-stream emitter for synchronous tools)
 
 [OUTPUT]
-- emit_todo_progress_events: Dispatch tasks_steps custom events for UI
+- emit_plan_update: put the whole plan, ``{goal, revision, todos}``, on the run's custom stream
 
 [POS]
-Emits LangGraph custom events consumed by server SSE → ProgressSteps UI.
+Tells the UI that the plan file changed. One event per todo_write, after the file is written, carrying the revision
+the file now holds.
 """
 
 from __future__ import annotations
 
 import logging
 
-from langchain_core.callbacks.manager import dispatch_custom_event
-
-from myrm_agent_harness.agent.meta_tools.progress.schemas import TodoItem, TodoStatus, TodoStore
+from myrm_agent_harness.agent.meta_tools.progress.schemas import TodoStore
+from myrm_agent_harness.core.events.types import AgentEventType
+from myrm_agent_harness.utils.event_utils import emit_custom_event_sync
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_ROOT_STEP_KEY = "progress_root"
 
-
-def _ui_status(status: TodoStatus) -> str:
-    if status == TodoStatus.IN_PROGRESS:
-        return "running"
-    if status == TodoStatus.COMPLETED:
-        return "success"
-    if status == TodoStatus.CANCELLED:
-        return "skipped"
-    if status == TodoStatus.BLOCKED:
-        return "blocked"
-    return "pending"
-
-
-def emit_todo_progress_events(store: TodoStore) -> None:
-    """Emit root + child steps so chat ProgressSteps can render a tree."""
+def emit_plan_update(store: TodoStore) -> None:
+    """Emit the plan; a failure to emit is logged and never fails the todo_write that already wrote the file."""
+    snapshot: dict[str, object] = {
+        "goal": store.goal,
+        "revision": store.revision,
+        "todos": [item.model_dump() for item in store.todos],
+    }
     try:
-        root_label = store.goal or "Task progress"
-        dispatch_custom_event(
-            "tasks_steps",
-            {
-                "step_key": PROGRESS_ROOT_STEP_KEY,
-                "is_plan": True,
-                "status": "in_progress",
-                "data": [{"text": root_label}],
-                "revision": store.revision,
-                "tool_name": "todo_write",
-                "tool_result_details": {
-                    "goal": store.goal,
-                    "revision": store.revision,
-                    "todos": [item.model_dump() for item in store.todos],
-                },
-            },
-        )
-
-        for item in store.todos:
-            _emit_todo_step(item, revision=store.revision)
+        emit_custom_event_sync(AgentEventType.PLAN_UPDATE.value, snapshot)
     except Exception as exc:
-        logger.warning("Failed to emit todo progress events: %s", exc)
-
-
-def _emit_todo_step(item: TodoItem, *, revision: int = 0) -> None:
-    dispatch_custom_event(
-        "tasks_steps",
-        {
-            "step_key": f"todo_step_{item.id}",
-            "parent_step_key": PROGRESS_ROOT_STEP_KEY,
-            "is_plan": True,
-            "status": _ui_status(item.status),
-            "data": [{"text": item.content}],
-            "revision": revision,
-        },
-    )
+        logger.warning("Failed to emit plan_update: %s", exc)

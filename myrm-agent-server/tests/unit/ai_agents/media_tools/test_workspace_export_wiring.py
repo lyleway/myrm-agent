@@ -4,15 +4,17 @@
 - app.ai_agents.media_tools.image_agent_tool / video_agent_tool / tts_agent_tool (POS: the tools whose results gain ``workspace_files``)
 - app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: the gate that decides whose task is exported)
 - tests.support.media_library_env::media_library_env (POS: a real media library on a throwaway database and local storage)
+- myrm_agent_harness.core.security.detection::redact_leaks (POS: the credential redaction the agent stack applies to every tool result)
 
 [OUTPUT]
 Fails when a result lacks the copies of its media, when the status of a task of another user or chat writes into the
-workspace, when a failed copy changes the result it completes, when an agent without a workspace gets another answer, or
-when what the model sees of a tool depends on the workspace, the user or the chat.
+workspace, when a failed copy changes the result it completes, when an agent without a workspace gets another answer,
+when what the model sees of a tool depends on the workspace, the user or the chat, or when the credential redaction masks
+a path the answer names.
 
 [POS]
 tests/unit/ai_agents/media_tools/test_workspace_export_wiring.py; the model call and the task queue are replaced, the media
-library, the reference resolver and the exporter are real.
+library, the reference resolver, the exporter and the credential redaction are real.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from myrm_agent_harness.core.security.detection import redact_leaks
 from myrm_agent_harness.toolkits.llms.image.models import ImageGenerationConfig
 from myrm_agent_harness.toolkits.llms.tts import TTSConfig
 from myrm_agent_harness.toolkits.llms.video import VideoGenerationConfig
@@ -169,7 +172,7 @@ class TestWhoseTaskIsExported:
         answer = await WorkspaceExporter(workspace, user_id="user-1", chat_id=exporter_chat).complete_status(task, status)
 
         if exported:
-            assert answer["result"] == {**(task.result or {}), "workspace_files": [f"{WORKSPACE_MEDIA_DIR}/{record.id}.mp4"]}
+            assert answer["result"] == {**(task.result or {}), "workspace_files": [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.mp4"]}
         else:
             assert answer == status
             assert not (workspace / WORKSPACE_MEDIA_DIR).exists()
@@ -214,7 +217,7 @@ class TestStatus:
         answer = await _status(kind.make_tool(workspace), _task(kind, result))
 
         assert answer["status"] == "succeeded"
-        assert answer["result"] == {**result, "workspace_files": [f"{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]}
+        assert answer["result"] == {**result, "workspace_files": [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]}
         assert (workspace / WORKSPACE_MEDIA_DIR / f"{record.id}.{kind.extension}").read_bytes() == _BYTES
 
     @_KINDS
@@ -228,7 +231,7 @@ class TestStatus:
             answer = await _status(kind.make_tool(workspace), _task(kind, None), _task(kind, result), wait_seconds=5)
 
         assert answer["status"] == "succeeded"
-        assert answer["result"]["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]
+        assert answer["result"]["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{record.id}.{kind.extension}"]
 
     @_KINDS
     @pytest.mark.parametrize(("task_user", "task_chat"), [("user-2", "chat-1"), ("user-1", "chat-2"), ("user-1", None)])
@@ -295,7 +298,7 @@ class TestEdit:
 
         answer = json.loads(await self._edit(workspace, source.id, self._engine_answer(edited.id)))
 
-        assert answer["workspace_files"] == [f"{WORKSPACE_MEDIA_DIR}/{edited.id}.png"]
+        assert answer["workspace_files"] == [f"./{WORKSPACE_MEDIA_DIR}/{edited.id}.png"]
         assert answer["images"][0]["url"] == media_reference(edited.id)
         assert (workspace / WORKSPACE_MEDIA_DIR / f"{edited.id}.png").read_bytes() == _BYTES
 
@@ -347,6 +350,20 @@ class TestWhatTheModelSees:
 
         assert "workspace_files" in description
         assert "without that field there is no copy" in description
+
+    async def test_the_copy_paths_are_not_masked_as_secrets_before_the_model_reads_them(
+        self, library: MediaLibraryEnv, workspace: Path
+    ) -> None:
+        """A masked path opens no file. The agent stack masks random-looking tokens and media ids are random, so the
+        bare ``_generated/<id>.png`` form is masked in most results; forty ids leave no chance of passing by luck."""
+        records = [await library.store(_BYTES + bytes([index])) for index in range(40)]
+        result = {"images": [{"url": media_reference(record.id)} for record in records]}
+
+        answer = await WorkspaceExporter(workspace, user_id="user-1", chat_id="chat-1").complete(result)
+
+        text = json.dumps(answer)
+        assert text.count(WORKSPACE_MEDIA_DIR) == len(records)
+        assert redact_leaks(text) == text
 
     @_EVERY_TOOL
     def test_the_tool_as_sent_to_the_model_does_not_depend_on_the_workspace_user_or_chat(

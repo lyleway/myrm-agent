@@ -17,6 +17,7 @@ import type {
   CapabilityGapStreamEvent,
   SkillGapStreamEvent,
   PhaseTransitionStreamEvent,
+  PlanUpdateStreamEvent,
   ErrorStreamEvent,
   MessageStreamEvent,
   RateLimitThrottledStreamEvent,
@@ -92,6 +93,7 @@ export type AgentStreamEvent =
   | ErrorStreamEvent
   | AgentCancelledStreamEvent
   | TasksStepsStreamEvent
+  | PlanUpdateStreamEvent
   | ToolHeartbeatStreamEvent
   | SourcesStreamEvent
   | ToolApprovalRequestStreamEvent
