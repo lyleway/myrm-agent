@@ -10,13 +10,26 @@ on:
       - 'myrm-agent-harness/scripts/validate_tool_registry.py'
       - 'myrm-agent-server/app/**/*.py'
       - '.github/workflows/harness-tool-registry.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'myrm-agent-harness/src/myrm_agent_harness/**/*.py'
+      - 'myrm-agent-harness/src/myrm_agent_harness/agent/tool_management/**'
+      - 'myrm-agent-harness/tests/architecture/test_tool_registry.py'
+      - 'myrm-agent-harness/scripts/tool_registry_*.py'
+      - 'myrm-agent-harness/scripts/validate_tool_registry.py'
+      - 'myrm-agent-server/app/**/*.py'
+      - '.github/workflows/harness-tool-registry.yml'
 
 permissions:
   contents: read
 
 concurrency:
+  # A push never cancels the run in progress: a cancelled run ends without a verdict, and the commit that broke the
+  # gate is then named by no run. Only a pull request is superseded by a newer run.
   group: harness-tool-registry-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

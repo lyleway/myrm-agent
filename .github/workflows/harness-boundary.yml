@@ -7,13 +7,22 @@ on:
       # tests/architecture/test_core_platform_matrix.py judges this file, which sits outside the harness directory.
       - '.github/core-platform-matrix.json'
       - '.github/workflows/harness-boundary.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'myrm-agent-harness/**'
+      - '.github/core-platform-matrix.json'
+      - '.github/workflows/harness-boundary.yml'
 
 permissions:
   contents: read
 
 concurrency:
+  # A push never cancels the run in progress: a cancelled run ends without a verdict, and the commit that broke the
+  # gate is then named by no run. Only a pull request is superseded by a newer run.
   group: harness-boundary-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

@@ -7,6 +7,14 @@ on:
       - '.github/workflows/install-smoke.yml'
       - 'myrm-agent-server/pyproject.toml'
       - 'myrm-agent-server/uv.lock'
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/install-smoke.yml'
+      - 'myrm-agent-server/pyproject.toml'
+      - 'myrm-agent-server/uv.lock'
   workflow_dispatch:
 
 jobs:

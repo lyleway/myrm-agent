@@ -3,7 +3,8 @@ name: Harness framework canary
 # The agent runs on LangChain and LangGraph, and uv.lock keeps one release of each. What users install is whatever
 # pyproject.toml allows, so the two ends of that range are tested here: the lowest release it admits (is the floor true?)
 # and the newest one inside its upper bound (does a release the lock has not met yet still run the agent?). Both run
-# weekly and on demand, and on a pull request that changes the declared ranges, not on every harness change.
+# weekly and on demand, and on a pull request or a push to main that changes the declared ranges, not on every
+# harness change.
 
 on:
   schedule:
@@ -14,13 +15,22 @@ on:
       - 'myrm-agent-harness/pyproject.toml'
       - 'myrm-agent-harness/scripts/framework_requirements.py'
       - '.github/workflows/harness-framework-canary.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'myrm-agent-harness/pyproject.toml'
+      - 'myrm-agent-harness/scripts/framework_requirements.py'
+      - '.github/workflows/harness-framework-canary.yml'
 
 permissions:
   contents: read
 
 concurrency:
+  # A push never cancels the run in progress: a cancelled run ends without a verdict, and the commit that broke the
+  # gate is then named by no run. Only a pull request is superseded by a newer run.
   group: harness-framework-canary-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

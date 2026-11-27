@@ -2,14 +2,21 @@ name: Harness CLI contract
 
 # The real claude, codex, gemini, qwen and opencode binaries are the contract of the delegation runtime: the flags and
 # values it passes, the handshake it sends, the frames it reads. They release on their own schedule, so the checks run
-# against their latest releases: on every pull request that touches what the runtime sends them, weekly, on demand,
-# and before every harness release (harness-publish.yml calls this workflow; its wheels are not uploaded while it is
-# red). The checks that need no model gate everything. The real turns need provider credentials: they run where the
-# repository has CONTRACT_*_API_KEY secrets (dedicated keys with a provider-side spend limit) and say so in the run
-# when it has none, so a green run never passes for one that talked to a model.
+# against their latest releases: on every pull request and push to main that touches what the runtime sends them,
+# weekly, on demand, and before every harness release (harness-publish.yml calls this workflow; its wheels are not
+# uploaded while it is red). The checks that need no model gate everything. The real turns need provider credentials:
+# they run where the repository has CONTRACT_*_API_KEY secrets (dedicated keys with a provider-side spend limit) and
+# say so in the run when it has none, so a green run never passes for one that talked to a model.
 
 on:
   pull_request:
+    paths:
+      - 'myrm-agent-harness/src/myrm_agent_harness/toolkits/acp/**'
+      - 'myrm-agent-harness/tests/toolkits/acp/**'
+      - '.github/workflows/harness-cli-contract.yml'
+  push:
+    branches:
+      - main
     paths:
       - 'myrm-agent-harness/src/myrm_agent_harness/toolkits/acp/**'
       - 'myrm-agent-harness/tests/toolkits/acp/**'
