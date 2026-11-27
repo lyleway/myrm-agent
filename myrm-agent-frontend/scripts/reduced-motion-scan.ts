@@ -8,7 +8,8 @@
  *
  * 判定口径：
  * 1. 候选文件 = 含 `<style>` 或 `<html` 的源码（自己拼 HTML），或 `.css` 样式表（被某个独立文档引入）；
- * 2. 只对“带动画”的候选报警：有 `animation:`、`@keyframes` 或 Tailwind 的 `animate-*` 工具类；
+ * 2. 只对“带动画”的候选报警：有 `animation:`、`transition:`、`@keyframes` 或 Tailwind 的 `animate-*` 工具类
+ *    （`none` 是关掉动效的声明，不算）；
  * 3. 该文件里必须出现 `prefers-reduced-motion`；
  * 4. 白名单按文件给出理由，理由写在 `ALLOWED_WITHOUT_GUARD` 的条目里，不允许无理由豁免。
  *
@@ -24,13 +25,19 @@
  */
 const EMITS_HTML = /<style[\s>]|<html[\s>]|<!DOCTYPE html>/i;
 /**
- * 动画来源：CSS 声明、关键帧，或 Tailwind 的 `animate-*` 工具类（含任意值写法 `animate-[...]`）。
+ * 动画来源：CSS 声明、关键帧，或 Tailwind 的 `animate-*` 工具类（含任意值写法 `animate-[...]`）；
+ * 首个命中的片段同时是报错里的证据。
  *
  * 为什么要算 `transition:`：过渡同样会连续重绘。`transition: all` 加一处 `:hover { transform: ... }`
  * 就是一段真实的位移动画（`decryptor_shell.py` 的生成页就是这样）；只盯 `animation` / `@keyframes`
  * 会把这类独立文档整批漏掉。
+ *
+ * 为什么 `none` 不算：`transition: none` 与 `animation: none` 是把动效关掉的声明，不是动效。
+ * 端到端测试常往被测页面注入 `*, *::before, *::after { transition: none !important }` 来固定测量时刻，
+ * 把它当动画，只做关闭的文件就会被要求再写一份守卫。
  */
-const HAS_MOTION = /@keyframes|\banimation\s*:|\btransition\s*:|\banimate-[\w[]/;
+const MOTION =
+  /@keyframes\s+[\w-]+|\banimation\s*:(?!\s*none\b)[^;]{0,60}|\btransition\s*:(?!\s*none\b)[^;]{0,60}|\banimate-[\w[\]-]{0,40}/;
 const HAS_GUARD = /prefers-reduced-motion/;
 /**
  * 守卫必须落到通用选择器上，而不是只关掉一两个具名动画。
@@ -55,12 +62,6 @@ interface ReducedMotionSurface {
   path: string;
   /** 命中的动画片段（首条），便于在报错里定位。 */
   evidence: string;
-}
-
-function firstMotionEvidence(source: string): string | undefined {
-  const match =
-    /@keyframes\s+[\w-]+|\banimation\s*:[^;]{0,60}|\btransition\s*:[^;]{0,60}|\banimate-[\w[\]-]{0,40}/.exec(source);
-  return match?.[0];
 }
 
 /**
@@ -104,7 +105,8 @@ export function findUnguardedMotionSurface(path: string, source: string): Reduce
   if (!isStylesheet && !EMITS_HTML.test(production)) {
     return undefined;
   }
-  if (!HAS_MOTION.test(production)) {
+  const evidence = MOTION.exec(production)?.[0];
+  if (evidence === undefined) {
     return undefined;
   }
   // 被主文档 @import 的样式表由主文档的守卫统一覆盖，不属于“独立文档”。
@@ -113,10 +115,6 @@ export function findUnguardedMotionSurface(path: string, source: string): Reduce
   }
   // 守卫要“真的兜住全部动画”：既出现在 reduce 媒体查询里，又落在通用选择器上。
   if (HAS_GUARD.test(production) && UNIVERSAL_GUARD.test(production)) {
-    return undefined;
-  }
-  const evidence = firstMotionEvidence(production);
-  if (evidence === undefined) {
     return undefined;
   }
   return { path, evidence };

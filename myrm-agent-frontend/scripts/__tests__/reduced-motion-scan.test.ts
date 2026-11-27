@@ -56,6 +56,21 @@ describe('findUnguardedMotionSurface', () => {
     expect(findUnguardedMotionSurface('svc/page.py', source)?.evidence).toContain('transition');
   });
 
+  // `none` 是把动效关掉的声明：端到端测试往被测页面注入它来固定测量时刻，文件里一处动效也没有。
+  it('does not count a declaration that switches motion off', () => {
+    const source = `// the theme is switched by the class on <html>; transitions are switched off for the measurement
+const OFF = '*, *::before, *::after { transition: none !important; animation:none; }';`;
+    expect(findUnguardedMotionSurface('tests/support/frame.py', source)).toBeUndefined();
+  });
+
+  // 关掉一处不等于没有动效：同一份文档里另一处真实的过渡或动画照样要有守卫。
+  it('still flags real motion that sits next to a declaration switching motion off', () => {
+    const transition = '<html><style>.a { transition: none } .b { transition: opacity .2s }</style></html>';
+    expect(findUnguardedMotionSurface('svc/page.py', transition)?.evidence).toMatch(/^transition: opacity/);
+    const animation = '<html><style>.a { animation: none } .b { animation: spin 1s infinite }</style></html>';
+    expect(findUnguardedMotionSurface('svc/page.py', animation)?.evidence).toMatch(/^animation: spin/);
+  });
+
   // 被 globals.css @import 的样式表并进主文档，由主文档的守卫覆盖，不该被当成独立文档。
   it('ignores a stylesheet that globals.css imports into the main document', () => {
     const source = '.a { transition: all 0.2s; }';
