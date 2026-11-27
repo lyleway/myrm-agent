@@ -18,8 +18,11 @@ permissions:
   contents: read
 
 concurrency:
+  # The suite takes close to twenty minutes and pushes to main often arrive closer together than that, so a push
+  # never cancels the run in progress: at most one run executes and one waits, and a newer push replaces the waiting
+  # one. Only a pull request is superseded by a newer run.
   group: harness-test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
