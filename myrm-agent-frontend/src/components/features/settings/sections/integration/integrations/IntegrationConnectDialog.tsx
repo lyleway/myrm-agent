@@ -16,6 +16,7 @@ import useConfigStore from '@/store/useConfigStore';
 import { MCPScanAckDialog } from '@/components/features/settings/mcp/MCPScanAckDialog';
 import type { MCPServiceConfig } from '@/store/config/types';
 import { getDocsUrl, isSandbox } from '@/lib/deploy-mode';
+import { findSameMcpServer } from '@/lib/utils/mcp-config';
 import type { CatalogLocale } from './catalog-locale';
 import type { CatalogEntry, CatalogMcpDialogConfig } from './catalog-types';
 import { shouldBlockLocalOnlyInSandbox } from './deploymentGuard';
@@ -142,8 +143,7 @@ export const IntegrationConnectDialog = memo<IntegrationConnectDialogProps>(
               extra_params: Object.keys(envMap).length > 0 ? { env: envMap } : null,
             };
 
-            const exists = mcpConfigs.some((c) => c.name === newConfig.name);
-            if (exists) {
+            if (findSameMcpServer(mcpConfigs, newConfig.name)) {
               toast({ title: t('alreadyConnected'), variant: 'destructive' });
               return;
             }

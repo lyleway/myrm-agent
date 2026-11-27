@@ -195,10 +195,11 @@ export function useMCPConfig(
   );
 
   const validateForm = useCallback(() => {
-    const newErrors = validateMCPFormFields(formData, t);
+    const others = configs.filter((_, index) => index !== editingIndex);
+    const newErrors = validateMCPFormFields(formData, t, others);
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  }, [formData, t]);
+  }, [formData, t, configs, editingIndex]);
 
   const handleAddConfig = useCallback(() => {
     setFormData(DEFAULT_FORM_DATA);

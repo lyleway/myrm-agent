@@ -8,6 +8,7 @@ Provides content quality assessment, deduplication, context injection, and conte
 
 [OUTPUT]
 - ContentTypeConfig: Content type configuration
+- TextMetrics: Text statistics reported by calculate_text_metrics
 - calculate_text_metrics: Compute text statistics (reused by multiple functions)
 - detect_content_type: Detect content type and return configuration
 - assess_content_quality: Assess content quality level
@@ -22,12 +23,20 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
+from typing import TypedDict
 
 from langchain_core.documents import Document
 
 from myrm_agent_harness.utils.document_utils import enhance_document_content
 
 logger = logging.getLogger(__name__)
+
+_NAVIGATION_MAX_CHARS = 100
+
+# A list marker after the indentation of its own line. Indentation never reads past a line break: ``^\s*`` would
+# cross blank lines, so a page of 20,000 of them is read to its end from every one (about 1.4 s).
+_LIST_ITEM_RE = re.compile(r"^[^\S\n]*[-*+•]\s+", re.MULTILINE)
+_NUMBERED_ITEM_RE = re.compile(r"^[^\S\n]*\d+\.\s+", re.MULTILINE)
 
 
 @dataclass
@@ -63,14 +72,24 @@ CONTENT_TYPE_CONFIGS = {
 }
 
 
-def calculate_text_metrics(text: str) -> dict:
+class TextMetrics(TypedDict):
+    """Text statistics reported by ``calculate_text_metrics``."""
+
+    length: int
+    h2_count: int
+    sentence_count: int
+    avg_section_length: float
+    sentence_density: float
+
+
+def calculate_text_metrics(text: str) -> TextMetrics:
     """Compute text statistics (reused by multiple functions).
 
     Args:
         text: Text content (Markdown format)
 
     Returns:
-        dict: Statistical metrics
+        Statistical metrics
     """
     if not text:
         return {
@@ -162,13 +181,14 @@ def assess_content_quality(content: str) -> str:
         if re.match(pattern, content_stripped, re.IGNORECASE):
             return "low"
 
-    # Detect pure navigation link content (very strict conditions)
-    lines = content_stripped.split("\n")
-    if len(lines) >= 3:
-        link_lines = sum(1 for line in lines if re.search(r"\[.+?\]\(.+?\)", line.strip()))
-        # Only classify as navigation menu when almost all links (>90%) and very short
-        if link_lines / len(lines) > 0.9 and len(content_stripped) < 100:
-            return "low"
+    # Detect pure navigation link content: very short, and almost every line (>90%) holds a link. Only content under
+    # 100 characters is looked at, which also bounds the cost of the lazy link pattern on a hostile page.
+    if len(content_stripped) < _NAVIGATION_MAX_CHARS:
+        lines = content_stripped.split("\n")
+        if len(lines) >= 3:
+            link_lines = sum(1 for line in lines if re.search(r"\[.+?\]\(.+?\)", line.strip()))
+            if link_lines / len(lines) > 0.9:
+                return "low"
 
     metrics = calculate_text_metrics(content_stripped)
     sentence_count = metrics["sentence_count"]
@@ -176,8 +196,8 @@ def assess_content_quality(content: str) -> str:
 
     # Additional structured content metrics
     code_blocks = len(re.findall(r"```", content_stripped)) // 2
-    list_items = len(re.findall(r"^\s*[-*+•]\s+", content_stripped, re.MULTILINE))
-    numbered_items = len(re.findall(r"^\s*\d+\.\s+", content_stripped, re.MULTILINE))
+    list_items = len(_LIST_ITEM_RE.findall(content_stripped))
+    numbered_items = len(_NUMBERED_ITEM_RE.findall(content_stripped))
 
     # Simplified quality scoring
     density_score = 0
@@ -229,7 +249,7 @@ def generate_content_hash(content: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()[:8]
 
 
-def inject_structured_context(chunks: list[Document], document_metadata: dict) -> list[Document]:
+def inject_structured_context(chunks: list[Document], document_metadata: dict[str, object]) -> list[Document]:
     """Inject structured context into chunks.
 
     Args:

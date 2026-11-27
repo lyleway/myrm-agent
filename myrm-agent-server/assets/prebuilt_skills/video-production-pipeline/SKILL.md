@@ -171,7 +171,7 @@ For each shot, call `video_tool(action="generate")` with:
 
 ### Step 5 — Concatenate with FFmpeg
 
-Once the clips have finished, call `video_tool(action="status", task_id=...)` for each shot. The `result` of a finished clip lists its file in the workspace under `workspace_files` (for example `_generated/media_xxx.mp4`). Use `bash_code_execute_tool` to concatenate the clips losslessly:
+Once the clips have finished, call `video_tool(action="status", task_id=...)` for each shot. The `result` of a finished clip lists its file in the workspace under `workspace_files` (for example `./_generated/media_xxx.mp4`). Use `bash_code_execute_tool` to concatenate the clips losslessly:
 
 ```bash
 ffmpeg -f concat -safe 0 -i list.txt -c copy output.mp4

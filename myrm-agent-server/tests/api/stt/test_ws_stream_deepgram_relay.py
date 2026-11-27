@@ -58,6 +58,7 @@ class TestProviderConnection:
 
         assert sent_json(ws) == [{"type": "transcript", "text": "hello", "is_final": True}]
         assert control_messages(deepgram)[-1] == _CLOSE_STREAM
+        ws.close.assert_awaited_once_with(code=1000, reason="Done")
 
     @pytest.mark.parametrize("browser_frames", [[_text(action="close")], []], ids=["close action", "disconnect"])
     async def test_final_results_flushed_after_the_browser_ends_the_stream_are_still_delivered(
@@ -74,6 +75,7 @@ class TestProviderConnection:
             {"type": "transcript", "text": "last words", "is_final": True},
         ]
         assert control_messages(deepgram) == [_CLOSE_STREAM]
+        ws.close.assert_awaited_once_with(code=1000, reason="Done")
 
     async def test_a_provider_that_does_not_answer_the_close_is_dropped_after_the_flush_timeout(
         self, monkeypatch: pytest.MonkeyPatch
@@ -86,6 +88,7 @@ class TestProviderConnection:
             await asyncio.wait_for(ws_stream._stream_via_deepgram(ws, _CONFIG, []), timeout=5)
 
         assert control_messages(deepgram) == [_CLOSE_STREAM]
+        ws.close.assert_awaited_once_with(code=1000, reason="Done")
 
     async def test_a_relay_that_fails_unexpectedly_is_logged_instead_of_raised(self, caplog: pytest.LogCaptureFixture) -> None:
         ws = browser_socket(hang=True)

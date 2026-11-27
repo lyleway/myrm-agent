@@ -10,7 +10,7 @@ myrm_agent_harness.core.context_vars::workspace_root_var (POS: root bound to the
 
 [OUTPUT]
 seed_installed_app_fixture: a chat whose assistant answer carries one HTML artifact that declares the notify and fetch bridge capabilities
-revise_installed_app_fixture: saves a new version of that artifact that declares other fetch hosts, as an agent editing the page would
+revise_installed_app_fixture: saves a new version of that artifact that declares other fetch hosts and, on request, the ai capability, as an agent editing the page would
 
 [POS]
 Mounted via test_fixtures/__init__.py router include. The artifact is registered by the product's own artifact processor
@@ -43,7 +43,8 @@ _DECLARED_HOST = "example.com"
 
 # A page cannot be clicked from outside its sandbox, so the host posts `e2e-run`, which stands for the user's click:
 # one round of calls (a notification, the declared host, a host outside the declaration) whose outcomes the page reports
-# back. `e2e-burst` fires `count` notifications at once. `e2e-ping` is answered once the page's script is running.
+# back. `e2e-burst` fires `count` notifications at once. `e2e-ask` puts one question to the user's model and reports
+# whether an answer came, not its text. `e2e-ping` is answered once the page's script is running.
 _APP_PAGE_TEMPLATE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Pulse</title>
 <script type="application/json" id="myrm-app">__DECLARATION__</script></head>
@@ -69,6 +70,15 @@ window.addEventListener('message', async (event) => {
     window.parent.postMessage({ type: 'e2e-result', round: event.data.round, outcomes }, '*');
     return;
   }
+  if (event.data && event.data.type === 'e2e-ask') {
+    const asked = [await attempt('ai', async () => {
+      const text = await window.myrm.llm.complete({ prompt: 'Reply with the single word: pong', maxTokens: 32 });
+      if (!text.trim()) throw { code: 'empty' };
+    })];
+    document.getElementById('out').textContent = asked.join(' ');
+    window.parent.postMessage({ type: 'e2e-result', round: event.data.round, outcomes: asked }, '*');
+    return;
+  }
   if (!event.data || event.data.type !== 'e2e-run') return;
   const outcomes = [];
   outcomes.push(await attempt('notify', () => window.myrm.notify({ title: 'Pulse ping', body: 'hello from the app' })));
@@ -84,16 +94,16 @@ window.addEventListener('message', async (event) => {
 """
 
 
-def _declaration(fetch_hosts: list[str]) -> str:
-    return json.dumps({"notify": True, "fetch": fetch_hosts})
+def _declaration(fetch_hosts: list[str], ai: bool) -> str:
+    return json.dumps({"notify": True, "fetch": fetch_hosts, "ai": ai})
 
 
-async def _register_page(chat_id: str, workspace: str, fetch_hosts: list[str]) -> dict[str, object]:
+async def _register_page(chat_id: str, workspace: str, fetch_hosts: list[str], ai: bool) -> dict[str, object]:
     """Write the page into the chat's workspace and register it as the product's artifact processor would."""
     folder = Path(workspace) / Path(_APP_NAME).stem
     folder.mkdir(parents=True, exist_ok=True)
     page = folder / _APP_NAME
-    page.write_text(_APP_PAGE_TEMPLATE.replace("__DECLARATION__", _declaration(fetch_hosts)), encoding="utf-8")
+    page.write_text(_APP_PAGE_TEMPLATE.replace("__DECLARATION__", _declaration(fetch_hosts, ai)), encoding="utf-8")
 
     event: dict[str, object] = {"type": "artifacts_ready", "data": [{"filename": _APP_NAME, "path": str(page)}]}
     bound_root = workspace_root_var.set(workspace)
@@ -125,7 +135,7 @@ async def seed_installed_app_fixture() -> dict[str, str]:
     if not workspace:
         raise HTTPException(status_code=500, detail="Failed to resolve workspace for installed-app E2E seed")
 
-    row = await _register_page(chat_id, workspace, [_DECLARED_HOST])
+    row = await _register_page(chat_id, workspace, [_DECLARED_HOST], ai=False)
 
     now = datetime.now(UTC)
     await ChatService.append_message(chat_id, "user", "Make me a small app that pings me.", now, "UTC")
@@ -143,15 +153,16 @@ async def seed_installed_app_fixture() -> dict[str, str]:
 class ReviseFixtureBody(BaseModel):
     chat_id: str
     fetch_hosts: list[str]
+    ai: bool = False
 
 
 @router.post("/test/seed-installed-app-fixture/revise", include_in_schema=False)
 async def revise_installed_app_fixture(body: ReviseFixtureBody) -> dict[str, str]:
-    """Local dev/test only: save the seeded page again with another `fetch` declaration, the way an agent edits it."""
+    """Local dev/test only: save the seeded page again with other declarations, the way an agent edits it."""
     if not is_local_mode():
         raise HTTPException(status_code=404, detail="Not found")
     workspace = await resolve_default_chat_workspace_dir(body.chat_id, persist_workspace=True)
     if not workspace:
         raise HTTPException(status_code=404, detail="Chat has no workspace")
-    row = await _register_page(body.chat_id, workspace, body.fetch_hosts)
+    row = await _register_page(body.chat_id, workspace, body.fetch_hosts, body.ai)
     return {"artifact_id": str(row["id"])}

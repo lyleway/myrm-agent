@@ -20259,6 +20259,7 @@
     "mcpServiceName": "服务名称",
     "mcpServiceNamePlaceholder": "输入服务名称",
     "mcpNameRequired": "服务名称不能为空",
+    "mcpNameConflict": "与已有服务 \"{name}\" 重名（仅符号或空格不同也算重名），请换一个名称",
     "mcpUrlRequired": "URL不能为空",
     "mcpUrlInvalid": "URL格式不正确",
     "mcpCommandRequired": "命令不能为空",

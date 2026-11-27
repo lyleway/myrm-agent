@@ -4,6 +4,7 @@
 - pipeline.raw_gate (POS: raw publication gate)
 - toolkits.web_fetch (POS: HTML→markdown conversion)
 - ingress.asset_store (POS: wiki/assets hash store)
+- myrm_agent_harness.utils.markdown_links::markdown_links (POS: linear-time Markdown link scan)
 
 [OUTPUT]
 - publish_clip_ingress, publish_url_markdown_ingress (POS: clip + URL ingress writers)
@@ -29,6 +30,7 @@ from myrm_agent_harness.toolkits.wiki.pipeline.raw_gate import (
     RawPublishRequest,
     publish_raw,
 )
+from myrm_agent_harness.utils.markdown_links import markdown_links
 
 from .asset_store import (
     localize_public_markdown_images,
@@ -44,6 +46,11 @@ from .types import (
 )
 
 _TITLE_SLUG_RE = re.compile(r"[^\w\s-]", re.UNICODE)
+
+
+def _has_markdown_image(text: str) -> bool:
+    """Whether ``text`` holds the start of an image, ``![alt](``, closed or not."""
+    return next(markdown_links(text, image=True, label_min=0, target_min=None), None) is not None
 
 
 def _slugify_title(title: str, *, max_len: int = 60) -> str:
@@ -133,7 +140,7 @@ async def publish_clip_ingress(
         body = f"# {request.title or 'Untitled'}\n\n(source: {request.source_url})"
 
     url_map, asset_stats = store_clip_assets(structure, request.assets)
-    had_refs = bool(re.search(r"!\[[^\]]*\]\(", body))
+    had_refs = _has_markdown_image(body)
     if url_map:
         body = rewrite_markdown_asset_refs(body, url_map, raw_relative=rel_path)
 
@@ -145,7 +152,7 @@ async def publish_clip_ingress(
     )
     body = track_b_body
     asset_stats = _merge_asset_stats(asset_stats, track_b_stats)
-    had_refs = had_refs or bool(re.search(r"!\[[^\]]*\]\(", body))
+    had_refs = had_refs or _has_markdown_image(body)
 
     localized = _assets_localized_label(asset_stats, had_markdown_refs=had_refs)
     content = (
@@ -236,7 +243,7 @@ async def publish_url_markdown_ingress(
             base_url=request.url,
             raw_relative=rel_path,
         )
-        localized = _assets_localized_label(asset_stats, had_markdown_refs=bool(re.search(r"!\[[^\]]*\]\(", markdown)))
+        localized = _assets_localized_label(asset_stats, had_markdown_refs=_has_markdown_image(markdown))
 
     title = Path(rel_path).stem
     content = (

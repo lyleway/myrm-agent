@@ -1,5 +1,5 @@
 """[INPUT]
-- （无跨模块依赖）
+- myrm_agent_harness.utils.markdown_links::mask_unclosable_openers (POS: 线性时间的链接扫描，未闭合的 `[` 不会拖慢匹配)
 
 [OUTPUT]
 - resolve_send_mode: Determine Feishu message send mode based on context.
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 from typing import Literal
+
+from myrm_agent_harness.utils.markdown_links import mask_unclosable_openers
 
 SendMode = Literal["reply", "root_create", "create"]
 
@@ -41,36 +43,70 @@ def resolve_send_mode(
 
 # ── Post (rich text) format builders ─────────────────────────────
 
-_RICH_TEXT_RE = re.compile(
-    r"\*\*.+?\*\*" r"|(?<!\w)_.+?_(?!\w)" r"|\[.+?\]\(.+?\)" r"|~~.+?~~" r"|`[^`]+`",
-)
+# Bold, strikethrough and code spans cost time in proportion to the line however broken their delimiters are. Links
+# (lazy label and target, cubic: 1,000 repeats of ``[a](`` took 4.6 s) and ``_italic_`` (quadratic: 8,000 characters
+# of `` _a`` took 0.1 s) do not, so each has its own scan below.
+_PLAIN_EMPHASIS_RE = re.compile(r"\*\*.+?\*\*" r"|~~.+?~~" r"|`[^`]+`")
 _HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _POST_INLINE_RE = re.compile(
     r"(\*\*(.+?)\*\*)" r"|(~~(.+?)~~)" r"|(`([^`]+)`)" r"|(\[(.+?)\]\((.+?)\))",
 )
 
 
+def _is_word_char(char: str) -> bool:
+    """``\\w`` for one character: what ``re`` counts as a word character."""
+    return char.isalnum() or char == "_"
+
+
+def _has_link(line: str) -> bool:
+    """``\\[.+?\\]\\(.+?\\)`` finds something in ``line``: an opener survives the masking of those that cannot link."""
+    return "[" in mask_unclosable_openers(line, lazy_target=True)
+
+
+def _has_underscore_emphasis(line: str) -> bool:
+    """``(?<!\\w)_.+?_(?!\\w)`` finds something in ``line``: a "_" not behind a word character, and a "_" not before one at least two characters on."""
+    last_closer = line.rfind("_")
+    while last_closer != -1 and last_closer + 1 < len(line) and _is_word_char(line[last_closer + 1]):
+        last_closer = line.rfind("_", 0, last_closer)
+    opener = line.find("_")
+    while 0 <= opener <= last_closer - 2:
+        if opener == 0 or not _is_word_char(line[opener - 1]):
+            return True
+        opener = line.find("_", opener + 1)
+    return False
+
+
 def has_rich_text(content: str) -> bool:
     """Detect if content has rich formatting that benefits from post type."""
-    return bool(_RICH_TEXT_RE.search(content) or _HEADING_RE.search(content))
+    return bool(
+        _PLAIN_EMPHASIS_RE.search(content)
+        or _HEADING_RE.search(content)
+        or any(_has_link(line) or _has_underscore_emphasis(line) for line in content.split("\n"))
+    )
+
+
+def _span_text(line: str, match: re.Match[str], group: int = 0) -> str:
+    """The part of ``line`` that ``group`` of ``match`` covers; ``match`` was found on a masked copy of ``line``."""
+    return line[match.start(group) : match.end(group)]
 
 
 def _parse_post_line(line: str) -> list[dict[str, object]]:
     """Parse a single line of Markdown into Feishu post elements."""
     elements: list[dict[str, object]] = []
     pos = 0
-    for m in _POST_INLINE_RE.finditer(line):
+    # Openers that no link can start at are masked: the link branch would read the rest of the line from each of them.
+    for m in _POST_INLINE_RE.finditer(mask_unclosable_openers(line, lazy_target=True)):
         if m.start() > pos:
             elements.append({"tag": "text", "text": line[pos : m.start()]})
         if m.group(2) is not None:
-            elements.append({"tag": "text", "text": m.group(2), "style": ["bold"]})
+            elements.append({"tag": "text", "text": _span_text(line, m, 2), "style": ["bold"]})
         elif m.group(4) is not None:
-            elements.append({"tag": "text", "text": m.group(4), "style": ["lineThrough"]})
+            elements.append({"tag": "text", "text": _span_text(line, m, 4), "style": ["lineThrough"]})
         elif m.group(6) is not None:
             # A post text element has no code style (Feishu ignores unknown styles), so the backticks stay as the cue.
-            elements.append({"tag": "text", "text": m.group(0)})
+            elements.append({"tag": "text", "text": _span_text(line, m)})
         elif m.group(8) is not None:
-            elements.append({"tag": "a", "text": m.group(8), "href": m.group(9)})
+            elements.append({"tag": "a", "text": _span_text(line, m, 8), "href": _span_text(line, m, 9)})
         pos = m.end()
     if pos < len(line):
         elements.append({"tag": "text", "text": line[pos:]})

@@ -52,6 +52,11 @@ describe('normalizeDesktopPath', () => {
   it('returns empty string for blank input', () => {
     expect(normalizeDesktopPath('   ')).toBe('');
   });
+
+  it('keeps the whitespace of a folder name, since it is part of the name', () => {
+    expect(normalizeDesktopPath('/Users/me/shared ')).toBe('/Users/me/shared ');
+    expect(normalizeDesktopPath('/Users/me/shared /')).toBe('/Users/me/shared ');
+  });
 });
 
 describe('useDesktopFolderDrop', () => {
@@ -108,6 +113,26 @@ describe('useDesktopFolderDrop', () => {
       optimistic: [{ path: '/Users/test/workspace', writable: true, source: 'desktop_drag_drop' }],
     });
     expect(onGranted).toHaveBeenCalledWith('/Users/test/workspace');
+  });
+
+  it('grants a dropped folder whose name ends in a space as itself, not as the folder above it', async () => {
+    (tauriLib.isTauriEnvironment as unknown as { mockReturnValue: (v: boolean) => void }).mockReturnValue(true);
+    (chatService.grantSessionAccessRoot as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      session_access_roots: [],
+    });
+
+    const onGranted = vi.fn();
+    const { result } = renderHook(() => useDesktopFolderDrop({ onFolderGranted: onGranted }));
+
+    await act(async () => {
+      await result.current.handleDroppedPaths(['/Users/test/shared ']);
+    });
+
+    expect(chatService.grantSessionAccessRoot).toHaveBeenCalledWith('test-chat-123', '/Users/test/shared ', true);
+    expect(sessionAccessRefresh.refreshSessionAccessRoots).toHaveBeenCalledWith('test-chat-123', {
+      optimistic: [{ path: '/Users/test/shared ', writable: true, source: 'desktop_drag_drop' }],
+    });
+    expect(onGranted).toHaveBeenCalledWith('/Users/test/shared ');
   });
 
   it('reports a folder the server refuses instead of showing it as granted', async () => {

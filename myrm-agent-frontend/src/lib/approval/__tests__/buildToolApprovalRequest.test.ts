@@ -298,9 +298,15 @@ describe('buildToolApprovalRequest', () => {
     });
 
     it('drops malformed entries and treats a missing writable flag as read-only', () => {
-      const request = requestWith([null, 'x', { path: 7 }, { path: '  ' }, { path: ' /Users/me/Downloads ' }]);
+      const request = requestWith([null, 'x', { path: 7 }, { path: '  ' }, { path: '/Users/me/Downloads' }]);
 
       expect(request.grantDirectories).toEqual([{ path: '/Users/me/Downloads', writable: false }]);
+    });
+
+    it('keeps a folder path exactly as planned, since a name that ends in a space is another folder', () => {
+      const request = requestWith([{ path: '/Users/me/shared ', writable: true }]);
+
+      expect(request.grantDirectories).toEqual([{ path: '/Users/me/shared ', writable: true }]);
     });
 
     it('ignores a payload that is not a list', () => {

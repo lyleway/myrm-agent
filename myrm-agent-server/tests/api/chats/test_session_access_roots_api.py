@@ -8,6 +8,7 @@ and PATCH (revoke) endpoints through the full HTTP router layer with minimal app
 from __future__ import annotations
 
 import os
+import sys
 import uuid
 
 import httpx
@@ -129,3 +130,42 @@ async def test_a_grant_the_server_refuses_answers_403_and_leaves_the_chat_unchan
         f"/api/v1/chats/{plain_chat}/session-access-roots", json={"path": str(folder), "writable": True}
     )
     assert [root["path"] for root in still_empty.json()["data"]["session_access_roots"]] == [os.path.realpath(str(folder))]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows cannot create names that end in a space")
+@pytest.mark.asyncio
+async def test_a_folder_whose_name_ends_in_a_space_is_granted_and_revoked_as_itself(
+    async_client: httpx.AsyncClient,
+    tmp_path,
+) -> None:
+    # The path is the folder's exact text on both calls: trimming it would grant (and fail to revoke) the folder above.
+    chat_id = f"test-grant-space-{uuid.uuid4().hex[:8]}"
+    await _create_chat(chat_id)
+    folder = tmp_path / "shared "
+    folder.mkdir()
+    stored = os.path.realpath(str(folder))
+    url = f"/api/v1/chats/{chat_id}/session-access-roots"
+
+    granted = await async_client.post(url, json={"path": str(folder), "writable": True})
+
+    assert granted.status_code == 200
+    assert [root["path"] for root in granted.json()["data"]["session_access_roots"]] == [stored]
+
+    revoked = await async_client.patch(url, json={"path": stored})
+
+    assert revoked.status_code == 200
+    assert revoked.json()["data"]["session_access_roots"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["POST", "PATCH"])
+async def test_a_blank_folder_path_is_rejected_before_it_reaches_the_chat(
+    async_client: httpx.AsyncClient,
+    method: str,
+) -> None:
+    chat_id = f"test-grant-blank-{uuid.uuid4().hex[:8]}"
+    await _create_chat(chat_id)
+
+    response = await async_client.request(method, f"/api/v1/chats/{chat_id}/session-access-roots", json={"path": "  "})
+
+    assert response.status_code == 422

@@ -28,11 +28,12 @@ Protocol (JSON text frames + binary audio frames):
 [INPUT]
 - app.api.stt.ws_stream: Deepgram proxy pattern (reused)
 - app.api.voice.ws_frames::parse_session_frame (POS: validated config / control frames from the browser)
+- app.api.voice.ws_session_batch::BatchSttMixin (POS: batch STT loop for providers without live streaming)
 - app.api.voice.agent_bridge::VoiceAgentBridge (POS: Agent execution bridge for voice)
 - app.core.infra.ws_origin_guard::verify_ws_origin (POS: WebSocket Origin guard)
-- app.core.channel_bridge.config_loader (POS: user config loader)
+- app.core.channel_bridge.config_loader::load_voice_config_only (POS: model-free voice config loader)
 - app.channels.voice.tts::synthesize_stream (POS: streaming TTS)
-- app.channels.voice.stt::transcribe / deepgram_stream_url (POS: batch STT fallback; Deepgram stream URL)
+- app.channels.voice.stt::deepgram_stream_url (POS: Deepgram stream URL)
 - app.core.utils.session_id::is_safe_session_id (POS: safe chat_id whitelist guard)
 
 [OUTPUT]
@@ -54,6 +55,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.api.dependencies import verify_voice_enabled
 from app.api.voice.ws_frames import parse_session_frame
+from app.api.voice.ws_session_batch import _SESSION_IDLE_TIMEOUT, BatchSttMixin
 from app.core.infra.ws_origin_guard import verify_ws_origin
 from app.core.utils.session_id import is_safe_session_id
 
@@ -72,7 +74,6 @@ _STREAMING_PROVIDERS = frozenset({"deepgram"})
 _WS_CLOSE_NORMAL = 1000
 _WS_CLOSE_ERROR = 1011
 _MAX_AUDIO_CHUNK = 1024 * 1024
-_SESSION_IDLE_TIMEOUT = 180.0
 
 
 @router.websocket("/session")
@@ -126,7 +127,7 @@ async def ws_voice_session(ws: WebSocket) -> None:
     await session.run()
 
 
-class _VoiceSession:
+class _VoiceSession(BatchSttMixin):
     """Manages concurrent STT + TTS within a single WebSocket."""
 
     __slots__ = (
@@ -329,93 +330,6 @@ class _VoiceSession:
 
         await self._send_json({"type": "tts_end"})
 
-    # ── STT: Batch fallback for non-streaming providers ──────────────────
-
-    async def _run_batch_stt(self) -> None:
-        """Batch STT for providers without streaming support."""
-        await self._send_json(
-            {
-                "type": "info",
-                "message": "streaming_unavailable",
-                "fallback": "batch",
-            }
-        )
-
-        try:
-            while not self._closed:
-                chunks: list[bytes] = []
-                total_size = 0
-
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(self._ws.receive(), timeout=_SESSION_IDLE_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        self._closed = True
-                        return
-
-                    if msg.get("type") == "websocket.disconnect":
-                        self._closed = True
-                        return
-
-                    if "bytes" in msg and msg["bytes"]:
-                        chunk = msg["bytes"]
-                        total_size += len(chunk)
-                        if total_size > 25 * 1024 * 1024:
-                            await self._send_json(
-                                {
-                                    "type": "error",
-                                    "message": "Audio too large",
-                                }
-                            )
-                            return
-                        chunks.append(chunk)
-
-                    elif "text" in msg and msg["text"]:
-                        self._handle_text_message(msg["text"])
-                        if self._closed:
-                            return
-                        frame = parse_session_frame(msg["text"])
-                        if frame is not None and frame.type == "end_utterance":
-                            break
-
-                if not chunks:
-                    continue
-
-                audio_blob = b"".join(chunks)
-                if len(audio_blob) < 1024:
-                    continue
-
-                text = await self._batch_transcribe(audio_blob)
-                if text:
-                    if self._agent_bridge:
-                        task = asyncio.create_task(self._agent_bridge.handle_stt_final(text))
-                        task.add_done_callback(self._on_bridge_task_done)
-                    else:
-                        await self._send_json({"type": "stt_final", "text": text})
-
-        except WebSocketDisconnect:
-            pass
-
-    async def _batch_transcribe(self, audio_blob: bytes) -> str | None:
-        """Transcribe audio blob using batch STT."""
-        import tempfile
-        from pathlib import Path
-
-        from app.channels.voice.stt import transcribe
-
-        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
-            tmp.write(audio_blob)
-            tmp_path = Path(tmp.name)
-
-        try:
-            result = await transcribe(tmp_path, self._voice_config)
-            return result.text if result and result.text else None
-        except Exception:
-            logger.exception("Batch STT failed in voice session")
-            return None
-        finally:
-            tmp_path.unlink(missing_ok=True)
-
     # ── Task error handling ──────────────────────────────────────────────
 
     def _on_bridge_task_done(self, task: asyncio.Task[None]) -> None:
@@ -452,11 +366,12 @@ async def _load_voice_config(ws: WebSocket) -> VoiceConfig | None:
         user_id = "sandbox"
 
     try:
-        from app.core.channel_bridge.config_loader import load_user_configs
+        from app.core.channel_bridge.config_loader import load_voice_config_only
         from app.core.channel_bridge.config_parsers import extract_voice_config
 
-        configs = await load_user_configs()
-        voice_config = extract_voice_config(configs.voice_dict)
+        # Not load_user_configs(): it refuses without a default model, which STT/TTS I/O never needs
+        # (agent_bridge resolves its own model in params.py).
+        voice_config = extract_voice_config(await load_voice_config_only())
         if voice_config and voice_config.stt_enabled:
             return voice_config
     except Exception:

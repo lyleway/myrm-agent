@@ -5,21 +5,25 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolCall
 
 from myrm_agent_harness.agent.middlewares.approval._batch_decisions import _card_text, apply_approval_decisions
 
-_CALL = {"name": "bash_code_execute_tool", "args": {"command": "ls"}, "id": "c1", "type": "tool_call"}
+_CALL: ToolCall = {"name": "bash_code_execute_tool", "args": {"command": "ls"}, "id": "c1", "type": "tool_call"}
 _ALLOWLIST_WRITE = "myrm_agent_harness.agent.middlewares.approval._batch_decisions.try_add_to_allowlist"
 
 
 async def _allowlist_write(decision: dict[str, object]) -> tuple[object, object]:
     """Approve the one pending call with *decision*; return the always-allow and TTL handed to the allowlist write."""
-    pending = [(0, _CALL, "shell_exec", "needs approval", None)]
+    pending: list[tuple[int, ToolCall, str, str, dict[str, object] | None]] = [
+        (0, _CALL, "shell_exec", "needs approval", None)
+    ]
     with patch(_ALLOWLIST_WRITE, new_callable=AsyncMock) as write:
         await apply_approval_decisions([decision], AIMessage(content="", tool_calls=[_CALL]), [], pending, [0], {})
     write.assert_awaited_once()
-    return write.await_args.args[2], write.await_args.kwargs["ttl_seconds"]
+    call = write.await_args
+    assert call is not None
+    return call.args[2], call.kwargs["ttl_seconds"]
 
 
 class TestAlwaysAllowGrant:

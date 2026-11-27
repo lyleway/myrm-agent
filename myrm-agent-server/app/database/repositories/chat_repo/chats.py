@@ -7,12 +7,12 @@
 
 [POS]
 ChatRepository mixin: chat list/detail (sidebar keyword search over titles, first messages and message text), create/update,
-pins, trash lifecycle and compaction CAS.
+pins and trash lifecycle.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import cast
 
 from sqlalchemy import String as SQLString
@@ -134,30 +134,6 @@ class ChatsMixin:
             for column, value in updates.items()
         }
         await db.execute(update(Chat).where(Chat.id == chat_id).values(**values))
-
-    @staticmethod
-    async def cas_update_compaction(
-        db: AsyncSession,
-        chat_id: str,
-        old_before_id: str | None,
-        new_summary: str,
-        new_before_id: str,
-    ) -> bool:
-        """Optimistic Concurrency Control (CAS) update for compacted summary."""
-        stmt = update(Chat).where(Chat.id == chat_id)
-        if old_before_id is None:
-            stmt = stmt.where(Chat.compacted_before_id.is_(None))
-        else:
-            stmt = stmt.where(Chat.compacted_before_id == old_before_id)
-
-        stmt = stmt.values(
-            compacted_summary=new_summary,
-            compacted_before_id=new_before_id,
-            compacted_at=datetime.now(UTC),
-        )
-
-        result = cast(CursorResult[tuple[object, ...]], await db.execute(stmt))
-        return bool(result.rowcount and result.rowcount > 0)
 
     @staticmethod
     async def get_channel_chat_by_key(db: AsyncSession, channel_session_key: str) -> ChatDTO | None:

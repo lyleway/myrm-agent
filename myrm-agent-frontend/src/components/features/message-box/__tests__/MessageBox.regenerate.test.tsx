@@ -17,6 +17,7 @@ const ASSISTANT: Message = {
 const mocks = vi.hoisted(() => ({
   regenerateLastTurn: vi.fn(),
   sendMessage: vi.fn(),
+  refreshCompaction: vi.fn(),
   onRegenerate: undefined as undefined | ((instruction?: string) => Promise<boolean>),
 }));
 
@@ -63,6 +64,9 @@ vi.mock('@/components/features/message-box/MessageActionBar', () => ({
     return null;
   },
 }));
+vi.mock('@/store/chat/compactionAfterHistoryChange', () => ({
+  refreshCompactionAfterHistoryChange: (...args: unknown[]) => mocks.refreshCompaction(...args),
+}));
 vi.mock('@/store/chat/goals/usePlanStore', () => ({
   usePlanStore: { getState: () => ({ fetchPlan: vi.fn() }) },
 }));
@@ -101,6 +105,7 @@ describe('MessageBox regenerate', () => {
 
     expect(mocks.regenerateLastTurn).toHaveBeenCalledWith('chat-regen', 'use the key I pasted');
     expect(mocks.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.refreshCompaction).not.toHaveBeenCalled();
   });
 
   it('reports a turn that was not dispatched', async () => {
@@ -115,6 +120,7 @@ describe('MessageBox regenerate', () => {
 
     await expect(regenerate()).resolves.toBe(false);
     expect(mocks.sendMessage).not.toHaveBeenCalled();
+    expect(mocks.refreshCompaction).not.toHaveBeenCalled();
   });
 
   it('reports a regeneration whose turn was dispatched', async () => {
@@ -123,5 +129,7 @@ describe('MessageBox regenerate', () => {
 
     await expect(regenerate('be concise')).resolves.toBe(true);
     expect(mocks.sendMessage).toHaveBeenCalledWith('summarise the report');
+    // The server may have dropped the summary of the replaced answer's turn; the open chat must not keep showing it.
+    expect(mocks.refreshCompaction).toHaveBeenCalledWith('chat-regen');
   });
 });

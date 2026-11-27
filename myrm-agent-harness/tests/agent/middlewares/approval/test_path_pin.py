@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -133,7 +134,7 @@ def _moved_calls() -> list[str | None]:
     return [entry.tool_call_id for entry in get_audit_entries() if entry.decision == "PATH_MOVED_REJECT"]
 
 
-THREAD = {"configurable": {"thread_id": "t"}}
+THREAD: RunnableConfig = {"configurable": {"thread_id": "t"}}
 
 
 async def test_a_read_through_a_link_an_earlier_call_of_the_message_made_is_refused(workspace: Path) -> None:

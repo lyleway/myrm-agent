@@ -20,6 +20,7 @@ Legacy storage id remap 在前后端使用**同一算法**（与 [`providers.py`
 | `provider_legacy_remap.json` | 遗留 providerId → canonical storage id | `providers.py` · `providerIdentityMigration.ts` · Docker `/shared` · PyInstaller bundle · vitest · pytest |
 | `kanban_move_guard.json` | 看板任务手动 move 的流转表：每个起点状态（含「原地不动」）服务端接受的目标状态 | [`kanban-transitions.ts`](../../myrm-agent-frontend/src/components/features/kanban/kanban-transitions.ts) 据此在发起前拦下必败的移动 · 服务端只在测试里读它，运行时不读 |
 | `kanban_blocked_reasons.json` | 服务端自己拥有的看板任务阻塞原因（依赖合并失败、模型用量上限、批次暂停、工作目录过宽、运行停在审批请求上、运行停在只能由本人批准的审批请求上、运行停在浏览器要人的一步）的原文，按 key 命名 | [`kanbanBlockedReason.ts`](../../myrm-agent-frontend/src/lib/kanban/kanbanBlockedReason.ts) 按整句匹配译成界面语言 · 服务端只在测试里读它，运行时不读 |
+| `mcp_server_identity.json` | MCP 服务器显示名与它在工具名 `mcp__{server}__{tool}` 里的身份段：名字全是 ASCII 的取折叠结果（与旧规则逐字相同），其余加 6 位 FNV-1a 哈希后缀；含常见的中日韩名字、emoji、NFC 两种写法、纯分隔符名字与孤立代理项 | [`test_server_identity.py`](../../myrm-agent-harness/tests/toolkits/mcp/test_server_identity.py) · [`mcpServerIdentity.test.ts`](../../myrm-agent-frontend/src/lib/utils/mcp-config/__tests__/mcpServerIdentity.test.ts) · 运行时不读 |
 | `media_generation_contract.json` | 生成媒体的结果形状与登记规则：图像模型清单、三个媒体工具的返回形状、聊天登记的条目形状，以及两端共同遵守的登记用例 | [`mediaGenerated.ts`](../../myrm-agent-frontend/src/lib/chat/mediaGenerated.ts) · [`imageModels.ts`](../../myrm-agent-frontend/src/lib/utils/media/imageModels.ts) · `ImageTaskCard` / `VideoTaskCard` 的结果解析 · 服务端 [`media_generated.py`](../../myrm-agent-server/app/services/agent/streaming_support/media_generated.py) 实现同一套登记规则，服务端只在测试里读这份文件，运行时不读 |
 | `chat_input_limits.json` | 用户在聊天里输入的文字，服务端允许的最大长度（按字符计）：`history_search_query`（侧栏会话搜索、Cmd+K 消息搜索、`@chat:` 选择器、共享上下文历史搜索共用）、`compact_focus_topic`（压缩上下文的聚焦主题）与 `advisor_question`（向会话顾问提的问题） | [`chat-history-search.ts`](../../myrm-agent-frontend/src/lib/constants/chat-history-search.ts) · [`compact-focus-topic.ts`](../../myrm-agent-frontend/src/lib/constants/compact-focus-topic.ts) · [`advisor-question.ts`](../../myrm-agent-frontend/src/lib/constants/advisor-question.ts) 据此给输入框限长、截断发出的文本 · 服务端只在测试里读它，运行时不读 |
 
@@ -42,6 +43,15 @@ Legacy storage id remap 在前后端使用**同一算法**（与 [`providers.py`
 把 9 × 9 对状态逐对打到真实的 `POST /kanban/tasks/{id}/move`，接受与否必须和这张表完全一致。
 改服务端守卫或这张表，都要让该测试保持通过。
 
+## MCP Server Identity Contract
+
+服务器身份是工具名 `mcp__{server}__{tool}` 里的 `{server}` 段。登记表、审批查询、卸载驱逐、「始终允许」规则与逐工具权限规则都以带前缀的工具名为键，所以两台服务器不能共用一个身份。
+规则写了两遍：后端 [`server_identity.py`](../../myrm-agent-harness/src/myrm_agent_harness/toolkits/mcp/server_identity.py)（汇合点、组织服务器合并与插件导入据此判重），
+前端 [`mcpServerIdentity.ts`](../../myrm-agent-frontend/src/lib/utils/mcp-config/mcpServerIdentity.ts)（表单、JSON 导入与注册表安装据此判重）。两边对同一个名字必须给出同一个身份，
+否则表单放行的名字会在运行时被跳过。
+
+`mcp_server_identity.json` 是 `[{name, identity}]`：harness 测试与前端 vitest 各读一遍，逐条要求实现对 `name` 的结果等于 `identity`。改任一端的规则或这份文件，都要让两条测试保持通过。
+
 ## Media Generation Contract
 
 媒体工具的结果由服务端产出、由前端卡片消费，聊天里的卡片又由工具结果登记出来，三处必须对同一份形状达成一致，所以形状写在 `media_generation_contract.json`：
@@ -49,7 +59,7 @@ Legacy storage id remap 在前后端使用**同一算法**（与 [`providers.py`
 - `image_models`：图像模型清单，顺序与 harness `BUILTIN_PROFILES` 一致；设置页的 `IMAGE_MODEL_OPTIONS` 逐项等于它。
 - `shapes`：`generate_result`（`tasks[{task_id, task_type, status}]`）、`image_result`（`images[{url, mime_type}]`、`model`、`prompt`、`latency_ms`，`provider` 可选）、
   `video_result`（`video_urls`）、`speech_result`（`audio_url`、`model`、`duration_seconds` 可选）、登记条目 `task_entry` / `stored_entry`。
-  三种结果形状另有两个可选字段：`workspace_files`（工作区里的副本路径，非空字符串列表）与 `workspace_files_error`（哪些副本没复制成功及原因）；
+  三种结果形状另有两个可选字段：`workspace_files`（工作区里的副本路径，相对工作区根、形如 `./_generated/<id>.<扩展名>`，非空字符串列表）与 `workspace_files_error`（哪些副本没复制成功及原因）；
   异步任务的结果里它们在 `result` 对象内，同步编辑与语音在结果顶层。前端不读这两个字段，登记与卡片都不受它们影响。
   图像、视频、语音地址一律是 `media://<id>`；字段类型只有 `string`（非空）、`number`、`media_reference`、`{list}` 和 `{one_of}`。
 - `collector_cases`：工具名 + 结果 + 应登记的条目。服务端 `collect_media_generated` 与前端 `mediaGeneratedEntriesOf` 都逐条跑它。

@@ -3,7 +3,7 @@
 MCP server configuration models passed to the Agent.
 
 [INPUT]
-- (none)
+- server_identity::fold_mcp_name, mcp_server_component (POS: server identity rule)
 
 [OUTPUT]
 - MCPAuthProvider: Authentication provider protocol for remote MCP servers.
@@ -12,7 +12,7 @@ MCP server configuration models passed to the Agent.
 - should_register_mcp_tool: Per-server include/exclude filter for MCP tool whitelisting.
 - sanitize_mcp_name_component: Sanitize name component for ``mcp__{server}__{tool}`` generation (replaces non-alnum, collapses consecutive underscores, strips leading/trailing underscores, falls back to 'unnamed').
 - is_mcp_tool_name: Check if a tool name follows the ``mcp__{server}__{tool}`` convention.
-- mcp_tool_prefix: The ``mcp__{server}__`` prefix every tool of one server carries, the single place it is derived from a server name.
+- mcp_tool_prefix: The ``mcp__{server}__`` prefix every tool of one server carries, the single place it is derived from a server name (the ``{server}`` segment is ``mcp_server_component``).
 - parse_mcp_tool_name: Parse ``mcp__{server}__{tool}`` into (server, tool) tuple.
 - mcp_config_to_runtime_dict: Serialize an MCPServerConfigProtocol into a complete runtime dictionary preserving auth, TLS, filtering, and callback attributes.
 
@@ -22,10 +22,11 @@ MCP Configuration
 
 from __future__ import annotations
 
-import re
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field, model_validator
+
+from .server_identity import fold_mcp_name, mcp_server_component
 
 
 @runtime_checkable
@@ -290,9 +291,7 @@ def sanitize_mcp_name_component(value: str) -> str:
     Generated names satisfy provider validation rules
     (e.g. OpenAI's function-name regex).
     """
-    result = re.sub(r"[^A-Za-z0-9_]", "_", str(value or ""))
-    result = re.sub(r"_{2,}", "_", result)
-    return result.strip("_") or "unnamed"
+    return fold_mcp_name(str(value or "")) or "unnamed"
 
 
 _MCP_PREFIX = "mcp__"
@@ -307,10 +306,12 @@ def is_mcp_tool_name(name: str) -> bool:
 def mcp_tool_prefix(server_name: str) -> str:
     """Return the ``mcp__{server}__`` prefix that every tool of *server_name* carries.
 
-    The sanitized server component never contains ``__``, so one server's prefix is never
+    The server component never contains ``__``, so one server's prefix is never
     the start of another server's tool names (``mcp__a__`` does not match ``mcp__a_b__x``).
+    Names that differ only in characters the component drops (``天气`` and ``我的服务``) still get
+    different prefixes: see ``mcp_server_component``.
     """
-    return f"{_MCP_PREFIX}{sanitize_mcp_name_component(server_name)}{_MCP_DELIM}"
+    return f"{_MCP_PREFIX}{mcp_server_component(server_name)}{_MCP_DELIM}"
 
 
 def parse_mcp_tool_name(name: str) -> tuple[str, str] | None:

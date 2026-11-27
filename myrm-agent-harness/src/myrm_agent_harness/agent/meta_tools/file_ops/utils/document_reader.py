@@ -10,6 +10,7 @@ Legacy OLE2 formats (.doc/.xls/.ppt) are auto-converted via LegacyFormatParser (
 - toolkits.file_parsers::PptxParser (POS: PowerPoint document parser)
 - toolkits.file_parsers::IpynbParser (POS: Jupyter Notebook parser)
 - toolkits.file_parsers::LegacyFormatParser (POS: OLE2 legacy format parser with soffice conversion)
+- toolkits.file_parsers.base::FileParser (POS: Abstract base class for file parsers)
 - toolkits.code_execution.executors.base::CodeExecutor (POS: Code executor base classes.)
 
 [OUTPUT]
@@ -39,6 +40,7 @@ from myrm_agent_harness.utils.mime_types import detect_image_mime
 
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.code_execution.executors.base import CodeExecutor
+    from myrm_agent_harness.toolkits.file_parsers.base import FileParser
 
 logger = logging.getLogger(__name__)
 
@@ -105,14 +107,15 @@ async def read_document_multimodal(
 
     tmp_path: str | None = None
     excel_structure = False
+    parser: FileParser
     try:
         tmp_path = await _write_to_temp(raw_bytes, suffix)
 
         if suffix == ".ipynb":
             from myrm_agent_harness.toolkits.file_parsers.ipynb import IpynbParser
 
-            parser = IpynbParser()
-            parsed_res = await parser.parse_with_images(tmp_path)
+            notebook_parser = IpynbParser()
+            parsed_res = await notebook_parser.parse_with_images(tmp_path)
             blocks: list[ContentBlock] = []
 
             text = parsed_res.text
@@ -152,8 +155,10 @@ async def read_document_multimodal(
                 effective_mode = "structure"
             excel_structure = effective_mode == "structure"
 
-            if effective_mode in ("structure", "audit"):
-                excel_delegate = ExcelParser(output_format=effective_mode)
+            if effective_mode == "structure":
+                excel_delegate = ExcelParser(output_format="structure")
+            elif effective_mode == "audit":
+                excel_delegate = ExcelParser(output_format="audit")
             else:
                 excel_delegate = ExcelParser()
 

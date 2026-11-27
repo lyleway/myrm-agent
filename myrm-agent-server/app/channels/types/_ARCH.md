@@ -16,7 +16,7 @@
 | `streaming.py` | 核心 | Agent 执行流事件（ProgressUpdate、StreamingText、FissionTopologyNode/Update）与 `ApprovalExpiry`（工具审批的等待时长与超时决定，经 `ProgressUpdate.expiry` 交给路由器起计时器）、`METADATA_APPROVAL_WINDOW_SECONDS_KEY`（入站消息 metadata 里设定该回合审批等待时长的键，委托运行用它把等待放宽到任务时限）；审批提示还带提问回合的渠道会话键（`ProgressUpdate.session_key`），路由器随未决请求保存，续跑消息经 `METADATA_RESUME_SESSION_KEY` 带回，让答复接回提问回合的聊天 | ✅ |
 | `voice.py` | 核心 | 语音 STT/TTS 配置与结果（VoiceConfig、TTSMode、STTResult） | ✅ |
 | `components.py` | 核心 | 跨渠道交互组件（按钮、快捷回复等）类型 | ✅ |
-| `session.py` | 核心 | 会话标识与隔离策略：`SessionKey`、`SessionPolicy`、`compute_daily_epoch`（可按给定时刻计算）；用户按请求开启的会话的键（`started_session_key` / `started_key_time` / `is_started_session_key`，`:e=s<UTC 时间戳>`）与 `METADATA_NEW_CONVERSATION_KEY`（转发方在 `/new` 之后的第一条消息上设置的入站标志） | ✅ |
+| `session.py` | 核心 | 会话标识与隔离策略：`SessionKey`、`SessionPolicy`、`compute_daily_epoch`（可按给定时刻计算）；用户按请求开启的会话的键（`started_session_key` / `started_key_time` / `is_started_session_key`，`:e=s<UTC 时间戳>`）与 `METADATA_NEW_CONVERSATION_KEY`（转发方在 `/new` 之后的第一条消息上设置的入站标志）、`METADATA_STORED_CHAT_KEY`（回复的出站元数据：产出这条回复的一方写进去的、回复所在的聊天 id（数据库聊天 id）；路由器据此给回复挂「在浏览器继续」按钮） | ✅ |
 | `notification.py` | 核心 | 通知模式枚举与显式 @ 元数据 | ✅ |
 | `context_document.py` | 核心 | 渠道随一次 turn 附带的参考文档：`ContextDocument`（正文 Markdown 或纯文本 + `ContextDocumentStatus`：READY/DENIED（应用没被加进这篇文档）/SCOPE_MISSING（应用根本没有读文档的权限）/TOO_LARGE/UNSUPPORTED/UNAVAILABLE；`clamped` 截断、`as_metadata`/`from_metadata` 经 `InboundMessage.metadata[METADATA_CONTEXT_DOCUMENT_KEY]` 往返）。生产方是能读取消息所指文档的 provider，消费方是智能体执行器 | ✅ |
 | `status.py` | 核心 | 渠道状态与诊断类型：`ChannelStatus`、`StartMode`、`ChannelHealth`（熔断）、`ChannelActivity`（最近出入站时间，供 status API 消费）、`ChannelIssue`、`ChannelCapabilities`（`reaction_glyphs` 声明平台接受的反应表情，`None` 表示不限；`reaction_key` 去掉变体选择符）| ✅ |

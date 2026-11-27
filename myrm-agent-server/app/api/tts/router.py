@@ -131,12 +131,12 @@ async def synthesize_text_stream(
 
 async def _resolve_voice_config(user_id: str, req: TTSRequest) -> VoiceConfig:
     """Load user VoiceConfig and apply request overrides."""
-    from app.core.channel_bridge.config_loader import load_user_configs
+    from app.core.channel_bridge.config_loader import load_voice_config_only
     from app.core.channel_bridge.config_parsers import extract_web_tts_config
 
     try:
-        configs = await load_user_configs()
-        voice_config = extract_web_tts_config(configs.voice_dict)
+        # Not load_user_configs(): it refuses without a default model, and read-aloud needs none.
+        voice_config = extract_web_tts_config(await load_voice_config_only())
     except Exception as exc:
         logger.exception("Failed to load voice config for sandbox user")
         raise HTTPException(

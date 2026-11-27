@@ -30,8 +30,9 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-import re
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from typing import cast
 
 from app.channels.types import (
     InboundMessage,
@@ -44,8 +45,63 @@ from app.channels.types import (
 
 logger = logging.getLogger(__name__)
 
-_TTS_DIRECTIVE_RE = re.compile(r"\[\[tts:([^\]]+)\]\]")
-_TTS_TEXT_RE = re.compile(r"\[\[tts:text\]\](.*?)\[\[/tts:text\]\]", re.DOTALL)
+# MessageBus.get_channel: a channel by name. Channels expose their own download method, so the result is probed by name.
+type ChannelLookup = Callable[[str], object | None]
+
+_TTS_DIRECTIVE_OPEN = "[[tts:"
+_TTS_TEXT_OPEN = "[[tts:text]]"
+_TTS_TEXT_CLOSE = "[[/tts:text]]"
+
+# (start, end, body) of a marker in the text; the body is what stands between its delimiters.
+_Marker = tuple[int, int, str]
+
+
+def _tts_directives(text: str) -> Iterator[_Marker]:
+    """Yield each ``[[tts:body]]`` whose body is not empty and holds no ``]``.
+
+    A reply is untrusted text. Trying a pattern at every ``[[tts:`` makes a reply made of nothing else cost the square
+    of its length, so the first ``]`` after an opener is looked up once and decides it: none ahead means no later
+    opener can close either, and an opener that fails there is followed by the openers inside its body, which fail
+    at the same ``]``.
+    """
+    position = 0
+    while (start := text.find(_TTS_DIRECTIVE_OPEN, position)) != -1:
+        body_start = start + len(_TTS_DIRECTIVE_OPEN)
+        close = text.find("]", body_start)
+        if close == -1:
+            return
+        if close > body_start and text.startswith("]]", close):
+            yield start, close + 2, text[body_start:close]
+            position = close + 2
+        else:
+            position = close
+
+
+def _tts_text_blocks(text: str) -> Iterator[_Marker]:
+    """Yield each ``[[tts:text]]…[[/tts:text]]``, a block ending at the first closing marker after its opener.
+
+    With no closing marker after an opener there is none after a later one either, so the scan ends there instead of
+    searching to the end of the text once per opener.
+    """
+    position = 0
+    while (start := text.find(_TTS_TEXT_OPEN, position)) != -1:
+        body_start = start + len(_TTS_TEXT_OPEN)
+        close = text.find(_TTS_TEXT_CLOSE, body_start)
+        if close == -1:
+            return
+        position = close + len(_TTS_TEXT_CLOSE)
+        yield start, position, text[body_start:close]
+
+
+def _without(text: str, markers: Iterable[_Marker]) -> str:
+    """Return the text with the given (ordered, non-overlapping) markers cut out."""
+    kept: list[str] = []
+    position = 0
+    for start, end, _ in markers:
+        kept.append(text[position:start])
+        position = end
+    kept.append(text[position:])
+    return "".join(kept)
 
 
 def has_audio_attachment(msg: InboundMessage) -> bool:
@@ -65,8 +121,8 @@ def parse_tts_directives(text: str) -> tuple[dict[str, str], str | None]:
     """
     directives: dict[str, str] = {}
 
-    for match in _TTS_DIRECTIVE_RE.finditer(text):
-        raw = match.group(1).strip()
+    for _, _, body in _tts_directives(text):
+        raw = body.strip()
         if raw == "off":
             directives["off"] = "true"
             continue
@@ -77,23 +133,23 @@ def parse_tts_directives(text: str) -> tuple[dict[str, str], str | None]:
                 key, _, val = part.partition("=")
                 directives[key.strip()] = val.strip()
 
-    tts_text_match = _TTS_TEXT_RE.search(text)
-    tts_text = tts_text_match.group(1).strip() if tts_text_match else None
+    first_block = next(_tts_text_blocks(text), None)
+    tts_text = first_block[2].strip() if first_block else None
 
     return directives, tts_text
 
 
 def strip_tts_tags(text: str) -> str:
     """Remove all TTS directive tags from text for display in chat."""
-    text = _TTS_TEXT_RE.sub("", text)
-    text = _TTS_DIRECTIVE_RE.sub("", text)
+    text = _without(text, _tts_text_blocks(text))
+    text = _without(text, _tts_directives(text))
     return text.strip()
 
 
 async def transcribe_inbound(
     msg: InboundMessage,
     voice_config: VoiceConfig | None,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> InboundMessage:
     """Transcribe voice attachments and inject transcript into content.
 
@@ -130,7 +186,7 @@ async def transcribe_inbound(
 async def transcribe_video_inbound(
     msg: InboundMessage,
     voice_config: VoiceConfig | None,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> InboundMessage:
     """Transcribe audio from video attachments and inject transcript into content.
 
@@ -163,21 +219,18 @@ async def transcribe_video_inbound(
 
 async def download_inbound_video(
     msg: InboundMessage,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> Path | None:
     """Download a video attachment from the inbound message for STT."""
-    from collections.abc import Callable
-
-    assert callable(get_channel_fn)
-    get_channel: Callable[[str], object | None] = get_channel_fn  # type: ignore[assignment]
-    ch = get_channel(msg.channel)
+    ch = get_channel_fn(msg.channel)
     if not ch:
         return None
 
     if msg.channel == "telegram":
         file_id = msg.metadata.get("video_file_id")
-        if isinstance(file_id, str) and hasattr(ch, "download_video_file"):
-            return await ch.download_video_file(file_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_video_file", None)
+        if isinstance(file_id, str) and download is not None:
+            return cast("Path | None", await download(file_id))
 
     for attachment in msg.media:
         if attachment.media_type == MediaType.VIDEO:
@@ -193,29 +246,27 @@ async def download_inbound_video(
 
 async def download_inbound_audio(
     msg: InboundMessage,
-    get_channel_fn: object,
+    get_channel_fn: ChannelLookup,
 ) -> Path | None:
     """Download the voice attachment from the inbound message.
 
     Dispatches to the appropriate channel's download method.
     """
-    from collections.abc import Callable
-
-    assert callable(get_channel_fn)
-    get_channel: Callable[[str], object | None] = get_channel_fn  # type: ignore[assignment]
-    ch = get_channel(msg.channel)
+    ch = get_channel_fn(msg.channel)
     if not ch:
         return None
 
     if msg.channel == "whatsapp":
         voice_msg_id = msg.metadata.get("voice_message_id")
-        if isinstance(voice_msg_id, str) and hasattr(ch, "download_voice_message"):
-            return await ch.download_voice_message(voice_msg_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_voice_message", None)
+        if isinstance(voice_msg_id, str) and download is not None:
+            return cast("Path | None", await download(voice_msg_id))
 
     if msg.channel == "telegram":
         file_id = msg.metadata.get("voice_file_id")
-        if isinstance(file_id, str) and hasattr(ch, "download_voice_message"):
-            return await ch.download_voice_message(file_id)  # type: ignore[union-attr]
+        download = getattr(ch, "download_voice_message", None)
+        if isinstance(file_id, str) and download is not None:
+            return cast("Path | None", await download(file_id))
 
     for attachment in msg.media:
         if attachment.media_type == MediaType.AUDIO:
@@ -257,14 +308,11 @@ async def maybe_tts(
     if directives.get("off"):
         return dataclasses.replace(result, content=strip_tts_tags(content))
 
-    vc = voice_config
-    overrides: dict[str, str | int | bool] = {}
-    if "voice" in directives:
-        overrides["tts_voice"] = directives["voice"]
-    if "provider" in directives:
-        overrides["tts_provider"] = directives["provider"]
-    if overrides:
-        vc = dataclasses.replace(vc, **overrides)
+    vc = dataclasses.replace(
+        voice_config,
+        tts_voice=directives.get("voice", voice_config.tts_voice),
+        tts_provider=directives.get("provider", voice_config.tts_provider),
+    )
 
     tts_input = tts_text_block if tts_text_block else strip_tts_tags(content)
     clean_content = strip_tts_tags(content)

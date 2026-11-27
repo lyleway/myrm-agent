@@ -140,13 +140,14 @@ class TestOfflineCompaction:
             SimpleNamespace(id="m2", role="assistant", content="已记录", extra_data=None),
         ]
         repo = SimpleNamespace(
+            # SQLite hands datetimes back without a zone, so the drain's cold-cache check must read a naive one.
             get_latest_message=AsyncMock(
-                return_value=SimpleNamespace(id="m2", created_at=datetime.now(UTC) - timedelta(hours=1))
+                return_value=SimpleNamespace(id="m2", created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1))
             ),
-            get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None)),
+            get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None, compacted_summary=None)),
             get_all_messages=AsyncMock(return_value=stored),
-            cas_update_compaction=AsyncMock(return_value=True),
         )
+        persist = AsyncMock(return_value="m2")
         archive = AsyncMock()
         model_cfg = SimpleNamespace(max_context_tokens=8000, api_keys=None)
 
@@ -159,9 +160,13 @@ class TestOfflineCompaction:
             async def __aexit__(self, *exc: object) -> None:
                 return None
 
+            async def commit(self) -> None:
+                return None
+
         with (
             patch("asyncio.sleep", new=AsyncMock()),
             patch("app.services.chat.chat_compaction.UnitOfWork", new=_Uow),
+            patch("app.services.chat.chat_compaction.do_persist_to_db", new=persist),
             patch("app.services.chat.chat_compaction._ChatServiceBase._cr", new=staticmethod(lambda _uow: repo)),
             patch(
                 "app.core.channel_bridge.config_loader.load_user_configs",
@@ -181,4 +186,4 @@ class TestOfflineCompaction:
         assert (_ID_NUMBER in "\n".join(sent)) is leaks
         archived = str(archive.call_args.kwargs["messages"][0].content)
         assert _PHONE in archived, "the recall archive keeps the original text"
-        repo.cas_update_compaction.assert_awaited_once()
+        persist.assert_awaited_once()

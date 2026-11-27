@@ -135,6 +135,10 @@ async def _stream_via_deepgram(
                 if exc and not isinstance(exc, (WebSocketDisconnect, asyncio.CancelledError)):
                     logger.warning("STT stream task error: %s", exc)
 
+            # A handler that returns without closing makes uvicorn drop the TCP connection; the browser reports that as
+            # 1006 and the dictation hook treats it as a failed stream.
+            await _close_ws(ws, _WS_CLOSE_NORMAL, "Done")
+
     except ImportError:
         logger.error("websockets package not installed, falling back to batch STT")
         await _batch_fallback(ws, config)
@@ -319,11 +323,11 @@ async def _load_voice_config_from_ws(ws: WebSocket) -> VoiceConfig | None:
         user_id = "sandbox"
 
     try:
-        from app.core.channel_bridge.config_loader import load_user_configs
+        from app.core.channel_bridge.config_loader import load_voice_config_only
         from app.core.channel_bridge.config_parsers import extract_voice_config
 
-        configs = await load_user_configs()
-        voice_config = extract_voice_config(configs.voice_dict)
+        # Not load_user_configs(): it resolves the default model and refuses without one, and dictation needs no model.
+        voice_config = extract_voice_config(await load_voice_config_only())
         if voice_config and voice_config.stt_enabled:
             return voice_config
     except Exception:

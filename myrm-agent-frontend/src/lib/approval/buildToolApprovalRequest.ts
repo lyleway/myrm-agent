@@ -61,7 +61,11 @@ interface BuildToolApprovalRequestParams {
   interruptId?: string;
 }
 
-/** The folders the harness planned for "also grant folder access"; malformed entries are dropped. */
+/**
+ * The folders the harness planned for "also grant folder access"; malformed entries are dropped. A path is kept
+ * exactly as planned because it goes back to the server as the grant: a folder whose name ends in a space is not the
+ * folder without it.
+ */
 function parseGrantDirectories(raw: unknown): ApprovalGrantDirectory[] | undefined {
   if (!Array.isArray(raw)) {
     return undefined;
@@ -70,7 +74,7 @@ function parseGrantDirectories(raw: unknown): ApprovalGrantDirectory[] | undefin
   for (const item of raw) {
     const path = (item as { path?: unknown } | null)?.path;
     if (typeof path === 'string' && path.trim()) {
-      directories.push({ path: path.trim(), writable: (item as { writable?: unknown }).writable === true });
+      directories.push({ path, writable: (item as { writable?: unknown }).writable === true });
     }
   }
   return directories.length > 0 ? directories : undefined;
