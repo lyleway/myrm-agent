@@ -83,7 +83,9 @@ export class TauriConfigAdapter extends BaseConfigAdapter {
   /**
    * 统一 fetch，自动携带 Cookie 以兼容 WebUI Remote 模式的 JWT 认证。
    * 非 Remote 模式下后端跳过认证，Cookie 虽携带但无影响。
-   * 响应头与应答体各有期限，到期即取消请求（`fetchWithDeadlines`），后端卡死时前端既不无限等待，也不占着连接。
+   * 响应头与应答体各有期限，到期即取消请求（`fetchWithDeadlines`），后端卡死时这个请求既不无限等待，也不占着连接。
+   * 请求前的就绪门（`whenDatabaseReady`）不在这两道期限内：它探测后端时没有自己的期限，后端不应答时重试停在门口，
+   * 直到后端重新应答。
    */
   private async localFetch(url: string, init?: DeadlineInit): Promise<DeadlineAnswer> {
     const ready = await whenDatabaseReady();

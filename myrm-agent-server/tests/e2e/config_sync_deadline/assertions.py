@@ -14,7 +14,6 @@ clock, so a small slack absorbs rounding when the two are compared.
 - HEADERS_DEADLINE_MS / BODY_DEADLINE_MS: how long the app waits for an answer to start, and for its body to end
 - TIMER_LATE_MS: how late a deadline timer may fire after its deadline
 - CLOCK_SLACK_MS: rounding between the page clock and the backend's write stamps
-- RETRY_PAUSE_MS: the pause before the outbox's first retry; each further retry waits twice as long
 - moment(page_ms) / elapsed(start_ms, end_ms) / cancelled_at(write): page moments a phase compares, each refusing a moment
   the request never reached
 - one_answered_write(card, marker): one edit becomes one answered write that reaches the database once
@@ -32,7 +31,6 @@ HEADERS_DEADLINE_MS = 10_000
 BODY_DEADLINE_MS = 30_000
 TIMER_LATE_MS = 6_000
 CLOCK_SLACK_MS = 250.0
-RETRY_PAUSE_MS = 1_000
 
 
 def moment(page_ms: float | None) -> float:
