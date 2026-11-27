@@ -153,7 +153,7 @@ class TestWhatTheGuardStops:
             async with _pool(guard) as pool:
                 await pool.warmup(browsers=1, pages_per_context=1)
                 contexts = pool._browsers[0].contexts
-                assert set(contexts) >= {"crawl_warmup", "agent_warmup"}
+                assert set(contexts) >= {"agent_warmup"}
                 for context in contexts.values():
                     internal = await context.new_page()
                     assert _REFUSED_BY_GUARD in await _goto_error(internal, f"{world.internal_literal}/secret")

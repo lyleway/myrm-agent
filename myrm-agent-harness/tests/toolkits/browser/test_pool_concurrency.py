@@ -328,28 +328,3 @@ class TestEndToEndConcurrencyControl:
                 with contextlib.suppress(Exception):
                     await pool.release_page(page, key)
             await pool.shutdown()
-
-
-class TestBrowserFetcherNavigatorIntegration:
-    """Tests for BrowserFetcher using Navigator"""
-
-    @pytest.mark.integration
-    @pytest.mark.asyncio
-    async def test_browser_fetcher_uses_navigator(self):
-        """Test BrowserFetcher uses Navigator and gets throttle"""
-        from myrm_agent_harness.toolkits.web_fetch.fetchers.browser_fetcher import BrowserFetcher
-
-        config = BrowserPoolConfig.minimal()
-        pool = GlobalBrowserPool(max_browsers=1, config=config)
-        fetcher = BrowserFetcher(browser_pool=pool)
-
-        try:
-            result = await fetcher.fetch("https://www.example.com")
-
-            # Should succeed and return result
-            assert result is not None
-            assert result.url == "https://www.example.com" or "example.com" in result.url
-            assert result.status_code == 200
-
-        finally:
-            await pool.shutdown()

@@ -254,7 +254,7 @@ class GlobalBrowserPool(
     async def warmup(self, browsers: int = 2, pages_per_context: int = 5) -> None:
         """Warm up pool (called at app startup).
 
-        Creates the specified number of Browser instances and pre-creates Contexts and Pages for each ContextType.
+        Creates the specified number of Browser instances and pre-creates the agent Context with its Pages in each.
         Warms up the default engine.
 
         Args:

@@ -77,7 +77,7 @@ async def test_warmup(browser_pool: GlobalBrowserPool) -> None:
 
     stats = browser_pool.stats
     assert stats["total_browsers"] == 1
-    assert stats["total_contexts"] >= 2
+    assert stats["total_contexts"] >= 1
 
 
 @requires_browser

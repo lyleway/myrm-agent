@@ -16,9 +16,9 @@
 - UdpListener: counts the datagrams sent to a loopback UDP port; ``stun_probe`` is the page script that makes a browser send one
 
 [POS]
-Test support for ``test_egress_guard_integration`` and ``test_stealth_fetcher_egress_guard_integration``. The tests run
-the same page against a browser with and without the guard: a probe that finds nothing proves nothing unless it can
-see something, so the run without the guard has to reach the internal site and the run with it must not.
+Test support for ``test_egress_guard_integration``. The tests run the same page against a browser with and without
+the guard: a probe that finds nothing proves nothing unless it can see something, so the run without the guard has to
+reach the internal site and the run with it must not.
 """
 
 from __future__ import annotations
