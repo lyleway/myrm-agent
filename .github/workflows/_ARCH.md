@@ -10,7 +10,7 @@ GitHub Actions 工作流定义。harness 流水线：`harness-test.yml`（单测
 - `harness-v*` 与桌面发布 `v*` tag 命名空间互不重叠；发布不使用长期 PyPI token
 - 架构测试标记 `architecture`：server 的 `tests/architecture/` 由该目录的 `conftest.py` 登记并自动加到每个测试上（别的工作流点名运行的文件除外），门禁带 `--strict-markers`；harness 的架构测试手写 `@pytest.mark.architecture`，`harness-boundary.yml` 据此选测
 - 读整棵文件树的守卫放在不带路径过滤的 `public-tree-guards.yml`，不要放进按路径过滤的流水线，否则路径之外的改动绕过它；守卫测试文件本身仍在 `myrm-agent-server/tests/architecture/`，只在这条流水线里用 `--noconftest -c /dev/null` 独立运行；它的触发器不带路径过滤，由 `test_gate_workflow_triggers.py` 钉住
-- 每个会被 `pull_request` 触发的工作流在 push main 时也按同一份路径过滤运行：直推 main 的仓里，只由 PR 触发的门禁量不到真正发布的代码，它的上一次结论是多久以前某个 PR 留下的；定时或手动触发只能加在 push 之上，不能代替它；长套件与会被后续推送取代的门禁，并发只取消 PR 的运行，被取消的运行得不出结论；由 `test_workflow_push_coverage.py` 钉住
+- 每个会被 `pull_request` 触发的工作流在 push main 时也按同一份路径过滤运行：直推 main 的仓里，只由 PR 触发的门禁量不到真正发布的代码，它的上一次结论是多久以前某个 PR 留下的；定时或手动触发只能加在 push 之上，不能代替它；由 `test_workflow_push_coverage.py` 钉住
 - 第三方 action 一律钉 40 位 commit SHA 并在行尾注释对应的 tag（`dtolnay/rust-toolchain` 钉 `stable` 分支头，注释 `stable`）；SHA 必须由 `git ls-remote --tags <仓库> refs/tags/<tag> refs/tags/<tag>^{}` 解出（`stable` 用 `git ls-remote <仓库> refs/heads/stable`），禁止手写或凭记忆填写（解析不到的 SHA 会让 job 在 `Set up job` 阶段直接失败）
 
 ## 依赖

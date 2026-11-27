@@ -44,11 +44,14 @@ def _scope(triggers: _Triggers, event: str) -> _Filter:
     return {key: value for key, value in (triggers.get(event) or {}).items() if key in _PATH_FILTERS}
 
 
-_PULL_REQUEST_GATES = sorted(path.name for path in WORKFLOWS.glob("*.yml") if "pull_request" in _triggers(path.name))
+# GitHub runs a workflow file with either suffix; a `.yaml` one must not slip past the check.
+_PULL_REQUEST_GATES = sorted(
+    path.name for path in WORKFLOWS.iterdir() if path.suffix in {".yml", ".yaml"} and "pull_request" in _triggers(path.name)
+)
 
 
 def test_the_pull_request_gates_are_found() -> None:
-    # A glob that finds nothing would pass every case below by generating none of them.
+    # A scan that finds nothing would pass every case below by generating none of them.
     assert "server-unit-tests.yml" in _PULL_REQUEST_GATES
 
 
