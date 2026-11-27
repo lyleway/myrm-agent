@@ -711,7 +711,7 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/chats/test_citation_seed_fixture.py` | 模块 | citation fixture seed HTTP 单测（local-only，`/chats/test/seed-citation-fixture`） |
 | `api/chats/test_deliverable_seed_fixture.py` | 模块 | deliverable link fixture seed HTTP 单测（`/chats/test/seed-deliverable-link-fixture`） |
 | `api/chats/test_artifact_share_seed_fixture.py` | 模块 | 制品分享页 seed 路由 HTTP 单测（`/chats/test/seed-artifact-share-fixture`）：两份制品登记在新会话名下且带 `source_path`；按分享创建时的同一查找（`resolve_artifact_deploy_files`，聊天工作区根而不是进程根）各自单独取到文件，图表页与含脚本 / 事件处理器 / `javascript:` 链接的报告内容俱在；非本地模式路由不存在 |
-| `api/chats/test_channel_chat_seed_fixture.py` | 模块 | IM 来源会话 seed 路由 HTTP 单测（`/chats/test/seed-channel-chat-fixture`，真实聊天库）：种子是渠道会话键下的聊天（来源为渠道名、标题取自用户文本前 50 个字符、绑定第一个智能体，或绑定请求里点名的智能体且不再查智能体列表），同一会话键再次解析得到同一个聊天（渠道的下一回合就落在它里面）；用户消息先于助手回复落库；每次种子各得一个聊天；非本地模式路由不存在且不落库，没有智能体时报 500 且不落库 |
+| `api/chats/test_channel_chat_seed_fixture.py` | 模块 | IM 来源会话 seed 路由 HTTP 单测（`/chats/test/seed-channel-chat-fixture`，真实聊天库）：种子是渠道会话键下的聊天（来源为渠道名、标题取自用户文本前 50 个字符、绑定第一个智能体，或绑定请求里点名的智能体且不查智能体列表），同一会话键再次解析得到同一个聊天（渠道的下一回合就落在它里面）；用户消息先于助手回复落库；每次种子各得一个聊天；非本地模式路由不存在且不落库，没有智能体时报 500 且不落库 |
 | `e2e/test_deliverable_bundle_board_chrome_e2e.py` | 模块 | TaskDeliverableBundle 看板 Chrome MCP E2E（seed 完成态 Goal + 3 项不同类目工件 → 展开 GoalStatusCard → 验证聚合看板渲染、类目 Tab 过滤、多选动态导出按钮） |
 | `core/wire/test_registry.py` | 模块 | OpenCode wire 路由 registry + enrich defaults（muse-spark `include` / reasoning effort）单测 |
 | `services/copilot/test_advisor_service.py` | 模块 | Session Advisor Tier-0/Tier-1 单测（`load_llm_from_model_config` wire-aware 路径 mock 契约） |

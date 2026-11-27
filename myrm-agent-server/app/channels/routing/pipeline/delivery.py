@@ -303,7 +303,7 @@ class RouterDeliveryMixin:
         result: OutboundMessage,
         msg: InboundMessage,
     ) -> OutboundMessage:
-        """Append a SECONDARY "Continue in browser" button for IM channel replies.
+        """Append a default-style "Continue in browser" button for IM channel replies.
 
         The button links the stored chat the reply was produced in, which its producer named in
         ``METADATA_STORED_CHAT_KEY``: only the turn knows the conversation it ran in (the agent an alias routed it to, the

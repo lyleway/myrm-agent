@@ -4,7 +4,7 @@ Serves two link families:
 1. **Mobile status** — `/mobile/status/{chatId}?pair=` with signed pairing token
    for HITL approval on mobile.
 2. **Web chat** — `/{chatId}` pointing to the full WebUI conversation page,
-   attached as a SECONDARY button on every IM reply produced in a stored chat so
+   attached as a default-style button on every IM reply produced in a stored chat so
    users can seamlessly continue in the browser.
 
 [INPUT]
@@ -15,7 +15,7 @@ Serves two link families:
 - build_mobile_status_deep_link: Scoped `/mobile/status/{chatId}?pair=` URL
 - resolve_mobile_status_deep_link: Async helper for channel outbound buttons
 - build_web_chat_url: Plain `/{chatId}` URL for WebUI continuation
-- resolve_web_handoff_components: SECONDARY ActionButton row for IM replies
+- resolve_web_handoff_components: default-style ActionButton row for IM replies
 
 [POS]
 Channel-to-frontend bridge. Builds deep links when a public base URL exists;
@@ -83,7 +83,7 @@ async def resolve_web_handoff_components(
     *,
     locale: str = "en",
 ) -> tuple[tuple[ActionButton, ...], ...]:
-    """Generate a SECONDARY ActionButton linking to the WebUI chat page.
+    """Generate a default-style ActionButton linking to the WebUI chat page.
 
     Args:
         chat_id: Database Chat UUID (NOT the IM platform peer_id).

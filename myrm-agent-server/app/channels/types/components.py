@@ -1,7 +1,7 @@
 """Interactive UI component types for cross-channel message abstraction.
 
 [INPUT]
-(No external dependencies, pure data type definitions)
+- channels.i18n::channel_t (POS: channel-scoped localized text for the plain-text fallback)
 
 [OUTPUT]
 - ActionButton, QuickReply, SelectMenu, ComponentRow: Interactive components

@@ -312,8 +312,8 @@ class BaseChannel(InboundPipelineMixin, ReplyShortcutsMixin, ProviderHooksMixin,
     ) -> None:
         """Replace placeholder with a rich final message using full OutboundMessage context.
 
-        Channels that support rich formatting (e.g. Feishu cards with sources/header)
-        should override this to build structured output from the complete message.
+        Channels that support rich formatting (e.g. Feishu cards with sources/header) should override this to
+        build structured output from the complete message, the buttons it still holds included (nothing re-sends them).
         Default: falls back to edit_message with the text content. Like ``edit_message`` it raises
         ``ChannelSendError`` when the edit was not applied, so the router sends the reply as a new message.
 
