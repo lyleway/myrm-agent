@@ -23,6 +23,7 @@ pytest_plugins = [
     "tests.support.llm_endpoint_env",
     "tests.support.chat_fence_isolation",
     "tests.support.allowlist_isolation",
+    "tests.support.honest_resolver",
 ]
 
 # Run at import time to isolate harness tests as well

@@ -63,8 +63,11 @@ class TestClassifyBlockProtocolSignals:
 
 
 class TestFetchEngineFailureReasonPropagation:
+    """The fetch is stubbed and the hosts are names that resolve nowhere, so the engine runs with ``allow_private_networks``:
+    its SSRF check resolves the host, and the guard is not what these tests are about."""
+
     async def test_records_blocked_for_short_403_and_challenge_headers(self) -> None:
-        engine = FetchEngine()
+        engine = FetchEngine(allow_private_networks=True)
         http = stub_fetchers(engine)
 
         http.fetch.return_value = FetchResult(
@@ -95,7 +98,7 @@ class TestFetchEngineFailureReasonPropagation:
         await engine.shutdown()
 
     async def test_records_needs_javascript_for_200_empty_shell(self) -> None:
-        engine = FetchEngine()
+        engine = FetchEngine(allow_private_networks=True)
         http = stub_fetchers(engine)
         http.fetch.return_value = FetchResult(
             html=_UNTITLED_SCRIPT_SHELL,
@@ -113,7 +116,7 @@ class TestFetchEngineFailureReasonPropagation:
 
     @pytest.mark.parametrize("status_code", [404, 410])
     async def test_records_not_found_for_404_and_410(self, status_code: int) -> None:
-        engine = FetchEngine()
+        engine = FetchEngine(allow_private_networks=True)
         http = stub_fetchers(engine)
         url = f"https://missing.example/page-{status_code}"
         http.fetch.return_value = FetchResult(
@@ -130,7 +133,7 @@ class TestFetchEngineFailureReasonPropagation:
         await engine.shutdown()
 
     async def test_records_error_page_for_other_non_degradable_4xx(self) -> None:
-        engine = FetchEngine()
+        engine = FetchEngine(allow_private_networks=True)
         http = stub_fetchers(engine)
         url = "https://badreq.example/page"
         http.fetch.return_value = FetchResult(
@@ -148,7 +151,7 @@ class TestFetchEngineFailureReasonPropagation:
     async def test_text_payload_with_waf_challenge_header_is_blocked_not_delivered(self) -> None:
         from myrm_agent_harness.utils.content_sniff import PayloadKind
 
-        engine = FetchEngine()
+        engine = FetchEngine(allow_private_networks=True)
         http = stub_fetchers(engine)
         url = "https://waf-text.example/doc"
         http.fetch.return_value = FetchResult(
