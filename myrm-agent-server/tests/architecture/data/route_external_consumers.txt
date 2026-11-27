@@ -23,4 +23,4 @@ POST /wiki/clip | browser extension posts page clips (myrm-agent-extension/src/w
 GET /wiki/clip/{job_id} | browser extension polls the clip job (myrm-agent-extension/src/wiki/clip_client.js:18)
 POST /cron/trigger/event | documented external webhook trigger (myrm-agent-brand/myrm-docs/docs/api-reference/webhooks.mdx:28)
 POST /cron/trigger/system-event | documented external webhook trigger (myrm-agent-brand/myrm-docs/docs/api-reference/webhooks.mdx:36)
-POST /browser/domain-skills/distill | documented skill distillation API (myrm-agent-brand/myrm-docs/docs/guides/browser-automation.mdx:615)
+POST /browser/domain-skills/distill | documented skill distillation API (myrm-agent-brand/myrm-docs/docs/guides/browser-automation.mdx:636)
