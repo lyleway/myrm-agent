@@ -16,7 +16,6 @@ from app.services.agent.builtin_specs.types import (
     _TOOL_DEFAULT,
     _TOOL_DESIGN,
     _TOOL_MINIMAL,
-    _TOOL_RESEARCH,
     _TOOL_VIDEO_STUDIO,
     _BuiltInAgentSpec,
 )
@@ -113,7 +112,7 @@ _VERTICAL_BUILTIN_AGENTS: tuple[_BuiltInAgentSpec, ...] = (
             "\n\nProvide comprehensive, detailed explanations. Break down complex topics step by step. Include examples, edge cases, and thorough reasoning. Prioritize completeness over brevity."
         ),
         default_skill_ids=(),
-        enabled_builtin_tools=_TOOL_RESEARCH,
+        enabled_builtin_tools=_TOOL_MINIMAL,
         suggestion_prompts=(
             "Audit my web project and generate an SEO optimization roadmap",
             "Audit my blog post and suggest SEO improvements",
@@ -240,7 +239,7 @@ _VERTICAL_BUILTIN_AGENTS: tuple[_BuiltInAgentSpec, ...] = (
             "Always note practical tips: best booking timing, safety considerations, packing essentials."
             "\n\nBe warm, friendly, and encouraging. Use conversational language and show enthusiasm. Add emoji occasionally to express emotions (😊 👍 🎉 etc.)."
         ),
-        enabled_builtin_tools=_TOOL_RESEARCH,
+        enabled_builtin_tools=_TOOL_MINIMAL,
         suggestion_prompts=(
             "Plan a 7-day trip to Japan on a $2000 budget",
             "What should I pack for a two-week backpacking trip in Europe?",
@@ -379,7 +378,7 @@ _VERTICAL_BUILTIN_AGENTS: tuple[_BuiltInAgentSpec, ...] = (
             "\n\nProvide comprehensive, detailed explanations. Break down complex topics step by step. Include examples, edge cases, and thorough reasoning. Prioritize completeness over brevity."
         ),
         default_skill_ids=(),
-        enabled_builtin_tools=_TOOL_RESEARCH,
+        enabled_builtin_tools=_TOOL_MINIMAL,
         suggestion_prompts=(
             "What are AI leaders saying on X this week?",
             "Monitor mentions of my brand on X and summarize sentiment",

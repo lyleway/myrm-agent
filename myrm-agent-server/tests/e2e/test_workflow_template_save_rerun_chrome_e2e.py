@@ -121,7 +121,7 @@ def _agent_stream_turn(
             "modelSelection": get_model_selection(),
             "enableWebSearch": False,
             "agentConfig": {
-                "enabledBuiltinTools": ["answer_tool", "memory", "structured_clarify"],
+                "enabledBuiltinTools": ["memory", "structured_clarify"],
                 "skillIds": [],
             },
             "use_workflow": use_workflow,

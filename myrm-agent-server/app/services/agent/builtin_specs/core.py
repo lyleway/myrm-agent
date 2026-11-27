@@ -18,7 +18,6 @@ from app.services.agent.builtin_specs.types import (
     _TOOL_COWORK,
     _TOOL_DEFAULT,
     _TOOL_MINIMAL,
-    _TOOL_RESEARCH,
     _BuiltInAgentSpec,
 )
 
@@ -87,7 +86,7 @@ _CORE_BUILTIN_AGENTS: tuple[_BuiltInAgentSpec, ...] = (
             "\n\nProvide comprehensive, detailed explanations. Break down complex topics step by step. Include examples, edge cases, and thorough reasoning. Prioritize completeness over brevity."
         ),
         default_skill_ids=(),
-        enabled_builtin_tools=_TOOL_RESEARCH,
+        enabled_builtin_tools=_TOOL_MINIMAL,
         suggestion_prompts=(
             "Research the pros and cons of electric vehicles vs hybrids in 2026",
             "Analyze the current housing market trends in major cities",

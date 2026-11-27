@@ -30,7 +30,6 @@ from app.services.agent.builtin_agent_specs import (
     _TOOL_DEFAULT,
     _TOOL_DESIGN,
     _TOOL_MINIMAL,
-    _TOOL_RESEARCH,
     _TOOL_VIDEO_STUDIO,
     _BuiltInAgentSpec,
 )
@@ -44,7 +43,6 @@ __all__ = [
     "_TOOL_DEFAULT",
     "_TOOL_DESIGN",
     "_TOOL_MINIMAL",
-    "_TOOL_RESEARCH",
     "_TOOL_VIDEO_STUDIO",
     "initialize_builtin_agents",
 ]

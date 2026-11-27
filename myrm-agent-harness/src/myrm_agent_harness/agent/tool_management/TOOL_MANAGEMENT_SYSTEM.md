@@ -148,7 +148,7 @@ Only **LLM tools** (`_TOOL_LAYERS` + ToolRegistry) appear here. Orchestration si
 | `kanban_revise_plan` | EXTENDED | user_capability | kanban | enabled_builtin_tools: kanban |
 | `kanban_show` | EXTENDED | user_capability | kanban | enabled_builtin_tools: kanban |
 | `kanban_unblock` | EXTENDED | user_capability | kanban | enabled_builtin_tools: kanban |
-| `request_answer_user_tool` | EXTENDED | user_capability | answer_tool | enabled_builtin_tools: answer_tool |
+| `request_answer_user_tool` | EXTENDED | user_capability | — | Opt-in Turn1; see product switch |
 | `skill_manage_tool` | EXTENDED | user_capability | — | enabled_builtin_tools: skill_manage or /learn force_skill_manage (server Turn1) |
 | `skill_market_tool` | EXTENDED | user_capability | — | enabled_builtin_tools: skill_market (server ToolSetupMixin Turn1) |
 | `skill_search_tool` | EXTENDED | user_capability | — | Turn1 when searchable skills exist |

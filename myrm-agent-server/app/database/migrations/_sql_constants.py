@@ -4,7 +4,7 @@
 (none — frozen SQL constants)
 
 [OUTPUT]
-CLEAR_LEGACY_PROJECT_WORKSPACE_PATHS_SQL（项目里指向不存在沙箱目录的历史假工作区路径清空） / BACKFILL_LEGACY_WAKEUP_NOTICE_SQL（没有标记的后台完成通知行补 followup 标记） / REJECT_LEGACY_TOOL_STUCK_APPROVALS_SQL（遗留的循环守卫暂停 PENDING 审批行置为 REJECTED） / CLEAR_BUILTIN_SEARCH_MEMORY_POLICY_SQL（快速 / 深度搜索预置体行里的记忆策略覆盖清空） / NORMALIZE_RETIRED_PROMPT_MODES_SQL（已退役的 lean / naked 提示词模式行改为 full） / REARM_STALLED_CRON_JOBS_SQL（启用却无下一时刻的周期任务重订） / PAUSE_STALLED_ONCE_CRON_JOBS_SQL（同样停摆的一次性任务置为暂停） / STRIP_RETIRED_RESPONSE_LOCALE_POLICY_SQL（智能体参数里已退役的回复语体键移除） / STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL（回滚快照里的同一键移除）
+CLEAR_LEGACY_PROJECT_WORKSPACE_PATHS_SQL（项目里指向不存在沙箱目录的历史假工作区路径清空） / BACKFILL_LEGACY_WAKEUP_NOTICE_SQL（没有标记的后台完成通知行补 followup 标记） / REJECT_LEGACY_TOOL_STUCK_APPROVALS_SQL（遗留的循环守卫暂停 PENDING 审批行置为 REJECTED） / CLEAR_BUILTIN_SEARCH_MEMORY_POLICY_SQL（快速 / 深度搜索预置体行里的记忆策略覆盖清空） / NORMALIZE_RETIRED_PROMPT_MODES_SQL（已退役的 lean / naked 提示词模式行改为 full） / REARM_STALLED_CRON_JOBS_SQL（启用却无下一时刻的周期任务重订） / PAUSE_STALLED_ONCE_CRON_JOBS_SQL（同样停摆的一次性任务置为暂停） / STRIP_RETIRED_RESPONSE_LOCALE_POLICY_SQL（智能体参数里已退役的回复语体键移除） / STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL（回滚快照里的同一键移除） / STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL（智能体能力清单里已退役的 answer_tool 移除） / STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL（回滚快照能力清单里的同一 ID 移除） / STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL（定时任务限定清单里与其它 ID 并存的同一 ID 移除，单独存在的不动）
 
 [POS]
 database 层迁移语句常量：每条常量在 MIGRATION_STATEMENTS 里占一个位置，是一次性的数据修复。语句文本是迁移账本的校验源，
@@ -82,4 +82,40 @@ STRIP_RETIRED_RESPONSE_LOCALE_POLICY_FROM_SNAPSHOTS_SQL = (
     "SET snapshot_data = json_remove(snapshot_data, '$.engine_params.response_locale_policy') "
     "WHERE CASE WHEN json_valid(snapshot_data) "
     "THEN json_type(snapshot_data, '$.engine_params.response_locale_policy') IS NOT NULL ELSE 0 END"
+)
+
+# ``answer_tool`` is a retired capability ID and validation rejects it, so an agent whose saved list still holds it could
+# no longer be saved. It is dropped from every list that holds it and the other IDs keep their order; a list that held
+# nothing else becomes ``[]``, the list a save writes for an agent with no optional capability. A row whose list is NULL,
+# is not a JSON array or does not hold the ID is left alone, and a second pass finds nothing to change.
+STRIP_RETIRED_ANSWER_TOOL_FROM_AGENTS_SQL = (
+    "UPDATE agents SET enabled_builtin_tools = ("
+    "SELECT json_group_array(value) FROM (SELECT value FROM json_each(agents.enabled_builtin_tools) "
+    "WHERE value IS NOT 'answer_tool' ORDER BY key)) "
+    "WHERE CASE WHEN json_valid(enabled_builtin_tools) AND json_type(enabled_builtin_tools) = 'array' "
+    "THEN EXISTS (SELECT 1 FROM json_each(agents.enabled_builtin_tools) WHERE value = 'answer_tool') ELSE 0 END"
+)
+
+# A rollback snapshot holds the agent's capability list too, and a rollback writes it back into the live agent; the same
+# drop keeps the retired ID out of it. The edit history is a read-only record and keeps what each version held.
+STRIP_RETIRED_ANSWER_TOOL_FROM_SNAPSHOTS_SQL = (
+    "UPDATE agent_profile_snapshots SET snapshot_data = json_set(snapshot_data, '$.enabled_builtin_tools', json(("
+    "SELECT json_group_array(value) FROM (SELECT value FROM json_each(agent_profile_snapshots.snapshot_data, "
+    "'$.enabled_builtin_tools') WHERE value IS NOT 'answer_tool' ORDER BY key)))) "
+    "WHERE CASE WHEN json_valid(snapshot_data) AND json_type(snapshot_data, '$.enabled_builtin_tools') = 'array' "
+    "THEN EXISTS (SELECT 1 FROM json_each(agent_profile_snapshots.snapshot_data, '$.enabled_builtin_tools') "
+    "WHERE value = 'answer_tool') ELSE 0 END"
+)
+
+# A job's ``tools_allowed`` list restricts the tools it may use, and a stored empty list is read back as "no
+# restriction". A list that holds the ID next to other IDs loses it; a list that holds nothing else keeps it, so the job
+# keeps allowing no tool at all instead of being widened to every tool of its agent. Rows that are NULL, not a JSON
+# array or without the ID are left alone, and a second pass finds nothing to change.
+STRIP_RETIRED_ANSWER_TOOL_FROM_CRON_JOBS_SQL = (
+    "UPDATE cron_jobs SET tools_allowed = ("
+    "SELECT json_group_array(value) FROM (SELECT value FROM json_each(cron_jobs.tools_allowed) "
+    "WHERE value IS NOT 'answer_tool' ORDER BY key)) "
+    "WHERE CASE WHEN json_valid(tools_allowed) AND json_type(tools_allowed) = 'array' "
+    "THEN EXISTS (SELECT 1 FROM json_each(cron_jobs.tools_allowed) WHERE value = 'answer_tool') "
+    "AND EXISTS (SELECT 1 FROM json_each(cron_jobs.tools_allowed) WHERE value IS NOT 'answer_tool') ELSE 0 END"
 )

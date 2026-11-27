@@ -68,9 +68,9 @@ export const BUILTIN_AGENT_I18N: Record<string, AgentI18nEntry> = {
   'builtin-deep-search': {
     en: {
       name: 'Deep Search',
-      description: 'Thorough multi-source research — reads full pages, cross-references, and self-validates answers.',
+      description: 'Thorough multi-source research — reads full pages and cross-references sources.',
     },
-    zh: { name: '深度搜索', description: '多源深度调研——阅读全文、交叉验证并自检答案。' },
+    zh: { name: '深度搜索', description: '多源深度调研——阅读全文并交叉验证来源。' },
   },
   'builtin-translator': {
     en: {
@@ -235,4 +235,3 @@ export const BUILTIN_AGENT_I18N: Record<string, AgentI18nEntry> = {
     },
   },
 };
-
