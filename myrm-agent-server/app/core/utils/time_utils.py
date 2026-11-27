@@ -1,5 +1,8 @@
 """UTC normalization for datetimes read back from SQLite.
 
+[INPUT]
+- (none)
+
 [OUTPUT]
 - as_utc: a datetime as an aware UTC value
 
