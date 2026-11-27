@@ -6,12 +6,13 @@
 - myrm_agent_harness.toolkits.storage.local::LocalStorageBackend (POS: the real local storage backend)
 
 [OUTPUT]
-- MediaLibraryEnv: the sessions and storage behind the library, and ``store()`` to put a media item in it
+- MediaLibraryEnv: the sessions and storage behind the library, ``store()`` to put a media item in it and
+  ``point_at()`` to change which file a record names
 - media_library_env(): async context manager that points every ``get_session_factory()`` and
   ``get_storage_provider()`` caller at them for the duration of a test
 
 [POS]
-Shared by the media library tests (reference loader, persistence callback, file endpoint). The singletons are replaced
+Shared by the media library tests (reference loaders, persistence callback, file endpoint, workspace copies). The singletons are replaced
 at their source, so callers that imported the getters by name resolve to the same database and storage.
 """
 
@@ -25,7 +26,7 @@ from pathlib import Path
 
 import pytest
 from myrm_agent_harness.toolkits.storage.local import LocalStorageBackend
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -60,6 +61,12 @@ class MediaLibraryEnv:
             )
             await session.commit()
             return record
+
+    async def point_at(self, media_id: str, storage_key: str) -> None:
+        """Make the record of ``media_id`` name ``storage_key`` as its file, the way a damaged or tampered record would."""
+        async with self.sessions() as session:
+            await session.execute(update(MediaLibrary).where(MediaLibrary.id == media_id).values(storage_key=storage_key))
+            await session.commit()
 
     async def records(self) -> list[MediaLibrary]:
         """Every committed record, oldest first."""

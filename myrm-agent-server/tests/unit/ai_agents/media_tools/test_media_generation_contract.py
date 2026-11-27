@@ -4,13 +4,15 @@
 - shared/config/media_generation_contract.json (POS: the result shapes and registration cases both sides are held to)
 - app.ai_agents.media_tools.task_results::started_tasks_result (POS: the generate answer of image_tool and video_tool)
 - app.ai_agents.media_tools.tts_agent_tool::TTSTool (POS: the speech answer)
+- app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: adds the workspace copies a result names)
 - app.tasks.executors.image_executor::ImageTaskExecutor, app.tasks.executors.video_executor::VideoTaskExecutor (POS: the results of finished tasks)
 - app.services.agent.streaming_support.media_generated::collect_media_generated (POS: registers the cards of a message)
 - myrm_agent_harness.toolkits.llms.image (POS: the edit answer and the model catalog)
 
 [OUTPUT]
 Fails when a producer drops or renames a field a card reads, stores a non-``media://`` address, registers a different
-entry than the shared cases say, or when the catalog and the client's model list drift apart.
+entry than the shared cases say, adds a field its shape does not declare, or when the catalog and the client's model
+list drift apart.
 
 [POS]
 tests/unit/ai_agents/media_tools/test_media_generation_contract.py; the client half is
@@ -36,9 +38,12 @@ from myrm_agent_harness.toolkits.tasks import Task, TaskStatus
 
 from app.ai_agents.media_tools.task_results import started_tasks_result
 from app.ai_agents.media_tools.tts_agent_tool import TTSTool
+from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
+from app.core.media.reference import media_reference
 from app.services.agent.streaming_support.media_generated import collect_media_generated
 from app.tasks.executors.image_executor import ImageTaskExecutor
 from app.tasks.executors.video_executor import VideoTaskExecutor
+from tests.support.media_library_env import media_library_env
 
 _CONTRACT = json.loads(
     (Path(__file__).resolve().parents[5] / "shared" / "config" / "media_generation_contract.json").read_text(encoding="utf-8")
@@ -103,10 +108,14 @@ def test_every_example_conforms_to_its_shape() -> None:
         ("image_result", lambda v: {**v, "images": []}),
         ("image_result", lambda v: {k: x for k, x in v.items() if k != "model"}),
         ("image_result", lambda v: {**v, "latency_ms": "8200"}),
+        ("image_result", lambda v: {**v, "workspace_files": "_generated/media_img_1.png"}),
+        ("image_result", lambda v: {**v, "workspace_files": []}),
         ("video_result", lambda v: {k: x for k, x in v.items() if k != "video_urls"}),
         ("video_result", lambda v: {**v, "video_urls": ["https://cdn.example/a.mp4"]}),
+        ("video_result", lambda v: {**v, "workspace_files": [""]}),
         ("speech_result", lambda v: {k: x for k, x in v.items() if k != "audio_url"}),
         ("speech_result", lambda v: {**v, "audio_url": "file:///tmp/a.mp3"}),
+        ("speech_result", lambda v: {**v, "workspace_files_error": ""}),
         ("generate_result", lambda v: {"task_ids": [t["task_id"] for t in v["tasks"]]}),
         ("generate_result", lambda v: {"tasks": [{**v["tasks"][0], "task_id": ""}]}),
         ("stored_entry", lambda v: {**v, "kind": "video"}),
@@ -213,6 +222,41 @@ async def test_a_speech_call_answers_with_the_speech_result() -> None:
         answer = json.loads(await TTSTool(config).ainvoke({"text": "Hello"}))
 
     _assert_conforms("speech_result", answer)
+
+
+def _result_with_media(shape: str, reference: str) -> dict[str, object]:
+    """The example result of ``shape`` naming ``reference`` as its media and showing no workspace copy yet."""
+    base = {key: value for key, value in _EXAMPLES[shape].items() if not key.startswith("workspace_files")}
+    if shape == "image_result":
+        return {**base, "images": [{"url": reference, "mime_type": "image/png"}]}
+    if shape == "video_result":
+        return {**base, "video_urls": [reference]}
+    return {**base, "audio_url": reference}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("shape", "content_type"),
+    [("image_result", "image/png"), ("video_result", "video/mp4"), ("speech_result", "audio/mpeg")],
+)
+async def test_the_workspace_fields_a_result_gains_are_the_ones_its_shape_declares(
+    shape: str, content_type: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    exporter = WorkspaceExporter(workspace, user_id="user-1", chat_id="chat-1")
+    async with media_library_env(tmp_path / "storage", monkeypatch) as library:
+        stored = await library.store(b"media", content_type=content_type)
+        copied = await exporter.complete(_result_with_media(shape, media_reference(stored.id)))
+        failed = await exporter.complete(_result_with_media(shape, "media://media_gone"))
+
+    original = set(_result_with_media(shape, "media://media_any"))
+    declared = set(_SHAPES[shape]["optional"])
+    assert set(copied) - original == {"workspace_files"}
+    assert set(failed) - original == {"workspace_files_error"}
+    assert {"workspace_files", "workspace_files_error"} <= declared
+    _assert_conforms(shape, copied)
+    _assert_conforms(shape, failed)
 
 
 @pytest.mark.parametrize("as_json_text", [True, False], ids=["result as JSON text", "result as an object"])
