@@ -34,7 +34,7 @@ async def test_build_multimodal_image_list_blocks() -> None:
             supports_vision=True,
             config=_DUMMY_CONFIG,
         )
-    assert any("img-list" in b.get("text", "") for b in blocks if isinstance(b, dict))
+    assert any("img-list" in str(b.get("text", "")) for b in blocks if isinstance(b, dict))
 
 
 @pytest.mark.asyncio
@@ -57,7 +57,7 @@ async def test_build_multimodal_image_no_vision_string_result() -> None:
             supports_vision=False,
             config=_DUMMY_CONFIG,
         )
-    assert blocks[0]["text"] == "plain image text"
+    assert blocks[0].get("text") == "plain image text"
 
 
 @pytest.mark.asyncio
@@ -92,7 +92,7 @@ async def test_build_multimodal_image_uses_ocr_tier_when_no_vision_route_exists(
         )
 
     mock_ocr.assert_awaited_once()
-    assert "INVOICE TOTAL 12345.67" in blocks[0]["text"]
+    assert "INVOICE TOTAL 12345.67" in str(blocks[0].get("text", ""))
 
 
 @pytest.mark.asyncio
@@ -129,7 +129,7 @@ async def test_build_multimodal_image_empty_ocr_falls_back_to_metadata() -> None
             config=_DUMMY_CONFIG,
         )
 
-    assert blocks[0]["text"] == "metadata only"
+    assert blocks[0].get("text") == "metadata only"
 
 
 @pytest.mark.asyncio
@@ -170,7 +170,7 @@ async def test_build_multimodal_image_propagates_block_list_from_plain_reader() 
             config=_DUMMY_CONFIG,
         )
 
-    assert [block["text"] for block in blocks] == ["block-a", "block-b"]
+    assert [block.get("text") for block in blocks] == ["block-a", "block-b"]
 
 
 class TestReadImageViaOcr:

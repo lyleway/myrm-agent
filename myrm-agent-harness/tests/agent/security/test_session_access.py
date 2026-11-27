@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 from myrm_agent_harness.agent.security.checks import check_path_policy
 from myrm_agent_harness.agent.security.session_access import (
     get_session_access_roots,
@@ -66,7 +68,9 @@ def test_resolve_grant_directory_path_uses_workspace_for_relative(tmp_path) -> N
     assert resolved == os.path.realpath(str(outside))
 
 
-def test_resolve_grant_directory_path_names_the_directory_the_tools_open(tmp_path, monkeypatch) -> None:
+def test_resolve_grant_directory_path_names_the_directory_the_tools_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A bare ``~`` is the home the engine asked about; ``~name`` is a directory below the workspace, as the tools open it.
     workspace = tmp_path / "ws"
     (workspace / "~root").mkdir(parents=True)
@@ -275,7 +279,7 @@ class TestPlanDirectoryGrants:
         )
         assert [root.writable for root in plan] == [True]
 
-    def test_a_read_is_offered_the_folder_of_the_file_it_opens_in_place_of_a_quoted_path(self, tmp_path) -> None:
+    def test_a_read_is_offered_the_folder_of_the_file_it_opens_in_place_of_a_quoted_path(self, tmp_path: Path) -> None:
         # The quoted text names nothing below the workspace, so the read opens the file the quotes wrap.
         set_session_access_roots(())
         workspace = tmp_path / "ws"
@@ -283,7 +287,7 @@ class TestPlanDirectoryGrants:
         for directory in (workspace, downloads):
             directory.mkdir()
         (downloads / "a.csv").write_text("x", encoding="utf-8")
-        call = {"paths": [f'"{downloads}/a.csv"']}
+        call: dict[str, object] = {"paths": [f'"{downloads}/a.csv"']}
 
         plan = plan_directory_grants(call, policy=self._policy(), workspace_root=str(workspace), permission="file_read")
 
@@ -294,7 +298,9 @@ class TestPlanDirectoryGrants:
         assert granted == [os.path.realpath(downloads)]
         set_session_access_roots(())
 
-    def test_a_write_is_offered_nothing_for_a_quoted_path_since_it_opens_exactly_that_text(self, tmp_path) -> None:
+    def test_a_write_is_offered_nothing_for_a_quoted_path_since_it_opens_exactly_that_text(
+        self, tmp_path: Path
+    ) -> None:
         set_session_access_roots(())
         workspace = tmp_path / "ws"
         downloads = tmp_path / "downloads"
