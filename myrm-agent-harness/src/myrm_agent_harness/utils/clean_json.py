@@ -36,8 +36,10 @@ MAX_NESTING = 64
 
 # One token per string literal, opening bracket (group 1) or closing bracket (group 2); all other text is skipped. A literal is
 # consumed whole, so a bracket inside a string is no level, and an unterminated one runs to the end of the text, as the
-# parser's own error does: every character is scanned once, however many quotes and backslashes an input piles up.
-_STRING_OR_BRACKET = re.compile(r'"[^"\\]*(?:\\(?:.|\Z)[^"\\]*)*(?:"|\Z)|([\[{])|([\]}])')
+# parser's own error does. A backslash takes the character after it, a line break included (hence DOTALL), and the repeat is
+# possessive: once its opening quote has matched, a literal can neither fail nor give characters back, so every character is
+# read once and no backtracking state is kept, however many quotes, backslashes and line breaks an input piles up.
+_STRING_OR_BRACKET = re.compile(r'"(?:[^"\\]+|\\.?)*+(?:"|\Z)|([\[{])|([\]}])', re.DOTALL)
 
 # ``json.dumps`` writes CJK and Korean text as ``\u`` escapes that are no surrogates, and the rewrite below calls back for every
 # escape it passes, so only a text that holds something the shape of a surrogate escape goes through it.

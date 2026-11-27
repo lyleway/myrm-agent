@@ -4,8 +4,9 @@ A summary is derived from the messages written before it. Once retry, regenerate
 rewind rewrites the history from some turn on, a summary written at or after that turn may carry what was removed or
 replaced and is dropped; one written before it covers only untouched turns and stays, or every regenerate in a long chat
 would discard all older context. Rows a change deleted also leave the recall index, whose text only grows otherwise.
-A compaction that picked its boundary before the change must not store a summary of rows that are gone, and a reply
-the change replaced must not be read into the next summary.
+A compaction that picked its boundary before the change must not store a summary of rows that are gone or that the
+change deactivated (a replaced reply, a flushed conversation), and a reply the change replaced must not be read into the
+next summary.
 """
 
 from __future__ import annotations
@@ -256,7 +257,25 @@ class TestACompactionThatPickedItsBoundaryBeforeAChange:
         await _seed(db_session)
         await ChatService.undo_last_turn(CHAT_ID)
 
-        with pytest.raises(ValueError, match="no longer exists"):
+        with pytest.raises(ValueError, match="no longer an active message"):
+            await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "a2", TOKENS_SAVED)
+
+        assert await _compaction(db_session) == (None, None, None, None)
+
+    async def test_a_boundary_a_regenerate_replaced_is_refused(self, db_session: AsyncSession) -> None:
+        await _seed(db_session, regenerated=True)
+
+        with pytest.raises(ValueError, match="no longer an active message"):
+            await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "a2", TOKENS_SAVED)
+
+        assert await _compaction(db_session) == (None, None, None, None)
+
+    async def test_a_boundary_a_flush_cleared_is_refused(self, db_session: AsyncSession) -> None:
+        await _seed(db_session)
+        await ChatRepository.soft_delete_all_messages_for_chat(db_session, CHAT_ID)
+        await db_session.commit()
+
+        with pytest.raises(ValueError, match="no longer an active message"):
             await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "a2", TOKENS_SAVED)
 
         assert await _compaction(db_session) == (None, None, None, None)
@@ -266,7 +285,7 @@ class TestACompactionThatPickedItsBoundaryBeforeAChange:
         db_session.add(Chat(id="other-chat", title="Other", source="web"))
         await db_session.commit()
 
-        with pytest.raises(ValueError, match="no longer exists"):
+        with pytest.raises(ValueError, match="no longer an active message"):
             await do_persist_to_db(db_session, "other-chat", SUMMARY, "a2", TOKENS_SAVED)
 
     async def test_an_existing_boundary_is_stored(self, db_session: AsyncSession) -> None:
@@ -284,6 +303,25 @@ class TestACompactionThatPickedItsBoundaryBeforeAChange:
         stored = await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "", TOKENS_SAVED)
 
         assert stored == "a2"
+
+    async def test_without_a_boundary_a_newest_row_a_sibling_switch_left_inactive_is_skipped(
+        self, db_session: AsyncSession
+    ) -> None:
+        await _seed(db_session, regenerated=True)
+        await db_session.execute(update(Message).where(Message.id == "a2").values(is_active=True))
+        await db_session.execute(update(Message).where(Message.id == "a2b").values(is_active=False))
+
+        stored = await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "", TOKENS_SAVED)
+
+        assert stored == "a2"
+
+    async def test_without_a_boundary_and_without_an_active_row_nothing_is_stored(self, db_session: AsyncSession) -> None:
+        await _seed(db_session)
+        await ChatRepository.soft_delete_all_messages_for_chat(db_session, CHAT_ID)
+        await db_session.commit()
+
+        with pytest.raises(ValueError, match="Cannot resolve"):
+            await do_persist_to_db(db_session, CHAT_ID, SUMMARY, "", TOKENS_SAVED)
 
 
 class TestWhatTheNextCompactionReads:

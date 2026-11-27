@@ -1,9 +1,9 @@
 """Integration test: the browser button of an IM reply links the stored chat the reply was produced in.
 
 The producer of a reply (the executor, or the router for a follow-up) names that chat in ``METADATA_STORED_CHAT_KEY``;
-``_attach_web_handoff`` builds the button from it and never works out again which conversation a turn ran in. A turn's
-conversation depends on inputs the delivery cannot see (the agent an alias routed it to, the session a resumed approval
-belongs to), so every test stores the chat the turn ran in next to the chat the message itself would point at.
+``_attach_web_handoff`` builds the button from it. A turn's conversation depends on the agent an alias routed it to and
+on the session a resumed approval belongs to, so every test stores the chat the turn ran in next to the chat the message
+itself would point at.
 
 Chats go through the real ChatService over the real SQLite DB; the tunnel/ingress is monkey-patched.
 """

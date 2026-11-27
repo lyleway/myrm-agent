@@ -1,9 +1,11 @@
 """The idle drain stores its summary through the writer every compaction shares.
 
 The model call takes seconds, during which a rewind or an undo may remove the row the summary was cut at; the shared
-writer refuses such a boundary and the drain drops the summary instead of storing one of rows that are gone. The salient
-tool archive is appended after the writer's index rebuild, which drops every segment no message backs. What the drain
-adds to the running total of saved tokens is measured as ``compact_chat`` measures it, so a row is counted once.
+writer refuses such a boundary and the drain drops the summary instead of storing one of rows that are gone. The summary
+is cut at the last active row the idle gate saw: a conversation Focus & Flush cleared while the drain waited costs no
+model call, and a newest row that a sibling switch left inactive does not become the boundary. The salient tool archive
+is appended after the writer's index rebuild, which drops every segment no message backs. What the drain adds to the
+running total of saved tokens is measured as ``compact_chat`` measures it, so a row is counted once.
 """
 
 from __future__ import annotations
@@ -55,19 +57,31 @@ def _model_run(llm: object, archive: AsyncMock) -> Iterator[None]:
         yield
 
 
-class _Run:
-    """What one drain did, in order."""
+LONG_AGO = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
 
-    def __init__(self) -> None:
+
+def _row(row_id: str, role: str, content: str, second: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=row_id, role=role, content=content, extra_data=None, created_at=LONG_AGO + timedelta(seconds=second)
+    )
+
+
+class _Run:
+    """What one drain did, in order, and the rows it finds: the active ones and the newest row the idle gate sees."""
+
+    def __init__(self, sent: list[str]) -> None:
         self.calls: list[str] = []
+        self.sent = sent
         self.persist = AsyncMock(side_effect=self._persist)
         self.archive = AsyncMock(side_effect=self._archive)
         self.boundary_removed = False
+        self.rows = [_row("m1", "user", "question", 0), _row(SNAPSHOT_ID, "assistant", "answer", 1)]
+        self.newest = self.rows[-1]
 
     async def _persist(self, *_args: object) -> str:
         self.calls.append("persist")
         if self.boundary_removed:
-            raise ValueError("Compaction boundary m2 no longer exists")
+            raise ValueError("Compaction boundary m2 is no longer an active message")
         return SNAPSHOT_ID
 
     async def _archive(self, *_args: object, **_kwargs: object) -> list[object]:
@@ -77,18 +91,12 @@ class _Run:
 
 @pytest.fixture
 def run() -> Iterator[_Run]:
-    drain = _Run()
-    llm, _sent = wire_llm('{"goal": "notes"}')
-    stored = [
-        SimpleNamespace(id="m1", role="user", content="question", extra_data=None),
-        SimpleNamespace(id=SNAPSHOT_ID, role="assistant", content="answer", extra_data=None),
-    ]
+    llm, sent = wire_llm('{"goal": "notes"}')
+    drain = _Run(sent)
     repo = SimpleNamespace(
-        get_latest_message=AsyncMock(
-            return_value=SimpleNamespace(id=SNAPSHOT_ID, created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1))
-        ),
+        get_latest_message=AsyncMock(side_effect=lambda _chat_id: drain.newest),
         get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None, compacted_summary=None)),
-        get_all_messages=AsyncMock(return_value=stored),
+        get_all_messages=AsyncMock(side_effect=lambda _chat_id: drain.rows),
     )
 
     class _Uow:
@@ -127,6 +135,31 @@ async def test_a_boundary_removed_while_the_model_ran_discards_the_summary(run: 
     await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
 
     assert run.calls == ["persist"], "nothing is committed or archived for a summary of rows that are gone"
+
+
+async def test_a_conversation_flushed_while_the_drain_waited_costs_no_model_call(run: _Run) -> None:
+    run.rows = []
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.calls == [] and run.sent == [], "no active message is left, so nothing is summarized, stored or archived"
+
+
+async def test_a_newest_row_a_sibling_switch_left_inactive_is_not_the_boundary(run: _Run) -> None:
+    run.newest = _row("m2b", "assistant", "the other version", 2)
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.persist.await_args.args[3] == SNAPSHOT_ID
+
+
+async def test_rows_written_after_the_gate_stay_out_of_the_summary(run: _Run) -> None:
+    run.rows.append(_row("m3", "user", "LATER-ROW", 2))
+
+    await _ChatCompactionMixin.flush_compaction_debt(CHAT_ID)
+
+    assert run.persist.await_args.args[3] == SNAPSHOT_ID
+    assert not any("LATER-ROW" in text for text in run.sent)
 
 
 async def test_the_running_total_counts_what_the_stored_summary_did_not_already_cover(db_session: AsyncSession) -> None:

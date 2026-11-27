@@ -143,11 +143,11 @@ async def _current_started_key(base_key: str, policy: SessionPolicy) -> str | No
             .limit(1)
         )
         row = result.first()
-    if row is None or row[0] is None:
+    if row is None:
         return None
-
-    key: str = row[0]
-    updated_at: datetime = row[1]
+    key, updated_at = row
+    if key is None:
+        return None
     now = datetime.now(tz=UTC)
     match policy.mode:
         case SessionResetMode.PERSISTENT:
@@ -197,11 +197,11 @@ async def _resolve_idle_key(
     now = datetime.now(tz=UTC)
     new_epoch_key = f"{base_key}:e={now.strftime('%Y%m%dT%H%M')}"
 
-    if row is None or row[1] is None:
+    if row is None:
         return new_epoch_key
-
-    updated_at: datetime = row[0]
-    existing_key: str = row[1]
+    updated_at, existing_key = row
+    if existing_key is None:
+        return new_epoch_key
 
     if _is_idle_expired(updated_at, now, idle_minutes):
         return new_epoch_key
