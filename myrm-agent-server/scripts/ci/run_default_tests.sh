@@ -12,7 +12,8 @@ source "${SERVER_ROOT}/scripts/ci/lib_harness_deps.sh"
 
 _run_pytest() {
   # pyproject addopts already applies the marker filter, --timeout and --import-mode.
-  local pytest_args=(-n0 --tb=short -q)
+  # The junit report is what the failed-tests step of server-unit-tests.yml reads.
+  local pytest_args=(-n0 --tb=short -q --junitxml=/tmp/server-unit.xml)
   if [[ -x "${SERVER_ROOT}/.venv/bin/python" ]]; then
     "${SERVER_ROOT}/.venv/bin/python" -m pytest "${pytest_args[@]}"
   else

@@ -1,0 +1,18 @@
+name: Report failed tests
+description: >-
+  Name the failing tests of a pytest junit report in the step summary and in the run's annotations, so a reader of
+  the run page sees which tests failed without opening the job log. Call it with `if: failure()` after the test step.
+
+inputs:
+  junit:
+    description: Glob of the junit XML files the pytest run wrote (pytest --junitxml).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: List the failing tests
+      shell: bash
+      env:
+        JUNIT: ${{ inputs.junit }}
+      run: python3 "$GITHUB_ACTION_PATH/report_failed_tests.py" "$JUNIT"

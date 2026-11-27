@@ -70,47 +70,12 @@ jobs:
           uv run --no-sync pytest -n 2 --dist=loadscope -v --tb=short tests/
           --junitxml=/tmp/unit.xml
 
-      # Surface which tests failed without downloading the whole job log: the summary is
-      # written to the step summary, which is readable from the run page and the API.
+      # Name the failing tests in the run's annotations: a reader without a sign-in cannot open the job log.
       - name: Report failed tests
         if: failure()
-        run: |
-          python3 - <<'EOF'
-          import glob, os, sys, xml.etree.ElementTree as ET
-
-          rows = []
-          for path in glob.glob("/tmp/*.xml"):
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  continue
-              for case in root.iter("testcase"):
-                  for tag in ("failure", "error"):
-                      node = case.find(tag)
-                      if node is not None:
-                          msg = (node.get("message") or "").strip().splitlines()[:2]
-                          rows.append((case.get("classname"), case.get("name"), msg))
-
-          summary = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary:
-              with open(summary, "a", encoding="utf-8") as handle:
-                  handle.write("## Failed tests\n")
-                  if not rows:
-                      handle.write("No failures recorded in the junit report.\n")
-                  for cls, name, msg in rows:
-                      handle.write(f"- `{cls}::{name}`\n")
-                      for line in msg:
-                          handle.write(f"  - {line}\n")
-
-          # Annotations are the only part of a failed job an anonymous reader can fetch,
-          # so the failing test ids go there too.
-          for cls, name, msg in rows[:40]:
-              detail = " | ".join(msg).replace("\n", " ")[:180]
-              print(f"::error title={cls}::{name}::{detail}")
-          if not rows:
-              print("::error title=failed-tests::no junit entries were written")
-          sys.exit(0)
-          EOF
+        uses: ./.github/actions/report-failed-tests
+        with:
+          junit: /tmp/unit.xml
 
       # A stalled run ends before pytest writes the junit report, so the log is the only trace: the newest
       # finished test of each worker (the stalled test is the next one in that module), then what the stall
@@ -392,40 +357,6 @@ jobs:
 
       - name: Report failed tests
         if: failure()
-        run: |
-          python3 - <<'EOF'
-          import glob, os, sys, xml.etree.ElementTree as ET
-
-          rows = []
-          for path in glob.glob("/tmp/*.xml"):
-              try:
-                  root = ET.parse(path).getroot()
-              except ET.ParseError:
-                  continue
-              for case in root.iter("testcase"):
-                  for tag in ("failure", "error"):
-                      node = case.find(tag)
-                      if node is not None:
-                          msg = (node.get("message") or "").strip().splitlines()[:2]
-                          rows.append((case.get("classname"), case.get("name"), msg))
-
-          summary = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary:
-              with open(summary, "a", encoding="utf-8") as handle:
-                  handle.write("## Failed tests\n")
-                  if not rows:
-                      handle.write("No failures recorded in the junit report.\n")
-                  for cls, name, msg in rows:
-                      handle.write(f"- `{cls}::{name}`\n")
-                      for line in msg:
-                          handle.write(f"  - {line}\n")
-
-          # Annotations are the only part of a failed job an anonymous reader can fetch,
-          # so the failing test ids go there too.
-          for cls, name, msg in rows[:40]:
-              detail = " | ".join(msg).replace("\n", " ")[:180]
-              print(f"::error title={cls}::{name}::{detail}")
-          if not rows:
-              print("::error title=failed-tests::no junit entries were written")
-          sys.exit(0)
-          EOF
+        uses: ./.github/actions/report-failed-tests
+        with:
+          junit: /tmp/browser.xml

@@ -55,6 +55,13 @@ jobs:
       - name: Run default pytest suite
         run: bash scripts/ci/run_default_tests.sh
 
+      # Name the failing tests in the run's annotations: a reader without a sign-in cannot open the job log.
+      - name: Report failed tests
+        if: failure()
+        uses: ./.github/actions/report-failed-tests
+        with:
+          junit: /tmp/server-unit.xml
+
   locked-use-pytest:
     name: Locked Use regression (tests/services/locked_use)
     runs-on: ubuntu-24.04
