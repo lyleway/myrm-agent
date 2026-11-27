@@ -1011,6 +1011,8 @@ pytest 测试套件根目录。单元/集成/API/E2E 测试按域分子目录；
 | `api/agent/test_fleet_overview_integration.py` | 模块 | Fleet Overview API 集成（Chat/CronJob/Approval 真实 DB 聚合 + kanban IN_REVIEW 并入 pendingApprovals + kanban store 故障降级）；聚合用例把 kanban 读取固定为没有看板（它读进程库，别的套件会在里面留下 IN_REVIEW 任务），kanban 两条用例各自替换读取 |
 | `api/chats/test_kanban_in_review_seed_integration.py` | 模块 | IN_REVIEW seed fixture 集成（fixture → badges 计数 + approve/reject 转换回落） |
 | `core/web_push/test_push_deep_links.py` | 模块 | Web Push 点击路由（resolve_push_url：APPROVAL_REQUIRED 深链、pending_review+board_id 直达看板 in_review 列、非 review 状态回退聊天页、缺 chat 回首页、自动备份告警直达备份设置、云端同步告警直达云端备份页） |
+| `core/web_push/conftest.py` | 辅助 | `keyed_service`：持有 `vapid_keys.py` 在临时状态目录里真实生成的 VAPID 密钥对（PKCS8 PEM）的推送服务，`test_web_push_service.py` 的发送用例与 `test_web_push_delivery.py` 共用 |
+| `core/web_push/test_web_push_delivery.py` | 模块 | `_send_one` 走真实 pywebpush，只桩掉它最底层的 `requests.post`：库接受生成器写出的 PEM 私钥并发出请求；请求头里的 VAPID 令牌用对外公布的公钥验签（`aud` 取推送端点的源、`sub` 取 `NOREPLY_EMAIL`）；每个请求带有界超时；推送服务回 410 或 404 时清掉订阅，回 500 时保留 |
 | `api/kanban/test_in_review_api.py` | 模块 | IN_REVIEW 审批 API（approve/reject 转换、守卫、pending_review 通知 payload 含 board_id） |
 | `platform_utils/sandbox/_ARCH.md` | 模块 | `platform_utils/sandbox` 业务逻辑回归（platform provider seed 14 例 + tool gateway merge），见子目录清单 |
 | `services/skills/test_scan_risk_policy.py` | 模块 | 后台学习的高危新增复核策略（真实扫描器）：新技能对比空内容、同类发现数量增加仍判新增（计数差分）、原有发现不重复拦截、语境型类别仅 CRITICAL 生效、扫描异常 fail-closed、信号词汇 |
