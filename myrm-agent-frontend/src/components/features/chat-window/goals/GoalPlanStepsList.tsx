@@ -42,6 +42,8 @@ export function GoalPlanStepsList({ goal, steps, compact = false }: GoalPlanStep
         {steps.map((step, index) => (
           <li
             key={step.step_id}
+            data-testid="goal-plan-step"
+            data-status={step.status}
             className={cn(
               'flex gap-3 rounded-2xl border p-3 transition-colors',
               step.status === 'in_progress' && 'border-primary/30 bg-primary/5',
