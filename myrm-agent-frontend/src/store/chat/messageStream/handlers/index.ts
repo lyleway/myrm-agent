@@ -31,6 +31,7 @@ import { modelNotifyEvents } from './modelNotifyEvents';
 import { completionEvents } from './completionEvents';
 import { gapEvents } from './gapEvents';
 import { phaseTransitionEvents } from './phaseTransitionEvents';
+import { planEvents } from './planEvents';
 
 export const STREAM_EVENT_HANDLERS: Array<(ctx: StreamCtx) => Promise<StreamTurn | null>> = [
   catchupEvents,
@@ -38,6 +39,7 @@ export const STREAM_EVENT_HANDLERS: Array<(ctx: StreamCtx) => Promise<StreamTurn
   rateLimitEvents,
   gapEvents,
   phaseTransitionEvents,
+  planEvents,
   agentControlEvents,
   toolsProgressEvents,
   statusStreamEvents,

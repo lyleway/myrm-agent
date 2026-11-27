@@ -3,7 +3,7 @@
 [INPUT]
 - progress.schemas::MAX_TODOS, TodoItem, TodoStatus, TodoStore (POS: todo data models and limits)
 - progress.storage::read/write/merge todos (POS: workspace SSOT)
-- progress.events::emit_todo_progress_events (POS: SSE UI)
+- progress.events::emit_plan_update (POS: tells the UI the plan file changed)
 - langchain_core.tools::tool (POS: LangChain tool decorator)
 
 [OUTPUT]
@@ -21,7 +21,7 @@ import logging
 
 from langchain_core.tools import BaseTool, tool
 
-from myrm_agent_harness.agent.meta_tools.progress.events import emit_todo_progress_events
+from myrm_agent_harness.agent.meta_tools.progress.events import emit_plan_update
 from myrm_agent_harness.agent.meta_tools.progress.schemas import MAX_TODOS, TodoItem, TodoStatus, TodoStore
 from myrm_agent_harness.agent.meta_tools.progress.storage import (
     merge_todo_items,
@@ -101,7 +101,7 @@ def create_todo_write_tool(workspace_root: str | None) -> BaseTool:
             revision=next_revision,
         )
         write_todos_sync_to_workspace(root, store)
-        emit_todo_progress_events(store)
+        emit_plan_update(store)
 
         pending = sum(1 for item in store.todos if item.status == TodoStatus.PENDING)
         in_progress = sum(1 for item in store.todos if item.status == TodoStatus.IN_PROGRESS)

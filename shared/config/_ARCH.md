@@ -49,7 +49,7 @@ Legacy storage id remap 在前后端使用**同一算法**（与 [`providers.py`
 - `image_models`：图像模型清单，顺序与 harness `BUILTIN_PROFILES` 一致；设置页的 `IMAGE_MODEL_OPTIONS` 逐项等于它。
 - `shapes`：`generate_result`（`tasks[{task_id, task_type, status}]`）、`image_result`（`images[{url, mime_type}]`、`model`、`prompt`、`latency_ms`，`provider` 可选）、
   `video_result`（`video_urls`）、`speech_result`（`audio_url`、`model`、`duration_seconds` 可选）、登记条目 `task_entry` / `stored_entry`。
-  三种结果形状另有两个可选字段：`workspace_files`（工作区里的副本路径，非空字符串列表）与 `workspace_files_error`（哪些副本没复制成功及原因）；
+  三种结果形状另有两个可选字段：`workspace_files`（工作区里的副本路径，相对工作区根、形如 `./_generated/<id>.<扩展名>`，非空字符串列表）与 `workspace_files_error`（哪些副本没复制成功及原因）；
   异步任务的结果里它们在 `result` 对象内，同步编辑与语音在结果顶层。前端不读这两个字段，登记与卡片都不受它们影响。
   图像、视频、语音地址一律是 `media://<id>`；字段类型只有 `string`（非空）、`number`、`media_reference`、`{list}` 和 `{one_of}`。
 - `collector_cases`：工具名 + 结果 + 应登记的条目。服务端 `collect_media_generated` 与前端 `mediaGeneratedEntriesOf` 都逐条跑它。

@@ -90,6 +90,7 @@ class AgentEventType(StrEnum):
     """Agent event types for streaming responses."""
 
     TASKS_STEPS = "tasks_steps"
+    PLAN_UPDATE = "plan_update"
     TOOL_HEARTBEAT = "tool_heartbeat"
     SOURCES = "sources"
     MESSAGE = "message"

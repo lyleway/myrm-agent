@@ -8,6 +8,7 @@ workspace's skills, rules and MCP servers.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import stat
 import sys
@@ -94,7 +95,7 @@ def started(monkeypatch: pytest.MonkeyPatch, every_formatter_is_installed: None)
         calls.append(cmd)
         return _FinishedProcess()
 
-    monkeypatch.setattr(format_observer.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     return calls
 
 

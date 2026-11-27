@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,7 +17,7 @@ from myrm_agent_harness.toolkits.code_execution.executors.models import Executio
 
 
 @pytest.fixture(autouse=True)
-def _clear_cache():
+def _clear_cache() -> Iterator[None]:
     """Clear linter availability cache before each test."""
     _reset_cache()
     yield
@@ -24,15 +25,15 @@ def _clear_cache():
 
 
 class TestLinterRegistry:
-    def test_python_extension_registered(self):
+    def test_python_extension_registered(self) -> None:
         assert ".py" in LINTER_REGISTRY
         assert "pyright" in LINTER_REGISTRY[".py"].command_template
 
-    def test_only_python_is_registered(self):
+    def test_only_python_is_registered(self) -> None:
         """A per-file TypeScript, Go or Rust check is silent or reports phantom errors, so none is registered."""
         assert set(LINTER_REGISTRY) == {".py"}
 
-    def test_unsupported_extension(self):
+    def test_unsupported_extension(self) -> None:
         assert ".md" not in LINTER_REGISTRY
         assert ".txt" not in LINTER_REGISTRY
         assert ".html" not in LINTER_REGISTRY
@@ -40,7 +41,7 @@ class TestLinterRegistry:
 
 class TestRunAutoVerify:
     @pytest.mark.asyncio
-    async def test_unsupported_extension_returns_none(self):
+    async def test_unsupported_extension_returns_none(self) -> None:
         executor = AsyncMock()
         result = await run_auto_verify(executor, "/workspace/readme.md")
         assert result is None
@@ -48,14 +49,14 @@ class TestRunAutoVerify:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("name", ["a.ts", "a.tsx", "a.go", "a.rs", "a.js"])
-    async def test_languages_without_a_registered_linter_start_no_process(self, name):
+    async def test_languages_without_a_registered_linter_start_no_process(self, name: str) -> None:
         executor = AsyncMock()
         result = await run_auto_verify(executor, f"/workspace/{name}")
         assert result is None
         executor.execute_bash.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_linter_not_available_returns_none(self):
+    async def test_linter_not_available_returns_none(self) -> None:
         executor = AsyncMock()
         exec_result = AsyncMock()
         exec_result.success = False
@@ -65,7 +66,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_linter_available_no_errors_returns_none(self):
+    async def test_linter_available_no_errors_returns_none(self) -> None:
         executor = AsyncMock()
 
         which_result = AsyncMock()
@@ -82,7 +83,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_linter_finds_errors(self):
+    async def test_linter_finds_errors(self) -> None:
         executor = AsyncMock()
 
         which_result = AsyncMock()
@@ -101,7 +102,7 @@ class TestRunAutoVerify:
         assert "Type mismatch" in result
 
     @pytest.mark.asyncio
-    async def test_uses_cache_for_availability(self):
+    async def test_uses_cache_for_availability(self) -> None:
         executor = AsyncMock()
 
         which_result = AsyncMock()
@@ -123,7 +124,7 @@ class TestRunAutoVerify:
         assert len(which_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_timeout_returns_none(self):
+    async def test_timeout_returns_none(self) -> None:
         executor = AsyncMock()
 
         which_result = AsyncMock()
@@ -138,7 +139,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_with_edit_range_filters_diagnostics(self):
+    async def test_with_edit_range_filters_diagnostics(self) -> None:
         """Verify edit_line_start/end params trigger incremental filtering."""
         executor = AsyncMock()
 
@@ -158,7 +159,7 @@ class TestRunAutoVerify:
         assert "Far away" not in result
 
     @pytest.mark.asyncio
-    async def test_pyright_invalid_json_falls_back_to_text_output(self):
+    async def test_pyright_invalid_json_falls_back_to_text_output(self) -> None:
         """When pyright outputs non-JSON, its text format is parsed instead."""
         executor = AsyncMock()
 
@@ -177,7 +178,7 @@ class TestRunAutoVerify:
         assert "Undefined variable" in result
 
     @pytest.mark.asyncio
-    async def test_executor_generic_exception_returns_none(self):
+    async def test_executor_generic_exception_returns_none(self) -> None:
         """Any non-timeout exception from executor is handled gracefully."""
         executor = AsyncMock()
 
@@ -193,7 +194,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_no_executor_returns_none_early(self):
+    async def test_no_executor_returns_none_early(self) -> None:
         """Unsupported extension still returns None even if executor is weird."""
         executor = AsyncMock()
         result = await run_auto_verify(executor, "/workspace/file.xyz")
@@ -201,7 +202,7 @@ class TestRunAutoVerify:
         executor.execute_bash.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_linter_unavailable_cached_on_second_call(self):
+    async def test_linter_unavailable_cached_on_second_call(self) -> None:
         """Second call for same linter uses cached False result."""
         executor = AsyncMock()
 
@@ -219,7 +220,7 @@ class TestRunAutoVerify:
         assert len(which_calls) == 1
 
     @pytest.mark.asyncio
-    async def test_check_available_exception_returns_false(self):
+    async def test_check_available_exception_returns_false(self) -> None:
         """Exception during `which` check marks linter as unavailable."""
         executor = AsyncMock()
         executor.execute_bash.side_effect = OSError("broken pipe")
@@ -228,7 +229,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_diagnostics_all_outside_edit_range_returns_none(self):
+    async def test_diagnostics_all_outside_edit_range_returns_none(self) -> None:
         """All diagnostics outside edit range => filtered to empty => return None."""
         executor = AsyncMock()
 
@@ -246,7 +247,7 @@ class TestRunAutoVerify:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_unparseable_linter_output_returns_none(self):
+    async def test_unparseable_linter_output_returns_none(self) -> None:
         """Linter fails but output is garbage => no parseable diagnostics => None."""
         executor = AsyncMock()
 
@@ -268,7 +269,7 @@ class TestWorkspaceContext:
     """The detection and the linter run from the workspace root, not from the directory of the host process."""
 
     @pytest.mark.asyncio
-    async def test_detection_and_lint_run_from_the_workspace_root(self):
+    async def test_detection_and_lint_run_from_the_workspace_root(self) -> None:
         executor = AsyncMock()
         executor.workspace_path = "/srv/ws"
         executor.execute_bash.return_value = ExecutionResult(success=True, exit_code=0)

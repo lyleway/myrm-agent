@@ -45,6 +45,7 @@ export { default as useConfigStore } from '@/store/useConfigStore';
 export { playCompletionSound } from '@/lib/utils/completionSound';
 export { dispatchPetSurfaceAwayCompletion } from '@/components/features/companion/sprite/petSurfaceAwayCompletion';
 import useChatStore from '@/store/useChatStore';
+import { useFeatureGateStore } from '@/store/useFeatureGateStore';
 import type { SubagentStore } from '@/store/chat/useSubagentStore';
 import type { StreamHandlerState } from '../types';
 export type { ProgressFileItem } from '../types';
@@ -104,6 +105,24 @@ export function writeSubagentStore(state: StreamHandlerState, write: (store: Sub
   void import('@/store/chat/useSubagentStore').then(({ useSubagentStore }) => {
     if (isStreamForOpenChat(state)) {
       write(useSubagentStore.getState());
+    }
+  });
+}
+
+/**
+ * Makes the plan panel of the open chat re-read its plan. The panel shows the plan the server serves (the list the
+ * agent itself reads), so a stream's snapshot is only the signal that it changed: applying it here would bypass the
+ * server's rules for which plan a chat shows. A stream of another chat leaves the open chat's plan alone, and with the
+ * goals feature off the plan endpoint refuses every call. The plan store loads lazily like the subagent store, so the
+ * open-chat check runs once the chunk has arrived.
+ */
+export function refreshPlanForOpenChat(state: StreamHandlerState): void {
+  if (!useFeatureGateStore.getState().isEnabled('goals_system')) {
+    return;
+  }
+  void import('@/store/chat/goals/usePlanStore').then(({ usePlanStore }) => {
+    if (isStreamForOpenChat(state)) {
+      void usePlanStore.getState().fetchPlan(resolveStreamChatId(state));
     }
   });
 }

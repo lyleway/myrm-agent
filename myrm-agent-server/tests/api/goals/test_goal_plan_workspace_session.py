@@ -1,9 +1,9 @@
-"""Goal plan API reads todos from the chat-prefixed workspace session."""
+"""Goal plan API reads todos from the chat-prefixed workspace session, and answers no plan or a failed read."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -63,3 +63,45 @@ async def test_get_goal_plan_uses_chat_workspace_session(goals_client: tuple[Tes
     assert payload["plan"]["steps"][0]["status"] == "pending"
     assert payload["plan"]["steps"][1]["step_id"] == "todo_2"
     assert payload["plan"]["steps"][1]["status"] == "blocked"
+
+
+def test_get_goal_plan_for_a_chat_without_a_list_or_a_branch_plan_reports_none(
+    goals_client: tuple[TestClient, Path],
+) -> None:
+    test_client, tmp_path = goals_client
+
+    with patch("app.config.settings.get_settings") as mock_settings:
+        mock_settings.return_value.database.harness_dir = str(tmp_path)
+        with patch("app.services.chat.chat_service.ChatService.get_all_messages", new_callable=AsyncMock) as messages:
+            messages.return_value = []
+            response = test_client.get("/api/v1/goals/chat-without-plan/plan")
+
+    assert response.status_code == 200
+    assert response.json() == {"plan": None}
+    messages.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "store",
+    [pytest.param(None, id="no-store"), pytest.param(TodoStore(todos=[]), id="empty-list")],
+)
+def test_get_goal_plan_reports_none_when_the_store_holds_no_todos(
+    goals_client: tuple[TestClient, Path], store: TodoStore | None
+) -> None:
+    test_client, _ = goals_client
+
+    with patch("app.api.goals.plan.resolve_session_todo_store", new=AsyncMock(return_value=store)):
+        response = test_client.get("/api/v1/goals/session-uuid-2/plan")
+
+    assert response.status_code == 200
+    assert response.json() == {"plan": None}
+
+
+def test_get_goal_plan_reports_a_failed_read_as_a_server_error(goals_client: tuple[TestClient, Path]) -> None:
+    test_client, _ = goals_client
+
+    with patch("app.api.goals.plan.resolve_session_todo_store", new=AsyncMock(side_effect=RuntimeError("disk gone"))):
+        response = test_client.get("/api/v1/goals/session-uuid-2/plan")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Failed to get goal progress"}

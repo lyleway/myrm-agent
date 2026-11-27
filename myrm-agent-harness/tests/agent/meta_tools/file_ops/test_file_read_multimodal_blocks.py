@@ -61,7 +61,7 @@ async def test_build_multimodal_vision_and_pdf(tmp_path: Path) -> None:
             config=_DUMMY_CONFIG,
         )
 
-    texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+    texts = [str(b.get("text")) for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
     assert any("img block" in t for t in texts)
     assert any("pdf text" in t for t in texts)
     assert any("video text" in t for t in texts)
@@ -110,7 +110,7 @@ async def test_build_multimodal_pdf_list_blocks() -> None:
             supports_vision=True,
             config=_DUMMY_CONFIG,
         )
-    assert any("pdf blocks" in b.get("text", "") for b in blocks if isinstance(b, dict))
+    assert any("pdf blocks" in str(b.get("text", "")) for b in blocks if isinstance(b, dict))
 
     blocks = await build_multimodal_result(
         image_paths=[],
@@ -125,7 +125,7 @@ async def test_build_multimodal_pdf_list_blocks() -> None:
         supports_vision=False,
         config=_DUMMY_CONFIG,
     )
-    assert blocks[0]["text"] == "No results."
+    assert blocks[0].get("text") == "No results."
 
 
 @pytest.mark.asyncio
@@ -189,7 +189,7 @@ async def test_build_multimodal_video_list_blocks() -> None:
             video_paths=["clip.mp4"],
             config=_DUMMY_CONFIG,
         )
-    assert any("vid-list" in b.get("text", "") for b in blocks if isinstance(b, dict))
+    assert any("vid-list" in str(b.get("text", "")) for b in blocks if isinstance(b, dict))
 
 
 @pytest.mark.asyncio

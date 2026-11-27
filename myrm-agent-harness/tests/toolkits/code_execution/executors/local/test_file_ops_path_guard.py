@@ -70,6 +70,6 @@ async def test_read_of_evidence_stays_allowed(executor, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_delete_refuses_protected_paths(executor):
+async def test_delete_refuses_protected_paths(executor: LocalExecutor) -> None:
     with pytest.raises(PermissionError):
         await executor.delete_file("evidence/source.pdf")

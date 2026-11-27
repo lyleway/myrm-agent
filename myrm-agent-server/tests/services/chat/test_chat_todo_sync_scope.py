@@ -6,6 +6,8 @@
 
 [OUTPUT]
 - Cases proving the sync follows the workspace a chat runs in and never touches another chat's list.
+- Cases proving the plan a chat shows is its own list, and the plan archived on its branch only when it has no list or
+  its workspace cannot be found.
 - Cases proving a failure to read the database or the list is skipped over with a WARNING, not dropped silently.
 """
 
@@ -115,7 +117,7 @@ async def test_a_session_key_names_the_same_list_as_the_chat_id(project_workspac
 
 
 @pytest.mark.asyncio
-async def test_the_plan_fallback_reads_the_chats_own_list(project_workspace: str) -> None:
+async def test_the_plan_is_read_from_the_chats_own_list(project_workspace: str) -> None:
     write_todos_sync_to_workspace(project_workspace, _list("A's plan", "a1"), _CHAT_A)
     write_todos_sync_to_workspace(project_workspace, _list("B's plan", "b1"), _CHAT_B)
 
@@ -148,32 +150,93 @@ async def test_a_failure_finding_the_workspace_skips_the_sync_and_is_warned_abou
 
 
 @pytest.mark.asyncio
-async def test_a_failure_reading_the_branch_is_warned_about_and_the_workspace_list_still_answers(
-    project_workspace: str, caplog: pytest.LogCaptureFixture
-) -> None:
+async def test_a_chat_with_a_list_is_answered_without_reading_its_messages(project_workspace: str) -> None:
     write_todos_sync_to_workspace(project_workspace, _list("A's plan", "a1"), _CHAT_A)
+    get_all_messages = AsyncMock(return_value=[])
 
+    with patch(_GET_ALL_MESSAGES, new=get_all_messages):
+        store = await resolve_session_todo_store(_CHAT_A)
+
+    assert store is not None and store.goal == "A's plan"
+    get_all_messages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_list_wins_over_the_plan_archived_with_the_messages(project_workspace: str) -> None:
+    newer = _list("Newer plan", "new", TodoStatus.IN_PROGRESS)
+    write_todos_sync_to_workspace(project_workspace, newer, _CHAT_A)
+
+    with patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[_message_with(_CHAT_A, _list("Older plan", "old"))])):
+        store = await resolve_session_todo_store(_CHAT_A)
+
+    assert store is not None and store.goal == "Newer plan"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("project_workspace")
+async def test_a_chat_without_a_list_shows_the_plan_of_its_branch() -> None:
+    with patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[_message_with(_CHAT_A, _list("Branch plan", "b1"))])):
+        store = await resolve_session_todo_store(_CHAT_A)
+
+    assert store is not None and store.goal == "Branch plan"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("project_workspace")
+async def test_a_failure_reading_the_branch_is_warned_about_and_no_plan_is_served(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     with (
         patch(_GET_ALL_MESSAGES, new=AsyncMock(side_effect=sqlite3.OperationalError(_LOCKED))),
         caplog.at_level(logging.WARNING, logger=_SYNC_LOGGER),
     ):
         store = await resolve_session_todo_store(_CHAT_A)
 
-    assert store is not None and store.goal == "A's plan"
+    assert store is None
     assert _warnings(caplog) == [f"Failed to fold todo state from conversation branch {_CHAT_A}: {_LOCKED}"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("project_workspace")
-async def test_a_failure_reading_the_workspace_list_is_warned_about_and_no_plan_is_served(
+async def test_an_unreadable_list_is_warned_about_and_the_plan_of_the_branch_answers(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with (
-        patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[])),
+        patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[_message_with(_CHAT_A, _list("Branch plan", "b1"))])),
         patch(_READ_TODOS, side_effect=PermissionError("denied")),
         caplog.at_level(logging.WARNING, logger=_SYNC_LOGGER),
     ):
         store = await resolve_session_todo_store(_CHAT_A)
 
-    assert store is None
-    assert _warnings(caplog) == [f"Failed to read fallback workspace todos for session {_CHAT_A}: denied"]
+    assert store is not None and store.goal == "Branch plan"
+    assert _warnings(caplog) == [f"Failed to read workspace todos for session {_CHAT_A}: denied"]
+
+
+@pytest.mark.asyncio
+async def test_a_chat_whose_workspace_cannot_be_found_shows_the_plan_of_its_branch() -> None:
+    with (
+        patch(f"{_SYNC_LOGGER}.find_chat_workspace_root", new=AsyncMock(return_value=None)),
+        patch(_READ_TODOS) as read_todos,
+        patch(_GET_ALL_MESSAGES, new=AsyncMock(return_value=[_message_with(_CHAT_A, _list("Branch plan", "b1"))])),
+    ):
+        store = await resolve_session_todo_store(_CHAT_A)
+
+    assert store is not None and store.goal == "Branch plan"
+    read_todos.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failure_reading_the_messages_skips_the_sync_and_is_warned_about(
+    project_workspace: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    write_todos_sync_to_workspace(project_workspace, _list("Later plan", "late"), _CHAT_A)
+
+    with (
+        patch(_GET_ALL_MESSAGES, new=AsyncMock(side_effect=sqlite3.OperationalError(_LOCKED))),
+        caplog.at_level(logging.WARNING, logger=_SYNC_LOGGER),
+    ):
+        await sync_workspace_todos_for_active_branch(_CHAT_A)
+
+    kept = read_todos_sync_from_workspace(project_workspace, _CHAT_A)
+    assert kept is not None and kept.goal == "Later plan"
+    assert _warnings(caplog) == [f"Failed to sync workspace todos for active branch on chat {_CHAT_A}: {_LOCKED}"]
