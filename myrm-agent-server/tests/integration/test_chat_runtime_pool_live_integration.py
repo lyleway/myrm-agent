@@ -81,7 +81,9 @@ async def test_live_concurrent_turns_of_one_agent_queue_on_the_real_pool() -> No
     gate = asyncio.Event()
     release = asyncio.Event()
 
-    async def slow_run(prompt: str, session_id: str, *, mcp_servers: object = None, images: object = None):
+    # The doubles in this module name the arguments they use and ignore the rest the facade forwards, so a parameter
+    # added to ``run_turn`` does not break them.
+    async def slow_run(prompt: str, session_id: str, **_forwarded: object):
         order.append(f"{prompt}_start")
         gate.set()
         await release.wait()
@@ -164,8 +166,7 @@ async def test_live_facade_cancel_during_active_run_turn() -> None:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: object = None,
-        images: object = None,
+        **_forwarded: object,
     ):
         entered.set()
         await unblock.wait()
@@ -219,8 +220,7 @@ async def test_live_fingerprint_replace_deferred_while_turn_in_flight() -> None:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: object = None,
-        images: object = None,
+        **_forwarded: object,
     ):
         entered.set()
         await unblock.wait()
@@ -284,8 +284,7 @@ async def test_live_parallel_run_turn_different_chats() -> None:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: object = None,
-        images: object = None,
+        **_forwarded: object,
     ):
         label = session_id.split("-")[-1]
         order.append(f"{label}_start")
@@ -376,8 +375,7 @@ async def test_live_direct_delegate_stream_cancel_propagates() -> None:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: object = None,
-        images: object = None,
+        **_forwarded: object,
     ):
         entered.set()
         while True:

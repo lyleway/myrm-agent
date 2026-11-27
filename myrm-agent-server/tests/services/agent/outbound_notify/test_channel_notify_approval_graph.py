@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import myrm_agent_harness.agent.security.approval_flow as approval_flow
@@ -100,7 +100,9 @@ def bus(monkeypatch: pytest.MonkeyPatch) -> _FakeBus:
 
 
 @pytest.fixture(autouse=True)
-def _web_session(tmp_path: Path) -> Iterator[None]:
+async def _web_session(tmp_path: Path) -> AsyncIterator[None]:
+    """Async on purpose: the setters below bind the context they run in, and a sync fixture would bind the thread's
+    main context, so every later test of the run would inherit this workspace root, chat and user."""
     approval_flow._allowlist = approval_flow.Allowlist()
     reset_taint_tracker()
     reset_audit_log()
