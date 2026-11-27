@@ -3,13 +3,15 @@
 [INPUT]
 - app.lifecycle.task_worker::get_task_store (POS: task queue singleton; imported at call time)
 - app.tasks.serializer::serialize_media_task (POS: media task status serializer)
+- app.ai_agents.media_tools.workspace_export::WorkspaceExporter (POS: copies a result's media into the workspace)
 
 [OUTPUT]
 - tool_error(): ``{"error": ...}`` result
 - media_task_store(): the task queue store, raising ``RuntimeError`` before the worker has started
 - started_tasks_result(): ``{"tasks": [...]}`` answer of a generate call, with what to do while the tasks run
 - MAX_WAIT_SECONDS / WAIT_SECONDS_DESCRIPTION: bound and wording of the ``wait_seconds`` parameter of ``status``
-- media_task_status_result(): result of ``action='status'``, optionally waiting for the task, with explicit errors
+- media_task_status_result(): result of ``action='status'``, optionally waiting for the task and completing a finished
+  result with its workspace copies, with explicit errors
 
 [POS]
 The generate and status halves of ``image_tool`` and ``video_tool`` answer identically, so they are built once here:
@@ -26,6 +28,7 @@ from time import monotonic
 
 from myrm_agent_harness.toolkits.tasks import SQLiteTaskStore, Task
 
+from app.ai_agents.media_tools.workspace_export import WorkspaceExporter
 from app.tasks.serializer import serialize_media_task
 
 logger = logging.getLogger(__name__)
@@ -84,10 +87,16 @@ async def _wait_until_finished(store: SQLiteTaskStore, task: Task, wait_seconds:
     return task
 
 
-async def media_task_status_result(task_id: str | None, wait_seconds: int | None = None) -> str:
+async def media_task_status_result(
+    task_id: str | None,
+    wait_seconds: int | None = None,
+    *,
+    exporter: WorkspaceExporter | None = None,
+) -> str:
     """State and result of one task, or the explicit reason there is none to report.
 
     With ``wait_seconds`` the answer comes as soon as the task has finished, at the latest after that many seconds.
+    With ``exporter`` the result of a finished task of its chat also names the copies of the media in the workspace.
     """
     if not task_id:
         return tool_error("task_id is required when action=status")
@@ -101,4 +110,7 @@ async def media_task_status_result(task_id: str | None, wait_seconds: int | None
         return tool_error("Task store unavailable", task_id=task_id)
     if task is None:
         return tool_error("Task not found", task_id=task_id)
-    return json.dumps(serialize_media_task(task), ensure_ascii=False)
+    status = serialize_media_task(task)
+    if exporter is not None:
+        status = await exporter.complete_status(task, status)
+    return json.dumps(status, ensure_ascii=False)

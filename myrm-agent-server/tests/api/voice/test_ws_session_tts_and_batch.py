@@ -16,7 +16,7 @@ from app.api.voice.agent_bridge import VoiceAgentBridge
 from app.api.voice.ws_session import _VoiceSession
 from app.channels.types import VoiceConfig
 from tests.api.stt.stream_testkit import FakeTranscriber, Frame, audio_frame, sent_json
-from tests.api.voice.session_testkit import voice_session
+from tests.api.voice.session_testkit import socket_of, voice_session
 
 _INFO = {"type": "info", "message": "streaming_unavailable", "fallback": "batch"}
 _END_UTTERANCE: dict[str, object] = {"type": "websocket.receive", "text": json.dumps({"type": "end_utterance"})}
@@ -47,7 +47,7 @@ def _synthesizer(
 
 
 def _spoken(session: _VoiceSession) -> list[bytes]:
-    return [call.args[0] for call in session._ws.send_bytes.await_args_list]
+    return [call.args[0] for call in socket_of(session).send_bytes.await_args_list]
 
 
 class TestSpeechStreaming:
@@ -58,7 +58,7 @@ class TestSpeechStreaming:
             await session._stream_tts("hello")
 
         assert _spoken(session) == [b"a", b"b"]
-        assert sent_json(session._ws) == [{"type": "tts_start"}, {"type": "tts_end"}]
+        assert sent_json(socket_of(session)) == [{"type": "tts_start"}, {"type": "tts_end"}]
 
     async def test_cancelling_speech_mid_stream_stops_the_audio_but_still_ends_the_turn(self) -> None:
         session = _session()
@@ -68,7 +68,7 @@ class TestSpeechStreaming:
             await session._stream_tts("hello")
 
         assert _spoken(session) == [b"a"]
-        assert sent_json(session._ws)[-1] == {"type": "tts_end"}
+        assert sent_json(socket_of(session))[-1] == {"type": "tts_end"}
 
     async def test_speech_after_a_cancel_starts_with_a_clean_flag(self) -> None:
         session = _session()
@@ -82,13 +82,13 @@ class TestSpeechStreaming:
     @pytest.mark.parametrize("failure", [WebSocketDisconnect(), RuntimeError("closed")], ids=["disconnected", "closed"])
     async def test_a_browser_that_vanishes_while_audio_is_sent_closes_the_session(self, failure: Exception) -> None:
         session = _session()
-        session._ws.send_bytes.side_effect = failure
+        socket_of(session).send_bytes.side_effect = failure
 
         with patch("app.channels.voice.tts.synthesize_stream", _synthesizer(b"a", b"b")):
             await session._stream_tts("hello")
 
         assert session._closed
-        assert sent_json(session._ws) == [{"type": "tts_start"}]
+        assert sent_json(socket_of(session)) == [{"type": "tts_start"}]
 
     async def test_a_synthesis_failure_is_logged_and_the_turn_still_ends(self, caplog: pytest.LogCaptureFixture) -> None:
         session = _session()
@@ -99,7 +99,7 @@ class TestSpeechStreaming:
 
         assert "TTS streaming failed in voice session" in caplog.text
         assert _spoken(session) == [b"a"]
-        assert sent_json(session._ws)[-1] == {"type": "tts_end"}
+        assert sent_json(socket_of(session))[-1] == {"type": "tts_end"}
 
     async def test_the_consumer_speaks_queued_text_in_order_until_the_end_marker(self) -> None:
         session = _session()
@@ -120,7 +120,7 @@ class TestBatchSpeechToText:
         await session._run_batch_stt()
 
         assert session._closed
-        assert sent_json(session._ws) == [_INFO]
+        assert sent_json(socket_of(session)) == [_INFO]
 
     async def test_a_disconnect_frame_closes_the_session(self) -> None:
         session = _session()
@@ -134,7 +134,7 @@ class TestBatchSpeechToText:
 
         await session._run_batch_stt()
 
-        assert sent_json(session._ws) == [_INFO]
+        assert sent_json(socket_of(session)) == [_INFO]
 
     async def test_an_utterance_without_audio_is_skipped_and_the_next_one_is_transcribed(self) -> None:
         session = _session([_END_UTTERANCE, audio_frame(_UTTERANCE_AUDIO), _END_UTTERANCE])
@@ -143,7 +143,7 @@ class TestBatchSpeechToText:
             await session._run_batch_stt()
 
         transcribe.assert_awaited_once_with(_UTTERANCE_AUDIO)
-        assert sent_json(session._ws) == [_INFO, {"type": "stt_final", "text": "turn it on"}]
+        assert sent_json(socket_of(session)) == [_INFO, {"type": "stt_final", "text": "turn it on"}]
 
     @pytest.mark.parametrize(
         ("size", "transcribed"),
@@ -165,7 +165,7 @@ class TestBatchSpeechToText:
             await session._run_batch_stt()
 
         transcribe.assert_not_awaited()
-        assert sent_json(session._ws) == [_INFO, {"type": "error", "message": "Audio too large"}]
+        assert sent_json(socket_of(session)) == [_INFO, {"type": "error", "message": "Audio too large"}]
 
     async def test_a_transcribed_utterance_goes_to_the_agent_bridge_instead_of_the_browser(self) -> None:
         bridge = create_autospec(VoiceAgentBridge, instance=True)
@@ -176,7 +176,7 @@ class TestBatchSpeechToText:
         await asyncio.sleep(0)
 
         bridge.handle_stt_final.assert_awaited_once_with("turn it on")
-        assert sent_json(session._ws) == [_INFO]
+        assert sent_json(socket_of(session)) == [_INFO]
 
 
 class TestBatchTranscription:

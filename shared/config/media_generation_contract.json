@@ -26,15 +26,30 @@
         "prompt": "string",
         "latency_ms": "number"
       },
-      "optional": { "provider": "string" }
+      "optional": {
+        "provider": "string",
+        "workspace_files": { "list": "string" },
+        "workspace_files_error": "string"
+      }
     },
     "video_result": {
       "required": { "video_urls": { "list": "media_reference" } },
-      "optional": { "provider": "string", "model": "string", "prompt": "string", "latency_ms": "number" }
+      "optional": {
+        "provider": "string",
+        "model": "string",
+        "prompt": "string",
+        "latency_ms": "number",
+        "workspace_files": { "list": "string" },
+        "workspace_files_error": "string"
+      }
     },
     "speech_result": {
       "required": { "status": "string", "audio_url": "media_reference", "model": "string" },
-      "optional": { "duration_seconds": "number" }
+      "optional": {
+        "duration_seconds": "number",
+        "workspace_files": { "list": "string" },
+        "workspace_files_error": "string"
+      }
     },
     "task_entry": {
       "required": { "kind": { "one_of": ["image", "video"] }, "task_id": "string" }
@@ -56,14 +71,16 @@
       "images": [{ "url": "media://media_img_1", "mime_type": "image/png" }],
       "model": "gpt-image-2.6-sunburst",
       "prompt": "a red fox in the snow",
-      "latency_ms": 8200
+      "latency_ms": 8200,
+      "workspace_files": ["_generated/media_img_1.png"]
     },
     "video_result": {
       "video_urls": ["media://media_vid_1"],
       "provider": "gemini",
       "model": "veo-3.1-fast-generate-preview",
       "prompt": "waves at sunset",
-      "latency_ms": 61000
+      "latency_ms": 61000,
+      "workspace_files": ["_generated/media_vid_1.mp4"]
     },
     "speech_result": {
       "status": "success",
@@ -72,7 +89,8 @@
       "latency_ms": 900,
       "audio_url": "media://media_tts_1",
       "duration_seconds": 3.2,
-      "message": "Audio generated; it appears in the chat for the user to play."
+      "message": "Audio generated; it appears in the chat for the user to play.",
+      "workspace_files": ["_generated/media_tts_1.mp3"]
     },
     "task_entry": { "kind": "image", "task_id": "task_img_1" },
     "stored_entry": {
@@ -119,6 +137,30 @@
       "entries": [{ "kind": "image", "media": "media://media_edit_1", "model": "gpt-image-2.6-sunburst" }]
     },
     {
+      "name": "a synchronous image edit that names its workspace copy registers the same entry",
+      "tool": "image_tool",
+      "result": {
+        "images": [{ "url": "media://media_edit_1", "mime_type": "image/png" }],
+        "model": "gpt-image-2.6-sunburst",
+        "prompt": "add a red scarf",
+        "latency_ms": 7400,
+        "workspace_files": ["_generated/media_edit_1.png"]
+      },
+      "entries": [{ "kind": "image", "media": "media://media_edit_1", "model": "gpt-image-2.6-sunburst" }]
+    },
+    {
+      "name": "a synchronous image edit whose workspace copy failed registers the same entry",
+      "tool": "image_tool",
+      "result": {
+        "images": [{ "url": "media://media_edit_1", "mime_type": "image/png" }],
+        "model": "gpt-image-2.6-sunburst",
+        "prompt": "add a red scarf",
+        "latency_ms": 7400,
+        "workspace_files_error": "media://media_edit_1: its file is missing from storage"
+      },
+      "entries": [{ "kind": "image", "media": "media://media_edit_1", "model": "gpt-image-2.6-sunburst" }]
+    },
+    {
       "name": "a successful speech call registers the stored audio with its model and length",
       "tool": "tts_generate",
       "result": {
@@ -126,6 +168,20 @@
         "model": "eleven_turbo_v2_5",
         "audio_url": "media://media_tts_1",
         "duration_seconds": 3.2
+      },
+      "entries": [
+        { "kind": "tts", "media": "media://media_tts_1", "model": "eleven_turbo_v2_5", "duration_seconds": 3.2 }
+      ]
+    },
+    {
+      "name": "a speech call that names its workspace copy registers the same entry",
+      "tool": "tts_generate",
+      "result": {
+        "status": "success",
+        "model": "eleven_turbo_v2_5",
+        "audio_url": "media://media_tts_1",
+        "duration_seconds": 3.2,
+        "workspace_files": ["_generated/media_tts_1.mp3"]
       },
       "entries": [
         { "kind": "tts", "media": "media://media_tts_1", "model": "eleven_turbo_v2_5", "duration_seconds": 3.2 }
@@ -151,6 +207,17 @@
         "task_type": "image_generate",
         "status": "succeeded",
         "result": { "images": [{ "url": "media://media_img_1", "mime_type": "image/png" }] }
+      },
+      "entries": []
+    },
+    {
+      "name": "a status call whose result names workspace copies registers nothing either",
+      "tool": "video_tool",
+      "result": {
+        "task_id": "task_vid_1",
+        "task_type": "video_generate",
+        "status": "succeeded",
+        "result": { "video_urls": ["media://media_vid_1"], "workspace_files": ["_generated/media_vid_1.mp4"] }
       },
       "entries": []
     },
