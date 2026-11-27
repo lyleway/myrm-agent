@@ -8,7 +8,7 @@ import { MCPConfigEditor } from './mcp/MCPConfigEditor';
 import { MCPJsonImporter } from './mcp/MCPJsonImporter';
 import { DeleteConfirmDialog } from './mcp/DeleteConfirmDialog';
 import { useToast } from '@/hooks/shared/useToast';
-import { parseMCPConfigsFromJSON } from '@/lib/utils/mcp-config';
+import { parseMCPConfigsFromJSON, partitionByMcpIdentity } from '@/lib/utils/mcp-config';
 import { buildLastScanSummary, gateMcpConfigBatch } from '@/hooks/settings/useMcpSecurityGate';
 import { getMcpFindingDescription } from '@/lib/utils/mcp-config';
 import { MCPScanAckDialog } from './mcp/MCPScanAckDialog';
@@ -134,18 +134,10 @@ const MCPConfigForm = ({ currentConfigs, onSave }: MCPConfigFormProps) => {
         return;
       }
 
-      const existingNames = new Set(mcpConfig.configs.map((c) => c.name));
       const newConfigs = [...mcpConfig.configs];
-      let skippedCount = 0;
-
-      const configsToImport: typeof filteredConfigs = [];
-      for (const importedConfig of filteredConfigs) {
-        if (existingNames.has(importedConfig.name)) {
-          skippedCount++;
-          continue;
-        }
-        configsToImport.push(importedConfig);
-      }
+      const configuredNames = newConfigs.map((c) => c.name);
+      const { accepted: configsToImport, skipped } = partitionByMcpIdentity(filteredConfigs, configuredNames);
+      const skippedCount = skipped.length;
 
       if (configsToImport.length > 0) {
         const batchGate = await gateMcpConfigBatch(configsToImport);

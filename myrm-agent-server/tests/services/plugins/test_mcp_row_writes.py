@@ -61,8 +61,8 @@ def _confirm_without_the_installation_probe(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr("app.services.plugins.import_service.load_preview_context", AsyncMock(return_value=PreviewContext()))
 
 
-def _session() -> tuple[PluginImportSession, list[PluginConfirmItem]]:
-    """A package of two remote connectors (no bundled files) and the decision that installs both."""
+def _session(names: tuple[str, ...]) -> tuple[PluginImportSession, list[PluginConfirmItem]]:
+    """A package of remote connectors named ``names`` (no bundled files) and the decision that installs them all."""
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr(
@@ -83,8 +83,8 @@ def _session() -> tuple[PluginImportSession, list[PluginConfirmItem]]:
                 {
                     "$schema": MCP_SCHEMA,
                     "mcpServers": {
-                        "docs": {"type": "streamable-http", "url": "https://docs.example.com/mcp"},
-                        "search": {"type": "streamable-http", "url": "https://search.example.com/mcp"},
+                        name: {"type": "streamable-http", "url": f"https://connector-{index}.example.com/mcp"}
+                        for index, name in enumerate(names)
                     },
                 }
             ),
@@ -95,8 +95,8 @@ def _session() -> tuple[PluginImportSession, list[PluginConfirmItem]]:
     return PluginImportSession(plugin_result=result, servers_by_key=servers), decisions
 
 
-async def _import_servers() -> dict[str, object]:
-    session, decisions = _session()
+async def _import_servers(*names: str) -> dict[str, object]:
+    session, decisions = _session(names or ("docs", "search"))
     return await confirm_plugin_import(session, skill_decisions=[], server_decisions=decisions)
 
 
@@ -169,6 +169,40 @@ async def test_the_first_import_creates_the_row(credentials: CredentialStore) ->
     assert result["imported_servers"] == 2
     assert result["failures"] == []
     assert [cfg["name"] for cfg in _entries((await _stored("mcpServers"))["mcpConfigs"])] == ["docs", "search"]
+
+
+async def test_a_server_whose_name_folds_to_a_stored_ones_is_not_imported(credentials: CredentialStore) -> None:
+    """``my-api`` and ``my_api`` give their tools one prefix, so the second must not join the list."""
+    stored = {"name": "my_api", "type": "stdio", "command": "my-api-server", "enabled": True}
+    await config_service.set("mcpServers", {"mcpConfigs": [stored]}, device_id="web")
+
+    result = await _import_servers("my-api", "search")
+
+    assert result["imported_servers"] == 1
+    assert [(cfg["name"], cfg["enabled"]) for cfg in _entries((await _stored("mcpServers"))["mcpConfigs"])] == [
+        ("my_api", True),
+        ("search", False),
+    ]
+
+
+async def test_of_two_servers_of_one_package_with_one_prefix_only_the_first_is_imported(credentials: CredentialStore) -> None:
+    result = await _import_servers("a-b", "a_b", "search")
+
+    assert result["imported_servers"] == 2
+    assert [(cfg["name"], cfg["enabled"]) for cfg in _entries((await _stored("mcpServers"))["mcpConfigs"])] == [
+        ("a-b", False),
+        ("search", False),
+    ]
+
+
+async def test_servers_with_different_non_ascii_names_do_not_count_as_duplicates(credentials: CredentialStore) -> None:
+    stored = {"name": "天气", "type": "stdio", "command": "weather-server", "enabled": True}
+    await config_service.set("mcpServers", {"mcpConfigs": [stored]}, device_id="web")
+
+    result = await _import_servers("我的服务", "天气")
+
+    assert result["imported_servers"] == 1
+    assert [cfg["name"] for cfg in _entries((await _stored("mcpServers"))["mcpConfigs"])] == ["天气", "我的服务"]
 
 
 async def test_a_row_sealed_under_a_lost_key_is_not_overwritten_by_an_import(

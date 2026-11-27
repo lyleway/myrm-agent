@@ -1203,10 +1203,10 @@ class TestPrefixToolNames:
         assert tools[0].name == "mcp__my_server__echo"
 
     def test_unicode_server_name(self) -> None:
-        """Non-ASCII characters sanitized to underscores."""
+        """A non-ASCII name keeps its ASCII letters and gains the suffix that tells it from the other such names."""
         tools = [_make_tool(name="list")]
         prefix_tool_names(tools, "飞书mcp")
-        assert tools[0].name == "mcp__mcp__list"
+        assert tools[0].name == "mcp__mcp_ac67bc__list"
 
     def test_roundtrip_prefix_parse(self) -> None:
         """Prefixed name can be parsed back to (server, tool)."""

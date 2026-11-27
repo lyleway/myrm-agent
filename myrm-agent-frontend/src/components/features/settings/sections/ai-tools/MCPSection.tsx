@@ -10,6 +10,7 @@ import { MCPInstallWizard } from '../../mcp/MCPInstallWizard';
 import SettingsSection from '../SettingsSection';
 import { useToast } from '@/hooks/shared/useToast';
 import { gateMcpConfigBatch } from '@/hooks/settings/useMcpSecurityGate';
+import { uniqueMcpName } from '@/lib/utils/mcp-config';
 import type { MCPServiceConfig } from '@/store/config/types';
 
 type MCPTab = 'installed' | 'registry';
@@ -60,14 +61,8 @@ const MCPSection = memo(() => {
         const { buildLastScanSummary } = await import('@/hooks/settings/useMcpSecurityGate');
         finalConfig = { ...finalConfig, lastScanSummary: buildLastScanSummary(batchGate.scanResults[0]) };
       }
-      const existingNames = new Set(mcpConfigs.map((c) => c.name));
-      if (existingNames.has(finalConfig.name)) {
-        let suffix = 2;
-        while (existingNames.has(`${finalConfig.name}-${suffix}`)) {
-          suffix++;
-        }
-        finalConfig = { ...finalConfig, name: `${finalConfig.name}-${suffix}` };
-      }
+      const existingNames = mcpConfigs.map((c) => c.name);
+      finalConfig = { ...finalConfig, name: uniqueMcpName(finalConfig.name, existingNames) };
       addMCPConfig(finalConfig);
       toast({
         title: t('mcpRegistryInstallSuccess'),

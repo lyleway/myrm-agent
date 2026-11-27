@@ -45,6 +45,7 @@ CI 架构门禁：层边界、分形文档、PyPI wheel 打包不变量、tool r
 | `test_tool_registry.py` | Gate | tool registry 与 `_TOOL_LAYERS` 一致 | — |
 | `test_tool_registry_exemptions.py` | Gate | `LAYER_EXEMPT_TOOLS` 带到期日：未到期豁免才隐藏未挂载工具，过期后工具重新报缺；对应工具已删除或已登记的豁免按过期条目报错（合成 `ScanReport`，不扫源码） | — |
 | `test_mcp_routing_two_outcomes.py` | Gate | 钉住当前 MCP 路由结果形态（direct/PTC）与已删除的 catalog_invoke 产物；增加结局时随决策一起改本门禁 | — |
+| `test_mcp_prefix_single_source.py` | Gate | AST：工具名前缀 `mcp__{server}__` 只在 `toolkits/mcp/config.py`（`mcp_tool_prefix`）里推导，其余模块不得自己拼；`toolkits/acp/runtime/`（外部智能体自带的 `mcp__` 名字，不经服务器身份规则）除外；匹配字面 `mcp__` 开头的 f 字符串、`+`、`%` 与 `.format`（不含绑定到别处的常量或 `"__".join`）；检查两处豁免仍然有效（`mcp_tool_prefix` 还在、运行时目录仍在拼 `mcp__` 名字）；自带扫描器正反例 | — |
 | `test_mcp_annotations_gate.py` | Gate | AST：MCP 服务器自报的工具提示（`readOnlyHint` 等）只经 `toolkits/mcp/annotations.judge` 变成行为——并行安全位只有冲突闸门与回合台账两处读取者；除内置安全表与 `judge` 外没有任何调用点能抬高 `SafetyMetadata` 的 `is_concurrent_safe`，除内置表外没有调用点能抬高 `is_read_only` / `is_idempotent`；声明字段（`mcp_annotations`）只由转换器写、`recorded_annotations` 读；四个提示的名字（`readOnlyHint` 等及其 SDK 属性名）只出现在 `annotations.py`，其余模块不按名取用任何提示 | — |
 | `test_openapi_fail_loud_gate.py` | Gate | OpenAPI enabled 但 0 tools 须 fail-loud（`openapi_load_failed`）；预算 guard 回归 | — |
 | `test_skill_tool_boundary.py` | Gate | `skill_search_tool` ↔ `skill_market_tool` description 互指 + `<BoundSkills>` 运行时 XML 不回归（单元/集成覆盖） | — |
