@@ -10,13 +10,11 @@
 - check_request_stopped(): the result of a call refused because its request was stopped before it started, else None
 
 [POS]
-Pre-call guard of the tool interceptor, and the one stop predicate its executor shares. A stop (the user's Stop, the
-request timeout, a client that disconnected) cancels the request's token. A call already running is cut after a grace
-period; a call that has not started, such as one parked at the conflict gate behind a call the stop just cut, is
-admitted a moment later, before the run is torn down, and would start. It is refused here, right after the E-Stop
-check (an E-Stop cancels every request's token too, and keeps its own audited refusal) and before the loop guard or
-the turn budget records it, so a stopped request never changes a file or reaches a remote service through a call that
-was only queued.
+Pre-call guard of the tool interceptor, and the one stop predicate its executor shares: a call that has not started when
+its request is stopped (the user's Stop, the request timeout, a client that disconnected), such as one parked at the
+conflict gate behind a call the stop just cut, is refused, so a stopped request never changes a file or reaches a remote
+service through a call that was only queued. The refusal comes right after the E-Stop check, which keeps its own audited
+refusal, and before the loop guard or the turn budget records the call.
 """
 
 from __future__ import annotations
