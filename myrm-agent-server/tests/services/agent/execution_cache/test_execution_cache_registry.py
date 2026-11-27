@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,10 +14,11 @@ from app.services.agent.execution_cache.registry import (
     get_execution_cache,
 )
 from app.services.agent.execution_cache.types import BuiltExecutionUnit
+from tests.support.execution_unit_mocks import agent_close
 
 
 @pytest.fixture(autouse=True)
-async def _reset_execution_cache_singleton() -> None:
+async def _reset_execution_cache_singleton() -> AsyncIterator[None]:
     await get_execution_cache().close_all()
     yield
     await get_execution_cache().close_all()
@@ -47,7 +49,7 @@ async def test_acquire_reuses_unit_for_same_scope_and_fingerprint() -> None:
 
     assert first is second
     assert build_count == 1
-    first.skill_agent.close.assert_not_called()
+    agent_close(first).assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -65,7 +67,7 @@ async def test_acquire_replaces_unit_when_fingerprint_changes() -> None:
 
     assert first is not second
     assert len(units) == 2
-    first.skill_agent.close.assert_awaited_once()
+    agent_close(first).assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -79,7 +81,7 @@ async def test_a_failed_replacement_build_leaves_nothing_cached() -> None:
     with pytest.raises(RuntimeError, match="build failed"):
         await registry.acquire("chat-1:default", "fp-b", _failing_build)
 
-    first.skill_agent.close.assert_awaited_once()
+    agent_close(first).assert_awaited_once()
     assert registry.warm_entry_count == 0
     assert not await registry.is_warm("chat-1:default", "fp-a")
 
@@ -102,7 +104,7 @@ async def test_a_scope_whose_replacement_failed_rebuilds_instead_of_reusing_the_
 
     assert again is not first
     assert len(units) == 2
-    again.skill_agent.close.assert_not_called()
+    agent_close(again).assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -114,7 +116,7 @@ async def test_release_does_not_teardown_unit() -> None:
 
     unit = await registry.acquire("chat-1:default", "fp-a", build_unit)
     await registry.release("chat-1:default")
-    unit.skill_agent.close.assert_not_called()
+    agent_close(unit).assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -196,7 +198,7 @@ async def test_idle_reclaim_evicts_stale_units_and_increments_count() -> None:
 
     assert registry.warm_entry_count == 0
     assert registry.reclaimed_count == 1
-    unit1.skill_agent.close.assert_awaited_once()
+    agent_close(unit1).assert_awaited_once()
 
 
 @pytest.mark.asyncio

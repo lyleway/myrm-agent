@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -14,10 +15,11 @@ from app.services.agent.execution_cache.prewarm.coordinator import TurnPrewarmCo
 from app.services.agent.execution_cache.registry import get_execution_cache
 from app.services.agent.execution_cache.types import BuiltExecutionUnit
 from app.services.agent.goals.goal_registry import GoalRegistry
+from tests.support.execution_unit_mocks import agent_close
 
 
 @pytest.fixture(autouse=True)
-async def _reset_execution_cache_singleton() -> None:
+async def _reset_execution_cache_singleton() -> AsyncIterator[None]:
     await get_execution_cache().close_all()
     yield
     await get_execution_cache().close_all()
@@ -72,8 +74,8 @@ async def test_join_for_turn_uses_brief_cache_when_ready() -> None:
     coordinator = TurnPrewarmCoordinator()
     scope_key = "c-test:default"
     fingerprint = "fp-b"
-    preview = {"snapshot_id": "snap-1", "items": []}
-    snapshot = {"snapshot_id": "snap-1"}
+    preview: dict[str, object] = {"snapshot_id": "snap-1", "items": []}
+    snapshot: dict[str, object] = {"snapshot_id": "snap-1"}
     coordinator._brief_cache.put(scope_key, fingerprint, preview, snapshot)
 
     params = _make_params()
@@ -321,7 +323,7 @@ async def test_guard_holder_finishes_the_replacement_a_prewarm_deferred() -> Non
     assert await prewarm is old_unit
     assert turn_unit is new_unit
     assert await cache.is_warm(scope_key, "fp-b")
-    old_unit.skill_agent.close.assert_awaited_once()
+    agent_close(old_unit).assert_awaited_once()
     await other_chat_build
 
 
