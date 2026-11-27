@@ -20,6 +20,7 @@ from tests.api.voice.session_testkit import socket_of, voice_session
 
 _INFO = {"type": "info", "message": "streaming_unavailable", "fallback": "batch"}
 _END_UTTERANCE: dict[str, object] = {"type": "websocket.receive", "text": json.dumps({"type": "end_utterance"})}
+_CLOSE: dict[str, object] = {"type": "websocket.receive", "text": json.dumps({"type": "close"})}
 _UTTERANCE_AUDIO = b"\x01" * 2048
 _MIN_UTTERANCE_BYTES = 1024
 _MAX_UTTERANCE_BYTES = 25 * 1024 * 1024
@@ -134,6 +135,16 @@ class TestBatchSpeechToText:
 
         await session._run_batch_stt()
 
+        assert sent_json(socket_of(session)) == [_INFO]
+
+    async def test_a_close_message_ends_the_loop_without_transcribing_what_was_collected(self) -> None:
+        session = _session([audio_frame(_UTTERANCE_AUDIO), _CLOSE, _END_UTTERANCE])
+
+        with patch.object(_VoiceSession, "_batch_transcribe", new_callable=AsyncMock) as transcribe:
+            await session._run_batch_stt()
+
+        assert session._closed
+        transcribe.assert_not_awaited()
         assert sent_json(socket_of(session)) == [_INFO]
 
     async def test_an_utterance_without_audio_is_skipped_and_the_next_one_is_transcribed(self) -> None:

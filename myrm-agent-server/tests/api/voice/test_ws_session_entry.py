@@ -1,4 +1,4 @@
-"""Voice session entry: the opening-message checks, the voice config lookup and the run loop around speech-to-text."""
+"""Voice session entry: the opening-message checks, the voice config lookup, sending to the browser and the run loop."""
 
 from __future__ import annotations
 
@@ -165,6 +165,42 @@ class TestVoiceConfigLookup:
         assert loaded is None
         assert f"Failed to load voice config for WS user {logged_user}" in caplog.text
         assert sent_json(ws) == [{"type": "error", "message": "Voice not configured"}]
+
+
+class TestSendingToTheBrowser:
+    async def test_a_closed_session_sends_nothing(self) -> None:
+        session = voice_session()
+        session._closed = True
+
+        await session._send_json({"type": "stt_final", "text": "hi"})
+
+        socket_of(session).send_text.assert_not_awaited()
+
+    @pytest.mark.parametrize("failure", [WebSocketDisconnect(), RuntimeError("closed")], ids=["disconnected", "closed"])
+    async def test_a_session_whose_browser_vanished_marks_itself_closed(self, failure: Exception) -> None:
+        session = voice_session()
+        socket_of(session).send_text.side_effect = failure
+
+        await session._send_json({"type": "stt_final", "text": "hi"})
+
+        assert session._closed
+
+    @pytest.mark.parametrize("failure", [WebSocketDisconnect(), RuntimeError("closed")], ids=["disconnected", "closed"])
+    async def test_a_message_to_a_vanished_browser_is_dropped_quietly(self, failure: Exception) -> None:
+        ws = browser_socket()
+        ws.send_text.side_effect = failure
+
+        await ws_session._send_json_to_ws(ws, {"type": "error", "message": "boom"})
+
+        ws.send_text.assert_awaited_once_with(json.dumps({"type": "error", "message": "boom"}))
+
+    async def test_a_socket_that_cannot_be_closed_is_left_alone(self) -> None:
+        ws = browser_socket()
+        ws.close.side_effect = RuntimeError("already closed")
+
+        await ws_session._close_ws(ws, 1000, "bye")
+
+        ws.close.assert_awaited_once_with(code=1000, reason="bye")
 
 
 class TestSessionRun:
