@@ -7,6 +7,7 @@ batch_str_replace, integrity guard) is exercised without mocks.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ from myrm_agent_harness.toolkits.code_execution.utils.workspace_path import (
 )
 from myrm_agent_harness.toolkits.code_execution.workspace.storage_root_bind import (
     bind_workspace_storage_root,
+    release_workspace_storage_bind_token,
 )
 from myrm_agent_harness.utils.errors import ToolError
 
@@ -79,11 +81,12 @@ def _stop_sandbox_patches() -> None:
 
 
 @pytest.fixture
-def workspace(tmp_path: Path) -> Path:
+def workspace(tmp_path: Path) -> Iterator[Path]:
     _reset_workspace_cache()
     os.environ["WORKSPACE_ROOT"] = str(tmp_path)
-    bind_workspace_storage_root(tmp_path)
+    root_token = bind_workspace_storage_root(tmp_path)
     yield tmp_path
+    release_workspace_storage_bind_token(root_token)
     os.environ.pop("WORKSPACE_ROOT", None)
     _reset_workspace_cache()
 
