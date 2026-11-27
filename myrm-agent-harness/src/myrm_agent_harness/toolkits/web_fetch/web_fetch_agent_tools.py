@@ -246,7 +246,7 @@ async def _fetch_full_content(
         stored = await store_full_text(delivery.stored_text, delivery.read_ranges)
 
     content = wrap_with_external_sources_tag(delivery.visible_text, source="web_fetch")
-    # Outside the untrusted boundary: the guide and the cut-source notice are ours, not page content.
+    # Outside the untrusted boundary: the guide and both notices are ours, not page content.
     if stored is not None:
         content += stored.read_guide
         await emit_web_fetch_evicted_ref(
@@ -255,7 +255,7 @@ async def _fetch_full_content(
             total_lines=stored.total_lines,
             storage_truncated=stored.storage_truncated,
         )
-    content += delivery.source_notice + delivery.blocked_notice
+    content += delivery.source_notice + delivery.failure_notice
     return _full_content_result(
         content,
         sources=sources,

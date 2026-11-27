@@ -8,6 +8,9 @@ import pytest
 
 from myrm_agent_harness.agent.config import DEFAULT_FILE_IO_CONFIG
 from myrm_agent_harness.toolkits.web_fetch.processing.full_content_delivery import (
+    _BLOCKED_STOP_GUIDANCE,
+    _NEEDS_JS_GUIDANCE,
+    _NOT_FOUND_GUIDANCE,
     MAX_LINE_CHARS,
     FetchedPage,
     FullContentDelivery,
@@ -285,7 +288,10 @@ class TestFailures:
         assert plan.visible_text.endswith("- https://bad.test/a\n\n")
 
     def test_no_failures_adds_nothing(self) -> None:
-        assert "Could not retrieve" not in plan_full_content(make_pages(["body"]), []).visible_text
+        plan = plan_full_content(make_pages(["body"]), [])
+
+        assert "Could not retrieve" not in plan.visible_text
+        assert plan.failure_notice == ""
 
 
 class TestAllFailed:
@@ -302,6 +308,65 @@ class TestAllFailed:
 
     def test_no_citation_reminder_is_attached(self) -> None:
         assert "source markers" not in all_failed_content(["https://a.test/x"])
+
+
+# One distinctive sentence per kind, written out here so the tests do not lean on the table they check.
+GUIDANCE_PHRASES = {
+    "blocked": "Do NOT retry fetching URLs marked (blocked by site)",
+    "not_found": "do not exist (HTTP 404/410)",
+    "needs_javascript": "require client-side JavaScript rendering",
+}
+
+
+class TestFailureGuidance:
+    """A failed URL is answered the same way whether other pages were read or none was."""
+
+    @pytest.mark.parametrize("kind", GUIDANCE_PHRASES)
+    def test_a_failed_url_gets_its_guidance_beside_pages_and_without_them(self, kind: str) -> None:
+        url = f"https://failed.test/{kind}"
+        reasons = {url: (kind, "classified")}
+
+        beside_pages = plan_full_content(make_pages(["body"]), [url], failure_reasons=reasons)
+        without_pages = all_failed_content([url], failure_reasons=reasons)
+
+        for other, phrase in GUIDANCE_PHRASES.items():
+            assert (phrase in beside_pages.failure_notice) is (other == kind)
+            assert (phrase in without_pages) is (other == kind)
+
+    def test_every_kind_is_answered_in_one_fixed_order_whichever_failed_first(self) -> None:
+        reasons = {
+            "https://spa.test/c": ("needs_javascript", "empty shell"),
+            "https://dead.test/b": ("not_found", "HTTP 404"),
+            "https://blocked.test/a": ("blocked", "HTTP 403"),
+        }
+        urls = list(reasons)
+
+        plan = plan_full_content(make_pages(["body"]), urls, failure_reasons=reasons)
+
+        assert plan.failure_notice == (
+            f"\n\n[web_fetch]: {_BLOCKED_STOP_GUIDANCE}"
+            f"\n\n[web_fetch]: {_NOT_FOUND_GUIDANCE}"
+            f"\n\n[web_fetch]: {_NEEDS_JS_GUIDANCE}"
+        )
+        assert all_failed_content(urls, failure_reasons=reasons).endswith(
+            f"\n{_BLOCKED_STOP_GUIDANCE}\n{_NOT_FOUND_GUIDANCE}\n{_NEEDS_JS_GUIDANCE}"
+        )
+
+    def test_a_kind_without_guidance_adds_none_beside_pages_but_the_default_applies_without_them(self) -> None:
+        url = "https://down.test/page"
+        reasons = {url: ("error_page", "HTTP 502")}
+
+        assert plan_full_content(make_pages(["body"]), [url], failure_reasons=reasons).failure_notice == ""
+        assert "may be unavailable" in all_failed_content([url], failure_reasons=reasons)
+
+    def test_unclassified_failures_add_no_guidance_beside_pages(self) -> None:
+        assert plan_full_content(make_pages(["body"]), ["https://down.test/page"]).failure_notice == ""
+
+    def test_the_reason_of_a_url_that_did_not_fail_adds_no_guidance(self) -> None:
+        stale = {"https://old.test/page": ("blocked", "HTTP 403")}
+
+        assert plan_full_content(make_pages(["body"]), [], failure_reasons=stale).failure_notice == ""
+        assert GUIDANCE_PHRASES["blocked"] not in all_failed_content(["https://down.test/page"], failure_reasons=stale)
 
 
 class TestClampReadRanges:

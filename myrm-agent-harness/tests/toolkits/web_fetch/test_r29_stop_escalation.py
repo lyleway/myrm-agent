@@ -233,8 +233,8 @@ class TestStopTextGuidance:
             failure_reasons={"https://blocked.example/b": ("blocked", "HTTP 403")},
         )
         assert "(blocked by site)" in delivery.visible_text
-        assert "Do NOT retry" in delivery.blocked_notice
-        assert "curl" in delivery.blocked_notice
+        assert "Do NOT retry" in delivery.failure_notice
+        assert "curl" in delivery.failure_notice
 
     def test_partial_failure_with_not_found_url_appends_dead_link_notice(self) -> None:
         delivery = plan_full_content(
@@ -243,8 +243,8 @@ class TestStopTextGuidance:
             failure_reasons={"https://dead.example/b": ("not_found", "HTTP 404")},
         )
         assert "(HTTP 404/410 — not found)" in delivery.visible_text
-        assert "do not exist (HTTP 404/410)" in delivery.blocked_notice
-        assert "Do NOT retry" in delivery.blocked_notice
+        assert "do not exist (HTTP 404/410)" in delivery.failure_notice
+        assert "Do NOT retry" in delivery.failure_notice
 
 
 @pytest.mark.integration
@@ -297,6 +297,9 @@ class TestR29LiveLoopbackEndToEnd:
                         b'<p aria-hidden="true">ARIA_HIDDEN_INJECTION</p>'
                         b"</article></body></html>"
                     )
+                    self.send_response(200)
+                elif self.path == "/spa-shell":
+                    body = b"<html><head><title>App</title></head><body><div id='root'></div><script src='/app.js'></script></body></html>"
                     self.send_response(200)
                 else:
                     body = b"<html><head><title>403 Forbidden</title></head><body>Access Denied</body></html>"
@@ -364,6 +367,18 @@ class TestR29LiveLoopbackEndToEnd:
             assert "EXFILTRATE SECRETS" not in clean_result
             assert "HIDDEN_PROMPT_INJECTION_TOKEN" not in clean_result
             assert "ARIA_HIDDEN_INJECTION" not in clean_result
+
+            mixed_result = str(
+                await tool.ainvoke(
+                    {
+                        "urls": [f"http://127.0.0.1:{port}/hidden-injection", f"http://127.0.0.1:{port}/spa-shell"],
+                        "reason": "check a page that needs JavaScript beside a readable page",
+                    }
+                )
+            )
+            assert "Visible authoritative article paragraph" in mixed_result
+            assert "(requires JavaScript)" in mixed_result
+            assert "require client-side JavaScript rendering" in mixed_result
         finally:
             server.shutdown()
             server.server_close()

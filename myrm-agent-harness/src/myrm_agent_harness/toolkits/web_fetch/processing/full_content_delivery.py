@@ -8,12 +8,13 @@
 [OUTPUT]
 - FetchedPage: one fetched page (source URL, title, Markdown body, whether its source was cut short)
 - ReadRange: omitted lines of the stored copy, labelled with the page they belong to
-- FullContentDelivery: the model-visible text, the full text to persist, the omitted-line ranges, and the trusted
-  notice about pages whose source was cut short
+- FullContentDelivery: the model-visible text, the full text to persist, the omitted-line ranges, the trusted
+  notice about pages whose source was cut short, and the trusted guidance for the URLs that failed
 - plan_full_content(): split the shared budget fairly, cut each long page, locate the omitted lines, name the
   source-cut pages; the pages carry the numbers the caller gives (the run's source numbers), from 1 when none
 - clamp_read_ranges(): drop the ranges a capped stored copy no longer holds
-- all_failed_content(): tool result when no URL could be read
+- all_failed_content(): tool result when no URL could be read; its guidance comes from the same table as the
+  failure guidance of a delivery with pages
 - MAX_LINE_CHARS: longest line kept in the stored copy of a cut page
 
 [POS]
@@ -62,6 +63,13 @@ _DEFAULT_FAILED_GUIDANCE = (
     "The target page(s) may be unavailable (HTTP 404/403/timeout). "
     "Please synthesize the final answer using search snippets or other available information."
 )
+# Trusted guidance per classified failure kind, in the order the model reads it. A delivery with pages and an
+# all-failed result both take it from this table, so a kind cannot be answered in one and left silent in the other.
+_FAILURE_GUIDANCE: tuple[tuple[str, str], ...] = (
+    ("blocked", _BLOCKED_STOP_GUIDANCE),
+    ("not_found", _NOT_FOUND_GUIDANCE),
+    ("needs_javascript", _NEEDS_JS_GUIDANCE),
+)
 # Fixed trusted labels appended per URL when a failure classification is available (never raw server text).
 _FAILURE_KIND_LABELS: dict[str, str] = {
     "blocked": "blocked by site",
@@ -91,7 +99,7 @@ class ReadRange(NamedTuple):
 
 @dataclass(frozen=True, slots=True)
 class FullContentDelivery:
-    """What to show, what to persist, where the omitted parts sit in it, and the notice about cut sources."""
+    """What to show, what to persist, where the omitted parts sit in it, and the notices that follow the pages."""
 
     visible_text: str
     stored_text: str | None
@@ -99,8 +107,9 @@ class FullContentDelivery:
     raw_chars: int
     # Trusted guidance naming the pages whose source was cut short; empty when none was.
     source_notice: str = ""
-    # Trusted stop-escalation guidance when any failed URL was explicitly blocked by the target site.
-    blocked_notice: str = ""
+    # Trusted guidance for the failed URLs by the kind they were classified as (blocked: stop retrying, not found:
+    # find another source, needs JavaScript: ask before opening a browser); empty when none has guidance.
+    failure_notice: str = ""
 
     @property
     def truncated(self) -> bool:
@@ -121,13 +130,10 @@ def plan_full_content(
     """
     numbers = list(range(1, len(pages) + 1)) if indices is None else list(indices)
     delivery = _layout(pages, failed_urls, numbers, failure_reasons=failure_reasons)
-    kinds = {failure_reasons[u][0] for u in failed_urls if failure_reasons and u in failure_reasons}
-    notices: list[str] = []
-    if "blocked" in kinds:
-        notices.append(f"\n\n[web_fetch]: {_BLOCKED_STOP_GUIDANCE}")
-    if "not_found" in kinds:
-        notices.append(f"\n\n[web_fetch]: {_NOT_FOUND_GUIDANCE}")
-    return replace(delivery, source_notice=_source_cut_notice(pages, numbers), blocked_notice="".join(notices))
+    failure_notice = "".join(
+        f"\n\n[web_fetch]: {guidance}" for guidance in _failure_guidance(failed_urls, failure_reasons)
+    )
+    return replace(delivery, source_notice=_source_cut_notice(pages, numbers), failure_notice=failure_notice)
 
 
 def _layout(
@@ -202,16 +208,7 @@ def all_failed_content(
     """Tool result when no URL could be read; the URL list sits inside the untrusted boundary, the guidance outside."""
     from myrm_agent_harness.core.security.detection.content_boundary import wrap_untrusted
 
-    kinds = {failure_reasons[u][0] for u in failed_urls if failure_reasons and u in failure_reasons}
-    guidance_parts: list[str] = []
-    if "blocked" in kinds:
-        guidance_parts.append(_BLOCKED_STOP_GUIDANCE)
-    if "not_found" in kinds:
-        guidance_parts.append(_NOT_FOUND_GUIDANCE)
-    if "needs_javascript" in kinds:
-        guidance_parts.append(_NEEDS_JS_GUIDANCE)
-    if not guidance_parts:
-        guidance_parts.append(_DEFAULT_FAILED_GUIDANCE)
+    guidance_parts = _failure_guidance(failed_urls, failure_reasons) or [_DEFAULT_FAILED_GUIDANCE]
 
     return (
         "[web_fetch]: Could not retrieve content from the requested URL(s):\n"
@@ -300,6 +297,17 @@ def _wrap_line(line: str) -> str:
             start = cut + 1
     pieces.append(line[start:])
     return "\n".join(pieces)
+
+
+def _failure_guidance(
+    failed_urls: Sequence[str],
+    failure_reasons: Mapping[str, tuple[str, str]] | None,
+) -> list[str]:
+    """The guidance of every kind among ``failed_urls`` in table order; empty when no kind with guidance was seen."""
+    if not failure_reasons:
+        return []
+    kinds = {failure_reasons[url][0] for url in failed_urls if url in failure_reasons}
+    return [guidance for kind, guidance in _FAILURE_GUIDANCE if kind in kinds]
 
 
 def _failure_listing(
