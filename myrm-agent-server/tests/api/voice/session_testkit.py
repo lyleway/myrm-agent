@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from unittest.mock import AsyncMock
 
 from app.api.voice.agent_bridge import VoiceAgentBridge
 from app.api.voice.ws_session import _VoiceSession
@@ -25,3 +26,10 @@ def voice_session(
     return _VoiceSession(
         ws=browser_socket(frames, hang=hang), voice_config=voice_config(provider), keyterms=[], agent_bridge=bridge
     )
+
+
+def socket_of(session: _VoiceSession) -> AsyncMock:
+    """The scripted browser socket `voice_session` put under `session`, for asserting on what the session sent."""
+    socket = session._ws
+    assert isinstance(socket, AsyncMock), "voice_session builds its sessions over browser_socket"
+    return socket

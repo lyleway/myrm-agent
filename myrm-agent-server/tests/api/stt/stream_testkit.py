@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,14 +15,14 @@ from websockets.typing import Data, DataLike
 
 from app.channels.types import STTResult, VoiceConfig
 
-Frame = dict[str, object] | Exception
+Frame = Mapping[str, object] | Exception
 
 
-def scripted_receive(frames: Iterable[Frame], *, hang: bool = False) -> Callable[[], Awaitable[dict[str, object]]]:
+def scripted_receive(frames: Iterable[Frame], *, hang: bool = False) -> Callable[[], Awaitable[Mapping[str, object]]]:
     """A browser socket's `receive()`: replays `frames` (an exception is raised), then disconnects or, with `hang`, waits forever."""
     queue = list(frames)
 
-    async def receive() -> dict[str, object]:
+    async def receive() -> Mapping[str, object]:
         if queue:
             frame = queue.pop(0)
             if isinstance(frame, Exception):
