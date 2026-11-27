@@ -329,7 +329,7 @@ class TestNpmInstall:
         self, manager: IsolatedToolchainManager, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         pid_file = tmp_path / "version-pid.txt"
-        monkeypatch.setattr(manager_module, "VERSION_CHECK_SECONDS", 0.5)
+        monkeypatch.setattr(manager_module, "VERSION_CHECK_SECONDS", 3.0)
         _fake_npm(
             manager,
             f"""

@@ -114,6 +114,7 @@ jobs:
           tests/toolkits/acp/runtime/cli/test_real_cli_failures.py
           tests/toolkits/acp/runtime/cli/test_real_cli_images.py
           tests/toolkits/acp/runtime/cli/test_real_claude_permission_prompt.py
+          tests/toolkits/acp/runtime/cli/test_real_claude_turn_end.py
           tests/toolkits/acp/runtime/codex/test_real_codex_protocol_contract.py
           tests/toolkits/acp/runtime/codex/test_real_codex_app_server.py
           tests/toolkits/acp/runtime/codex/test_real_codex_threads.py

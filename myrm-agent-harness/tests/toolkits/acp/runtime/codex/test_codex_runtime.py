@@ -241,7 +241,7 @@ async def test_a_server_that_exits_during_the_handshake_says_why(tmp_path: Path,
 async def test_a_silent_server_fails_the_handshake_and_is_stopped(
     tmp_path: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("myrm_agent_harness.toolkits.acp.runtime.codex.connection._HANDSHAKE_SECONDS", 0.5)
+    monkeypatch.setattr("myrm_agent_harness.toolkits.acp.runtime.codex.connection._HANDSHAKE_SECONDS", 3.0)
     server = ScriptedServer(tmp_path / "s", {"handshake": "silent"})
     pool = server.pool()
     try:

@@ -4,7 +4,7 @@ A CLI reports failure in two ways: its final ``result`` line (Claude) and, last,
 the most specific, so it names the error code and supplies the message; the exit code alone is only a crash, explained
 by the CLI's last ``error`` line when it printed one and by the tail of its stderr otherwise. A turn this runtime
 ended itself because the CLI kept retrying a request the API answers 401 for is an authentication failure, not a
-cancellation.
+cancellation. A turn that ran out of the turns it was given is no failure at all: it ends with its stop reason.
 
 [INPUT]
 - toolkits.acp.runtime.event_text::condense_failure_text (POS: Text shaping of the events every runtime emits)
@@ -12,7 +12,7 @@ cancellation.
 - toolkits.acp.types::AcpError, AcpErrorCode (POS: ACP runtime type definitions layer.)
 
 [OUTPUT]
-- classify_failure: the AcpError of a finished attempt, or None when it succeeded
+- classify_failure: the AcpError of a finished attempt, or None when it succeeded (a turn that ran out of turns did)
 
 [POS]
 Error vocabulary of CliRuntime. Messages are the CLI's own text, never advice about product settings.
@@ -45,8 +45,6 @@ def _is_login_problem(result: CliResult) -> bool:
 def _from_result(result: CliResult) -> AcpError:
     status = result.api_error_status
     message = result.message or "The CLI reported an error"
-    if result.subtype == "error_max_turns" or result.terminal_reason == "max_turns":
-        return AcpError(AcpErrorCode.MAX_TURNS, message)
     if _is_login_problem(result):
         return AcpError(AcpErrorCode.AUTH_FAILED, message)
     if status == _RATE_LIMITED:
@@ -74,6 +72,8 @@ def classify_failure(
         return AcpError(AcpErrorCode.AUTH_FAILED, auth_rejection)
     if killed:
         return AcpError(AcpErrorCode.CANCELLED, "The CLI process was stopped before it finished")
+    if result is not None and result.hit_turn_limit:
+        return None
     if result is not None and result.is_error:
         return _from_result(result)
     if returncode != 0:

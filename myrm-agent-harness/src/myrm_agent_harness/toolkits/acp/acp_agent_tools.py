@@ -8,7 +8,7 @@ interface via the unified RuntimePool.
 - myrm_agent_harness.core.events.types::AgentEventType (POS: streaming event types and enums, framework-agnostic)
 - myrm_agent_harness.toolkits.acp.delegate_report::STOP_NOTES, DelegateMeta, DelegateUsage, as_int, notice_step (POS: What a delegated turn reports)
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
-- myrm_agent_harness.toolkits.acp.runtime.cli.dialect::has_native_turn_limit (POS: Per-CLI launch knowledge of CliRuntime)
+- myrm_agent_harness.toolkits.acp.runtime.cli.claude::is_claude (POS: Launch knowledge of CliRuntime about the one CLI it knows)
 - myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, StopReason, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
 - myrm_agent_harness.toolkits.acp.types::DelegationPool, PermissionBroker (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
@@ -42,7 +42,7 @@ from myrm_agent_harness.toolkits.acp.delegate_report import (
     notice_step,
 )
 from myrm_agent_harness.toolkits.acp.runtime._base import truncate_response
-from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import has_native_turn_limit
+from myrm_agent_harness.toolkits.acp.runtime.cli.claude import is_claude
 from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     ContinuityStatus,
@@ -250,9 +250,10 @@ async def _run_turn_and_collect(
 
     config = pool.get_config(agent_name)
     max_turns = config.max_turns if config else _DEFAULT_MAX_TURNS
-    # A CLI with its own turn limit stops itself and says so (ERROR/MAX_TURNS). Counting its tool calls here would
-    # cut it off early, since one turn can run several tool calls; every other backend is counted below.
-    native_limit = config is not None and config.backend_type == "cli" and has_native_turn_limit(config.command)
+    # Claude stops itself at the configured turn limit and says so (DONE with ``max_turn_requests``). Counting its
+    # tool calls here would cut it off early, since one turn can run several tool calls; every other backend is
+    # counted below.
+    native_limit = config is not None and config.backend_type == "cli" and is_claude(config.command)
 
     sink: ToolProgressSink | None = get_tool_progress_sink()
     cancel_token = get_cancel_token()
@@ -327,9 +328,6 @@ async def _run_turn_and_collect(
                 code = getattr(error_data, "code", None)
                 if code is AcpErrorCode.CANCELLED:
                     was_cancelled = True
-                elif code is AcpErrorCode.MAX_TURNS:
-                    logger.info("acp_delegate_native_max_turns agent=%s limit=%d", agent_name, max_turns)
-                    turns_used = max_turns
                 else:
                     error_count += 1
                     if hasattr(error_data, "message"):

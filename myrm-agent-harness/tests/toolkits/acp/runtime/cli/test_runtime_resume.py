@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, CliSessionRecord
+from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, CliSessionRecord, StopReason
 from tests.toolkits.acp._stores import RecordingStore
 
 from ._fakes import FakeCli, errors_of, make_runtime, run_turn, statuses_of, text_of, types_of
@@ -88,7 +88,8 @@ class TestClaudeConversation:
         fake_cli.set_scenario({})
         after = await run_turn(runtime)
 
-        assert [e.data["error"].code for e in errors_of(limited)] == [AcpErrorCode.MAX_TURNS]
+        assert errors_of(limited) == []
+        assert limited[-1].data["stop_reason"] is StopReason.MAX_TURN_REQUESTS
         assert fake_cli.resume_args() == [None, session, session]
         assert text_of(after) == session
         assert store.records["s1"].cli_session_id == session

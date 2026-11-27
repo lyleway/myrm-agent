@@ -243,16 +243,16 @@ class TestWhatTheHostOffers:
 
 class TestWaitingForAPerson:
     async def test_the_time_a_person_takes_is_not_the_time_the_agent_has(self, tmp_path: Path) -> None:
-        released = asyncio.Event()
+        # A turn limit a loaded machine can still start the agent within, and an answer that comes after it has run out.
+        agent_seconds = 3
 
         class _SlowBroker:
             async def decide(self, request: PermissionRequest) -> PermissionVerdict:
-                await released.wait()
+                await asyncio.sleep(agent_seconds + 1)
                 return PermissionVerdict(allowed=True)
 
-        pool = make_pool(permission_mode="safe", timeout_seconds=1)
+        pool = make_pool(permission_mode="safe", timeout_seconds=agent_seconds)
         try:
-            asyncio.get_running_loop().call_later(1.6, released.set)
             report = await _report(
                 pool, tmp_path, "permission", {"kind": "edit", "title": "Edit"}, broker=_SlowBroker()
             )

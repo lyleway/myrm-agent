@@ -15,6 +15,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     McpServerConfig,
     RuntimeConfig,
     RuntimeEventType,
+    StopReason,
 )
 from tests.toolkits.acp._stores import RecordingStore
 
@@ -178,15 +179,21 @@ class TestFailures:
         assert RuntimeEventType.DONE not in types_of(events)
 
     @pytest.mark.asyncio
-    async def test_the_cli_turn_limit_is_its_own_error_code_after_the_work_it_did(self, fake_cli: FakeCli) -> None:
+    async def test_the_cli_turn_limit_ends_the_turn_with_the_work_it_did_and_says_why(self, fake_cli: FakeCli) -> None:
         fake_cli.set_scenario({"text": "got this far", "fail": "max_turns"})
 
         events = await run_turn(make_runtime(fake_cli))
 
-        errors = errors_of(events)
-        assert [e.data["error"].code for e in errors] == [AcpErrorCode.MAX_TURNS]
-        assert errors[0].data["error"].message == "Reached maximum number of turns (3)"
+        assert errors_of(events) == []
         assert text_of(events) == "got this far"
+        assert types_of(events)[-1] is RuntimeEventType.DONE
+        assert events[-1].data["stop_reason"] is StopReason.MAX_TURN_REQUESTS
+
+    @pytest.mark.asyncio
+    async def test_a_turn_that_finished_ends_with_end_turn(self, fake_cli: FakeCli) -> None:
+        events = await run_turn(make_runtime(fake_cli))
+
+        assert events[-1].data["stop_reason"] is StopReason.END_TURN
 
 
 class TestLaunchArgs:

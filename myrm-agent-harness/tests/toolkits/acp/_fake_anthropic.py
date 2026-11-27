@@ -1,9 +1,10 @@
 """A scripted Anthropic Messages API on a loopback port, so a real ``claude`` binary can be driven without a login.
 
 ``claude`` talks to whatever ``ANTHROPIC_BASE_URL`` names. The scripted model asks for one tool call on its first
-request (any request that lists the tool and carries no tool result yet) and answers with plain text once the tool's
-result comes back, which is the shortest conversation that makes Claude Code ask for permission and then act on the
-answer. Every request body is kept, so a test can read what the model was told about the tool call.
+request (any request that lists the tool and carries no tool result yet), saying ``lead_text`` first when it has some,
+and answers with plain text once the tool's result comes back, which is the shortest conversation that makes Claude
+Code ask for permission and then act on the answer. A model told to call a tool that is not on offer just answers.
+Every request body is kept, so a test can read what the model was told about the tool call.
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ class FakeAnthropicApi(LoopbackApi):
     tool_name: str
     tool_input: Mapping[str, object]
     final_text: str = "finished"
+    # What the model says in the message that asks for the tool, before it asks.
+    lead_text: str = ""
+    # Why the message with ``final_text`` ended, as the API reports it (``end_turn``, ``max_tokens``, ``refusal``).
+    final_stop_reason: str = "end_turn"
 
     @property
     def tool_results(self) -> list[dict[str, object]]:
@@ -65,19 +70,23 @@ class FakeAnthropicApi(LoopbackApi):
             "usage": {"input_tokens": 10, "output_tokens": 1},
         }
         await response.write(_sse("message_start", {"type": "message_start", "message": message}))
+        blocks: list[tuple[dict[str, object], dict[str, object]]] = []
         if asks_for_the_tool:
-            block = {"type": "tool_use", "id": "toolu_" + uuid.uuid4().hex[:20], "name": self.tool_name, "input": {}}
-            delta = {"type": "input_json_delta", "partial_json": json.dumps(dict(self.tool_input))}
+            if self.lead_text:
+                blocks.append(({"type": "text", "text": ""}, {"type": "text_delta", "text": self.lead_text}))
+            tool_use = {"type": "tool_use", "id": "toolu_" + uuid.uuid4().hex[:20], "name": self.tool_name, "input": {}}
+            blocks.append((tool_use, {"type": "input_json_delta", "partial_json": json.dumps(dict(self.tool_input))}))
             stop_reason = "tool_use"
         else:
-            block = {"type": "text", "text": ""}
-            delta = {"type": "text_delta", "text": self.final_text}
-            stop_reason = "end_turn"
-        await response.write(
-            _sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": block})
-        )
-        await response.write(_sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": delta}))
-        await response.write(_sse("content_block_stop", {"type": "content_block_stop", "index": 0}))
+            blocks.append(({"type": "text", "text": ""}, {"type": "text_delta", "text": self.final_text}))
+            stop_reason = self.final_stop_reason
+        for index, (block, delta) in enumerate(blocks):
+            start = {"type": "content_block_start", "index": index, "content_block": block}
+            await response.write(_sse("content_block_start", start))
+            await response.write(
+                _sse("content_block_delta", {"type": "content_block_delta", "index": index, "delta": delta})
+            )
+            await response.write(_sse("content_block_stop", {"type": "content_block_stop", "index": index}))
         done = {
             "type": "message_delta",
             "delta": {"stop_reason": stop_reason, "stop_sequence": None},

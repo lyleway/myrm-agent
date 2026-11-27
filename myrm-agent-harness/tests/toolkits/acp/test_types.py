@@ -118,8 +118,8 @@ class TestRuntimeEvent:
         assert len(RuntimeEventType) == 8
 
     def test_error_codes_count(self) -> None:
-        assert len(AcpErrorCode) == 8
-        assert AcpErrorCode.MAX_TURNS == "max_turns"
+        assert len(AcpErrorCode) == 7
+        assert AcpErrorCode.CANCELLED == "cancelled"
         assert AcpErrorCode.BACKEND_NOT_FOUND == "backend_not_found"
 
 

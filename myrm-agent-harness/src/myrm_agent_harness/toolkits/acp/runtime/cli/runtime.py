@@ -2,7 +2,7 @@
 
 Supports Claude Code (``claude -p --output-format stream-json``) and any CLI that prints newline-delimited JSON
 events or plain text. The CLI's own session id is what carries a conversation between turns:
-it is stored the moment the CLI announces it and replayed through the CLI's resume syntax (see ``dialect``).
+it is stored the moment the CLI announces it and replayed through the CLI's resume syntax (see ``claude``).
 
 [INPUT]
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
@@ -10,7 +10,7 @@ it is stored the moment the CLI announces it and replayed through the CLI's resu
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.turn_permissions::TurnPermissions (POS: The permission broker of one turn, as the backend of that turn sees it)
 - toolkits.acp.runtime.cli.permission_bridge::PermissionBridge (POS: Loopback MCP endpoint through which Claude Code puts its permission prompts to the host)
-- toolkits.acp.runtime.cli.dialect::dialect_for, is_session_id (POS: Per-CLI launch knowledge of CliRuntime)
+- toolkits.acp.runtime.cli.claude::is_claude, ENV_DEFAULTS and the ``with_*`` args builders (POS: Launch knowledge of CliRuntime about the one CLI it knows)
 - toolkits.acp.runtime.cli.failure::classify_failure (POS: Error vocabulary of CliRuntime)
 - toolkits.acp.runtime.image_blocks::load_image_blocks (POS: Image input shared by CliRuntime and AcpRuntime)
 - toolkits.acp.runtime.process::ManagedProcess, ProcessLaunchError, spawn_managed_process (POS: Process ownership of every runtime that starts an agent)
@@ -43,7 +43,7 @@ from myrm_agent_harness.toolkits.acp.runtime._base import (
     build_safe_env,
     working_status,
 )
-from myrm_agent_harness.toolkits.acp.runtime.cli.dialect import CliDialect, dialect_for, is_session_id
+from myrm_agent_harness.toolkits.acp.runtime.cli import claude
 from myrm_agent_harness.toolkits.acp.runtime.cli.failure import classify_failure
 from myrm_agent_harness.toolkits.acp.runtime.cli.turn_parser import CliResult, TurnParser
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import load_image_blocks
@@ -118,7 +118,7 @@ class _Attempt:
 class CliRuntime(BaseRuntime):
     """RuntimeBackend that runs a CLI process per turn and parses its NDJSON output.
 
-    The prompt reaches the CLI on stdin (``-p``) or as the last argument. A CLI with a dialect (Claude)
+    The prompt reaches the CLI on stdin (``-p``) or as the last argument. Claude Code
     is resumed from the session it announced earlier, provided the turn starts in the directory that created it;
     with a ``session_store`` that id also survives a restart of the host process. A resume the CLI rejects as
     unknown is retried once as a fresh session in the same turn, and the old id is replaced only once the fresh
@@ -138,17 +138,18 @@ class CliRuntime(BaseRuntime):
         self._process: ManagedProcess | None = None
         self._stop_requested = False
         self._sessions = CliSessionBook(runtime_name, session_store)
+        # Claude is the one CLI whose command line is known: it resumes, takes images and asks the host.
+        self._is_claude = claude.is_claude(config.command)
 
     @property
     def capabilities(self) -> BackendCapabilities:
-        dialect = dialect_for(self._config.command)
         return BackendCapabilities(
-            supports_resume=dialect is not None,
+            supports_resume=self._is_claude,
             supports_mcp=False,
             supports_streaming=True,
             supports_tools=False,
-            supports_images=dialect is not None and dialect.sends_image_blocks,
-            supports_permission_requests=dialect is not None and dialect.asks_host,
+            supports_images=self._is_claude,
+            supports_permission_requests=self._is_claude,
         )
 
     @property
@@ -181,29 +182,28 @@ class CliRuntime(BaseRuntime):
         yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status="starting")
 
         cwd = self._workspace
-        dialect = dialect_for(command)
-        if images and (dialect is None or not dialect.sends_image_blocks):
+        if images and not self._is_claude:
             # Same as MCP above: the pool already withholds what a backend did not declare it takes.
             logger.warning(
                 "cli_runtime_images_ignored backend=%s images=%d reason=unsupported", self._name, len(images)
             )
-        env = {**(dialect.env_defaults if dialect is not None else {}), **build_safe_env(self._config)}
-        args = self._launch_args(command, dialect)
-        if images and dialect is not None and dialect.sends_image_blocks:
+        env = {**(claude.ENV_DEFAULTS if self._is_claude else {}), **build_safe_env(self._config)}
+        args = self._launch_args(command)
+        if images and self._is_claude:
             blocks = await asyncio.to_thread(load_image_blocks, images)
-            args, prompt = dialect.with_image_blocks(args, prompt, blocks)
+            args, prompt = claude.with_image_blocks(args, prompt, blocks)
 
         async with AsyncExitStack() as stack:
-            if permissions is not None and dialect is not None and self._asks_host(dialect):
+            if permissions is not None and self._asks_host():
                 bridge = await stack.enter_async_context(self._permission_bridge(permissions, session_id))
-                args = dialect.with_permission_bridge(args, bridge.prompt_tool, bridge.config_path)
-            async with aclosing(self._run_turn_attempts(args, prompt, session_id, cwd, env, dialect)) as events:
+                args = claude.with_permission_bridge(args, bridge.prompt_tool, bridge.config_path)
+            async with aclosing(self._run_turn_attempts(args, prompt, session_id, cwd, env)) as events:
                 async for event in events:
                     yield event
 
-    def _asks_host(self, dialect: CliDialect) -> bool:
-        """Whether this turn can put the CLI's permission prompts to the host: ``safe`` is the mode that asks."""
-        return dialect.asks_host and self._config.permission_mode == "safe"
+    def _asks_host(self) -> bool:
+        """Whether this turn can put Claude's permission prompts to the host: ``safe`` is the mode that asks."""
+        return self._is_claude and self._config.permission_mode == "safe"
 
     def _permission_bridge(self, permissions: TurnPermissions, session_id: str) -> PermissionBridge:
         # Imported here: the MCP and ASGI machinery is only loaded by a turn that is actually bridged.
@@ -218,17 +218,16 @@ class CliRuntime(BaseRuntime):
         session_id: str,
         cwd: str,
         env: dict[str, str],
-        dialect: CliDialect | None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Resume the session when it can be, retry once as a fresh one when the CLI rejects it, then close the turn."""
-        resume_args, notice = await self._resume_args(session_id, cwd, dialect, args)
+        resume_args, notice = await self._resume_args(session_id, cwd, args)
         if notice is not None:
             yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=notice)
 
         attempt = _Attempt()
         try:
             async with aclosing(
-                self._run_attempt(resume_args or args, prompt, session_id, cwd, env, dialect, attempt)
+                self._run_attempt(resume_args or args, prompt, session_id, cwd, env, attempt)
             ) as events:
                 async for event in events:
                     yield event
@@ -239,7 +238,7 @@ class CliRuntime(BaseRuntime):
                 )
                 yield create_event(RuntimeEventType.STATUS_UPDATE, session_id, status=ContinuityStatus.SESSION_EXPIRED)
                 attempt = _Attempt()
-                async with aclosing(self._run_attempt(args, prompt, session_id, cwd, env, dialect, attempt)) as events:
+                async with aclosing(self._run_attempt(args, prompt, session_id, cwd, env, attempt)) as events:
                     async for event in events:
                         yield event
         except ProcessLaunchError as exc:
@@ -254,21 +253,20 @@ class CliRuntime(BaseRuntime):
         for event in self._closing_events(attempt, session_id):
             yield event
 
-    def _launch_args(self, command: str, dialect: CliDialect | None) -> list[str]:
-        """The command line of a fresh turn: the CLI's launch and permission args, plus what its dialect adds."""
+    def _launch_args(self, command: str) -> list[str]:
+        """The command line of a fresh turn: the CLI's launch and permission args, plus what Claude adds."""
         args = [command, *resolve_cli_args(command, self._config.args, self._config.permission_mode)]
         if "--output-format" in args and "stream-json" in args and "--verbose" not in args:
             args.append("--verbose")
-        if dialect is not None:
-            args = dialect.with_partial_messages(args)
-            args = dialect.with_max_turns(args, self._config.max_turns)
+        if self._is_claude:
+            args = claude.with_partial_messages(args)
+            args = claude.with_max_turns(args, self._config.max_turns)
         return args
 
     async def _resume_args(
         self,
         session_id: str,
         cwd: str,
-        dialect: CliDialect | None,
         args: list[str],
     ) -> tuple[list[str] | None, ContinuityStatus | None]:
         """``args`` that continue this session's CLI conversation, and the status to tell when one cannot be.
@@ -276,7 +274,7 @@ class CliRuntime(BaseRuntime):
         A conversation is resumed only from the directory that created it: Claude files sessions per project
         directory, and before v2.1.223 ``--resume`` finds an id only from there.
         """
-        if dialect is None or dialect.is_resuming(args):
+        if not self._is_claude or claude.is_resuming(args):
             return None, None
         record = await self._sessions.recorded(session_id)
         if record is None:
@@ -290,7 +288,7 @@ class CliRuntime(BaseRuntime):
                 cwd,
             )
             return None, ContinuityStatus.WORKSPACE_CHANGED
-        resumed = dialect.with_resume(args, record.cli_session_id)
+        resumed = claude.with_resume(args, record.cli_session_id)
         if resumed is None:
             logger.warning("cli_session_not_resumable name=%s session=%s", self._name, session_id)
             return None, None
@@ -304,7 +302,6 @@ class CliRuntime(BaseRuntime):
         session_id: str,
         cwd: str,
         env: dict[str, str],
-        dialect: CliDialect | None,
         attempt: _Attempt,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Run ``args`` once, streaming its events and recording what the run turned out to be in ``attempt``."""
@@ -328,7 +325,7 @@ class CliRuntime(BaseRuntime):
                 announced = parser.take_announced()
                 if announced is not None:
                     attempt.announced = True
-                    await self._record_session(session_id, announced, cwd, dialect)
+                    await self._record_session(session_id, announced, cwd)
                 if parser.auth_rejection:
                     # The CLI would keep retrying for minutes and then fail with these same words.
                     logger.warning("cli_auth_rejected name=%s session=%s", self._name, session_id)
@@ -340,11 +337,11 @@ class CliRuntime(BaseRuntime):
             attempt.notice = parser.notice
             attempt.result = parser.result
 
-    async def _record_session(self, session_id: str, cli_session_id: str, cwd: str, dialect: CliDialect | None) -> None:
+    async def _record_session(self, session_id: str, cli_session_id: str, cwd: str) -> None:
         """Keep the session the CLI just announced — at once, so a turn stopped right after still continues."""
-        if dialect is None:
+        if not self._is_claude:
             return
-        if not is_session_id(cli_session_id):
+        if not claude.is_session_id(cli_session_id):
             logger.warning("cli_session_unrecognized name=%s session=%s", self._name, session_id)
             return
         self._sessions.remember(session_id, CliSessionRecord(cli_session_id, cwd))
@@ -361,7 +358,9 @@ class CliRuntime(BaseRuntime):
             notice=attempt.notice,
             auth_rejection=attempt.auth_rejection,
         )
-        done = create_event(RuntimeEventType.DONE, session_id, stop_reason=StopReason.END_TURN)
+        hit_turn_limit = attempt.result is not None and attempt.result.hit_turn_limit
+        stop_reason = StopReason.MAX_TURN_REQUESTS if hit_turn_limit else StopReason.END_TURN
+        done = create_event(RuntimeEventType.DONE, session_id, stop_reason=stop_reason)
         if error is None:
             return [done]
         if error.code is AcpErrorCode.PROCESS_CRASHED:

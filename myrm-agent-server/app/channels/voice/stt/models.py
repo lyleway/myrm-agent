@@ -10,7 +10,7 @@
 
 [POS]
 Pure rules of the voice stt package, shared by the batch providers and the streaming endpoints so no transcription path
-repeats a default model name or the Deepgram address. Nothing is pinned in stored settings: an empty model setting
+repeats a default model name or the live Deepgram address. Nothing is pinned in stored settings: an empty model setting
 always resolves here, so a provider that retires its default only needs this file to change.
 """
 

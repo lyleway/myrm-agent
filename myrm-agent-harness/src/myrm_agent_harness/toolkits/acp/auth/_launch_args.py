@@ -33,7 +33,7 @@ from myrm_agent_harness.toolkits.acp.types import AuthMode
 # - claude: `--permission-mode` accepts default / acceptEdits / plan / auto / dontAsk /
 #   bypassPermissions. `default` is the mode that asks before anything beyond a read; a
 #   headless run has nobody to ask, so it either hands the question to the host through
-#   `--permission-prompt-tool` (see ``CliDialect.with_permission_bridge``) or refuses.
+#   `--permission-prompt-tool` (see ``cli.claude.with_permission_bridge``) or refuses.
 # The agents driven over ACP (gemini, qwen) have no row: they ask the host in the mode their contract names. Nor does
 # the agent driven over its app server (codex): the host sets its approval policy and sandbox with every turn.
 _PERMISSION_MODE_ARGS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -50,7 +50,7 @@ _PERMISSION_MODE_ARGS: dict[str, dict[str, tuple[str, ...]]] = {
 # its config may carry is a short allowlist, not a list of flags to take away.
 _PERMISSION_FLAGS_BY_BACKEND: dict[str, tuple[frozenset[str], frozenset[str], tuple[str, ...]]] = {
     "claude": (
-        # ``--permission-prompt-tool`` is how a headless turn asks the host (``CliDialect.with_permission_bridge``).
+        # ``--permission-prompt-tool`` is how a headless turn asks the host (``cli.claude.with_permission_bridge``).
         frozenset({"--permission-mode", "--dangerously-skip-permissions", "--full-auto", "--permission-prompt-tool"}),
         frozenset({"--permission-mode", "--permission-prompt-tool"}),
         ("--permission-mode=", "--permission-prompt-tool="),
