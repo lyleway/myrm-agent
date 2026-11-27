@@ -69,7 +69,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.mark.asyncio
-async def test_home_spelling_opens_the_file_the_permission_engine_judged(executor, home):
+async def test_home_spelling_opens_the_file_the_permission_engine_judged(executor: LocalExecutor, home: Path) -> None:
     # The engine reads ``~/notes.txt`` as a file of the user's home; once the user grants the home, that is the file.
     with scoped_value(session_access_roots_var, (AccessRoot(path=str(home), writable=True),)):
         assert await executor.resolve_path("~/notes.txt") == str(home / "notes.txt")
@@ -77,19 +77,23 @@ async def test_home_spelling_opens_the_file_the_permission_engine_judged(executo
 
 
 @pytest.mark.asyncio
-async def test_home_spelling_is_refused_without_a_grant(executor, home):
+async def test_home_spelling_is_refused_without_a_grant(executor: LocalExecutor, home: Path) -> None:
     with pytest.raises(ValueError, match="Path traversal detected"):
         await executor.resolve_path("~/notes.txt")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["~$notes.txt", "~backup/notes.txt", "~root/notes.txt"])
-async def test_other_tilde_names_stay_workspace_paths(executor, workspace, home, name):
+async def test_other_tilde_names_stay_workspace_paths(
+    executor: LocalExecutor, workspace: Path, home: Path, name: str
+) -> None:
     assert await executor.resolve_path(name) == str((workspace / name).resolve())
 
 
 @pytest.mark.asyncio
-async def test_environment_variable_spelling_stays_a_workspace_path(executor, workspace, monkeypatch):
+async def test_environment_variable_spelling_stays_a_workspace_path(
+    executor: LocalExecutor, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The permission engine reads it the same way, so a link named like a variable is judged as the link it is.
     monkeypatch.setenv("MYRM_UP", "../elsewhere")
 
@@ -115,7 +119,9 @@ async def test_environment_variable_spelling_stays_a_workspace_path(executor, wo
         "~backup/notes.txt",
     ],
 )
-async def test_the_executor_opens_the_file_the_permission_engine_reads(executor, workspace, monkeypatch, typed):
+async def test_the_executor_opens_the_file_the_permission_engine_reads(
+    executor: LocalExecutor, workspace: Path, monkeypatch: pytest.MonkeyPatch, typed: str
+) -> None:
     # What a gate judges and what the tool opens are one file only if both read the typed text the same way.
     monkeypatch.setenv("MYRM_UP", "../elsewhere")
     (workspace / "src").mkdir()

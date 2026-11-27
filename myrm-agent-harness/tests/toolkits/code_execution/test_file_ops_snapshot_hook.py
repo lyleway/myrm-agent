@@ -8,6 +8,7 @@ stays inert. A mutation a protection rule refuses is neither reported nor perfor
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -56,7 +57,7 @@ class _RefusingOps(_TestOps):
         raise PermissionError(f"Write denied: '{resolved_path}'")
 
 
-def _hook_patch():
+def _hook_patch() -> AbstractContextManager[AsyncMock]:
     return patch(
         "myrm_agent_harness.toolkits.code_execution.executors.local._file_ops.trigger_destructive_action_hook",
         new_callable=AsyncMock,
