@@ -54,6 +54,13 @@ describe('offline queue storage', () => {
     expect(loadOfflineQueue()).toEqual([expect.objectContaining({ value: { a: 2 }, expectedVersion: '1000_0' })]);
   });
 
+  it('takes the base version of the next entry when the earliest one was stored without any', () => {
+    saveOfflineQueue([{ key: 'chatSettings', value: { a: 1 }, timestamp: 1 } as unknown as ConfigChange]);
+    saveOfflineQueue([change('chatSettings', { a: 2 }, '1000_3', 2)]);
+
+    expect(loadOfflineQueue()).toEqual([expect.objectContaining({ value: { a: 2 }, expectedVersion: '1000_3' })]);
+  });
+
   it('judges which value is the latest by edit time, not by the order the entries arrive in', () => {
     saveOfflineQueue([change('chatSettings', { a: 2 }, '1000_1', 5)]);
     saveOfflineQueue([change('chatSettings', { a: 1 }, '1000_0', 3)]);
@@ -66,6 +73,16 @@ describe('offline queue storage', () => {
   it('reads an unreadable stored queue as empty', () => {
     localStorageMock.setItem('config-offline-queue', '{not json');
     expect(loadOfflineQueue()).toEqual([]);
+  });
+
+  it('lifts nothing out of a queue that holds no secret-bearing entry, and leaves it as it is', () => {
+    saveOfflineQueue([change('chatSettings', { a: 1 }, '1000_0')]);
+    vi.clearAllMocks();
+
+    expect(takeUnpersistableOfflineEntries()).toEqual([]);
+
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+    expect(localStorageMock.removeItem).not.toHaveBeenCalled();
   });
 });
 
@@ -187,6 +204,17 @@ describe('offline queue per account', () => {
     expect(loadOfflineQueue()).toHaveLength(1);
   });
 
+  it('keeps the queue of the signed-in account when no backlog belongs to no account', () => {
+    signIn('alice');
+    saveOfflineQueue([change('commands', { c: 1 }, '1000_0')]);
+    vi.clearAllMocks();
+
+    discardUnattributedOfflineQueue();
+
+    expect(localStorageMock.removeItem).not.toHaveBeenCalled();
+    expect(loadOfflineQueue().map((queued) => queued.key)).toEqual(['commands']);
+  });
+
   it('drops the backlog that belongs to no account once an account is signed in', () => {
     localStorageMock.setItem('config-offline-queue', JSON.stringify([change('chatSettings', { a: 1 }, '1000_0')]));
     signIn('alice');
@@ -196,6 +224,80 @@ describe('offline queue per account', () => {
 
     expect(localStorageMock.getItem('config-offline-queue')).toBeNull();
     expect(loadOfflineQueue().map((queued) => queued.key)).toEqual(['commands']);
+  });
+});
+
+describe('offline queue when browser storage refuses', () => {
+  const quotaExceeded = () => {
+    throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+  };
+
+  beforeEach(() => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  it('does not throw when an edit cannot be saved, and says so', () => {
+    localStorageMock.setItem.mockImplementationOnce(quotaExceeded);
+
+    expect(() => saveOfflineQueue([change('chatSettings', { a: 1 }, '1000_0')])).not.toThrow();
+
+    expect(console.warn).toHaveBeenCalledWith('[ConfigSync] Failed to save offline queue:', expect.any(DOMException));
+  });
+
+  it('does not throw when a settled entry cannot be removed, and says so', () => {
+    saveOfflineQueue([change('chatSettings', { a: 1 }, '1000_0', 2)]);
+    localStorageMock.removeItem.mockImplementationOnce(quotaExceeded);
+
+    expect(() => removeOfflineEntries([change('chatSettings', { a: 1 }, '1000_0', 2)])).not.toThrow();
+
+    expect(console.warn).toHaveBeenCalledWith('[ConfigSync] Failed to update offline queue:', expect.any(DOMException));
+  });
+
+  it('still hands over the secret-bearing entries for in-memory replay when their stored copy cannot be removed', () => {
+    localStorageMock.setItem('config-offline-queue', JSON.stringify([change('providers', { secret: 'x' }, '1000_0')]));
+    localStorageMock.removeItem.mockImplementationOnce(quotaExceeded);
+
+    expect(takeUnpersistableOfflineEntries().map((lifted) => lifted.key)).toEqual(['providers']);
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[ConfigSync] Failed to remove unpersistable offline entries:',
+      expect.any(DOMException),
+    );
+  });
+
+  it('does not throw when the backlog that belongs to no account cannot be dropped, and says so', () => {
+    localStorageMock.setItem('config-offline-queue', JSON.stringify([change('chatSettings', { a: 1 }, '1000_0')]));
+    localStorageMock.setItem('auth_token', cpToken('alice'));
+    localStorageMock.removeItem.mockImplementationOnce(quotaExceeded);
+
+    expect(() => discardUnattributedOfflineQueue()).not.toThrow();
+
+    expect(console.warn).toHaveBeenCalledWith(
+      '[ConfigSync] Failed to drop the unattributed offline queue:',
+      expect.any(DOMException),
+    );
+  });
+});
+
+describe('offline queue outside a browser (server rendering)', () => {
+  it('reads nothing and touches no storage', () => {
+    localStorageMock.clear();
+    vi.clearAllMocks();
+    vi.stubGlobal('window', undefined);
+    try {
+      expect(loadOfflineQueue()).toEqual([]);
+      saveOfflineQueue([change('chatSettings', { a: 1 }, '1000_0')]);
+      removeOfflineEntries([change('chatSettings', { a: 1 }, '1000_0')]);
+      discardUnattributedOfflineQueue();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(localStorageMock.getItem).not.toHaveBeenCalled();
+    expect(localStorageMock.setItem).not.toHaveBeenCalled();
+    expect(localStorageMock.removeItem).not.toHaveBeenCalled();
   });
 });
 

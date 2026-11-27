@@ -16,6 +16,10 @@ Chrome MCP E2E helpers for the config-sync deadline live flow: edits typed into 
 
 `../test_config_sync_deadline_chrome_e2e.py` — Lane-B (PRIVATE + GLOBAL_WRITE) with the real frontend, backend and database and no model. Nine phases: eight on one page (healthy write, slow headers, slow body, stalled headers, stalled body, edit during a stall, stalled settlement read, healthy again) and one on a reopened page. Every timing assertion rests on page-clock moments from the shim and on the stamp the backend puts on each applied write, so a loaded host delays the verdict without changing it.
 
+## Unit Tests
+
+`../../unit/config_sync_deadline/` covers both modules without a browser: the Python half with a faked page and backend (`test_fault_shim.py`, `test_card_session.py`), and the shim's JavaScript run in Node against a stub `fetch` (`test_fault_shim_script.py`, which needs `node` on `PATH`). Run them with `./myrm-dev test -n0 --cov=tests.e2e.config_sync_deadline --cov-report=term-missing myrm-agent/myrm-agent-server/tests/unit/config_sync_deadline`.
+
 ## Dependencies
 
 - Inside the package: `card_session` ← `fault_shim`
