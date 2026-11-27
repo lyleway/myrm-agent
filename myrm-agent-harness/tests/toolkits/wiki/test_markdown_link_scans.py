@@ -12,6 +12,7 @@ import random
 import re
 import time
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
@@ -20,6 +21,7 @@ from myrm_agent_harness.toolkits.wiki.core.config import WikiConfig
 from myrm_agent_harness.toolkits.wiki.core.structure import WikiStructure
 from myrm_agent_harness.toolkits.wiki.pipeline.ingress.asset_store import (
     _asset_relpath_from_raw,
+    localize_public_markdown_images,
     rewrite_markdown_asset_refs,
 )
 from myrm_agent_harness.toolkits.wiki.pipeline.ingress.publish import _has_markdown_image
@@ -119,14 +121,37 @@ class TestImageReferenceScan:
     ) -> None:
         page = wiki_structure.concepts_dir / "Payment.md"
         page.parent.mkdir(parents=True, exist_ok=True)
-        page.write_text("# Payment\n\n![diagram](payment-flow.png)\n" + "![" * 100_000, encoding="utf-8")
+        page.write_text("# Payment\n\n![diagram](payment-flow.png)\n![](bare.png)\n" + "![" * 100_000, encoding="utf-8")
         indexer = WikiAssetIndexer(wiki_structure, WikiConfig(enable_asset_index=True))
 
         started = time.process_time()
         refs = indexer.scan_image_references()
 
-        assert refs == {"payment-flow.png": ["Payment"]}
+        assert refs == {"bare.png": ["Payment"], "payment-flow.png": ["Payment"]}
         assert time.process_time() - started < 2.0
+
+
+class TestImageDownload:
+    async def test_only_the_images_a_page_embeds_are_fetched(
+        self, wiki_structure: WikiStructure, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fetched: list[str] = []
+
+        async def refuse(url: str, **_options: object) -> SimpleNamespace:
+            fetched.append(url)
+            return SimpleNamespace(status_code=404, headers={}, content=b"")
+
+        monkeypatch.setattr("myrm_agent_harness.toolkits.wiki.pipeline.ingress.asset_store.secure_get", refuse)
+        page = (
+            "[a page](https://a.test/page) ![](https://a.test/bare.png) "
+            '![alt](https://a.test/titled.png "a title") ![inline](data:image/png;base64,AAAA) '
+            "![again](https://a.test/bare.png)"
+        )
+
+        rewritten, stats = await localize_public_markdown_images(wiki_structure, page, base_url="")
+
+        assert fetched == ["https://a.test/bare.png", "https://a.test/titled.png"]
+        assert (rewritten, stats.failed) == (page, 2)
 
 
 class TestImagePresence:
