@@ -9,8 +9,9 @@
 - settle_compaction_after_history_change: drop a summary the changed history made stale, refresh the recall index
 
 [POS]
-Runs in the transaction of every retry, regenerate, sibling switch, undo, truncate and rewind, so the summary and the
-messages it was derived from never disagree for any reader.
+Runs in the transaction of every retry, regenerate, sibling switch, undo, truncate and rewind, so a summary stored
+before the change never outlives the history it was derived from. A summary stored after it is held back by the shared
+writer's boundary check (``persist.do_persist_to_db``).
 """
 
 from __future__ import annotations

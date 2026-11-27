@@ -135,15 +135,16 @@ class TestOfflineCompaction:
     ) -> None:
         sync_privacy_policy(settings)
         llm, sent = wire_llm('{"goal": "社保"}')
+        # SQLite hands datetimes back without a zone, so the drain's cold-cache check must read a naive one.
+        answered_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
         stored = [
-            SimpleNamespace(id="m1", role="user", content=_SENSITIVE_TEXT, extra_data=None),
-            SimpleNamespace(id="m2", role="assistant", content="已记录", extra_data=None),
+            SimpleNamespace(
+                id="m1", role="user", content=_SENSITIVE_TEXT, extra_data=None, created_at=answered_at - timedelta(seconds=1)
+            ),
+            SimpleNamespace(id="m2", role="assistant", content="已记录", extra_data=None, created_at=answered_at),
         ]
         repo = SimpleNamespace(
-            # SQLite hands datetimes back without a zone, so the drain's cold-cache check must read a naive one.
-            get_latest_message=AsyncMock(
-                return_value=SimpleNamespace(id="m2", created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1))
-            ),
+            get_latest_message=AsyncMock(return_value=SimpleNamespace(id="m2", created_at=answered_at)),
             get_chat_by_id=AsyncMock(return_value=SimpleNamespace(compacted_before_id=None, compacted_summary=None)),
             get_all_messages=AsyncMock(return_value=stored),
         )
