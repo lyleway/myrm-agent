@@ -9,8 +9,8 @@ Request/response models for skill discovery endpoints. A response field that car
 scanner text is an EncodableStr, so a lone surrogate in it becomes U+FFFD instead of making the JSON body unencodable.
 
 [POS]
-Pydantic schemas extracted from discovery.py to stay within
-the 400-line file budget.
+Request and response schemas of the skill discovery routes: search, install, update, uninstall, preview,
+URL analysis, custom sources, static-index status and skill-pool sync.
 """
 
 from __future__ import annotations
