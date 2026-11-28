@@ -18,6 +18,6 @@ the ContextVar binding only — httpx vendor implementations live in
 ## Usage
 
 Server binds providers per agent stream; `FetchEngine._try_escalation` reads
-`get_bound_escalation_providers()` after L1-L3 failure — the bound providers are the only source, an engine holds
+`get_bound_escalation_providers()` after the local HTTP read fails — the bound providers are the only source, an engine holds
 none of its own. Every escalation ends in one log line: the provider that succeeded, or "no usable content" with the
 number of providers tried.

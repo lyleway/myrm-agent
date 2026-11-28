@@ -239,7 +239,7 @@ class DomainMetricsManager:
             return self._metrics[domain]
 
     def record_failure(self, domain: str, fetcher_type: FetcherType) -> None:
-        """Record a failed fetch attempt of a tier on a domain."""
+        """Record a failed fetch attempt of a fetcher type on a domain."""
         self.get_or_create(domain).record_failure(fetcher_type)
 
     def _maintain(self) -> None:

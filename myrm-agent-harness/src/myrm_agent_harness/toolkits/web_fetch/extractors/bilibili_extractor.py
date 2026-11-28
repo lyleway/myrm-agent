@@ -2,14 +2,14 @@
 
 Extracts subtitles from Bilibili videos via public API. Used as a fast-path
 shortcut in FetchEngine when a Bilibili URL is detected, bypassing the
-three-tier HTML fetcher pipeline.
+HTML fetch.
 
 Bilibili subtitles are loaded asynchronously via a separate API and are NOT
-present in the page DOM, so Browser-based crawling cannot retrieve them.
+present in the page DOM, so fetching the page cannot retrieve them.
 This extractor is the only way to obtain Bilibili video subtitles.
 
 When the API call fails or no subtitle is available, FetchEngine falls back
-to standard HTML crawl (which provides title/description but no subtitles).
+to the standard HTML fetch (which provides title/description but no subtitles).
 
 Design pattern: analogous to youtube_extractor.py — special content source routing.
 

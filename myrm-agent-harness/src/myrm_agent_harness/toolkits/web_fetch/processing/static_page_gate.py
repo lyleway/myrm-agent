@@ -1,7 +1,7 @@
 """Static long-page fallback gate for L1 HTTP fetches.
 
 [INPUT]
-- web_fetch.fetchers.protocols::FetcherType (POS: Fetcher tier enum)
+- web_fetch.fetchers.protocols::FetcherType (POS: Fetcher type enum)
 - utils.markdown_links::replace_markdown_links (POS: Linear-time Markdown link scan)
 
 [OUTPUT]
@@ -10,7 +10,7 @@
 
 [POS]
 Fallback gate in ContentPipeline. Prevents long static directory/index pages (e.g. man7, Gutenberg, Unicode tables)
-from being treated as L1 failures and escalating to heavier tiers when boilerplate pruning strips their link-heavy DOM.
+from being treated as L1 failures and escalating to the remote fallback when boilerplate pruning strips their link-heavy DOM.
 """
 
 from __future__ import annotations

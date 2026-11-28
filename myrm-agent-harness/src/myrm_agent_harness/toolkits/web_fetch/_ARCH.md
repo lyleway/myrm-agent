@@ -2,13 +2,13 @@
 
 ## Overview
 
-Layered single-page web fetch engine with L1 HTTP fetching, optional L4 remote escalation, and full-content delivery that shortens long pages to one shared budget while saving the complete text for `file_read_tool`.
+Single-page web fetch engine with L1 HTTP fetching, optional L4 remote escalation, and full-content delivery that shortens long pages to one shared budget while saving the complete text for `file_read_tool`.
 
 ## Submodule Index
 
 | Submodule | Role | Description |
 |-----------|------|-------------|
-| [engine/](engine/_ARCH.md) | Core | FetchEngine tiered fetcher pool |
+| [engine/](engine/_ARCH.md) | Core | FetchEngine: HTTP fetch entry, cache, batch and remote escalation |
 | [processing/](processing/_ARCH.md) | Core | Post-fetch pipeline, markdown, charset detection, full-content delivery, anti-bot |
 | [extractors/](extractors/_ARCH.md) | Core | WeChat / Bilibili / YouTube / X fast-paths |
 | [fetchers/](fetchers/_ARCH.md) | Core | L1 HTTP fetcher implementation and outbound target guard |

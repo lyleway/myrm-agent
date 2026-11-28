@@ -20,7 +20,7 @@ of a redirect: the HTTP fetcher judges each hop before requesting it, and L4 esc
 reported back by the remote provider. It is judged first and needs no DNS, and it applies whether or not
 the SSRF shield is on.
 
-The SSRF policy of the tiers that follow redirects: cloud policy resolves the host and requires every
+The SSRF policy of the hops the HTTP fetcher follows: cloud policy resolves the host and requires every
 address to be public; the HTTP tier then dials only those addresses (see ``connection_pin``), so the answer a
 hop was judged on is the one it connects to. Local policy (``allow_private_networks``) classifies the host as
 written and by its DNS answer, but only loopback, link-local and metadata answers count: the user's own

@@ -1,7 +1,7 @@
 """Domain-level learning data shared by web_fetch and the browser.
 
 [INPUT]
-- web_fetch.fetchers.protocols::FetcherType (POS: Fetch tier identifiers)
+- web_fetch.fetchers.protocols::FetcherType (POS: Fetcher type enum)
 
 [OUTPUT]
 - DomainMetrics: Per-domain fetch failures and browser wait-strategy learning data
@@ -123,7 +123,7 @@ class DomainMetrics:
         return metrics
 
     def record_failure(self, fetcher_type: FetcherType) -> None:
-        """Record a failed fetch attempt of a tier (thread-safe)"""
+        """Record a failed fetch attempt of a fetcher type (thread-safe)"""
         with self._lock:
             now = time.time()
             self.failure_timestamps[fetcher_type].append(now)

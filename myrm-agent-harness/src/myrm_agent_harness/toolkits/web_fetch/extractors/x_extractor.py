@@ -3,7 +3,7 @@
 Extracts post content, author metadata, engagement metrics, and media links
 via lightweight public APIs (FxTwitter / VxTwitter / oEmbed).
 Used as a fast-path shortcut in FetchEngine when an X or Twitter URL is detected,
-bypassing browser-based crawling to deliver <150ms structured Markdown Documents.
+bypassing the HTML fetch to deliver structured Markdown Documents.
 
 When the fast-path is unavailable or returns 404, FetchEngine degrades gracefully.
 

@@ -3,8 +3,7 @@
 A listed host is never read. The HTTP tier judges the requested URL and every redirect hop before it is requested
 (real curl_cffi against loopback servers: what was never requested proves the verdict). A remote escalation
 provider is judged by the URL it reports. A verdict is terminal: no other tier tries the URL, and the failure is
-remembered. The browser and stealth tiers are in ``test_network_blocklist_browser_tiers.py``, the tool wiring in
-``test_network_blocklist_tool.py``.
+remembered. The tool wiring is in ``test_network_blocklist_tool.py``.
 """
 
 from __future__ import annotations
