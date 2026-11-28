@@ -41,7 +41,7 @@ _kill_frontend_supervisor() {
     sleep 1
     kill -9 "${fe_pid}" 2>/dev/null || true
   fi
-  rm -f "${FRONTEND_PID}"
+  rm -f "${FRONTEND_PID}" 2>/dev/null || true
   if _frontend_port_listening; then
     local owned_pids
     owned_pids="$(_owned_frontend_listener_pids)"
@@ -53,7 +53,7 @@ _kill_frontend_supervisor() {
       kill -9 ${owned_pids} 2>/dev/null || true
     fi
   fi
-  rm -f "${FRONTEND_LOCK}"
+  rm -f "${FRONTEND_LOCK}" 2>/dev/null || true
 }
 
 _frontend_dev_paused() {

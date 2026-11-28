@@ -164,9 +164,9 @@ cmd_reset() {
     if [[ -n "${fe_pid}" ]]; then
       kill "${fe_pid}" 2>/dev/null || true
     fi
-    rm -f "${FRONTEND_PID}"
+    rm -f "${FRONTEND_PID}" 2>/dev/null || true
   fi
-  rm -f "${FRONTEND_LOCK}"
+  rm -f "${FRONTEND_LOCK}" 2>/dev/null || true
   _frontend_clear_warmth
   _clear_stack_epoch
 
@@ -184,7 +184,7 @@ cmd_reset() {
         kill -9 "${dev_pid}" 2>/dev/null || true
       fi
     fi
-    rm -f "${BACKEND_PID}"
+    rm -f "${BACKEND_PID}" 2>/dev/null || true
   fi
 
   local owned_pids

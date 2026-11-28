@@ -8,7 +8,7 @@
 # was recycled by an unrelated process yields nothing).
 _owned_pid_from_file() {
   local pid
-  pid="$(tr -d '[:space:]' <"$1" 2>/dev/null || true)"
+  pid="$(tr -d '[:space:]' 2>/dev/null <"$1" || true)"
   [[ "${pid}" =~ ^[0-9]+$ ]] || return 0
   dev_filter_owned_pids "${pid}"
 }

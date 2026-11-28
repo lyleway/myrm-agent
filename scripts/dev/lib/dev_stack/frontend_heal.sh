@@ -91,7 +91,7 @@ _repair_orphan_frontend() {
     kill ${owned_pids} 2>/dev/null || true
     sleep 1
   fi
-  rm -f "${FRONTEND_PID}" "${FRONTEND_LOCK}"
+  rm -f "${FRONTEND_PID}" "${FRONTEND_LOCK}" 2>/dev/null || true
 }
 
 _frontend_heal_stack_write_allowed() {

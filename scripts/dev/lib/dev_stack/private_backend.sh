@@ -113,7 +113,7 @@ _repair_orphan_private_backend() {
   if [[ -f "${BACKEND_IDENTITY}" ]]; then
     _stop_private_backend 2>/dev/null || true
   fi
-  rm -f "${BACKEND_PID}" "${BACKEND_IDENTITY}"
+  rm -f "${BACKEND_PID}" "${BACKEND_IDENTITY}" 2>/dev/null || true
   if dev_port_in_use "${BACKEND_PORT}"; then
     # Only this runtime's own orphan is reclaimed; any other listener keeps the port and the
     # wait below fails closed.
