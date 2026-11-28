@@ -18,6 +18,7 @@ import { getWsUrl } from '@/lib/api';
 import { buildToolApprovalRequest } from '@/lib/approval/buildToolApprovalRequest';
 import { ensureLocalBackendReady, isLocalBackendReadyCached } from '@/lib/backend-health';
 import useToolApprovalStore from '@/store/useToolApprovalStore';
+import { createUtteranceUplink, type UtteranceUplink } from './utteranceUplink';
 
 export type AgentBridgeState =
   'disconnected' | 'connecting' | 'connected' | 'listening' | 'agent_thinking' | 'agent_speaking' | 'error';
@@ -75,7 +76,9 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
   const [audioLevel, setAudioLevel] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
+  const uplinkRef = useRef<UtteranceUplink | null>(null);
+  // Set by the server's first frame when its STT provider transcribes whole utterances instead of a live stream.
+  const batchSttRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -107,10 +110,8 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
       clearInterval(levelTimerRef.current);
       levelTimerRef.current = null;
     }
-    if (recorderRef.current?.state === 'recording') {
-      recorderRef.current.stop();
-    }
-    recorderRef.current = null;
+    uplinkRef.current?.stop();
+    uplinkRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -152,6 +153,7 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
       }
       const rms = Math.sqrt(sum / data.length);
       setAudioLevel(Math.min(1, rms * 4));
+      uplinkRef.current?.onLevel(rms);
     }, 50);
   }, []);
 
@@ -168,6 +170,7 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
     }
 
     cleanup();
+    batchSttRef.current = false;
 
     setState('connecting');
 
@@ -208,22 +211,7 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
           analyserRef.current = analyser;
           startAudioLevelMonitor();
 
-          const recorder = new MediaRecorder(stream, {
-            mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm',
-          });
-          recorderRef.current = recorder;
-
-          recorder.ondataavailable = (e) => {
-            if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-              void e.data.arrayBuffer().then((buf) => {
-                if (ws.readyState === WebSocket.OPEN) {
-                  ws.send(buf);
-                }
-              });
-            }
-          };
-
-          recorder.start(100);
+          uplinkRef.current = createUtteranceUplink({ ws, stream, isBatchStt: () => batchSttRef.current });
           setState('listening');
         })
         .catch((err) => {
@@ -319,6 +307,12 @@ export function useVoiceAgentBridge(options: UseVoiceAgentBridgeOptions): UseVoi
       const type = msg.type as string;
 
       switch (type) {
+        case 'info':
+          if (msg.fallback === 'batch') {
+            batchSttRef.current = true;
+          }
+          break;
+
         case 'stt_interim':
           setInterimText(msg.text as string);
           break;

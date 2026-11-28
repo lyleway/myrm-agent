@@ -11,9 +11,9 @@
   of the archive down with it.
 
 [POS]
-The preview pickles the parsed archive into a staged session and echoes it in one response. The parser reads nesting that the
-pickle cannot follow (a few thousand levels) and refuses what it cannot read at all (about ten thousand); a hostile plugin.json
-or mcp.json must end as a diagnostic, because a server error leaves the user with nothing to fix.
+The preview pickles the parsed archive into a staged session and echoes it in one response. ``json.loads`` reads nesting that the
+pickle cannot follow (a few thousand levels) and gives up at about ten thousand; a hostile plugin.json or mcp.json must end as a
+diagnostic, because a server error leaves the user with nothing to fix.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 SKILL = "---\nname: s\ndescription: d\n---\nBody."
 NESTING_MESSAGE = f"Nesting is deeper than {MAX_NESTING} levels"
-# A depth the parser accepts but a pickle of the result does not, and one the parser cannot read at all.
+# A depth ``json.loads`` accepts but a pickle of the result does not, and one it cannot read at all.
 TOO_DEEP_TO_STAGE = 5_000
 TOO_DEEP_TO_PARSE = 20_000
 
