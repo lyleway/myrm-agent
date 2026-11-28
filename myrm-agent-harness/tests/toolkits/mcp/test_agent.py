@@ -562,7 +562,7 @@ async def test_tool_server_mapping():
 def test_wrap_tools_with_timeout_no_coroutine():
     tool = MagicMock()
     tool.coroutine = None
-    wrap_tools_with_timeout([tool], 10.0)
+    wrap_tools_with_timeout([tool], "srv", 10.0)
     assert tool.coroutine is None
 
 
@@ -575,7 +575,7 @@ async def test_wrap_tools_timeout_fires():
         await asyncio.sleep(5)
 
     tool = _make_tool(coroutine=slow_fn)
-    wrap_tools_with_timeout([tool], timeout=0.05)
+    wrap_tools_with_timeout([tool], "srv", timeout=0.05)
 
     result = await tool.coroutine()
     assert "timed out" in result
@@ -590,7 +590,7 @@ async def test_wrap_tools_normal_execution():
         return "success"
 
     tool = _make_tool(coroutine=fast_fn)
-    wrap_tools_with_timeout([tool], timeout=5.0)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
     result = await tool.coroutine()
     assert "success" in result
@@ -608,7 +608,7 @@ async def test_wrap_tools_output_guard_no_truncation():
         return "short result"
 
     tool = _make_tool(coroutine=small_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=1000)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=1000)
 
     result = await tool.coroutine()
     assert "short result" in result
@@ -624,7 +624,7 @@ async def test_wrap_tools_output_guard_truncates_large_output():
         return large_text
 
     tool = _make_tool(coroutine=large_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=100)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=100)
 
     result = await tool.coroutine()
     assert isinstance(result, str)
@@ -649,7 +649,7 @@ async def test_wrap_tools_output_guard_truncates_multimodal_text_blocks():
         return raw_result
 
     tool = _make_tool(coroutine=image_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=100)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=100)
 
     result = await tool.coroutine()
     assert isinstance(result, list)
@@ -673,7 +673,7 @@ async def test_wrap_tools_output_guard_exact_boundary():
         return exact_text
 
     tool = _make_tool(coroutine=exact_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=1000)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=1000)
 
     result = await tool.coroutine()
     assert exact_text in result
@@ -689,7 +689,7 @@ async def test_wrap_tools_output_guard_empty_string():
         return ""
 
     tool = _make_tool(coroutine=empty_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=1000)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=1000)
 
     result = await tool.coroutine()
     assert result == ""
@@ -704,7 +704,7 @@ async def test_wrap_tools_output_guard_text_tuple_truncated():
         return CallToolResult(content=[TextContent(type="text", text=large_text)])
 
     tool = _make_tool(coroutine=text_output)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=50)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=50)
 
     result = await tool.coroutine()
     assert isinstance(result, str)
@@ -723,7 +723,7 @@ async def test_wrap_tools_output_guard_one_char_over():
         return text
 
     tool = _make_tool(coroutine=over_by_one)
-    wrap_tools_with_timeout([tool], timeout=5.0, max_output_chars=1000)
+    wrap_tools_with_timeout([tool], "srv", timeout=5.0, max_output_chars=1000)
 
     result = await tool.coroutine()
     assert "[Output truncated:" in result
@@ -1514,7 +1514,7 @@ class TestTimeoutWrapperFaultTolerance:
             raise NotImplementedError("AudioContent not supported")
 
         tool = _make_tool(coroutine=raise_not_impl)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -1530,7 +1530,7 @@ class TestTimeoutWrapperFaultTolerance:
             raise ValueError("Unknown MCP content type: FutureContent")
 
         tool = _make_tool(coroutine=raise_value_err)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -1545,7 +1545,7 @@ class TestTimeoutWrapperFaultTolerance:
             raise TypeError("expected str, got NoneType")
 
         tool = _make_tool(coroutine=raise_type_err)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -1560,7 +1560,7 @@ class TestTimeoutWrapperFaultTolerance:
             raise ValueError("token TOKEN=sk-proj-abcdefghijklmnop1234567890 leaked")
 
         tool = _make_tool(coroutine=raise_with_secret)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -1576,7 +1576,7 @@ class TestTimeoutWrapperFaultTolerance:
             raise RuntimeError("unexpected crash")
 
         tool = _make_tool(coroutine=raise_runtime)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         with pytest.raises(RuntimeError, match="unexpected crash"):
             await tool.coroutine()
@@ -1753,12 +1753,11 @@ class TestWrapToolsAuthError:
             coroutine=AsyncMock(side_effect=err),
         )
         with patch("myrm_agent_harness.toolkits.mcp.tool_processing._emit_auth_expired_for_tool") as mock_emit:
-            wrap_tools_with_timeout([tool], timeout=5.0)
+            wrap_tools_with_timeout([tool], "auth_server", timeout=5.0)
             result = await tool.ainvoke({"a": "1"})
 
-        assert "auth_server" in result
-        assert "requires re-authorization" in result
-        mock_emit.assert_called_once()
+        assert result.startswith("MCP server 'auth_server' requires re-authorization.")
+        mock_emit.assert_called_once_with("auth_server", str(err))
 
     @pytest.mark.asyncio
     async def test_non_401_status_error_still_raises(self) -> None:
@@ -1770,12 +1769,12 @@ class TestWrapToolsAuthError:
         err = httpx2.HTTPStatusError("500 Internal Server Error", request=request, response=response)
 
         tool = _make_tool(name="mcp__srv__boom", coroutine=AsyncMock(side_effect=err))
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
         with pytest.raises(httpx2.HTTPStatusError):
             await tool.ainvoke({"a": "1"})
 
     @pytest.mark.asyncio
-    async def test_unauth_tool_name_yields_full_name_fallback(self) -> None:
+    async def test_the_server_is_named_by_the_name_it_was_given_not_by_the_tool_name(self) -> None:
         import httpx2
 
         request = MagicMock()
@@ -1783,11 +1782,11 @@ class TestWrapToolsAuthError:
         response.status_code = 401
         err = httpx2.HTTPStatusError("401 Unauthorized", request=request, response=response)
 
-        tool = _make_tool(name="plain_tool", coroutine=AsyncMock(side_effect=err))
-        with patch("myrm_agent_harness.toolkits.mcp.tool_processing._emit_auth_expired_for_tool"):
-            wrap_tools_with_timeout([tool], timeout=5.0)
+        tool = _make_tool(name="mcp__unnamed_dd4acd__read", coroutine=AsyncMock(side_effect=err))
+        with patch("myrm_agent_harness.toolkits.mcp.tool_processing._emit_auth_expired_for_tool") as mock_emit:
+            wrap_tools_with_timeout([tool], "天气", timeout=5.0)
             result = await tool.ainvoke({"a": "1"})
 
-        # No mcp__server__tool prefix -> falls back to the raw tool name.
-        assert "plain_tool" in result
-        assert "requires re-authorization" in result
+        assert "'天气'" in result
+        assert "unnamed_dd4acd" not in result
+        mock_emit.assert_called_once_with("天气", str(err))

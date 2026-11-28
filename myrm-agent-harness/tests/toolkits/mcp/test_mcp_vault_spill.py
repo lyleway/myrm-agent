@@ -100,6 +100,7 @@ class TestWrapToolsVaultSpill:
         tool = self._make_tool("big_mcp", big_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=mock_handler,
@@ -123,6 +124,7 @@ class TestWrapToolsVaultSpill:
         tool = self._make_tool("small_mcp", small_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=mock_handler,
@@ -144,6 +146,7 @@ class TestWrapToolsVaultSpill:
         tool = self._make_tool("fail_mcp", big_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=failing_handler,
@@ -161,6 +164,7 @@ class TestWrapToolsVaultSpill:
         tool = self._make_tool("trunc_mcp", big_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
         )
@@ -197,6 +201,7 @@ class TestBoundaryConditions:
         tool = self._make_tool("exact", exact_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=spy_handler,
@@ -223,6 +228,7 @@ class TestBoundaryConditions:
         tool = self._make_tool("over", over_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=spy_handler,
@@ -247,6 +253,7 @@ class TestBoundaryConditions:
         tool = self._make_tool("empty", empty_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=spy_handler,
@@ -268,6 +275,7 @@ class TestBoundaryConditions:
         tool = self._make_tool("unicode", unicode_fn)
         wrap_tools_with_timeout(
             [tool],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=handler,
@@ -305,6 +313,7 @@ class TestBoundaryConditions:
         tool_b = self._make_tool("tool_b", big_b)
         wrap_tools_with_timeout(
             [tool_a, tool_b],
+            "srv",
             timeout=5.0,
             max_output_chars=100_000,
             oversized_result_handler=log_handler,

@@ -33,7 +33,11 @@ def register_mcp_auth_expired_handler(handler: AuthExpiredHandler) -> None:
 
 
 def notify_mcp_auth_expired(server_name: str, error_detail: str) -> None:
-    """Notify all registered handlers (errors are logged, never raised)."""
+    """Notify all registered handlers (errors are logged, never raised).
+
+    *server_name* is the name the user gave the server, never the identity inside its tool names: the user sees
+    it in the re-authorization toast, and the toast keys its de-duplication on it.
+    """
     safe_detail = redact_sensitive_text(error_detail)
     for handler in _handlers:
         try:
