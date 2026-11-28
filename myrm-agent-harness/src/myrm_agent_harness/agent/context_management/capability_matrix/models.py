@@ -18,10 +18,10 @@ from typing import Literal
 
 CommandCategory = Literal[
     "concurrency_collaboration",  # 并发协作 (/bg, /btw, /steer, /fork)
-    "data_science",               # 数据与科学 (/pykernel, /repl, /chart, /data-diff)
-    "security_credential",        # 安全与凭证 (/vault, /secret, /sandbox)
-    "memory_knowledge",           # 记忆与知识 (/recall, /memory, /pin, /tag)
-    "delivery_workflow",          # 办公与交付 (/sop, /export, /timeline, /scratchpad)
+    "data_science",  # 数据与科学 (/pykernel, /repl, /chart, /data-diff)
+    "security_credential",  # 安全与凭证 (/vault, /secret)
+    "memory_knowledge",  # 记忆与知识 (/recall, /memory, /pin, /tag)
+    "delivery_workflow",  # 办公与交付 (/sop, /export, /timeline, /scratchpad)
 ]
 
 
