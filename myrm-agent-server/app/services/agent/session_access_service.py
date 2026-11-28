@@ -7,8 +7,8 @@
 [OUTPUT]
 - bootstrap_session_access_roots / persist_chat_session_access_roots
 - grant_chat_session_access_root / DirectoryGrantRefusedError
-- revoke_chat_session_access_root
-- apply_directory_resume_grant
+- revoke_chat_session_access_root (removes the root a path names, persisted)
+- apply_directory_resume_grant (grants the folders an approved card offered, on top of the folders the chat already holds)
 - is_directory_grant_allowed_for_deployment
 
 [POS]

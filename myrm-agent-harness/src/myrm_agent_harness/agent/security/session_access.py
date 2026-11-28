@@ -276,9 +276,9 @@ def revoke_session_access_root(
 ) -> tuple[AccessRoot, ...]:
     """Remove the HITL-granted root a path names. Returns updated tuple.
 
-    The path is read as the roots list shows it, so a root whose folder was deleted since still goes, and a path
-    that names a file is no root and takes no folder's grant with it (a grant reads a file as its folder; a
-    revoke must not widen to the folder above the one it names).
+    The path is matched as the roots list shows it, so a root whose folder has since been deleted is still removed.
+    A path that names a file is no root and removes nothing: a grant reads a file as its folder, but a revoke must
+    not widen to the folder above the one it names.
     """
     target = _resolve_named_path(raw_path, workspace_root)
     if not target:
