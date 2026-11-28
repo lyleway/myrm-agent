@@ -6,7 +6,7 @@ Agent-callable tools are exported via dedicated xx_agent_tools.py files.
 
 [INPUT]
 - llms::llm_manager, LLMManager, TransportChatModel, create_chat_model (POS: LLM manager and adapters, 100+ provider support)
-- web_fetch::FetchEngine (POS: layered fetch engine with HTTP/Browser/Stealth fallback)
+- web_fetch::FetchEngine (POS: single-page fetch engine: a bounded HTTP read plus an optional remote fallback)
 - retriever.engine::RetrieverManager (POS: retriever manager class)
 - web_fetch::web_fetch_tools (POS: global FetchEngine instance)
 
@@ -15,7 +15,7 @@ Agent-callable tools are exported via dedicated xx_agent_tools.py files.
 - LLMManager: LLM manager class
 - TransportChatModel: LangChain chat model over the model transport
 - create_chat_model: chat model factory function
-- FetchEngine: layered fetch engine
+- FetchEngine: HTTP fetch engine with an optional remote fallback
 - RetrieverManager: retriever manager class
 - web_fetch_tools: global FetchEngine instance
 
@@ -31,7 +31,7 @@ Generic, framework-agnostic toolkit collection. No agent coupling — each toolk
 - memory: pluggable memory system (vector/relational/graph storage)
 - retriever: retrieval and reranking tools
 - storage: storage service
-- web_fetch: layered fetch engine
+- web_fetch: single-page fetch engine (HTTP read, optional remote fallback)
 - web_search: web search tools
 """
 

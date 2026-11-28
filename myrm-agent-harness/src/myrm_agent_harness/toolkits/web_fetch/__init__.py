@@ -1,10 +1,10 @@
 """Web fetch toolkit.
 
 [INPUT]
-- engine::FetchEngine, FailedResult, SuccessResult (POS: layered single-page fetch engine)
+- engine::FetchEngine, FailedResult, SuccessResult (POS: single-page fetch engine: an HTTP read plus an optional remote fallback)
 
 [OUTPUT]
-- FetchEngine: layered fetch engine (re-export)
+- FetchEngine: single-page fetch engine (re-export)
 - FailedResult: failed fetch result model (re-export)
 - SuccessResult: successful fetch result model (re-export)
 - web_fetch_tools: global FetchEngine instance

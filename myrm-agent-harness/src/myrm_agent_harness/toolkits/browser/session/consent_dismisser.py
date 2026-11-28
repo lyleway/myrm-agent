@@ -12,8 +12,8 @@ after page navigation. 7-phase strategy: CMP-specific Accept buttons → generic
 attribute selectors → multilingual text matching (14 languages) → Shadow DOM
 CMPs → CMP JS APIs (Didomi/Cookiebot/Osano/Klaro) → force-remove CMP
 containers (55+ selectors + CMP iframes) → restore body scroll.
-Zero LLM cost, ~50ms per invocation. Also hooked into Navigator for L2
-web_fetch coverage (not just BrowserSession).
+Zero LLM cost, ~50ms per invocation. BrowserSession runs it after each
+navigation; a Navigator built with auto_dismiss_popups=True runs it too.
 """
 
 from __future__ import annotations

@@ -2,8 +2,9 @@
 
 The HTTP fetcher classifies every body: web pages go through the HTML pipeline, text (plain, markdown, csv,
 feeds) is returned as it is, and files (PDF, Office, downloads) arrive as ``raw_body`` with an empty ``html``.
-The engine parses a file first; a file no parser accepts ends the fetch, because a browser cannot read it
-either. An error status instead means the server refused the request, which a browser tier may get past.
+The engine parses a file first; a file no parser accepts is not read again over HTTP (the same bytes would
+come back), only the optional remote fallback may still convert it. An error status instead means the server
+refused the request, which the remote fallback may get past.
 """
 
 from __future__ import annotations

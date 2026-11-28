@@ -1,7 +1,7 @@
 """Browser session components.
 
 Single-responsibility components following SOLID principles. Navigator lives in
-``toolkits/browser/navigation``, shared by BrowserSession and BrowserFetcher.
+``toolkits/browser/navigation``, used by BrowserSession.
 """
 
 from .browser_session import BrowserSession

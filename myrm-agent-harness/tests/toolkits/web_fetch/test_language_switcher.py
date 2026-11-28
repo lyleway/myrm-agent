@@ -1,4 +1,4 @@
-"""Tests for language-switcher list removal (R18)."""
+"""Tests for language-switcher list removal."""
 
 from __future__ import annotations
 

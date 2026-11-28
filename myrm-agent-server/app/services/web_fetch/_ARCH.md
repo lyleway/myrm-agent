@@ -29,7 +29,7 @@ Omni-Config `webFetchEscalation.enabled`. Vendor httpx calls live here; harness 
 
 ## Boundaries
 
-- Harness: `FetchEscalationProvider` Protocol + ContextVar + `CrawlEngine._try_escalation`.
+- Harness: `FetchEscalationProvider` Protocol + ContextVar + `FetchEngine._try_escalation`.
 - Server: httpx vendors, user config, SSRF before outbound, session cap.
 
 ## Dependencies

@@ -2,14 +2,14 @@
 
 Extracts subtitles from Bilibili videos via public API. Used as a fast-path
 shortcut in FetchEngine when a Bilibili URL is detected, bypassing the
-three-tier HTML fetcher pipeline.
+HTML fetch.
 
 Bilibili subtitles are loaded asynchronously via a separate API and are NOT
-present in the page DOM, so Browser-based crawling cannot retrieve them.
+present in the page DOM, so fetching the page cannot retrieve them.
 This extractor is the only way to obtain Bilibili video subtitles.
 
 When the API call fails or no subtitle is available, FetchEngine falls back
-to standard HTML crawl (which provides title/description but no subtitles).
+to the standard HTML fetch (which provides title/description but no subtitles).
 
 Design pattern: analogous to youtube_extractor.py — special content source routing.
 
@@ -17,7 +17,7 @@ Design pattern: analogous to youtube_extractor.py — special content source rou
 - (none — standalone module; uses only stdlib urllib + json)
 
 [OUTPUT]
-- is_bilibili_url: Check if a URL is a Bilibili video URL
+- is_bilibili_url: Check if a URL is a Bilibili video URL; the video link must start the URL, one nested in another site's URL is no video
 - extract_bilibili_subtitle: Extract subtitle and return as Document, or None
 
 [POS]
@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The video link starts the URL (matched with ``re.match``): one carried inside another site's URL (an archive copy,
+# a redirect path, a query parameter) makes that site's page, not the video, and must be fetched like any page.
 _BILIBILI_URL_RE = re.compile(
     r"(?:https?://)"
     r"(?:www\.|m\.)?"
@@ -66,12 +68,13 @@ _DEFAULT_HEADERS = {
 
 def is_bilibili_url(url: str) -> bool:
     """Check if a URL points to a Bilibili video."""
-    return _BILIBILI_URL_RE.search(url) is not None or _BILIBILI_SHORT_URL_RE.search(url) is not None
+    target = url.strip()
+    return _BILIBILI_URL_RE.match(target) is not None or _BILIBILI_SHORT_URL_RE.match(target) is not None
 
 
 def _extract_bvid(url: str) -> str | None:
     """Extract BV ID from a Bilibili URL."""
-    match = _BILIBILI_URL_RE.search(url)
+    match = _BILIBILI_URL_RE.match(url.strip())
     if match:
         video_id = match.group(1)
         if video_id.startswith("BV"):

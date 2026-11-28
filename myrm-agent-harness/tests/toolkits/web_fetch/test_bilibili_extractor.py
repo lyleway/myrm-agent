@@ -57,8 +57,12 @@ class TestUrlDetection:
             ("https://m.bilibili.com/video/BV1xx411c7mD", True),
             ("https://www.bilibili.com/video/av170001", True),
             ("https://b23.tv/abc123", True),
+            ("  https://www.bilibili.com/video/BV1xx411c7mD\n", True),
             ("https://www.bilibili.com/bangumi/play/ep123456", False),
             ("https://example.com/video/BV1xx411c7mD", False),
+            ("https://web.archive.org/web/2020/https://www.bilibili.com/video/BV1xx411c7mD", False),
+            ("https://news.example/story?u=https://www.bilibili.com/video/BV1xx411c7mD", False),
+            ("https://news.example/story?u=https://b23.tv/abc123", False),
         ],
     )
     def test_is_bilibili_url(self, url: str, expected: bool) -> None:
@@ -68,8 +72,10 @@ class TestUrlDetection:
         "url,expected",
         [
             (BILIBILI_URL, BVID),
+            (f"  {BILIBILI_URL}\n", BVID),
             ("https://www.bilibili.com/video/av170001", None),
             ("https://example.com/video/BV1xx411c7mD", None),
+            (f"https://web.archive.org/web/2020/{BILIBILI_URL}", None),
         ],
     )
     def test_extract_bvid(self, url: str, expected: str | None) -> None:

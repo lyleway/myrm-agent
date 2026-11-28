@@ -12,7 +12,7 @@
 - EgressGuardError: a browser that does not route through the guard, or a guard that was stopped
 
 [POS]
-Closes the gap between checking a URL and connecting to it for the browser tiers. A URL check resolves the host
+Closes the gap between checking a URL and connecting to it for the browsers the pool launches. A URL check resolves the host
 name, but Chromium resolves it again when it connects: a name that answers the check with a public address and the
 browser with an internal one (DNS rebinding, ``169.254.169.254.nip.io``) reaches internal services, and a redirect
 hop, a subresource or a script-started request is only ever judged by its literal host. Over SOCKS5 Chromium hands the

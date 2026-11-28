@@ -1,7 +1,7 @@
 """Source loading for Wiki ingestion: the readable text of a web page or a local file, or a reason it has none.
 
 [INPUT]
-- toolkits.web_fetch::web_fetch_tools (POS: Global FetchEngine singleton — SSRF-guarded multi-tier fetch, YouTube/Bilibili subtitles)
+- toolkits.web_fetch::web_fetch_tools (POS: Global FetchEngine singleton — SSRF-guarded HTTP fetch, YouTube/Bilibili subtitles)
 - toolkits.file_parsers::get_parser, is_supported (POS: Document parsers for PDF, Office, images and more)
 - toolkits.file_parsers::TextDecodingError, decode_text_bytes (POS: Text bytes to str: UTF-8, Unicode BOM or an identifiable legacy encoding such as GBK)
 - utils.content_sniff::PayloadKind, classify_payload (POS: Tells a binary file from text)
@@ -44,7 +44,7 @@ def looks_like_local_path(source: str) -> bool:
 
 
 async def fetch_url_markdown(url: str) -> str:
-    """Fetch a URL through the FetchEngine (SSRF guard, tier degradation, subtitle extractors).
+    """Fetch a URL through the FetchEngine (SSRF guard, subtitle extractors).
 
     A page with nothing readable raises SourceLoadError, and so does a URL the SSRF guard blocks: the engine
     answers a blocked, timed-out or unreachable URL with no document. An unexpected engine failure propagates.

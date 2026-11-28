@@ -3,7 +3,7 @@
 Extracts post content, author metadata, engagement metrics, and media links
 via lightweight public APIs (FxTwitter / VxTwitter / oEmbed).
 Used as a fast-path shortcut in FetchEngine when an X or Twitter URL is detected,
-bypassing browser-based crawling to deliver <150ms structured Markdown Documents.
+bypassing the HTML fetch to deliver structured Markdown Documents.
 
 When the fast-path is unavailable or returns 404, FetchEngine degrades gracefully.
 
@@ -11,7 +11,7 @@ When the fast-path is unavailable or returns 404, FetchEngine degrades gracefull
 - x.com or twitter.com post URL
 
 [OUTPUT]
-- is_x_url: Detect x.com / twitter.com status URLs
+- is_x_url: Detect x.com / twitter.com status URLs; the host must start the URL, a status link inside another site's URL is no post
 - extract_x_post: Fetch + parse post into Document, or None
 """
 
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The host starts the URL (matched with ``re.match``): a status path inside another site's URL (an archive copy,
+# a ``notx.com`` host, a query parameter) is not an X post and must be fetched like any page.
 _X_STATUS_RE = re.compile(
     r"(?:https?://)?"
     r"(?:(?:www\.|mobile\.)?(?:twitter\.com|x\.com|vxtwitter\.com|fxtwitter\.com|fixupx\.com))"
@@ -41,17 +43,36 @@ _X_STATUS_RE = re.compile(
 _REQUEST_TIMEOUT = 8
 _USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
+_JsonObject = dict[str, object]
+
+
+def _as_object(value: object) -> _JsonObject:
+    """The value when it is a JSON object, an empty one otherwise: the API's shape is not ours to trust."""
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: object) -> list[object]:
+    return value if isinstance(value, list) else []
+
+
+def _as_text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _as_count(value: object) -> int:
+    return value if isinstance(value, int) else 0
+
 
 def is_x_url(url: str) -> bool:
     """Return True when url is a valid Twitter/X post status link."""
     if not url:
         return False
-    return _X_STATUS_RE.search(url.strip()) is not None
+    return _X_STATUS_RE.match(url.strip()) is not None
 
 
 def extract_status_info(url: str) -> tuple[str, str] | None:
     """Extract (screen_name, status_id) from an X/Twitter URL."""
-    match = _X_STATUS_RE.search(url.strip())
+    match = _X_STATUS_RE.match(url.strip())
     if not match:
         return None
     return match.group(1), match.group(2)
@@ -71,7 +92,7 @@ def _fetch_fxtwitter_data(
     screen_name: str,
     status_id: str,
     opener: urllib.request.OpenerDirector,
-) -> dict | None:
+) -> _JsonObject | None:
     """Fetch structured post data via api.fxtwitter.com."""
     endpoint = f"https://api.fxtwitter.com/{screen_name}/status/{status_id}"
     req = urllib.request.Request(
@@ -80,9 +101,10 @@ def _fetch_fxtwitter_data(
     )
     try:
         with opener.open(req, timeout=_REQUEST_TIMEOUT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("code") == 200 and "tweet" in data:
-                return data["tweet"]
+            data = _as_object(json.loads(resp.read().decode("utf-8")))
+            tweet = _as_object(data.get("tweet"))
+            if data.get("code") == 200 and tweet:
+                return tweet
     except Exception as exc:
         logger.debug("FxTwitter API fetch failed for %s/%s: %s", screen_name, status_id, exc)
     return None
@@ -91,7 +113,7 @@ def _fetch_fxtwitter_data(
 def _fetch_oembed_data(
     url: str,
     opener: urllib.request.OpenerDirector,
-) -> dict | None:
+) -> _JsonObject | None:
     """Fallback: Fetch oEmbed metadata via publish.twitter.com."""
     endpoint = f"https://publish.twitter.com/oembed?url={url}&omit_script=true"
     req = urllib.request.Request(
@@ -100,22 +122,22 @@ def _fetch_oembed_data(
     )
     try:
         with opener.open(req, timeout=_REQUEST_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            return _as_object(json.loads(resp.read().decode("utf-8"))) or None
     except Exception as exc:
         logger.debug("Twitter oEmbed fetch failed for %s: %s", url, exc)
     return None
 
 
-def _format_tweet_document(tweet: dict, original_url: str) -> Document:
+def _format_tweet_document(tweet: _JsonObject, original_url: str) -> Document:
     """Convert FxTwitter tweet dict to structured Markdown Document."""
-    author = tweet.get("author", {})
-    author_name = author.get("name", "")
-    screen_name = author.get("screen_name", "")
-    text = tweet.get("text", "").strip()
-    created_at = tweet.get("created_at", "")
-    likes = tweet.get("likes", 0)
-    retweets = tweet.get("retweets", 0)
-    replies = tweet.get("replies", 0)
+    author = _as_object(tweet.get("author"))
+    author_name = _as_text(author.get("name"))
+    screen_name = _as_text(author.get("screen_name"))
+    text = _as_text(tweet.get("text")).strip()
+    created_at = _as_text(tweet.get("created_at"))
+    likes = _as_count(tweet.get("likes"))
+    retweets = _as_count(tweet.get("retweets"))
+    replies = _as_count(tweet.get("replies"))
 
     header = f"**{author_name}** (@{screen_name})" if screen_name else f"**{author_name}**"
     lines: list[str] = [header]
@@ -125,18 +147,18 @@ def _format_tweet_document(tweet: dict, original_url: str) -> Document:
     lines.append(text)
 
     # Media attachments (photos / videos)
-    media = tweet.get("media", {})
-    photos = media.get("photos", []) if isinstance(media, dict) else []
-    videos = media.get("videos", []) if isinstance(media, dict) else []
-
+    media = _as_object(tweet.get("media"))
     media_urls: list[str] = []
-    for p in photos:
-        if isinstance(p, dict) and p.get("url"):
-            media_urls.append(p["url"])
-            lines.append(f"![Image]({p['url']})")
-    for v in videos:
-        if isinstance(v, dict) and v.get("thumbnail_url"):
-            media_urls.append(v.get("url") or v["thumbnail_url"])
+    for photo in _as_list(media.get("photos")):
+        photo_url = _as_text(_as_object(photo).get("url"))
+        if photo_url:
+            media_urls.append(photo_url)
+            lines.append(f"![Image]({photo_url})")
+    for video in _as_list(media.get("videos")):
+        video_fields = _as_object(video)
+        thumbnail_url = _as_text(video_fields.get("thumbnail_url"))
+        if thumbnail_url:
+            media_urls.append(_as_text(video_fields.get("url")) or thumbnail_url)
 
     # Engagement line
     engagement_parts: list[str] = []
@@ -169,11 +191,11 @@ def _format_tweet_document(tweet: dict, original_url: str) -> Document:
     return Document(page_content=page_content, metadata=metadata)
 
 
-def _format_oembed_document(oembed: dict, original_url: str) -> Document:
+def _format_oembed_document(oembed: _JsonObject, original_url: str) -> Document:
     """Convert oEmbed dict to fallback Document."""
-    author_name = oembed.get("author_name", "")
-    author_url = oembed.get("author_url", "")
-    raw_html = oembed.get("html", "")
+    author_name = _as_text(oembed.get("author_name"))
+    author_url = _as_text(oembed.get("author_url"))
+    raw_html = _as_text(oembed.get("html"))
 
     # Strip HTML tags simply
     text_content = re.sub(r"<[^>]+>", " ", raw_html).strip()
@@ -221,12 +243,12 @@ async def extract_x_post(
     opener = _build_opener(proxy_pool)
 
     def _do_fetch() -> Document | None:
-        # Tier 1: FxTwitter API (Rich JSON)
+        # FxTwitter API: rich JSON
         tweet = _fetch_fxtwitter_data(screen_name, status_id, opener)
         if tweet:
             return _format_tweet_document(tweet, url)
 
-        # Tier 2: Twitter official oEmbed (HTML Embed fallback)
+        # Twitter's own oEmbed: the HTML embed as a fallback
         oembed = _fetch_oembed_data(url, opener)
         if oembed:
             return _format_oembed_document(oembed, url)

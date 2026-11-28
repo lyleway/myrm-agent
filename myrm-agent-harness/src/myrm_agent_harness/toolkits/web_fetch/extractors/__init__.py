@@ -2,8 +2,8 @@
 
 Aggregates the WeChat / Bilibili / YouTube extractors behind
 ``toolkits.web_fetch.extractors``. Each extractor owns parsing for a single
-source and is used as a fast-path by the FetchEngine before L2/L3 browser
-fallback.
+source and is used as a fast-path by the FetchEngine before the general HTTP
+read.
 
 [INPUT]
 - (none)

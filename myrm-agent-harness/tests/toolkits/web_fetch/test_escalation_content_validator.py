@@ -1,4 +1,4 @@
-"""Tests for R26 ⑤ L4 escalation response content validation."""
+"""Tests for the content validation of an L4 escalation response."""
 
 from __future__ import annotations
 
