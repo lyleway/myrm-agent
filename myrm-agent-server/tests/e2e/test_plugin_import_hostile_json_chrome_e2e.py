@@ -6,13 +6,16 @@
 
 [OUTPUT]
 - test_a_nested_mcp_config_is_reported_in_the_import_dialog_and_the_skill_stays: fails when the dialog answers an archive whose
-  mcp.json is nested one level past ``MAX_NESTING`` with a parse error, when the notice that no MCP server is imported is
+  mcp.json is one level deeper than ``MAX_NESTING`` with a parse error, when the notice that no MCP server is imported is
   missing, or when the skill of the same archive is not offered.
 
 [POS]
 Browser-lane check of the path ``tests/integration`` covers without a UI: the archive is chosen in the file input of the dialog
 opened from Settings > Skills, so the preview request, its diagnostics and the sentences the user reads are the product's own.
-The preview only stages the archive; nothing is installed, so the node reads and writes no application state.
+The notice is worded the same for every invalid mcp.json, so the archive's mcp.json is valid in every respect but its depth:
+the value of ``capabilities`` is the one place a valid server entry takes any JSON, and the same document one level shallower
+lists its server instead. The preview only stages the archive; nothing is installed, so the node reads and writes no
+application state.
 """
 
 from __future__ import annotations
@@ -36,6 +39,9 @@ from tests.support.chrome_mcp_e2e import (
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 SKILL_NAME = "hostile-json-notes"
+SERVER_NAME = "hostile-json-server"
+# The root object, ``mcpServers`` and the server entry enclose the value of ``capabilities``.
+LEVELS_ABOVE_CAPABILITIES = 3
 
 _DISMISS_MIGRATION_JS = """(() => {
   try {
@@ -110,12 +116,13 @@ _PREVIEW_STATE_JS = f"""(() => {{
 
 
 def _archive_base64() -> str:
-    """A plugin whose mcp.json is one level too deep for the loader, next to a skill that is fine."""
-    nested = '{"k":' * (MAX_NESTING + 1) + "1" + "}" * (MAX_NESTING + 1)
-    server = json.dumps({"type": "stdio", "command": "tool"})
+    """A plugin whose mcp.json is valid but one level deeper than the loader accepts, next to a skill that is fine."""
+    levels = MAX_NESTING + 1 - LEVELS_ABOVE_CAPABILITIES
+    nested = '{"k":' * levels + "1" + "}" * levels
+    server = f'{{"type": "stdio", "command": "tool", "capabilities": {nested}}}'
     files = {
         "plugin.json": json.dumps({"$schema": PLUGIN_SCHEMA, "name": "hostile-plugin"}),
-        "mcp.json": f'{{"$schema": "{MCP_SCHEMA}", "mcpServers": {{"s": {server}}}, "x-unknown": {nested}}}',
+        "mcp.json": f'{{"$schema": "{MCP_SCHEMA}", "mcpServers": {{"{SERVER_NAME}": {server}}}}}',
         f"skills/{SKILL_NAME}/SKILL.md": f"---\nname: {SKILL_NAME}\ndescription: Keeps notes tidy\n---\n\n# Notes\n",
     }
     buffer = io.BytesIO()
