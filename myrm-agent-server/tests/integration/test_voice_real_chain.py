@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 import pytest
 from myrm_agent_harness.core.features import _reset_for_testing
 
+from app.api.voice import ws_session_batch
 from app.channels.voice.stt import models as stt_models
 from tests.integration.voice_real_chain_testkit import (
     DeepgramStandIn,
@@ -50,6 +51,10 @@ _BATCH_INFO = {"type": "info", "message": "streaming_unavailable", "fallback": "
 # The stand-in does not decode what it receives, so the bytes that reach it only have to arrive.
 _AUDIO_STAND_IN = bytes(24_000)
 _MODEL_TIMEOUT_SECONDS = 240.0
+# A quiet session's beats come well inside the idle timeout, and run for twice as long as it.
+_IDLE_TIMEOUT_SECONDS = 1.5
+_HEARTBEAT_SECONDS = 0.4
+_HEARTBEATS = 8
 # What the browser sees when the server ends a dictation / a voice session on its own terms: a clean close, not a dropped socket.
 _DICTATION_CLOSED = (1000, "Done")
 _SESSION_CLOSED = (1000, "Session ended")
@@ -133,6 +138,23 @@ async def test_voice_session_transcribes_each_utterance_with_the_local_model(spo
     for utterance in utterances:
         assert utterance["type"] == "stt_final"
         _assert_spoken(utterance["text"])
+
+
+async def test_voice_session_stays_open_while_the_browser_keeps_ending_empty_utterances(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A quiet session uploads no audio, only a bare ``end_utterance`` now and then: skipped, yet proof the browser is there."""
+    monkeypatch.setattr(ws_session_batch, "_SESSION_IDLE_TIMEOUT", _IDLE_TIMEOUT_SECONDS)
+    async with serving(production_app()) as host:
+        await save_voice_settings(host, voice_settings(provider="local"))
+        async with browser(host, "/ws/voice/session") as ws:
+            await ws.send(json.dumps({"type": "config", "mode": "audio_only", "keyterms": []}))
+            assert await receive_event(ws) == _BATCH_INFO
+            for _ in range(_HEARTBEATS):
+                await asyncio.sleep(_HEARTBEAT_SECONDS)
+                await ws.send(json.dumps({"type": "end_utterance"}))
+            assert ws.close_code is None
+            # The beats stop: the same session now counts as abandoned.
+            assert await receive_until_closed(ws) == []
+            assert (ws.close_code, ws.close_reason) == _SESSION_CLOSED
 
 
 async def test_the_upload_route_transcribes_real_speech_with_the_local_model(spoken_wav: bytes, local_whisper: None) -> None:
