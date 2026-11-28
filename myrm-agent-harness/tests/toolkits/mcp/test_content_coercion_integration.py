@@ -280,7 +280,7 @@ class TestAudioContentUpstreamFault:
 
         tool = _make_tool("audio_tool")
         tool.coroutine = _raise_not_impl
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -296,7 +296,7 @@ class TestAudioContentUpstreamFault:
 
         tool = _make_tool("widget_tool")
         tool.coroutine = _raise_value_error
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -312,7 +312,7 @@ class TestAudioContentUpstreamFault:
 
         tool = _make_tool("bad_args_tool")
         tool.coroutine = _raise_type_error
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -327,7 +327,7 @@ class TestAudioContentUpstreamFault:
 
         tool = _make_tool("net_tool")
         tool.coroutine = _raise_runtime
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         with pytest.raises(RuntimeError, match="network down"):
             await tool.coroutine()
@@ -355,7 +355,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("csv_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -371,7 +371,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("query_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -386,7 +386,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("chart_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, list)
@@ -412,7 +412,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("report_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, list)
@@ -433,7 +433,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("limited_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -450,7 +450,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("slow_tool")
         tool.coroutine = _slow
-        wrap_tools_with_timeout([tool], timeout=0.1)
+        wrap_tools_with_timeout([tool], "srv", timeout=0.1)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -477,7 +477,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("archive_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -492,7 +492,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("simple_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)
@@ -508,7 +508,7 @@ class TestFullToolExecutionPipeline:
 
         tool = _make_tool("empty_tool")
         tool.coroutine = _mock_invoke
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
 
         result = await tool.coroutine()
         assert isinstance(result, str)

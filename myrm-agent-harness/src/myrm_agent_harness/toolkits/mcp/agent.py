@@ -133,7 +133,7 @@ class MCPAgent:
         prefix_tool_names(tools, server_name)
         enforce_description_limits(tools)
         sanitize_tools(tools)
-        wrap_tools_with_timeout(tools, execute_timeout, max_output_chars, oversized_result_handler)
+        wrap_tools_with_timeout(tools, server_name, execute_timeout, max_output_chars, oversized_result_handler)
         register_tool_annotations(tools, host_serial)
         return tools
 

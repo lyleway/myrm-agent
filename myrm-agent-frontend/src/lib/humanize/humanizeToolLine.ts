@@ -1,13 +1,11 @@
 import type { McpServerNameResolver, TranslateFn } from './types';
 import type { HumanizeContext } from './extractContext';
 import { parseMcpToolName } from './extractContext';
+import { readableMcpServerName } from './mcpServerName';
 import { platformLabelFromTarget } from './scopeNote';
 import { displayUrlHost } from './pathUtils';
 
 type ToolLineMode = 'progress' | 'approval' | 'ask';
-
-/** The identity of a server whose name has nothing a person can read: `unnamed` or `unnamed_` and a 6-digit hash. */
-const OPAQUE_SERVER_IDENTITY = /^unnamed(?:_[0-9a-f]{6})?$/;
 
 function normalizeToolKey(toolName: string): string {
   return toolName.replace(/_tool$/, '').replace(/-/g, '_');
@@ -19,12 +17,9 @@ function isMissingTranslation(key: string, hit: string): boolean {
 
 /** The server as the user knows it: the name they gave it, else its identity when that reads, else a generic label. */
 function serverLabel(identity: string, t: TranslateFn, serverName?: McpServerNameResolver): string {
-  const named = serverName?.(identity);
-  if (named) {
-    return named;
-  }
-  if (!OPAQUE_SERVER_IDENTITY.test(identity)) {
-    return identity;
+  const readable = readableMcpServerName(identity, serverName);
+  if (readable) {
+    return readable;
   }
   const generic = t('fallback.service');
   return isMissingTranslation('fallback.service', generic) ? identity : generic;

@@ -141,6 +141,7 @@ class MCPAuthExpiredEvent(BaseEvent):
 
     Allows business layers to notify users (e.g. via toast) that re-authorization
     is required, without coupling the Harness MCP toolkit to any GUI or product layer.
+    ``server_name`` is the name the user gave the server, not the identity inside its tool names.
     """
 
     server_name: str

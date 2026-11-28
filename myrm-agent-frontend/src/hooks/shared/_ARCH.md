@@ -14,6 +14,6 @@
 | `useXaiDeviceLogin.ts`        | xAI 订阅的设备码登录（RFC 8628）：持有轮询节奏（遵循服务端 `interval`，`slow_down` 加 5s，到 `expires_in` 截止）与连接状态，成功后经 `connectProviderSubscription` 写入 provider 状态；聊天横幅、模型页、凭证页共用，各端只负责展示与文案 |
 | `useOllamaQuickConnect.ts`    | 聊天横幅显示期间向后端问一次本机 Ollama 的可用聊天模型（仅本地部署模式），返回该模型与「连接」动作；连接经 `enableProviderWithModel` 写入 provider 状态；无合格模型或请求失败时不提供                                                     |
 | `useCopyFeedback.ts`          | 经共享剪贴板工具（Tauri/Web 双路径）复制文本并给出 2s「已复制」确认；重复复制重启窗口，卸载后不留定时器                                                                                                                                   |
-| `useMcpServerNameResolver.ts` | 把工具名 `mcp__{身份}__{工具}` 里的身份还原成用户起的服务器名：读设置里用户与组织的 MCP 服务器（组织在前，与运行时同一优先级），两个列表不变时引用不变；步骤标题、审批卡、子 agent 审批与定时任务拦截行共用                               |
+| `useMcpServerNameResolver.ts` | 把工具名 `mcp__{身份}__{工具}` 里的身份还原成用户起的服务器名：读设置里用户与组织的 MCP 服务器（组织在前，与运行时同一优先级），两个列表不变时引用不变；步骤标题、审批卡、子 agent 审批、定时任务拦截行与 MCP App 查看器共用              |
 
 消费者：message-input、settings、workspace-browser、message-box 步骤标题、审批卡、cron 等。

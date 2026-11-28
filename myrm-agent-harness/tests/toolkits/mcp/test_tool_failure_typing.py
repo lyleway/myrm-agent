@@ -22,7 +22,7 @@ def _wrapped(name: str, coroutine: object, *, timeout: float = 5.0) -> BaseTool:
     tool = MagicMock(spec=BaseTool)
     tool.name = name
     tool.coroutine = coroutine
-    wrap_tools_with_timeout([tool], timeout=timeout)
+    wrap_tools_with_timeout([tool], "srv", timeout=timeout)
     return tool
 
 
