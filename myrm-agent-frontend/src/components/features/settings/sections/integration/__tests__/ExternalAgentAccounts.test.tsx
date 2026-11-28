@@ -5,12 +5,15 @@ import userEvent from '@testing-library/user-event';
 
 import type { ExternalAgentAccount } from '@/services/external-agents';
 
+import { agentRow, knownContracts } from './knownAgents';
+
 const stableT = (key: string) => key;
 
 const mocks = vi.hoisted(() => ({
   saved: undefined as unknown,
   set: vi.fn(),
   statuses: [] as unknown[],
+  catalog: [] as unknown[],
   accounts: [] as unknown[],
   list: vi.fn(),
   create: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock('@/services/config', () => ({
 vi.mock('@/services/external-agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => mocks.statuses,
+  getExternalAgentCatalog: async () => mocks.catalog,
   listExternalAgentAccounts: mocks.list,
   createExternalAgentAccount: mocks.create,
   deleteExternalAgentAccount: mocks.remove,
@@ -70,18 +74,7 @@ const account = (backend: string, name: string, authenticated = false): External
   authStatus: authenticated ? 'authenticated' : 'not_authenticated',
 });
 
-const hostedStatus = {
-  backend: 'claude',
-  installed: true,
-  path: '/usr/bin/claude',
-  version: '1.0.0',
-  transport: 'cli',
-  authenticated: false,
-  authStatus: 'not_authenticated',
-  loginStrategy: 'browser_oauth',
-  subscriptionLoginAllowed: false,
-  availableInDeployment: true,
-};
+const hostedStatus = agentRow('claude', { loginStrategy: 'browser_oauth', subscriptionLoginAllowed: false });
 
 const editorOf = async (index = 0) => {
   render(<ExternalAgentsConfig />);
@@ -104,6 +97,7 @@ const savedAgents = (call = 0) => {
 describe('ExternalAgentsConfig accounts', () => {
   beforeEach(() => {
     mocks.statuses = [];
+    mocks.catalog = knownContracts();
     mocks.accounts = [];
     mocks.saved = { agents: [agent()] };
     mocks.set.mockClear();

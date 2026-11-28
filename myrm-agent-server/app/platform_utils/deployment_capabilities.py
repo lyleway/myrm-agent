@@ -19,7 +19,7 @@ from functools import lru_cache
 
 from app.config.deploy_mode import DeployMode, get_deploy_mode, is_local_mode, is_webui_remote_mode
 
-# The delegated agents a managed sandbox does not run, named as their contract names them (``AuthProfile.backend``).
+# The delegated agents a managed sandbox does not run, named as their contract names them (``DriverSpec.backend``).
 # Where the machine is the user's own (desktop, local WebUI, a WebUI exposed from the user's machine) nothing is blocked.
 #
 #   claude  Anthropic asks for a commercial agreement before Claude Code is run on behalf of others. Its terms let an end

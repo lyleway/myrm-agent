@@ -1,7 +1,8 @@
 """External agent subscription-auth endpoints.
 
 GUI-driven authentication for delegated CLI agents (Codex / Claude Code /
-Gemini / Qwen): query login status for badges, drive the login of an agent whose
+Gemini / Qwen): list the agents the app can offer (the catalog: each agent's contract, nothing detected), query
+login status for badges, drive the login of an agent whose
 login the host can run (over SSE, surfacing the login URL / device code), describe the
 login of an agent whose login the user runs in a terminal of their own and say whether it
 has been made, or log out (through the CLI itself, which alone can remove a login it keeps
@@ -16,10 +17,11 @@ are managed by ``accounts_router``, mounted under ``/accounts``).
 [INPUT]
 - myrm_agent_harness.toolkits.acp.auth (POS: ACP subscription auth subsystem)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
+- myrm_agent_harness.toolkits.acp.drivers::all_drivers, driver_for, known_backends, LoginStrategy (POS: The contract of every known agent: its login, install, launch, transport and permission facts)
 - app.api.external_agents._deploy_capability::require_subscription_login_capability, require_backend_allowed (POS: subscription login gate, the gate of an agent the deployment does not run)
 - app.api.external_agents._account_scope::account_env, resolve_account (POS: the account a request names)
 - app.api.external_agents.accounts_router::router (POS: named account endpoints)
-- app.services.external_agents.deployment_policy::blocked_backend (POS: whether the deployment runs an agent, for the status rows)
+- app.services.external_agents.deployment_policy::blocked_backend (POS: whether the deployment runs an agent, for the status rows and the catalog)
 - app.services.external_agents.login_state::login_state, detected_executable (POS: what the CLI says about the login in one home, and which CLI that is)
 - app.services.external_agents.logout::log_out_of_home (POS: logout through the CLI, shared with account removal)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
@@ -136,6 +138,32 @@ async def external_agent_auth_status() -> dict[str, object]:
             }
         )
     return {"backends": backends}
+
+
+@router.get("/catalog")
+async def external_agent_catalog() -> dict[str, object]:
+    """The agents the app can offer, as their contracts say: what each is called, how it is driven, whether this
+    deployment runs it, and the name and description an agent added from it starts with.
+
+    Nothing is detected or started, so the answer is immediate and does not depend on what is installed or logged in
+    (that is ``/auth/status``); the settings screen holds no list of agents of its own and builds its add form from this.
+    """
+    from myrm_agent_harness.toolkits.acp.drivers import all_drivers
+
+    return {
+        "agents": [
+            {
+                "backend": spec.backend,
+                "title": spec.title,
+                "defaultName": spec.default_name,
+                "description": spec.description,
+                "transport": spec.transport,
+                "mcpNeedsTrustedFolder": spec.mcp_needs_trusted_folder,
+                "availableInDeployment": blocked_backend(spec.backend) is None,
+            }
+            for spec in all_drivers()
+        ]
+    }
 
 
 @router.post("/install/{backend}", dependencies=[Depends(require_backend_allowed)])

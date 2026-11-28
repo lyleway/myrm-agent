@@ -56,6 +56,38 @@ def client(tmp_path, monkeypatch):
     app.router.lifespan_context = original
 
 
+class TestCatalog:
+    """GET /external-agents/catalog: the agents the app can offer, with nothing detected."""
+
+    def test_the_catalog_says_what_the_settings_screen_needs_to_offer_each_agent(self, client):
+        body = client.get("/api/v1/external-agents/catalog").json()
+
+        agents = {a["backend"]: a for a in body["agents"]}
+        assert list(agents) == ["claude", "codex", "gemini", "qwen"]
+        assert {
+            name: (a["title"], a["defaultName"], a["transport"], a["mcpNeedsTrustedFolder"]) for name, a in agents.items()
+        } == {
+            "claude": ("Claude Code", "claude-code", "cli", False),
+            "codex": ("Codex CLI", "codex-cli", "app_server", False),
+            "gemini": ("Gemini CLI", "gemini-cli", "acp", True),
+            "qwen": ("Qwen Code", "qwen-code", "acp", False),
+        }
+        assert agents["codex"]["description"] == "OpenAI Codex CLI coding agent (requires Responses API provider)"
+        assert all(a["description"] and a["availableInDeployment"] is True for a in agents.values())
+
+    def test_the_catalog_never_waits_for_a_detection_of_the_machine(self, client):
+        detector = MagicMock()
+        detector.detect = AsyncMock(side_effect=AssertionError("the catalog must not detect anything"))
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=detector,
+        ):
+            resp = client.get("/api/v1/external-agents/catalog")
+
+        assert resp.status_code == 200
+        detector.detect.assert_not_called()
+
+
 class TestAuthStatus:
     """GET /external-agents/auth/status."""
 

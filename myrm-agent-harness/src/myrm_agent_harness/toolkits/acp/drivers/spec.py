@@ -1,41 +1,39 @@
-"""Authentication profiles for known external CLI agent backends.
-
-Captures, per backend, where its subscription login state lives, how to launch an
-interactive login, and which provider keys map to api-key mode. Business and
-control-plane layers read these to drive login, status badges, and logout without
-hard-coding CLI specifics anywhere upstream.
+"""The shape of a known agent's contract: one record that every layer reads instead of keeping its own copy.
 
 [INPUT]
-no — leaf module, standard library only
+- toolkits.acp.types::PermissionMode (POS: Core type definitions for the ACP runtime system)
 
 [OUTPUT]
 - LoginStrategy: Who runs a CLI's interactive login: the host, which relays what the CLI prints, or the user in a terminal.
 - Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
-- DriverSpec: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
-- driver_for: Resolve a DriverSpec from a backend name or command (a name that merely contains a backend's counts).
-- command_driver: Resolve the DriverSpec of a command that is exactly a known agent's executable.
-- effective_transport: The transport an agent really runs over: a known agent's contract wins over a stored choice.
-- all_drivers, known_backends: Every registered profile, and their names.
-- cli_launch_args: Baseline non-interactive launch args for a backend driven as a CLI process.
+- PermissionFlags: The flags of a command line that choose what an agent may do without asking, and how they are taken out of a config's args.
+- DriverSpec: Per-agent contract: what it is called, how it is installed, driven, logged in to and made to ask.
 
 [POS]
-The contract of every known agent: where its login lives, how to log in, how it is launched and over which transport.
-Business and control-plane layers read it instead of hard-coding agent specifics; the launch and permission arguments
-derived from it are resolved in ``_launch_args``.
+What a contract is made of, not which agents have one (``registry``) nor the command lines derived from it
+(``launch``). A spec that contradicts itself (an ACP agent with no permission flags, a CLI agent with a permission mode
+it cannot be put in, a blank title) cannot be built, so a half-added agent fails when the harness is imported rather
+than when someone first starts it.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
+
+from myrm_agent_harness.toolkits.acp.types import PermissionMode
 
 # How an agent is driven: as a CLI process whose output is parsed, over the Agent Client Protocol, or over the JSON-RPC
 # app server of Codex.
 Transport = Literal["cli", "acp", "app_server"]
+
+# A backend is the bare lowercase name of its executable: what a command is found by once its path and extension are gone.
+_BACKEND_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 
 class LoginStrategy(StrEnum):
@@ -48,22 +46,64 @@ class LoginStrategy(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class DriverSpec:
-    """Authentication characteristics of a known CLI agent backend.
+class PermissionFlags:
+    """The flags that choose what an agent may do without asking, spelled as its command line spells them.
 
-    Paths are resolved against a supplied environment so the control plane can
-    relocate a CLI's home (e.g. ``CODEX_HOME`` → ``/persistent/.codex``) without
-    any change here.
+    The host sets the mode itself, so a configured flag of this set is taken away: it would contradict the mode the
+    user selected or walk past the host's policy. The set belongs to one agent because a flag name can mean something
+    else in another CLI: a global strip would silently disable what the user asked for (gemini's own ``--sandbox``).
     """
 
+    names: frozenset[str]  # every flag, short and long spellings alike
+    value_names: frozenset[str]  # the flags that take a value, as the next arg or as ``--flag=value``
+
+    def __post_init__(self) -> None:
+        if not self.value_names <= self.names:
+            msg = f"Flags that take a value must be flags of the set: {sorted(self.value_names - self.names)}"
+            raise ValueError(msg)
+
+    def strip(self, args: Sequence[str]) -> tuple[list[str], list[str]]:
+        """``args`` without these flags (and the value of one that takes it), and what was removed."""
+        inline_prefixes = tuple(f"{name}=" for name in self.value_names)
+        kept: list[str] = []
+        removed: list[str] = []
+        skip_value = False
+        for arg in args:
+            if skip_value:
+                skip_value = False
+                removed.append(arg)
+                continue
+            if arg in self.names or arg.startswith(inline_prefixes):
+                skip_value = arg in self.value_names
+                removed.append(arg)
+                continue
+            kept.append(arg)
+        return kept, removed
+
+
+@dataclass(frozen=True, slots=True)
+class DriverSpec:
+    """Everything the host knows about one agent: its names, its install, its login, its launch and its permissions.
+
+    Paths are resolved against a supplied environment so the control plane can relocate a CLI's home (e.g.
+    ``CODEX_HOME`` → ``/persistent/.codex``) without any change here.
+    """
+
+    # The bare name of the executable; the key every other layer finds the agent by.
     backend: str
+    # What a person calls it ("Claude Code"): the label of the button that adds it.
+    title: str
+    # The name an agent added from this entry starts with, and what the model is told it is.
+    default_name: str
+    description: str
+    # The npm package the toolchain installs it from.
+    npm_package: str
     home_env: str  # env var that relocates the CLI home dir
     home_dir: str  # default home subdir under $HOME (e.g. ".codex")
     credential_files: tuple[str, ...]  # candidate credential filenames within the home dir
     login_strategy: LoginStrategy
-    login_args: tuple[
-        str, ...
-    ]  # args appended to the command to start login; empty: the CLI asks to sign in when it starts
+    # Args appended to the command to start login; empty: the CLI asks to sign in when it starts.
+    login_args: tuple[str, ...]
     logout_args: tuple[str, ...] | None  # args that make the CLI remove its own login, wherever it keeps it
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
     # The transport the agent's own contract calls for, and the args that start it that way (never permission flags,
@@ -85,6 +125,68 @@ class DriverSpec:
     # shares one login between every home.
     home_env_is_base: bool = False
     isolation_env: tuple[tuple[str, str], ...] = ()
+    # The flags the host owns, taken out of a config's args: every CLI and ACP agent has them, an app-server agent is
+    # given its approval policy with every turn so no flag of a config can reach it.
+    permission_flags: PermissionFlags | None = None
+    # For a CLI agent, which args put it in each permission mode; it has nobody to ask, so the mode is a flag.
+    permission_mode_args: tuple[tuple[PermissionMode, tuple[str, ...]], ...] = ()
+    # The agent connects to no MCP server (the shared memory is one) in a folder it has not been told to trust.
+    mcp_needs_trusted_folder: bool = False
+
+    def __post_init__(self) -> None:
+        problems = self._contradictions()
+        if problems:
+            msg = f"The contract of {self.backend!r} contradicts itself: {'; '.join(problems)}"
+            raise ValueError(msg)
+
+    def _contradictions(self) -> list[str]:
+        problems: list[str] = []
+        if not _BACKEND_NAME.fullmatch(self.backend):
+            problems.append("the backend must be the bare lowercase name of its executable")
+        texts = (
+            ("title", self.title),
+            ("default_name", self.default_name),
+            ("description", self.description),
+            ("npm_package", self.npm_package),
+        )
+        if blank := [name for name, text in texts if not text.strip()]:
+            problems.append(f"{', '.join(blank)} must not be blank")
+
+        if self.transport == "app_server":
+            if self.permission_flags is not None:
+                problems.append(
+                    "an app-server agent takes its approval policy with every turn, so it has no permission flags"
+                )
+        elif self.permission_flags is None:
+            problems.append(
+                "a CLI or ACP agent needs permission_flags, or a configured flag could contradict the host's mode"
+            )
+
+        if self.transport == "cli":
+            problems.extend(self._mode_args_problems())
+        elif self.permission_mode_args:
+            problems.append("only a CLI agent has permission_mode_args: any other asks the host or is given its policy")
+
+        if self.transport == "acp":
+            if not (self.acp_ask_mode or "").strip():
+                problems.append("an ACP agent needs the session mode it reports once it asks the host (acp_ask_mode)")
+        elif self.acp_ask_mode is not None:
+            problems.append("only an ACP agent has an acp_ask_mode")
+        if self.transport != "cli" and not self.launch_args:
+            problems.append("an ACP or app-server agent needs the launch_args that start it that way")
+        return problems
+
+    def _mode_args_problems(self) -> list[str]:
+        """What is wrong with the way a CLI agent is put in each permission mode."""
+        modes = [mode for mode, _ in self.permission_mode_args]
+        if sorted(modes) != sorted(get_args(PermissionMode)):
+            return [f"a CLI agent maps every permission mode exactly once, not {modes}"]
+        flags = self.permission_flags.names if self.permission_flags is not None else frozenset()
+        return [
+            f"the args of mode {mode!r} must start with a flag of permission_flags, or a configured one would repeat it"
+            for mode, args in self.permission_mode_args
+            if not args or args[0] not in flags
+        ]
 
     def resolve_home(self, env: Mapping[str, str]) -> Path:
         """Resolve the CLI home directory, honouring the relocation variable if set."""
@@ -113,133 +215,17 @@ class DriverSpec:
         """The args that start the login, for a browser on another machine than the CLI when ``remote``."""
         return self.remote_login_args if remote and self.remote_login_args else self.login_args
 
+    @property
+    def permission_modes(self) -> tuple[str, ...]:
+        """The permission modes a CLI agent can be put in; none for an agent that is not driven as a CLI process."""
+        return tuple(mode for mode, _ in self.permission_mode_args)
 
-# Per-backend profiles, in the order agents are detected and listed. Credential locations and home-override vars
-# below reflect each CLI's documented behaviour.
-_PROFILES: dict[str, DriverSpec] = {
-    "claude": DriverSpec(
-        backend="claude",
-        home_env="CLAUDE_CONFIG_DIR",
-        home_dir=".claude",
-        credential_files=(".credentials.json",),
-        login_strategy=LoginStrategy.TERMINAL,
-        login_args=("auth", "login", "--claudeai"),
-        logout_args=("auth", "logout"),
-        api_key_env=("ANTHROPIC_API_KEY",),
-        login_probe=("auth", "status"),
-        launch_args=("-p", "--output-format", "stream-json", "--verbose"),
-    ),
-    "codex": DriverSpec(
-        backend="codex",
-        home_env="CODEX_HOME",
-        home_dir=".codex",
-        credential_files=("auth.json",),
-        login_strategy=LoginStrategy.BROWSER_OAUTH,
-        login_args=("login",),
-        remote_login_args=("login", "--device-auth"),
-        logout_args=("logout",),
-        # The app server reads no key from its environment; the runtime hands the first of these the host injected to
-        # the server as a login that is never written to disk.
-        api_key_env=("OPENAI_API_KEY", "CODEX_API_KEY"),
-        login_probe=("login", "status"),
-        transport="app_server",
-        launch_args=("app-server",),
-    ),
-    "gemini": DriverSpec(
-        backend="gemini",
-        home_env="GEMINI_CLI_HOME",
-        home_dir=".gemini",
-        # The legacy file, and the encrypted file the CLI moves it into when it is told to keep its login in a file.
-        credential_files=("oauth_creds.json", "gemini-credentials.json"),
-        login_strategy=LoginStrategy.TERMINAL,
-        login_args=(),
-        logout_args=None,
-        api_key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
-        transport="acp",
-        launch_args=("--acp", "--approval-mode", "default"),
-        acp_ask_mode="default",
-        home_env_is_base=True,
-        isolation_env=(("GEMINI_FORCE_FILE_STORAGE", "true"),),
-    ),
-    "qwen": DriverSpec(
-        backend="qwen",
-        home_env="QWEN_HOME",
-        home_dir=".qwen",
-        credential_files=("oauth_creds.json",),
-        login_strategy=LoginStrategy.TERMINAL,
-        login_args=(),
-        logout_args=None,
-        api_key_env=("DASHSCOPE_API_KEY", "QWEN_API_KEY"),
-        transport="acp",
-        launch_args=("--acp", "--approval-mode", "default"),
-        acp_ask_mode="default",
-    ),
-}
+    def permission_args(self, mode: str) -> tuple[str, ...] | None:
+        """The args that put a CLI agent in ``mode``; ``None`` for a mode it has no mapping for."""
+        return next((args for name, args in self.permission_mode_args if name == mode), None)
 
-
-def _normalize(token: str) -> str:
-    """Reduce a command path or agent name to a bare lowercase backend key."""
-    base = os.path.basename(token.strip()).lower()
-    return base.split(".", 1)[0]  # drop extensions like .cmd / .exe
-
-
-def driver_for(backend_or_command: str) -> DriverSpec | None:
-    """Resolve a DriverSpec from a backend name or executable command.
-
-    Matches the executable basename first (``/usr/bin/codex`` → ``codex``), then
-    falls back to a substring scan so configured names like ``codex-cli`` or
-    ``claude-code`` still resolve.
-    """
-    if not backend_or_command:
-        return None
-    key = _normalize(backend_or_command)
-    direct = _PROFILES.get(key)
-    if direct is not None:
-        return direct
-    for name, profile in _PROFILES.items():
-        if name in key:
-            return profile
-    return None
-
-
-def command_driver(command: str | None) -> DriverSpec | None:
-    """The profile of a command that is exactly a known agent's executable (``/usr/bin/gemini``, ``gemini.cmd``).
-
-    ``driver_for`` also accepts a name that merely contains a backend's (``claude-code``), which suits resolving the
-    login of an agent by its configured name. How an agent is started and driven is decided only for the real
-    executable: an adapter or wrapper that happens to carry an agent's name is a command of its own.
-    """
-    if not command:
-        return None
-    return _PROFILES.get(_normalize(command))
-
-
-def effective_transport[Configured: str](command: str | None, configured: Configured) -> Configured | Transport:
-    """The transport ``command`` really runs over: a known agent's contract wins over the choice stored for it.
-
-    Any other command keeps ``configured`` as it is, a value this module does not recognise included, so the layer that
-    stored it can still report it.
-    """
-    profile = command_driver(command)
-    return profile.transport if profile is not None else configured
-
-
-def all_drivers() -> tuple[DriverSpec, ...]:
-    """Every registered profile."""
-    return tuple(_PROFILES.values())
-
-
-def known_backends() -> tuple[str, ...]:
-    """Names of all backends with a registered auth profile."""
-    return tuple(_PROFILES)
-
-
-def cli_launch_args(backend_or_command: str) -> list[str]:
-    """Baseline non-interactive launch args of a backend driven as a CLI process, or an empty list.
-
-    Business layers call this instead of hard-coding per-CLI arguments, so all CLI
-    invocation knowledge stays in this registry and cannot drift across layers. An agent driven over ACP or an app
-    server has no baseline to store: its launch args are resolved when it starts.
-    """
-    profile = driver_for(backend_or_command)
-    return list(profile.launch_args) if profile is not None and profile.transport == "cli" else []
+    def strip_permission_flags(self, args: Sequence[str]) -> tuple[list[str], list[str]]:
+        """``args`` without the permission flags the host owns for this agent, and what was removed."""
+        if self.permission_flags is None:
+            return list(args), []
+        return self.permission_flags.strip(args)

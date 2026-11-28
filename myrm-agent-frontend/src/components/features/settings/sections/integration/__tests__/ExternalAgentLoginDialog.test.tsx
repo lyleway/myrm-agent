@@ -27,20 +27,10 @@ vi.mock('@/services/external-agents', () => ({
 }));
 
 import ExternalAgentLoginDialog from '../ExternalAgentLoginDialog';
+import { agentRow } from './knownAgents';
 
-const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus => ({
-  backend: 'codex',
-  installed: true,
-  path: '/usr/local/bin/codex',
-  version: '0.5.0',
-  transport: 'app_server',
-  authenticated: false,
-  authStatus: 'not_authenticated',
-  loginStrategy: 'browser_oauth',
-  subscriptionLoginAllowed: true,
-  availableInDeployment: true,
-  ...overrides,
-});
+const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus =>
+  agentRow('codex', { path: '/usr/local/bin/codex', version: '0.5.0', ...overrides });
 
 const renderDialog = (
   overrides: Partial<React.ComponentProps<typeof ExternalAgentLoginDialog>> & { status?: ExternalAgentAuthStatus } = {},

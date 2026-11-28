@@ -20,23 +20,13 @@ vi.mock('@/lib/utils/clipboardUtils', () => ({ writeToClipboard: mocks.writeToCl
 vi.mock('@/services/external-agents', () => ({ getExternalAgentTerminalLogin: mocks.terminalLogin }));
 
 import ExternalAgentTerminalLoginDialog from '../ExternalAgentTerminalLoginDialog';
+import { agentRow } from './knownAgents';
 
 const RECHECK_MS = 4000;
 const CLOSE_MS = 1500;
 
-const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus => ({
-  backend: 'claude',
-  installed: true,
-  path: '/usr/local/bin/claude',
-  version: '2.1.0',
-  transport: 'cli',
-  authenticated: false,
-  authStatus: 'not_authenticated',
-  loginStrategy: 'terminal',
-  subscriptionLoginAllowed: true,
-  availableInDeployment: true,
-  ...overrides,
-});
+const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus =>
+  agentRow('claude', { path: '/usr/local/bin/claude', version: '2.1.0', ...overrides });
 
 const answer = (overrides: Partial<ExternalAgentTerminalLogin> = {}): ExternalAgentTerminalLogin => ({
   backend: 'claude',

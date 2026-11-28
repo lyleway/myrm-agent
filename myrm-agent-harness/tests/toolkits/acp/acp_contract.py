@@ -12,12 +12,16 @@ from __future__ import annotations
 
 from acp.schema import InitializeResponse
 
-from myrm_agent_harness.toolkits.acp.drivers import resolve_acp_args
+from myrm_agent_harness.toolkits.acp.drivers import all_drivers, resolve_acp_args
 
 # The arguments each agent is started with in ACP mode: the known agents' by their contract, the others' as documented.
 ACP_ARGS: dict[str, tuple[str, ...]] = {
     "opencode": ("acp",),
-    **{agent: tuple(resolve_acp_args(agent, []).args) for agent in ("gemini", "qwen")},
+    **{
+        spec.backend: tuple(resolve_acp_args(spec.backend, []).args)
+        for spec in all_drivers()
+        if spec.transport == "acp"
+    },
 }
 
 SESSION_CAPABILITIES = ("list", "delete", "additional_directories", "fork", "resume", "close")

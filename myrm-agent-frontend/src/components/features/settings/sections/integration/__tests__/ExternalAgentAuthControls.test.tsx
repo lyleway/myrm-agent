@@ -33,20 +33,10 @@ vi.mock('../ExternalAgentTerminalLoginDialog', () => ({
 }));
 
 import ExternalAgentAuthControls from '../ExternalAgentAuthControls';
+import { agentRow } from './knownAgents';
 
-const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus => ({
-  backend: 'codex',
-  installed: true,
-  path: '/usr/local/bin/codex',
-  version: '0.5.0',
-  transport: 'cli',
-  authenticated: false,
-  authStatus: 'not_authenticated',
-  loginStrategy: 'browser_oauth',
-  subscriptionLoginAllowed: true,
-  availableInDeployment: true,
-  ...overrides,
-});
+const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgentAuthStatus =>
+  agentRow('codex', { path: '/usr/local/bin/codex', version: '0.5.0', transport: 'cli', ...overrides });
 
 describe('ExternalAgentAuthControls', () => {
   beforeEach(() => {

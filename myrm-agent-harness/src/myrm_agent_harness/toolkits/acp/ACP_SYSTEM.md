@@ -73,6 +73,8 @@ RuntimeBackend (Protocol)
 
 **已知 Agent 走哪条通道由契约决定**：`drivers` 契约（`DriverSpec.transport`）规定 Claude Code 每回合拉起进程（`cli`），Gemini、Qwen 走 ACP（`acp`），Codex 走它自己的 app server（`app_server`）。命令恰好是这个 Agent 的可执行文件名（任意路径、任意扩展名）时，`RuntimePool.register` 用契约的通道，配置里存下的 `type` 改不了它（旧配置里写成 `cli` 的 `gemini` 无需迁移就走 ACP，并记 INFO `pool_transport_by_contract`）；名字里只是带着 `claude` / `gemini` 的适配器或包装脚本（`claude-code-acp`、`gemini-wrapper`）没有契约，保持配置里的通道与参数。
 
+**契约是已知 Agent 的唯一真相源**：叫什么（`title`）、从哪个 npm 包安装（`npm_package`，安装器只读这里）、添加时的默认名与给模型看的描述、凭据与登录命令、通道与启动参数、权限旗标（`PermissionFlags`：宿主拥有、会从配置参数里拿掉的旗标）与 CLI Agent 各权限模式对应的参数、是否只在受信任文件夹里才连 MCP 服务（`mcp_needs_trusted_folder`），都是同一条 `DriverSpec` 的字段；设置页的快速添加、已知命令判断、权限说明与受信任文件夹提示由服务端 `GET /external-agents/catalog` 下发的这些字段派生（目录是静态契约，不等安装与登录探测），不在前端另存一份列表。加一个 Agent 就是在 `drivers/registry.py` 加一条；自相矛盾的条目（ACP Agent 没有「会问」的会话模式、CLI Agent 有的权限模式没有对应参数、空标题、两个 Agent 同名或同默认名）构造时就报错，让 harness 在 import 时失败而不是等到有人第一次启动它。Codex 的最低 server 版本不在契约里：它是运行时所讲协议的下限（`runtime/codex/protocol.py::MINIMUM_SERVER_VERSION`，CI 的 `codex-floor` 从那里读），不是某个 Agent 的属性。
+
 **BackendInfo**：
 ```
 BackendInfo
@@ -329,7 +331,8 @@ acp/
 │   └── backend_detector.py # CLI 探测（detect + detect_with_auth 安装+登录态一次性视图；版本与登录态并发询问）
 ├── drivers/                # 已知 Agent 的契约（业务无关）
 │   ├── __init__.py         # 公共导出
-│   ├── spec.py             # DriverSpec：每个 CLI 的凭据路径、登录/登出/查询登录态的命令、谁来跑登录、通道与启动参数、家目录重定位变量
+│   ├── spec.py             # DriverSpec / PermissionFlags：一个 Agent 的契约长什么样（叫什么、npm 包、凭据路径、登录/登出/查询登录态的命令、谁来跑登录、通道与启动参数、权限旗标与各模式参数、家目录重定位变量）；自相矛盾的契约构造不出来
+│   ├── registry.py         # 已知 Agent 的登记（每个 Agent 一条 DriverSpec）与按名字/可执行文件查找；同名、同默认名、默认名被另一后端认走在 import 时就报错
 │   └── launch.py           # resolve_cli_args / resolve_acp_args / resolve_app_server_args：每种通道一个启动参数解析器
 ├── auth/                   # 订阅鉴权子系统（业务无关机制）
 │   ├── __init__.py         # 公共导出
@@ -456,7 +459,7 @@ acp/
 - **命令可用性测试**（本地模式）：通过 `POST /channels/manage/external-agents/test` 检测命令是否存在并返回版本信息
 - **流式事件消费**：`invoke_acp_agent_tool` 通过 `pool.run_turn()` 逐事件消费，实时日志输出工具调用和状态更新，返回结果包含 tool_calls 计数等元数据
 - **前端实时进度推送**：通过 ContextVar + `ToolProgressSink` 机制，`invoke_acp_agent_tool` 在执行期间将外部 Agent 的工具调用和状态事件实时推送至前端 SSE 流（复用 `TASKS_STEPS` 事件类型；会话连续性通知是只带标题的已完成步骤，措辞由前端按 `step_key` 本地化）
-- **前端预设模板**：新增模式下提供 Claude Code / Codex CLI / Gemini CLI / Qwen Code 一键填充，降低配置门槛；命令恰好是已知 Agent 时，设置页按服务端 `/auth/status` 报告的通道只读显示类型，保存时存契约的通道而不是旧值
+- **前端预设模板**：新增模式下提供 Claude Code / Codex CLI / Gemini CLI / Qwen Code 一键填充，降低配置门槛；命令恰好是已知 Agent 时，设置页按服务端 `/catalog` 下发的通道只读显示类型，保存时存契约的通道而不是旧值
 - **Max Turns 双层安全护栏**：Layer 1 是 CLI 自己的轮次上限——`claude.with_max_turns` 为 Claude 追加 `--max-turns`，到限后 CLI 自行结束并在 `result` 行（`error_max_turns` / `terminal_reason: max_turns`）报告，`CliRuntime` 不把它当故障，回合以 `DONE` 的 `stop_reason=max_turn_requests` 收尾——ACP Agent 自己的回合上限以同一个 `DONE` 到达，工具路径与直连路径都按「已达轮次上限」收尾（见 3.2 的 `StopReason`）；Layer 2 是 delegate 工具对 `TOOL_START` 的计数，只用于没有原生上限的后端（Claude 之外的一切，工具路径里的 `native_limit`），超限时 `pool.cancel()`——Claude 的一个 agent 轮次可发出多个工具调用，对它计数会提前截断。实测（真 claude 2.1.330，脚本化的假 Anthropic API）：`--max-turns 1` 的回合在第一轮工具结果之后以 `result` 行 `subtype: error_max_turns`、`terminal_reason: max_turns` 结束；`max_tokens` 与 `refusal` 两类停止由 Claude 自己重试后以 `is_error: true`、`terminal_reason: api_error` 的 `result` 报告，文字是 CLI 的原话（「API Error: …」），所以它们本来就以 `UNKNOWN` 错误原文呈现，不再另设映射；`tests/toolkits/acp/runtime/cli/test_claude_transcripts.py` 用录制的转录守这些形态，`test_real_claude_turn_end.py` 用真二进制守回合收尾。**回合内文字分段**：Claude 把工具调用前后的文字作为不同消息流出、之间什么都没有，工具调用不内联显示时读成一句连着的话；`TurnParser` 在工具调用之后的第一段文字前补空行（`event_text.paragraph_break` 数已有的换行，回合最开头不补，没有工具调用隔开的两条消息不动；ACP 路径同样用它，见 `acp/callback.py`）
 - **稳定 Tool Schema**：`invoke_acp_agent_tool` 使用固定 tool description（不含动态 agent 列表），保护 Turn1 Prompt Cache；`agent_name` 无效时错误响应列出 `available_backends`
 - **Deploy 门控（Server）**：`external_cli_deploy.is_external_cli_deploy_supported()` + profile `strip_deploy_incompatible_builtin_tools`；沙箱自动剔除 `external_cli`；BuiltinToolsPanel sandbox 硬禁用 toggle

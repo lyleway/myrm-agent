@@ -203,6 +203,16 @@ class TestSandboxDoesNotRunBlockedAgents:
             assert rows[allowed]["authenticated"] is True
         assert sorted(probed) == ["gemini", "qwen"]
 
+    def test_the_catalog_marks_the_agents_the_deployment_does_not_run(self, client, sandbox) -> None:
+        agents = {a["backend"]: a for a in client.get(f"{_API}/catalog").json()["agents"]}
+
+        assert {name: a["availableInDeployment"] for name, a in agents.items()} == {
+            "claude": False,
+            "codex": False,
+            "gemini": True,
+            "qwen": True,
+        }
+
     def test_status_still_shows_a_login_left_from_before_so_that_it_can_be_removed(self, client, sandbox, tmp_path) -> None:
         leftover = tmp_path / ".claude" / ".credentials.json"
         leftover.parent.mkdir()

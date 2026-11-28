@@ -54,6 +54,7 @@ import {
   type ExternalAgentDraft,
 } from './externalAgentModel';
 import { useExternalAgentAccounts } from './useExternalAgentAccounts';
+import { useExternalAgentCatalog } from './useExternalAgentCatalog';
 import SettingsSection from '../SettingsSection';
 import { cn } from '@/lib/utils/classnameUtils';
 import { REVEAL_ON_HOVER } from '@/lib/utils/a11y';
@@ -76,6 +77,7 @@ const ExternalAgentsConfig = memo(() => {
   const [isTesting, setIsTesting] = useState(false);
   const [authStatuses, setAuthStatuses] = useState<ExternalAgentAuthStatus[]>([]);
   const { accounts, refreshAccounts } = useExternalAgentAccounts();
+  const known = useExternalAgentCatalog();
 
   const refreshAuthStatuses = useCallback(async () => {
     try {
@@ -96,7 +98,7 @@ const ExternalAgentsConfig = memo(() => {
 
   const statusForCommand = useCallback(
     (command: string): ExternalAgentAuthStatus | null => {
-      const key = backendKeyFromCommand(command);
+      const key = backendKeyFromCommand(command, authStatuses);
       if (!key) {
         return null;
       }
@@ -174,7 +176,7 @@ const ExternalAgentsConfig = memo(() => {
       return;
     }
 
-    const cleaned = cleanAgent(draft, subscriptionLoginAllowed, contractTransport(draft.command, authStatuses));
+    const cleaned = cleanAgent(draft, known, subscriptionLoginAllowed);
 
     let updated: ExternalAgentConfig[];
     if (editingIndex === -1) {
@@ -184,18 +186,18 @@ const ExternalAgentsConfig = memo(() => {
     }
     persist(updated);
     setEditingIndex(null);
-  }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, authStatuses, t]);
+  }, [draft, editingIndex, agents, persist, subscriptionLoginAllowed, authStatuses, known, t]);
 
   // The agents that ran as a removed account go back to the login the CLI has on this machine.
   const handleAccountDeleted = useCallback(
     (backend: string, name: string) => {
       void refreshAccounts();
-      const detached = detachAccount(agents, backend, name);
+      const detached = detachAccount(agents, backend, name, known);
       if (detached !== agents) {
         persist([...detached]);
       }
     },
-    [agents, persist, refreshAccounts],
+    [agents, known, persist, refreshAccounts],
   );
 
   const handleDelete = useCallback(() => {
@@ -290,8 +292,8 @@ const ExternalAgentsConfig = memo(() => {
         {agents.length > 0 && (
           <div className="space-y-2">
             {agents.map((agent, index) => {
-              const TypeIcon = TYPE_ICONS[contractTransport(agent.command, authStatuses) ?? agent.type] ?? IconTerminal;
-              const accountOf = accountBackend(agent.command, agent.authMode, subscriptionLoginAllowed);
+              const TypeIcon = TYPE_ICONS[contractTransport(agent.command, known) ?? agent.type] ?? IconTerminal;
+              const accountOf = accountBackend(agent.command, agent.authMode, subscriptionLoginAllowed, known);
               const account = accountOf !== null ? agent.account : undefined;
               const accountState = account
                 ? (accounts.find((a) => a.backend === accountOf && a.name === account) ?? null)
@@ -346,9 +348,10 @@ const ExternalAgentsConfig = memo(() => {
         {isEditing && (
           <ExternalAgentForm
             draft={draft}
-            fixedTransport={contractTransport(draft.command, authStatuses)}
+            fixedTransport={contractTransport(draft.command, known)}
             isNew={editingIndex === -1}
-            presets={availablePresets(authStatuses)}
+            presets={availablePresets(known)}
+            known={known}
             isTesting={isTesting}
             subscriptionLoginAllowed={subscriptionLoginAllowed}
             accounts={accounts}

@@ -23,7 +23,6 @@ import pytest
 
 from myrm_agent_harness.toolkits.acp.toolchains import manager as manager_module
 from myrm_agent_harness.toolkits.acp.toolchains.manager import (
-    BACKEND_NPM_MAP,
     NODE_VERSION,
     IsolatedToolchainManager,
     ToolchainError,
@@ -74,12 +73,6 @@ _INSTALLS_CLI = """
 
 
 class TestCatalog:
-    def test_known_backends_use_official_packages(self) -> None:
-        assert BACKEND_NPM_MAP["claude"] == "@anthropic-ai/claude-code"
-        assert BACKEND_NPM_MAP["codex"] == "@openai/codex"
-        assert BACKEND_NPM_MAP["gemini"] == "@google/gemini-cli"
-        assert BACKEND_NPM_MAP["qwen"] == "@qwen-code/qwen-code"
-
     def test_the_managed_node_honours_the_system_trust_store(self) -> None:
         # Node reads NODE_USE_SYSTEM_CA from 22.19 and, on the 24 line the managed Node is on, from 24.6.
         major, minor = (int(part) for part in NODE_VERSION.removeprefix("v").split(".")[:2])
@@ -288,9 +281,43 @@ class TestNpmInstall:
         assert messages[-1] == "Successfully installed claude 1.2.3 (fake)"
         assert "added 1 package" in messages
 
+    @pytest.mark.parametrize(
+        ("backend", "package"),
+        [
+            ("claude", "@anthropic-ai/claude-code"),
+            ("codex", "@openai/codex"),
+            ("gemini", "@google/gemini-cli"),
+            ("qwen", "@qwen-code/qwen-code"),
+        ],
+    )
+    async def test_each_agent_is_installed_from_the_package_its_contract_names(
+        self, manager: IsolatedToolchainManager, tmp_path: Path, backend: str, package: str
+    ) -> None:
+        asked = tmp_path / "npm-args"
+        _fake_npm(manager, f"printf '%s\\n' \"$@\" > {asked}\n" + _INSTALLS_CLI)
+
+        messages = await _run(manager, backend)
+
+        assert asked.read_text().splitlines() == ["install", "-g", package, "--prefix", str(manager.base_dir)]
+        assert messages[-1].startswith(f"Successfully installed {backend} ")
+
     async def test_unknown_backend_is_an_error_not_a_success(self, manager: IsolatedToolchainManager) -> None:
-        with pytest.raises(ToolchainError, match="Unknown backend 'not-a-backend'"):
+        with pytest.raises(
+            ToolchainError, match=r"Unknown backend 'not-a-backend'\. Known: claude, codex, gemini, qwen\."
+        ):
             await _run(manager, "not-a-backend")
+
+    @pytest.mark.parametrize("name", ["/usr/bin/claude", "claude.cmd", "Claude", "../claude", "claude-code", ""])
+    async def test_only_the_exact_name_of_an_agent_is_installed(
+        self, manager: IsolatedToolchainManager, name: str
+    ) -> None:
+        """The name is also a file name under ``bin``: a path or an extension that names the same agent is refused."""
+        _fake_npm(manager, _INSTALLS_CLI)
+
+        with pytest.raises(ToolchainError, match="Unknown backend"):
+            await _run(manager, name)
+
+        assert list(manager.bin_dir.iterdir()) == []
 
     async def test_npm_failure_carries_the_exit_code_and_what_npm_said(self, manager: IsolatedToolchainManager) -> None:
         _fake_npm(manager, 'echo "npm ERR! code ENOTFOUND"; echo "npm ERR! network request failed"; exit 3\n')

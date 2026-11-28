@@ -1,19 +1,20 @@
 # drivers/
 
 ## Overview
-The contract of every known external agent (Codex / Claude Code / Gemini / Qwen): where its login lives, how it
-logs in and out, which transport drives it, which arguments start it, which flags decide its permissions.
-Login, status, launch and the settings screens read one `DriverSpec` instead of each keeping a copy of what a CLI
-is, so a fact changes in one place. Framework-level and business-free: a host that embeds the harness gets the
-same contract.
+The contract of every known external agent (Codex / Claude Code / Gemini / Qwen): what it is called and which npm
+package installs it, where its login lives, how it logs in and out, which transport drives it, which arguments start it,
+which flags decide its permissions. Login, status, launch, install and the settings screens read one `DriverSpec`
+instead of each keeping a copy of what a CLI is, so a fact changes in one place and an agent is added by one entry.
+Framework-level and business-free: a host that embeds the harness gets the same contract.
 
 ## File & Submodule Index
 
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
 | __init__.py | Package | Public surface of the driver registry. | ✅ |
-| launch.py | Core | The command line of a known agent: `resolve_cli_args` (permission mode → flags of a CLI agent), `resolve_acp_args` (the entry args of an ACP agent, every approval-skipping flag dropped and reported) and `resolve_app_server_args` (the subcommand of an app-server agent plus the configuration overrides it understands, everything else dropped and reported). Sole owner of the permission flags of every known agent. | ✅ |
-| spec.py | Core | The contract of each known agent: credential paths, the commands that log in (`login_command(remote=…)`: the flow for a browser on this machine or on another), log out and report the login, who runs the login (`LoginStrategy`: the host for a browser or device-code flow, the user in a terminal), api-key env, and the transport it is driven over (`cli` with its baseline launch args, `acp` with its entry args and the session mode that asks the host, or `app_server` with the subcommand that starts its own server). Names how the CLI is relocated into a home of its own (`isolated_env`, `relocation_vars`). Resolves a name (`driver_for`) or an exact executable (`command_driver`, `effective_transport`) to its contract. | ✅ |
+| launch.py | Core | The command line of a known agent: `resolve_cli_args` (permission mode → flags of a CLI agent), `resolve_acp_args` (the entry args of an ACP agent, every approval-skipping flag dropped and reported) and `resolve_app_server_args` (the subcommand of an app-server agent plus the configuration overrides it understands, everything else dropped and reported). The only place the permission facts of a contract reach a command line. | ✅ |
+| registry.py | Core | The known agents: `_SPECS` holds one `DriverSpec` each, in the order agents are detected and listed, and the lookups resolve a name (`driver_for`) or an exact executable (`command_driver`, `effective_transport`) to its contract (`all_drivers`, `known_backends`, `cli_launch_args`). The entries are checked as the module is imported (`_index`): two entries of one backend, two agents that start under one name, and an agent whose starting name carries another backend's name (so that it would be found as that backend) fail the import, not the first start. | ✅ |
+| spec.py | Core | The shape of the contract. `DriverSpec` holds, per agent: what it is called (`title`, the name an agent added from it starts with, the `description` the model is given) and the `npm_package` that installs it, credential paths, the commands that log in (`login_command(remote=…)`: the flow for a browser on this machine or on another), log out and report the login, who runs the login (`LoginStrategy`: the host for a browser or device-code flow, the user in a terminal), api-key env, the transport it is driven over (`cli` with its baseline launch args, `acp` with its entry args and the session mode that asks the host, or `app_server` with the subcommand that starts its own server), the permission facts (`PermissionFlags`: the flags the host owns, taken out of a config's args with the value of the one that takes it, and for a CLI agent the args of each permission mode) and whether the agent connects to no MCP server in a folder it has not been told to trust. Names how the CLI is relocated into a home of its own (`isolated_env`, `relocation_vars`). A spec that contradicts itself cannot be built (`__post_init__`). | ✅ |
 
 ## Design notes
 - **The contract names the transport**: `DriverSpec.transport` says how a known agent is driven. Claude Code is
@@ -31,7 +32,7 @@ same contract.
   `--dangerously-skip-permissions`) is stripped rather than duplicated — both the spaced
   and the `--flag=value` spellings.
   The merge works on options (a flag with the values after it), not on single
-  tokens: a config restating a baseline option (a preset's `--output-format stream-json`) adds
+  tokens: a config restating a baseline option (`--output-format stream-json`) adds
   nothing, while the config's own repeated options all stay (`--add-dir a --add-dir b` is two
   settings; dropping the second `--add-dir` as a duplicate token would lose one of them).
   This matters because a duplicated option is resolved by the CLI's own parser invisibly, so a
@@ -58,9 +59,25 @@ same contract.
   `--acp` alone takes its session mode from its own settings (`autoEdit` for Gemini, `yolo` for Qwen, whose own default
   is the model-judged `auto`), so it would act without ever asking; with the flag both report `default` whatever the
   settings say, in a folder they trust or not. `plan` is never used: it would turn an agent that asks into one that
-  refuses. A flag an older preset stored (`--output-format stream-json`) does not stop either agent from starting, so
-  stored configs need no migration. A command that is not a known ACP agent keeps its args as configured.
+  refuses. A stored `--output-format stream-json` does not stop either agent from starting, so stored configs need no
+  migration. A command that is not a known ACP agent keeps its args as configured.
 - **Baseline args never carry permission flags**: `cli_launch_args` holds only the
   non-interactive output/transport arguments. Keeping permission flags out of it is
   what makes the mode mapping genuinely single-owner; otherwise a baseline flag fights
   the mapping and the last-wins parser resolves that fight invisibly.
+- **One entry adds an agent, and an entry that contradicts itself cannot be built**: install, login, launch,
+  permissions and the settings screens all need facts about an agent, and keeping them as fields of one record means
+  a fact changes in one place. `DriverSpec.__post_init__` refuses what would otherwise fail at the first delegated
+  turn: a CLI or ACP agent without permission flags, an app-server agent with them, a CLI agent that does not map
+  every permission mode exactly once or whose mode starts with a flag the host does not own (a configured flag would
+  repeat it), an ACP agent without the session mode in which it asks, an ACP or app-server agent without the launch
+  args that start it, a blank title, name, description or package, and a backend that is not the bare lowercase name of
+  its executable. A bad entry stops the import of the harness, not a user's turn.
+- **Admission rules live in tests**: the registry cannot know which suites exercise an agent, so tests hold the rest
+  of the checklist. `tests/toolkits/acp/test_login_state.py` requires the parser table of `auth/login_state.py` and
+  the agents with a `login_probe` to be the same set; `tests/toolkits/acp/runtime/acp/test_real_agent_admission.py`
+  requires every agent driven over ACP to have a scripted model for the real-binary suites and its `initialize`
+  answer on record (`acp_contract.py`).
+- **The protocol floor is not a fact of an agent**: `toolkits/acp/runtime/codex/protocol.py::MINIMUM_SERVER_VERSION` is the oldest
+  app server whose protocol the runtime speaks, measured against the real binary, and the `codex-floor` CI job reads it
+  from there. It stays with the protocol, so `DriverSpec` carries no minimum version.

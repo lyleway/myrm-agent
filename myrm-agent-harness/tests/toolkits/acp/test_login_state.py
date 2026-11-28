@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialStore, resolve_login_state
+from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialStore, login_state, resolve_login_state
+from myrm_agent_harness.toolkits.acp.drivers import all_drivers
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the CLIs are stood in for by POSIX shell scripts")
 
@@ -141,3 +142,10 @@ class TestWithoutAStatusCommand:
     async def test_a_known_backend_that_is_not_installed_uses_the_file(self, home: dict[str, str]) -> None:
         state = await resolve_login_state(CredentialStore(home), "claude", executable=None, env=home)
         assert state.status is AuthStatus.NOT_AUTHENTICATED
+
+
+def test_an_agent_that_has_a_status_command_has_a_parser_for_its_answer_and_no_other_agent_has_one() -> None:
+    """A status command nobody parses is never asked, and a parser without a command never runs: they go together."""
+    with_status_command = {spec.backend for spec in all_drivers() if spec.login_probe}
+
+    assert set(login_state._PARSERS) == with_status_command

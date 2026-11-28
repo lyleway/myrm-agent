@@ -3,11 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { knownContracts } from './knownAgents';
+
 const stableT = (key: string) => key;
 
 const mocks = vi.hoisted(() => ({
   saved: undefined as unknown,
   set: vi.fn(),
+  catalog: [] as unknown[],
 }));
 
 vi.mock('next-intl', () => ({
@@ -20,6 +23,7 @@ vi.mock('@/services/config', () => ({
 vi.mock('@/services/external-agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => [],
+  getExternalAgentCatalog: async () => mocks.catalog,
   listExternalAgentAccounts: async () => [],
 }));
 vi.mock('@/lib/api', () => ({ apiRequest: vi.fn() }));
@@ -59,6 +63,7 @@ describe('ExternalAgentsConfig sharing memory with an agent', () => {
   beforeEach(() => {
     mocks.set.mockClear();
     mocks.saved = { agents: [agent()] };
+    mocks.catalog = knownContracts();
   });
 
   it('offers it off, with what it means said next to the switch', async () => {
@@ -71,11 +76,21 @@ describe('ExternalAgentsConfig sharing memory with an agent', () => {
   it('tells a Gemini CLI user that it only connects in folders it trusts', async () => {
     await openEditor();
 
-    expect(screen.getByText('shareMemoryTrustedFolderHint')).toBeInTheDocument();
+    expect(await screen.findByText('shareMemoryTrustedFolderHint')).toBeInTheDocument();
   });
 
   it('says nothing about trusted folders for an agent that does not need them', async () => {
     mocks.saved = { agents: [agent({ name: 'claude-code', type: 'cli', command: 'claude' })] };
+    await openEditor();
+
+    // The catalog has been read once it fixes the transport of the agent.
+    expect(await screen.findByText('typeFixedHint')).toBeInTheDocument();
+    expect(screen.getByText('shareMemoryHint')).toBeInTheDocument();
+    expect(screen.queryByText('shareMemoryTrustedFolderHint')).not.toBeInTheDocument();
+  });
+
+  it('says nothing about trusted folders while the catalog cannot say which agents need them', async () => {
+    mocks.catalog = [];
     await openEditor();
 
     expect(screen.getByText('shareMemoryHint')).toBeInTheDocument();

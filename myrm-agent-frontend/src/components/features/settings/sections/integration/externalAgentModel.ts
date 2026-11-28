@@ -1,11 +1,11 @@
 /**
  * [INPUT]
  * - @/services/config::ExternalAgentConfig (POS: one stored external agent entry)
- * - @/services/external-agents::ExternalAgentAuthStatus, isBlockedInDeployment (POS: what the server reports for a known agent, its transport and whether the deployment runs it included; whether a command names an agent the deployment does not run)
+ * - @/services/external-agents::ExternalAgentContract (POS: the server's catalog entry for each known agent: what it is called and how it starts when added, its transport, whether the deployment runs it)
  *
  * [OUTPUT]
- * - DEFAULT_AGENT, AgentPreset, AGENT_PRESETS, availablePresets: the blank entry, the one-click presets of the add form,
- *   and the ones the deployment runs
+ * - DEFAULT_AGENT, AgentPreset, availablePresets: the blank entry, and the one-click presets the known agents the
+ *   deployment runs give the add form
  * - PERMISSION_MODE_OPTIONS, permissionHintKey, normalizePermissionMode: the permission modes on offer and what each
  *   means for the agent being edited
  * - knownBackendOfCommand, backendKeyFromCommand: command → the known agent it is, command → the agent its login belongs to
@@ -17,7 +17,8 @@
  *   form of an agent and the rules for turning it back into what is stored
  *
  * [POS]
- * Pure data and rules of the external agent editor; no React, so every rule is unit-testable.
+ * Pure data and rules of the external agent editor; no React, so every rule is unit-testable. Which agents are known
+ * and what each is comes from the server's catalog (the harness registry), never from a list kept here.
  */
 
 import type {
@@ -26,7 +27,10 @@ import type {
   ExternalAgentPermissionMode,
   ExternalAgentType,
 } from '@/services/config';
-import { isBlockedInDeployment, type ExternalAgentAuthStatus } from '@/services/external-agents';
+import type { ExternalAgentContract } from '@/services/external-agents';
+
+/** The server's catalog: one entry per known agent, in the order the registry lists them; empty until the server has answered. */
+type KnownAgents = readonly ExternalAgentContract[];
 
 export const DEFAULT_AGENT: ExternalAgentConfig = {
   name: '',
@@ -40,24 +44,34 @@ export const DEFAULT_AGENT: ExternalAgentConfig = {
   maxTurns: 25,
 };
 
-const KNOWN_BACKENDS = ['claude', 'codex', 'gemini', 'qwen'] as const;
-
 /** The executable's name wherever the command lives and whatever its extension: `C:\tools\gemini.cmd` is `gemini`. */
 function executableName(command: string): string {
   return (command.split(/[\\/]/).pop() ?? '').toLowerCase().split('.')[0];
 }
 
-/** The known agent a command exactly is. A wrapper or adapter that merely carries an agent's name is a command of its own. */
-export function knownBackendOfCommand(command: string): string | null {
+/** Anything that names an agent by its backend: an entry of the catalog, or the status row the server reports for it. */
+interface NamedAgent {
+  readonly backend: string;
+}
+
+/** The agent a command exactly is. A wrapper or adapter that merely carries an agent's name is a command of its own. */
+function agentOfCommand<T extends NamedAgent>(command: string, agents: readonly T[]): T | undefined {
   const name = executableName(command);
-  return KNOWN_BACKENDS.find((backend) => backend === name) ?? null;
+  return agents.find((agent) => agent.backend === name);
+}
+
+/** The known agent a command exactly is. */
+export function knownBackendOfCommand(command: string, known: KnownAgents): string | null {
+  return agentOfCommand(command, known)?.backend ?? null;
 }
 
 /**
- * Gemini CLI connects to no MCP server in a folder it has not been told to trust, and it is the one place that
- * decision is made: the app cannot make it for the user, so the form says so next to the memory switch.
+ * Whether the agent connects to no MCP server in a folder it has not been told to trust (Gemini CLI). The decision is
+ * made in the agent and nowhere else: the app cannot make it for the user, so the form says so next to the memory
+ * switch.
  */
-export const memoryNeedsTrustedFolder = (command: string): boolean => knownBackendOfCommand(command) === 'gemini';
+export const memoryNeedsTrustedFolder = (command: string, known: KnownAgents): boolean =>
+  agentOfCommand(command, known)?.mcpNeedsTrustedFolder === true;
 
 // The server owns the rule; this mirrors it for immediate feedback while typing.
 const ACCOUNT_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -72,9 +86,10 @@ export function accountBackend(
   command: string,
   authMode: ExternalAgentAuthMode | undefined,
   subscriptionLoginAllowed: boolean,
+  known: KnownAgents,
 ): string | null {
   return effectiveAuthMode(authMode, subscriptionLoginAllowed) === 'subscription'
-    ? knownBackendOfCommand(command)
+    ? knownBackendOfCommand(command, known)
     : null;
 }
 
@@ -83,9 +98,10 @@ export function detachAccount(
   agents: readonly ExternalAgentConfig[],
   backend: string,
   name: string,
+  known: KnownAgents,
 ): readonly ExternalAgentConfig[] {
   const uses = (agent: ExternalAgentConfig): boolean =>
-    agent.account === name && knownBackendOfCommand(agent.command) === backend;
+    agent.account === name && knownBackendOfCommand(agent.command, known) === backend;
   if (!agents.some(uses)) {
     return agents;
   }
@@ -99,77 +115,47 @@ export function detachAccount(
   });
 }
 
-/** The agent a command's login belongs to: the agent it is, else one whose name it carries (`claude-code`). */
-export function backendKeyFromCommand(command: string): string | null {
-  return knownBackendOfCommand(command) ?? KNOWN_BACKENDS.find((b) => executableName(command).includes(b)) ?? null;
+/**
+ * The agent a command's login belongs to: the agent it is, else one whose name it carries (`claude-code`). The login
+ * state comes in its own rows, so `agents` may be those rows and the answer does not wait for the catalog.
+ */
+export function backendKeyFromCommand(command: string, agents: readonly NamedAgent[]): string | null {
+  const name = executableName(command);
+  return (agentOfCommand(command, agents) ?? agents.find((agent) => name.includes(agent.backend)))?.backend ?? null;
 }
 
 /**
  * The transport a command always runs over when it is exactly a known agent, whatever type was stored for it;
- * null for any other command, and until the server has reported.
+ * null for any other command, and until the server has answered.
  */
-export function contractTransport(
-  command: string,
-  statuses: readonly ExternalAgentAuthStatus[],
-): ExternalAgentType | null {
-  const backend = knownBackendOfCommand(command);
-  return statuses.find((status) => status.backend === backend)?.transport ?? null;
+export function contractTransport(command: string, known: KnownAgents): ExternalAgentType | null {
+  return agentOfCommand(command, known)?.transport ?? null;
 }
 
 export interface AgentPreset {
   key: string;
+  label: string;
   config: ExternalAgentConfig;
 }
 
-export const AGENT_PRESETS: AgentPreset[] = [
-  {
-    key: 'claude',
-    config: {
-      ...DEFAULT_AGENT,
-      name: 'claude-code',
-      command: 'claude',
-      args: ['-p', '--output-format', 'stream-json'],
-      description: 'Full-stack coding agent powered by Anthropic Claude',
-    },
-  },
-  {
-    key: 'codex',
-    config: {
-      ...DEFAULT_AGENT,
-      name: 'codex-cli',
-      type: 'app_server',
-      command: 'codex',
-      args: [],
-      description: 'OpenAI Codex CLI coding agent (requires Responses API provider)',
-    },
-  },
-  {
-    key: 'gemini',
-    config: {
-      ...DEFAULT_AGENT,
-      name: 'gemini-cli',
-      type: 'acp',
-      command: 'gemini',
-      args: [],
-      description: 'Google Gemini-powered coding agent',
-    },
-  },
-  {
-    key: 'qwen',
-    config: {
-      ...DEFAULT_AGENT,
-      name: 'qwen-code',
-      type: 'acp',
-      command: 'qwen',
-      args: [],
-      description: 'Alibaba Qwen-powered coding agent',
-    },
-  },
-];
-
-/** The presets whose agent the deployment runs; all of them until the server has reported. */
-export function availablePresets(statuses: readonly ExternalAgentAuthStatus[]): AgentPreset[] {
-  return AGENT_PRESETS.filter((preset) => !isBlockedInDeployment(preset.config.command, statuses));
+/**
+ * One preset per known agent the deployment runs, each starting as the agent's own contract says (its transport, name
+ * and description). The arguments stay empty: the launch arguments of a known agent are resolved when it starts.
+ */
+export function availablePresets(known: KnownAgents): AgentPreset[] {
+  return known
+    .filter((agent) => agent.availableInDeployment)
+    .map((agent) => ({
+      key: agent.backend,
+      label: agent.title,
+      config: {
+        ...DEFAULT_AGENT,
+        name: agent.defaultName,
+        type: agent.transport,
+        command: agent.backend,
+        description: agent.description,
+      },
+    }));
 }
 
 /** The permission modes every agent offers. */
@@ -178,20 +164,20 @@ export const PERMISSION_MODE_OPTIONS: { value: ExternalAgentPermissionMode; labe
   { value: 'safe', labelKey: 'permissionSafe' },
 ];
 
-/** The command-line agents whose own permission flags can be set per mode, and that can ask the user. */
-const CLI_BACKENDS_THAT_ASK = new Set(['claude']);
-
 /**
  * The hint under the permission select: what `safe` means for this agent. An agent that talks to the app over ACP or its
- * own app server asks the user; a command-line agent asks only when it is one we know; a command we do not know has no
- * flags to set, so it keeps its own behaviour.
+ * own app server asks the user; a command-line agent asks only when its contract sets the flags that make it ask, which
+ * every known agent driven as a command line does; a command we do not know has no flags to set, so it keeps its own
+ * behaviour.
  */
-export function permissionHintKey(type: ExternalAgentType, command: string): string {
+export function permissionHintKey(type: ExternalAgentType, command: string, known: KnownAgents): string {
   if (type === 'acp' || type === 'app_server') {
     return 'permissionHintAsk';
   }
-  const backend = backendKeyFromCommand(command);
-  return backend !== null && CLI_BACKENDS_THAT_ASK.has(backend) ? 'permissionHintAsk' : 'permissionHintUnrestricted';
+  const backend = backendKeyFromCommand(command, known);
+  return known.find((agent) => agent.backend === backend)?.transport === 'cli'
+    ? 'permissionHintAsk'
+    : 'permissionHintUnrestricted';
 }
 
 /** Coerce a stored mode to one on offer; a name of an older vocabulary falls back to `safe` (fail-closed). */
@@ -267,14 +253,14 @@ export function effectiveAuthMode(
  */
 export function cleanAgent(
   draft: ExternalAgentDraft,
+  known: KnownAgents,
   subscriptionLoginAllowed = true,
-  fixedTransport: ExternalAgentType | null = null,
 ): ExternalAgentConfig {
   const { envRows, account, shareMemory, ...rest } = draft;
   const env = Object.fromEntries(envRows.filter((row) => !isBlankRow(row)).map((row) => [row.name.trim(), row.value]));
   const cleaned: ExternalAgentConfig = {
     ...rest,
-    type: fixedTransport ?? draft.type,
+    type: contractTransport(draft.command, known) ?? draft.type,
     name: draft.name.trim(),
     command: draft.command.trim(),
     args: (draft.args ?? []).filter((a) => a.trim() !== ''),
@@ -283,7 +269,7 @@ export function cleanAgent(
   if (!subscriptionLoginAllowed) {
     cleaned.authMode = 'api_key';
   }
-  if (account && accountBackend(cleaned.command, draft.authMode, subscriptionLoginAllowed) !== null) {
+  if (account && accountBackend(cleaned.command, draft.authMode, subscriptionLoginAllowed, known) !== null) {
     cleaned.account = account;
   }
   if (shareMemory === true) {

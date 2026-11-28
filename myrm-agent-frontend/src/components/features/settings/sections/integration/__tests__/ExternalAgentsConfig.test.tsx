@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import type { ExternalAgentType } from '@/services/config';
+import { agentRow, contract, knownContracts, type KnownBackend } from './knownAgents';
 
 const stableT = (key: string) => key;
 
@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   saved: undefined as unknown,
   set: vi.fn(),
   statuses: [] as unknown[],
+  catalog: [] as unknown[],
+  catalogFails: false,
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -24,14 +26,37 @@ vi.mock('@/services/config', () => ({
 vi.mock('@/services/external-agents', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => mocks.statuses,
+  getExternalAgentCatalog: async () => {
+    if (mocks.catalogFails) {
+      throw new Error('offline');
+    }
+    return mocks.catalog;
+  },
   listExternalAgentAccounts: async () => [],
 }));
 vi.mock('@/lib/api', () => ({ apiRequest: vi.fn() }));
 vi.mock('@/lib/deploy-mode', () => ({ isLocalMode: () => false }));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
-vi.mock('../ExternalAgentAuthControls', () => ({ default: () => null }));
+// What the row hands the controls is what is under test, not the controls themselves.
+vi.mock('../ExternalAgentAuthControls', () => ({
+  default: ({ status }: { status: { backend: string } | null }) => (
+    <div data-testid="auth-controls">{status?.backend ?? 'none'}</div>
+  ),
+}));
+// Each transport's icon names its transport, so a row can be asked which one it shows.
+vi.mock('@/components/features/icons/PremiumIcons', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/features/icons/PremiumIcons')>()),
+  IconTerminal: () => <svg data-testid="icon-cli" />,
+  IconPlug: () => <svg data-testid="icon-acp" />,
+  IconServer: () => <svg data-testid="icon-app_server" />,
+}));
 
 import ExternalAgentsConfig from '../ExternalAgentsConfig';
+
+beforeEach(() => {
+  mocks.catalog = [];
+  mocks.catalogFails = false;
+});
 
 const agent = (overrides: Record<string, unknown> = {}) => ({
   name: 'claude-code',
@@ -148,13 +173,14 @@ describe('ExternalAgentsConfig environment variables', () => {
 
   it('starts a new agent without variables and keeps typed ones when a preset is chosen', async () => {
     mocks.saved = { agents: [] };
+    mocks.catalog = knownContracts();
     render(<ExternalAgentsConfig />);
     await userEvent.click(await screen.findByRole('button', { name: 'add' }));
     expect(screen.queryByLabelText('keyPlaceholder')).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'envAdd' }));
     await userEvent.type(screen.getByLabelText('keyPlaceholder'), 'HTTPS_PROXY');
-    await userEvent.click(screen.getByRole('button', { name: 'preset_claude' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Claude Code' }));
 
     expect(screen.getByLabelText('keyPlaceholder')).toHaveValue('HTTPS_PROXY');
     expect(screen.getByDisplayValue('claude-code')).toBeInTheDocument();
@@ -162,18 +188,8 @@ describe('ExternalAgentsConfig environment variables', () => {
 });
 
 describe('ExternalAgentsConfig auth mode', () => {
-  const status = (backend: string, subscriptionLoginAllowed: boolean) => ({
-    backend,
-    installed: true,
-    path: `/usr/bin/${backend}`,
-    version: '1.0.0',
-    transport: 'cli',
-    authenticated: false,
-    authStatus: 'not_authenticated',
-    loginStrategy: 'browser_oauth',
-    subscriptionLoginAllowed,
-    availableInDeployment: true,
-  });
+  const status = (backend: KnownBackend, subscriptionLoginAllowed: boolean) =>
+    agentRow(backend, { subscriptionLoginAllowed });
 
   beforeEach(() => {
     mocks.set.mockClear();
@@ -216,24 +232,12 @@ describe('ExternalAgentsConfig auth mode', () => {
 });
 
 describe('ExternalAgentsConfig transport', () => {
-  const status = (backend: string, transport: ExternalAgentType) => ({
-    backend,
-    installed: true,
-    path: `/usr/bin/${backend}`,
-    version: '1.0.0',
-    transport,
-    authenticated: false,
-    authStatus: 'not_authenticated',
-    loginStrategy: 'browser_oauth',
-    subscriptionLoginAllowed: true,
-    availableInDeployment: true,
-  });
-
   const typeSelect = () => within(screen.getByTestId('external-agent-type')).getByRole('combobox');
 
   beforeEach(() => {
     mocks.set.mockClear();
-    mocks.statuses = [status('claude', 'cli'), status('gemini', 'acp'), status('codex', 'app_server')];
+    mocks.statuses = [agentRow('claude'), agentRow('gemini'), agentRow('codex')];
+    mocks.catalog = knownContracts();
   });
 
   it('shows a known agent under the transport the app fixes for it and stores that one', async () => {
@@ -252,7 +256,7 @@ describe('ExternalAgentsConfig transport', () => {
     mocks.saved = { agents: [] };
     render(<ExternalAgentsConfig />);
     await userEvent.click(await screen.findByRole('button', { name: 'add' }));
-    await userEvent.click(screen.getByRole('button', { name: 'preset_gemini' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Gemini CLI' }));
 
     await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
     expect(typeSelect()).toHaveTextContent('typeAcp');
@@ -265,7 +269,7 @@ describe('ExternalAgentsConfig transport', () => {
     mocks.saved = { agents: [] };
     render(<ExternalAgentsConfig />);
     await userEvent.click(await screen.findByRole('button', { name: 'add' }));
-    await userEvent.click(screen.getByRole('button', { name: 'preset_codex' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Codex CLI' }));
 
     await vi.waitFor(() => expect(typeSelect()).toBeDisabled());
     expect(typeSelect()).toHaveTextContent('typeAppServer');
@@ -285,6 +289,19 @@ describe('ExternalAgentsConfig transport', () => {
     expect(savedAgent().type).toBe('app_server');
   });
 
+  it('leaves the type to the user while the catalog cannot be read, and still saves', async () => {
+    mocks.catalogFails = true;
+    mocks.saved = { agents: [agent({ name: 'gemini-cli', command: 'gemini', type: 'cli', args: [] })] };
+    await openEditor();
+
+    await vi.waitFor(() => expect(screen.getByText('authModeHint', { exact: false })).toBeTruthy());
+    expect(typeSelect()).toBeEnabled();
+    expect(screen.queryByText('typeFixedHint')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent().type).toBe('cli');
+  });
+
   it('leaves the type to the user for a command that only carries the name of a known agent', async () => {
     mocks.saved = { agents: [agent({ name: 'wrapped', command: 'gemini-wrapper', type: 'cli', args: [] })] };
     await openEditor();
@@ -298,25 +315,64 @@ describe('ExternalAgentsConfig transport', () => {
   });
 });
 
-describe('ExternalAgentsConfig in a deployment that does not run every agent', () => {
-  const row = (backend: string, availableInDeployment: boolean) => ({
-    backend,
-    installed: availableInDeployment,
-    path: availableInDeployment ? `/usr/bin/${backend}` : null,
-    version: availableInDeployment ? '1.0.0' : null,
-    transport: backend === 'claude' ? 'cli' : backend === 'codex' ? 'app_server' : 'acp',
-    authenticated: false,
-    authStatus: 'not_authenticated',
-    loginStrategy: 'browser_oauth',
-    subscriptionLoginAllowed: false,
-    availableInDeployment,
+describe('ExternalAgentsConfig rows', () => {
+  const textOf = (testId: string | RegExp) => screen.getAllByTestId(testId).map((element) => element.textContent);
+  const iconsOfRows = () => screen.getAllByTestId(/^icon-/).map((icon) => icon.getAttribute('data-testid'));
+
+  beforeEach(() => {
+    mocks.statuses = [agentRow('claude'), agentRow('gemini'), agentRow('codex')];
+    mocks.catalog = knownContracts();
   });
+
+  it('shows each row with the icon of the transport its contract fixes, and of the stored type for any other command', async () => {
+    mocks.saved = {
+      agents: [
+        agent({ name: 'g', command: 'gemini', type: 'cli', args: [] }),
+        agent({ name: 'x', command: 'codex', type: 'cli', args: [] }),
+        agent({ name: 'c', command: 'claude', type: 'acp', args: [] }),
+        agent({ name: 'mine', command: 'aider', type: 'app_server', args: [] }),
+      ],
+    };
+    render(<ExternalAgentsConfig />);
+
+    await vi.waitFor(() =>
+      expect(iconsOfRows()).toEqual(['icon-acp', 'icon-app_server', 'icon-cli', 'icon-app_server']),
+    );
+  });
+
+  it('hands each row the login state of the agent its command is, with or without the catalog', async () => {
+    mocks.catalogFails = true;
+    mocks.saved = {
+      agents: [
+        agent({ name: 'a', command: '/usr/local/bin/gemini', args: [] }),
+        agent({ name: 'b', command: 'claude-code', args: [] }),
+        agent({ name: 'c', command: 'aider', args: [] }),
+      ],
+    };
+    render(<ExternalAgentsConfig />);
+
+    await vi.waitFor(() => expect(textOf('auth-controls')).toEqual(['gemini', 'claude', 'none']));
+  });
+});
+
+describe('ExternalAgentsConfig in a deployment that does not run every agent', () => {
+  const row = (backend: KnownBackend, availableInDeployment: boolean) =>
+    agentRow(backend, {
+      installed: availableInDeployment,
+      path: availableInDeployment ? `/usr/bin/${backend}` : null,
+      version: availableInDeployment ? '1.0.0' : null,
+      subscriptionLoginAllowed: false,
+      availableInDeployment,
+    });
   const hosted = [row('claude', false), row('codex', false), row('gemini', true), row('qwen', true)];
 
   beforeEach(() => {
     mocks.set.mockClear();
     mocks.toast.error.mockClear();
     mocks.statuses = hosted;
+    mocks.catalog = hosted.map((status) =>
+      contract(status.backend as KnownBackend, { availableInDeployment: status.availableInDeployment }),
+    );
   });
 
   it('says that some agents are unavailable', async () => {
@@ -361,10 +417,10 @@ describe('ExternalAgentsConfig in a deployment that does not run every agent', (
     render(<ExternalAgentsConfig />);
     await userEvent.click(await screen.findByRole('button', { name: 'add' }));
 
-    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'preset_claude' })).not.toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'preset_codex' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'preset_gemini' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'preset_qwen' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Gemini CLI' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Qwen Code' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Claude Code' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Codex CLI' })).not.toBeInTheDocument();
   });
 
   it.each(['claude', '/usr/local/bin/codex', 'claude-code'])(

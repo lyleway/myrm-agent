@@ -12,7 +12,7 @@ from myrm_agent_harness.toolkits.acp.drivers import cli_launch_args, resolve_cli
 
 _MODES = ["safe", "allow_all"]
 
-# What the settings page puts in a new agent's args box (see ``AGENT_PRESETS`` of the frontend).
+# A stored config that restates the baseline of claude in its own args, as one written by hand does.
 _CLAUDE_PRESET = ["-p", "--output-format", "stream-json"]
 
 
@@ -89,3 +89,22 @@ def test_a_stale_permission_prompt_tool_in_the_config_cannot_replace_the_hosts()
     assert not any(arg.startswith("--permission-prompt-tool=") for arg in resolved)
     assert "mcp__other__approve" not in resolved
     assert resolved[-2:] == ["--model", "m"]
+
+
+def test_a_flag_the_mode_owns_replaces_the_stale_one_of_a_stored_config() -> None:
+    # A stored bypass flag must be replaced by the selected mode's own permission choice.
+    stale_bypass = resolve_cli_args("claude", ["--dangerously-skip-permissions"], "safe")
+    assert "--dangerously-skip-permissions" not in stale_bypass
+    assert stale_bypass[stale_bypass.index("--permission-mode") + 1] == "default"
+    # The `--flag=value` spelling escapes a plain name lookup and must be stripped.
+    claude_eq = resolve_cli_args("claude", ["--permission-mode=plan"], "allow_all")
+    assert claude_eq.count("--permission-mode") == 1
+    assert "--permission-mode=plan" not in claude_eq
+    # A tool allowlist has no substitute in the mapping, so it must not be dropped.
+    kept = resolve_cli_args("claude", ["--allowedTools", "Bash(git:*)"], "safe")
+    assert kept[-2:] == ["--allowedTools", "Bash(git:*)"]
+
+
+def test_a_mode_the_contract_does_not_name_refuses_to_launch() -> None:
+    with pytest.raises(ValueError, match=r"Unknown permission mode 'plan'; expected one of \['allow_all', 'safe'\]"):
+        resolve_cli_args("claude", [], "plan")

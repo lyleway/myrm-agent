@@ -3,16 +3,17 @@
  * - @/lib/api::apiRequest, fetchWithTimeout (POS: 前端统一请求入口)
  *
  * [OUTPUT]
- * - ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
+ * - ExternalAgentContract / ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
  * - ExternalAgentAccount / ExternalAgentTerminalLogin 类型
- * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
+ * - getExternalAgentCatalog / getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
  *   / getExternalAgentTerminalLogin / logoutExternalAgent
  * - listExternalAgentAccounts / createExternalAgentAccount / deleteExternalAgentAccount
  * - isBlockedInDeployment / resolveExternalCliReadiness: whether a command names an agent the deployment does not run,
  *   and whether delegation can run at all
  *
  * [POS]
- * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
+ * 外部委托 Agent 订阅鉴权前端服务层。封装已知 Agent 的契约清单（名称、默认名、描述、通道，前端不再自己记一份，
+ * 也不必等探测）与登录状态查询、SSE 安装与交互式登录
  * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、用户在自己终端里跑的登录
  * （取官方登录命令并重新检测）、登出，命名账号的列出、创建、删除，供设置页的鉴权 UI
  * 调用（local + SaaS 全模式可用）。前端从不接触凭据：登录由 CLI 完成，这里只读「谁登录了」。
@@ -25,6 +26,26 @@ import type { ExternalAgentType } from '@/services/config';
 export type ExternalAgentLoginStrategy = 'browser_oauth' | 'terminal';
 
 export type ExternalAgentShell = 'posix' | 'powershell' | 'cmd';
+
+/**
+ * What the app knows of an agent before it asks the machine anything: the agent's own contract, not its state.
+ * The server owns it, so an agent added there is offered here without a change to this app.
+ */
+export interface ExternalAgentContract {
+  backend: string;
+  /** What a person calls the agent ("Claude Code"): the label of its quick-add button. */
+  title: string;
+  /** The name an agent added from this entry starts with. */
+  defaultName: string;
+  /** What the model is told the agent is, filled in when the agent is added. */
+  description: string;
+  /** How the app runs this agent. It is the agent's own contract, so a stored choice of type never changes it. */
+  transport: ExternalAgentType;
+  /** True when the agent connects to no MCP server (shared memory is one) in a folder it has not been told to trust. */
+  mcpNeedsTrustedFolder: boolean;
+  /** False where the deployment does not run this agent at all (a hosted deployment). */
+  availableInDeployment: boolean;
+}
 
 export interface ExternalAgentAuthStatus {
   backend: string;
@@ -73,6 +94,12 @@ export interface ExternalAgentAccount {
   name: string;
   authenticated: boolean;
   authStatus: ExternalAgentAuthStatus['authStatus'];
+}
+
+/** Fetch the contract of every agent the app can offer. Immediate: nothing is detected. */
+export async function getExternalAgentCatalog(): Promise<ExternalAgentContract[]> {
+  const res = await apiRequest<{ agents: ExternalAgentContract[] }>('/external-agents/catalog', { silent: true });
+  return res.agents ?? [];
 }
 
 /** Fetch install + login state for every known delegated backend (drives badges). */

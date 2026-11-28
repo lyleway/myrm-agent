@@ -8,6 +8,7 @@ reports success it did not observe, waits without a bound, or leaves a child pro
 - core.security.bounded_communicate::communicate_bounded (POS: communicate() with a cap on each pipe, stopping the process through the caller on a deadline or a cancel)
 - core.security.process_env::EnvInheritPolicy, sanitize_env (POS: Child process environment isolation SSOT)
 - infra.tls_compat::with_node_system_ca (POS: Enterprise TLS compatibility: the system trust store for a Node child)
+- toolkits.acp.drivers::command_driver, known_backends (POS: The contract of every known agent: its login, install, launch, transport and permission facts)
 - utils.os_compat::SIGKILL, get_process_group_kwargs, kill_spawned_group (POS: Unified abstractions for POSIX/Windows differences (file locks, process groups))
 
 [OUTPUT]
@@ -19,7 +20,7 @@ reports success it did not observe, waits without a bound, or leaves a child pro
 
 [POS]
 Isolated toolchain manager for external CLI agents — keeps tool installations
-out of the global OS environment.
+out of the global OS environment. Which package installs an agent is a fact of its ``DriverSpec``, not of this module.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from pathlib import Path
 from myrm_agent_harness.core.security.bounded_communicate import communicate_bounded
 from myrm_agent_harness.core.security.process_env import EnvInheritPolicy, sanitize_env
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
+from myrm_agent_harness.toolkits.acp.drivers import command_driver, known_backends
 from myrm_agent_harness.utils.os_compat import SIGKILL, get_process_group_kwargs, kill_spawned_group
 
 logger = logging.getLogger(__name__)
@@ -51,13 +53,6 @@ logger = logging.getLogger(__name__)
 TOOLCHAIN_DIR_ENV = "MYRM_TOOLCHAIN_DIR"
 # Node 24.6 and later read NODE_USE_SYSTEM_CA, which npm needs behind a TLS-inspection proxy.
 NODE_VERSION = "v24.22.2"
-
-BACKEND_NPM_MAP = {
-    "claude": "@anthropic-ai/claude-code",
-    "codex": "@openai/codex",
-    "gemini": "@google/gemini-cli",
-    "qwen": "@qwen-code/qwen-code",
-}
 
 # How long a second install waits for the one in progress before it says so and stops.
 LOCK_WAIT_SECONDS = 600.0
@@ -183,9 +178,11 @@ class IsolatedToolchainManager:
         Returns normally only when the CLI is on disk and answers ``--version``; every other outcome raises
         ``ToolchainError``.
         """
-        package_name = BACKEND_NPM_MAP.get(backend_name)
-        if package_name is None:
-            msg = f"Unknown backend {backend_name!r}. Known: {', '.join(sorted(BACKEND_NPM_MAP))}."
+        spec = command_driver(backend_name)
+        # The name is also the file name under ``bin``, so only the exact backend name is accepted, never a path or an
+        # extension that names the same agent.
+        if spec is None or spec.backend != backend_name:
+            msg = f"Unknown backend {backend_name!r}. Known: {', '.join(sorted(known_backends()))}."
             raise ToolchainError(msg)
         self._get_node_download_url()  # an unsupported OS ends here, before the lock is touched
 
@@ -198,7 +195,7 @@ class IsolatedToolchainManager:
             async with aclosing(self._ensure_node()) as node_steps:
                 async for msg in node_steps:
                     yield msg
-            async with aclosing(self._npm_install(package_name)) as npm_lines:
+            async with aclosing(self._npm_install(spec.npm_package)) as npm_lines:
                 async for line in npm_lines:
                     yield line
             yield await self._verify_installed(backend_name)

@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import AuthEventType, CliLoginSession
-from myrm_agent_harness.toolkits.acp.drivers import DriverSpec, LoginStrategy, driver_for
+from myrm_agent_harness.toolkits.acp.drivers import DriverSpec, driver_for
 
 _TRANSCRIPTS = Path(__file__).parent / "login_transcripts"
 
@@ -39,17 +40,10 @@ _REPLAY_SCRIPT = "import sys; stream = getattr(sys, sys.argv[2]); stream.buffer.
 
 
 def _login_profile(login_args: tuple[str, ...], remote_login_args: tuple[str, ...] = ()) -> DriverSpec:
-    return DriverSpec(
-        backend="codex",
-        home_env="CODEX_HOME",
-        home_dir=".codex",
-        credential_files=("auth.json",),
-        login_strategy=LoginStrategy.BROWSER_OAUTH,
-        login_args=login_args,
-        logout_args=None,
-        api_key_env=("OPENAI_API_KEY",),
-        remote_login_args=remote_login_args,
-    )
+    """Codex's contract with the login commands of a scripted stand-in for its CLI."""
+    codex = driver_for("codex")
+    assert codex is not None
+    return replace(codex, login_args=login_args, logout_args=None, remote_login_args=remote_login_args)
 
 
 def _session(tmp_path: Path, login_args: tuple[str, ...], *, timeout_seconds: int = 300) -> CliLoginSession:

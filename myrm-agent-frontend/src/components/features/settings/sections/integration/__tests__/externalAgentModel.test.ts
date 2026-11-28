@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ExternalAgentConfig, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
-import type { ExternalAgentAuthStatus } from '@/services/external-agents';
+import type { ExternalAgentConfig, ExternalAgentPermissionMode } from '@/services/config';
 import {
-  AGENT_PRESETS,
   DEFAULT_AGENT,
   accountBackend,
   availablePresets,
@@ -21,6 +19,9 @@ import {
   permissionHintKey,
   toDraft,
 } from '../externalAgentModel';
+import { contract, knownContracts, newContract } from './knownAgents';
+
+const KNOWN = knownContracts();
 
 const stored = (overrides: Partial<ExternalAgentConfig> = {}): ExternalAgentConfig => ({
   ...DEFAULT_AGENT,
@@ -53,20 +54,23 @@ describe('cleanAgent', () => {
       envRows: [newEnvRow(' ANTHROPIC_API_KEY ', 'sk-1'), newEnvRow('HTTPS_PROXY', 'http://proxy:8080')],
     };
 
-    const cleaned = cleanAgent(draft);
+    const cleaned = cleanAgent(draft, KNOWN);
 
     expect(cleaned.env).toEqual({ ANTHROPIC_API_KEY: 'sk-1', HTTPS_PROXY: 'http://proxy:8080' });
     expect(cleaned).not.toHaveProperty('envRows');
   });
 
   it('leaves blank lines out and stores no environment when nothing is left', () => {
-    const cleaned = cleanAgent({ ...toDraft(stored({ env: { A: '1' } })), envRows: [newEnvRow(), newEnvRow('', '')] });
+    const cleaned = cleanAgent(
+      { ...toDraft(stored({ env: { A: '1' } })), envRows: [newEnvRow(), newEnvRow('', '')] },
+      KNOWN,
+    );
 
     expect(cleaned).not.toHaveProperty('env');
   });
 
   it('keeps a variable that is deliberately empty', () => {
-    const cleaned = cleanAgent({ ...toDraft(stored()), envRows: [newEnvRow('NO_PROXY', '')] });
+    const cleaned = cleanAgent({ ...toDraft(stored()), envRows: [newEnvRow('NO_PROXY', '')] }, KNOWN);
 
     expect(cleaned.env).toEqual({ NO_PROXY: '' });
   });
@@ -74,46 +78,49 @@ describe('cleanAgent', () => {
   it('gives back an unchanged agent as it was stored', () => {
     const agent = stored({ args: ['-p'], env: { HTTPS_PROXY: 'http://proxy:8080' }, description: 'd' });
 
-    expect(cleanAgent(toDraft(agent))).toEqual(agent);
+    expect(cleanAgent(toDraft(agent), KNOWN)).toEqual(agent);
   });
 
   it('keeps the settings of an agent that this form does not edit', () => {
     const agent = { ...stored(), timeout: 600, maxResponseChars: 20000 } as ExternalAgentConfig;
 
-    expect(cleanAgent(toDraft(agent))).toMatchObject({ timeout: 600, maxResponseChars: 20000 });
+    expect(cleanAgent(toDraft(agent), KNOWN)).toMatchObject({ timeout: 600, maxResponseChars: 20000 });
   });
 
   it('trims the text, drops blank arguments and replaces a mode of an older vocabulary', () => {
-    const cleaned = cleanAgent({
-      ...toDraft(stored({ name: '  claude-code ', command: ' claude ', args: ['-p', '  ', ''] })),
-      permissionMode: 'ask' as ExternalAgentPermissionMode,
-    });
+    const cleaned = cleanAgent(
+      {
+        ...toDraft(stored({ name: '  claude-code ', command: ' claude ', args: ['-p', '  ', ''] })),
+        permissionMode: 'ask' as ExternalAgentPermissionMode,
+      },
+      KNOWN,
+    );
 
     expect(cleaned).toMatchObject({ name: 'claude-code', command: 'claude', args: ['-p'], permissionMode: 'safe' });
   });
 
   it('keeps the chosen auth mode where subscription login is allowed', () => {
-    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), true).authMode).toBe('subscription');
-    expect(cleanAgent(toDraft(stored({ authMode: 'api_key' })), true).authMode).toBe('api_key');
-    expect(cleanAgent(toDraft(stored({ authMode: undefined }))).authMode).toBeUndefined();
+    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), KNOWN, true).authMode).toBe('subscription');
+    expect(cleanAgent(toDraft(stored({ authMode: 'api_key' })), KNOWN, true).authMode).toBe('api_key');
+    expect(cleanAgent(toDraft(stored({ authMode: undefined })), KNOWN).authMode).toBeUndefined();
   });
 
   it('stores an API key as the auth mode where subscription login is not allowed', () => {
-    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), false).authMode).toBe('api_key');
-    expect(cleanAgent(toDraft(stored({ authMode: undefined })), false).authMode).toBe('api_key');
+    expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), KNOWN, false).authMode).toBe('api_key');
+    expect(cleanAgent(toDraft(stored({ authMode: undefined })), KNOWN, false).authMode).toBe('api_key');
   });
 
   it('stores sharing memory only as the explicit true of a consent', () => {
-    expect(cleanAgent(toDraft(stored({ shareMemory: true }))).shareMemory).toBe(true);
-    expect(cleanAgent(toDraft(stored({ shareMemory: false })))).not.toHaveProperty('shareMemory');
-    expect(cleanAgent(toDraft(stored()))).not.toHaveProperty('shareMemory');
+    expect(cleanAgent(toDraft(stored({ shareMemory: true })), KNOWN).shareMemory).toBe(true);
+    expect(cleanAgent(toDraft(stored({ shareMemory: false })), KNOWN)).not.toHaveProperty('shareMemory');
+    expect(cleanAgent(toDraft(stored()), KNOWN)).not.toHaveProperty('shareMemory');
   });
 
   it('does not take a stored value that is not a boolean true for a consent', () => {
     for (const value of ['true', 'yes', 1, {}]) {
       const agent = { ...stored(), shareMemory: value } as unknown as ExternalAgentConfig;
 
-      expect(cleanAgent(toDraft(agent))).not.toHaveProperty('shareMemory');
+      expect(cleanAgent(toDraft(agent), KNOWN)).not.toHaveProperty('shareMemory');
     }
   });
 });
@@ -187,7 +194,7 @@ describe('permission and backend rules', () => {
     ['cli', 'codex-wrapper', 'permissionHintUnrestricted'],
     ['cli', '', 'permissionHintUnrestricted'],
   ] as const)('explains what the safe mode means for a %s agent running %s', (type, command, hint) => {
-    expect(permissionHintKey(type, command)).toBe(hint);
+    expect(permissionHintKey(type, command, KNOWN)).toBe(hint);
   });
 
   it.each([
@@ -197,48 +204,64 @@ describe('permission and backend rules', () => {
     ['my-qwen-wrapper', 'qwen'],
     ['aider', null],
   ])('maps the command %s to the login backend %s', (command, backend) => {
-    expect(backendKeyFromCommand(command)).toBe(backend);
+    expect(backendKeyFromCommand(command, KNOWN)).toBe(backend);
   });
 });
 
-describe('the presets a deployment offers', () => {
-  const row = (backend: string, availableInDeployment: boolean) =>
-    ({ backend, installed: false, authenticated: false, availableInDeployment }) as ExternalAgentAuthStatus;
-
-  it('offers every preset until the server has reported, and where every agent is available', () => {
-    expect(availablePresets([])).toEqual(AGENT_PRESETS);
-    expect(availablePresets(['claude', 'codex', 'gemini', 'qwen'].map((backend) => row(backend, true)))).toEqual(
-      AGENT_PRESETS,
-    );
+describe('the presets the known agents give', () => {
+  it('offers none before the server has answered', () => {
+    expect(availablePresets([])).toEqual([]);
   });
 
-  it('leaves out the presets of the agents the deployment does not run', () => {
-    const hosted = [row('claude', false), row('codex', false), row('gemini', true), row('qwen', true)];
+  it('offers one preset per known agent, labelled and started as the agent says', () => {
+    const presets = availablePresets(KNOWN);
+
+    expect(presets.map((preset) => [preset.key, preset.label])).toEqual([
+      ['claude', 'Claude Code'],
+      ['codex', 'Codex CLI'],
+      ['gemini', 'Gemini CLI'],
+      ['qwen', 'Qwen Code'],
+    ]);
+    for (const [index, entry] of KNOWN.entries()) {
+      expect(presets[index].config).toEqual({
+        ...DEFAULT_AGENT,
+        name: entry.defaultName,
+        type: entry.transport,
+        command: entry.backend,
+        description: entry.description,
+      });
+    }
+  });
+
+  it('leaves out the agents the deployment does not run', () => {
+    const hosted = [
+      contract('claude', { availableInDeployment: false }),
+      contract('codex', { availableInDeployment: false }),
+      contract('gemini'),
+      contract('qwen'),
+    ];
 
     expect(availablePresets(hosted).map((preset) => preset.key)).toEqual(['gemini', 'qwen']);
+  });
+
+  it('gives an agent the server starts to report a preset without a change here', () => {
+    const [preset] = availablePresets([newContract('aider', 'cli')]);
+
+    expect(preset).toMatchObject({
+      key: 'aider',
+      label: 'aider agent',
+      config: { name: 'aider-cli', command: 'aider', type: 'cli', args: [], description: 'The aider agent' },
+    });
+  });
+
+  it('starts every agent with the arguments of its own launch: none', () => {
+    for (const preset of availablePresets(KNOWN)) {
+      expect(preset.config.args, preset.key).toEqual([]);
+    }
   });
 });
 
 describe('the transport of a known agent', () => {
-  const status = (backend: string, transport: ExternalAgentType): ExternalAgentAuthStatus => ({
-    backend,
-    installed: true,
-    path: `/usr/bin/${backend}`,
-    version: '1.0.0',
-    transport,
-    authenticated: false,
-    authStatus: 'not_authenticated',
-    loginStrategy: 'browser_oauth',
-    subscriptionLoginAllowed: true,
-    availableInDeployment: true,
-  });
-  const statuses = [
-    status('claude', 'cli'),
-    status('codex', 'app_server'),
-    status('gemini', 'acp'),
-    status('qwen', 'acp'),
-  ];
-
   it.each([
     ['gemini', 'gemini'],
     ['/usr/local/bin/gemini', 'gemini'],
@@ -252,7 +275,12 @@ describe('the transport of a known agent', () => {
     ['aider', null],
     ['', null],
   ])('knows the command %s as the agent %s', (command, backend) => {
-    expect(knownBackendOfCommand(command)).toBe(backend);
+    expect(knownBackendOfCommand(command, KNOWN)).toBe(backend);
+  });
+
+  it('knows no agent before the server has answered, and the one a new entry names after it', () => {
+    expect(knownBackendOfCommand('claude', [])).toBeNull();
+    expect(knownBackendOfCommand('aider', [...KNOWN, newContract('aider', 'cli')])).toBe('aider');
   });
 
   it.each([
@@ -264,33 +292,24 @@ describe('the transport of a known agent', () => {
     ['claude-code-acp', null],
     ['aider', null],
   ])('fixes the transport of the command %s to %s', (command, transport) => {
-    expect(contractTransport(command, statuses)).toBe(transport);
+    expect(contractTransport(command, KNOWN)).toBe(transport);
   });
 
-  it('fixes nothing before the server has reported', () => {
+  it('fixes nothing before the server has answered', () => {
     expect(contractTransport('gemini', [])).toBeNull();
   });
 
   it('stores the fixed transport in place of a stale one', () => {
     const agent = stored({ name: 'gemini-cli', command: 'gemini', type: 'cli' });
 
-    expect(cleanAgent(toDraft(agent), true, 'acp').type).toBe('acp');
-    expect(cleanAgent(toDraft(agent), true, null).type).toBe('cli');
-    expect(cleanAgent(toDraft(agent)).type).toBe('cli');
+    expect(cleanAgent(toDraft(agent), KNOWN).type).toBe('acp');
+    expect(cleanAgent(toDraft(agent), []).type).toBe('cli');
   });
 
-  it('offers each known agent as a preset that already says how it runs', () => {
-    const presets = Object.fromEntries(AGENT_PRESETS.map(({ key, config }) => [key, config]));
-
-    expect(Object.keys(presets)).toEqual(['claude', 'codex', 'gemini', 'qwen']);
-    for (const [key, config] of Object.entries(presets)) {
-      const fixed = contractTransport(config.command, statuses);
-      expect(fixed, key).toBe(config.type);
+  it('starts every preset in the transport its own contract fixes', () => {
+    for (const preset of availablePresets(KNOWN)) {
+      expect(contractTransport(preset.config.command, KNOWN), preset.key).toBe(preset.config.type);
     }
-    // The agents that run over ACP or an app server need no arguments of ours.
-    expect(presets.gemini.args).toEqual([]);
-    expect(presets.qwen.args).toEqual([]);
-    expect(presets.codex.args).toEqual([]);
   });
 });
 
@@ -318,16 +337,20 @@ describe('accounts', () => {
   ] as const)(
     'lets the command %s on %s login (allowed: %s) choose an account of %s',
     (command, mode, allowed, backend) => {
-      expect(accountBackend(command, mode, allowed)).toBe(backend);
+      expect(accountBackend(command, mode, allowed, KNOWN)).toBe(backend);
     },
   );
+
+  it('lets no command choose an account before the server has answered', () => {
+    expect(accountBackend('claude', 'subscription', true, [])).toBeNull();
+  });
 
   describe('when stored', () => {
     const work = (overrides: Partial<ExternalAgentConfig> = {}) =>
       stored({ authMode: 'subscription', account: 'work', ...overrides });
 
     it('keeps the account of a known agent on its subscription login', () => {
-      expect(cleanAgent(toDraft(work()), true).account).toBe('work');
+      expect(cleanAgent(toDraft(work()), KNOWN, true).account).toBe('work');
     });
 
     it.each([
@@ -336,11 +359,11 @@ describe('accounts', () => {
       ['a command the app does not know', work({ command: 'aider' }), true],
       ['a blank account', work({ account: '' }), true],
     ])('drops the account of an agent on %s', (_label, agent, allowed) => {
-      expect(cleanAgent(toDraft(agent), allowed)).not.toHaveProperty('account');
+      expect(cleanAgent(toDraft(agent), KNOWN, allowed)).not.toHaveProperty('account');
     });
 
     it('stores an agent without an account as it was', () => {
-      expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), true)).not.toHaveProperty('account');
+      expect(cleanAgent(toDraft(stored({ authMode: 'subscription' })), KNOWN, true)).not.toHaveProperty('account');
     });
   });
 
@@ -357,7 +380,7 @@ describe('accounts', () => {
         agent('e', 'claude'),
       ];
 
-      const left = detachAccount(agents, 'claude', 'work');
+      const left = detachAccount(agents, 'claude', 'work', KNOWN);
 
       expect(left.map(({ name, account }) => [name, account])).toEqual([
         ['a', undefined],
@@ -373,21 +396,32 @@ describe('accounts', () => {
     it('hands back the same list when no agent ran as it', () => {
       const agents = [agent('a', 'claude', 'home'), agent('b', 'codex', 'work')];
 
-      expect(detachAccount(agents, 'claude', 'work')).toBe(agents);
+      expect(detachAccount(agents, 'claude', 'work', KNOWN)).toBe(agents);
     });
   });
 });
 
 describe('memoryNeedsTrustedFolder', () => {
-  it('is true for Gemini CLI wherever it lives and whatever its extension', () => {
-    expect(memoryNeedsTrustedFolder('gemini')).toBe(true);
-    expect(memoryNeedsTrustedFolder('/usr/local/bin/gemini')).toBe(true);
-    expect(memoryNeedsTrustedFolder('C:\\tools\\gemini.cmd')).toBe(true);
+  it('is true for the agent whose entry says so wherever it lives and whatever its extension', () => {
+    expect(memoryNeedsTrustedFolder('gemini', KNOWN)).toBe(true);
+    expect(memoryNeedsTrustedFolder('/usr/local/bin/gemini', KNOWN)).toBe(true);
+    expect(memoryNeedsTrustedFolder('C:\\tools\\gemini.cmd', KNOWN)).toBe(true);
   });
 
-  it('is false for the other agents and for a command that only carries its name', () => {
+  it('is false for the other agents, for a command that only carries a name, and before the server has answered', () => {
     for (const command of ['claude', 'codex', 'qwen', 'gemini-wrapper', '']) {
-      expect(memoryNeedsTrustedFolder(command)).toBe(false);
+      expect(memoryNeedsTrustedFolder(command, KNOWN)).toBe(false);
     }
+    expect(memoryNeedsTrustedFolder('gemini', [])).toBe(false);
+  });
+
+  it('follows the entry, not the name of the agent', () => {
+    const entries = [
+      contract('claude', { mcpNeedsTrustedFolder: true }),
+      contract('gemini', { mcpNeedsTrustedFolder: false }),
+    ];
+
+    expect(memoryNeedsTrustedFolder('claude', entries)).toBe(true);
+    expect(memoryNeedsTrustedFolder('gemini', entries)).toBe(false);
   });
 });

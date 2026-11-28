@@ -11,7 +11,7 @@ import { Switch } from '@/components/primitives/switch';
 import { Textarea } from '@/components/primitives/textarea';
 import { isLocalMode } from '@/lib/deploy-mode';
 import type { ExternalAgentAuthMode, ExternalAgentPermissionMode, ExternalAgentType } from '@/services/config';
-import type { ExternalAgentAccount } from '@/services/external-agents';
+import type { ExternalAgentAccount, ExternalAgentContract } from '@/services/external-agents';
 import ExternalAgentAccountField from './ExternalAgentAccountField';
 import ExternalAgentEnvEditor from './ExternalAgentEnvEditor';
 import {
@@ -34,6 +34,8 @@ interface ExternalAgentFormProps {
   isNew: boolean;
   /** The presets on offer: those whose agent the deployment runs. */
   presets: readonly AgentPreset[];
+  /** The server's catalog of known agents: what the form knows about a command it is given. */
+  known: readonly ExternalAgentContract[];
   isTesting: boolean;
   /** False in a hosted deployment: agents run on an API key there, so the form offers nothing else. */
   subscriptionLoginAllowed: boolean;
@@ -53,6 +55,7 @@ const ExternalAgentForm = memo(
     fixedTransport,
     isNew,
     presets,
+    known,
     isTesting,
     subscriptionLoginAllowed,
     accounts,
@@ -66,7 +69,7 @@ const ExternalAgentForm = memo(
     const t = useTranslations('settings.developer.externalAgents');
     const authMode = effectiveAuthMode(draft.authMode, subscriptionLoginAllowed);
     const type = fixedTransport ?? draft.type;
-    const accountOf = accountBackend(draft.command, draft.authMode, subscriptionLoginAllowed);
+    const accountOf = accountBackend(draft.command, draft.authMode, subscriptionLoginAllowed, known);
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
@@ -79,7 +82,7 @@ const ExternalAgentForm = memo(
                 onClick={() => onChange({ ...toDraft(preset.config), envRows: draft.envRows })}
                 className="text-xs px-2.5 py-1 rounded-full border border-border hover:bg-muted transition-colors"
               >
-                {t(`preset_${preset.key}` as Parameters<typeof t>[0])}
+                {preset.label}
               </button>
             ))}
           </div>
@@ -168,7 +171,7 @@ const ExternalAgentForm = memo(
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(type, draft.command))}</p>
+            <p className="text-[11px] text-muted-foreground/60">{t(permissionHintKey(type, draft.command, known))}</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">{t('maxTurns')}</label>
@@ -228,7 +231,7 @@ const ExternalAgentForm = memo(
             </label>
           </div>
           <p className="text-xs text-muted-foreground">{t('shareMemoryHint')}</p>
-          {memoryNeedsTrustedFolder(draft.command) && (
+          {memoryNeedsTrustedFolder(draft.command, known) && (
             <p className="text-xs text-muted-foreground">{t('shareMemoryTrustedFolderHint')}</p>
           )}
         </div>
