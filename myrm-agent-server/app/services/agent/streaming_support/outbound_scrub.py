@@ -2,7 +2,7 @@
 
 [INPUT]
 - myrm_agent_harness.core.events.types::AgentEventType (POS: the wire name of the approval request event)
-- myrm_agent_harness.core.security.redact::redact_sensitive_text (POS: masks credentials in one text)
+- myrm_agent_harness.api::redact_sensitive_text (POS: masks credentials in one text)
 - myrm_agent_harness.toolkits.code_execution.executors.models::scrub_sensitive_info (POS: masks host paths and credentials in one text)
 
 [OUTPUT]
@@ -22,8 +22,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from myrm_agent_harness.api import redact_sensitive_text
 from myrm_agent_harness.core.events.types import AgentEventType
-from myrm_agent_harness.core.security.redact import redact_sensitive_text
 from myrm_agent_harness.toolkits.code_execution.executors.models import scrub_sensitive_info
 
 _APPROVAL_REQUEST = AgentEventType.TOOL_APPROVAL_REQUEST.value
