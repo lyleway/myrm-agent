@@ -7,7 +7,7 @@
 - _extract_media_generation_params / _resolve_xai_oauth_api_key / _is_xai_provider
 
 [POS]
-参数转换媒体层：把请求中的 image / video / TTS 选择解析成 provider 可用的生成参数。没有选择、或选择已不在目录内时，对应参数为 None，绝不补默认模型。
+参数转换媒体层：把用户保存的设置（`personalSettings` 的 `imageGeneration` / `videoGeneration`，语音设置的 `tts*`）解析成 provider 可用的生成参数，只处理智能体启用的媒体工具。没有选择、或选择已不在目录内时，对应参数为 None，绝不补默认模型。
 """
 
 from __future__ import annotations
