@@ -28,6 +28,36 @@ def test_is_x_url():
     assert not is_x_url("")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.twitter.com/sama/status/987654321",
+        "HTTPS://X.COM/sama/status/987654321",
+        "x.com/sama/status/987654321",
+        "https://x.com/sama/status/987654321/photo/1",
+    ],
+)
+def test_the_host_that_starts_the_url_makes_it_an_x_post(url: str):
+    assert is_x_url(url)
+    assert extract_status_info(url) == ("sama", "987654321")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://notx.com/jack/status/20",
+        "https://x.com.example/jack/status/20",
+        "https://web.archive.org/web/2020/https://twitter.com/jack/status/20",
+        "https://news.example/story?ref=https://x.com/jack/status/20",
+        "https://news.example/x.com/jack/status/20",
+        "https://x.com@news.example/jack/status/20",
+    ],
+)
+def test_a_status_link_inside_another_url_is_not_an_x_post(url: str):
+    assert not is_x_url(url)
+    assert extract_status_info(url) is None
+
+
 def test_extract_status_info():
     info = extract_status_info("https://x.com/karpathy/status/1234567890123456789?s=20")
     assert info == ("karpathy", "1234567890123456789")

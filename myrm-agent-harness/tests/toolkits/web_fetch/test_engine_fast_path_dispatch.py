@@ -206,7 +206,20 @@ async def test_a_failing_fast_path_never_reaches_the_ladder(
     ladder.assert_not_awaited()
 
 
-async def test_a_url_without_a_fast_path_goes_straight_to_the_ladder(engine: FetchEngine) -> None:
+@pytest.mark.parametrize(
+    "url",
+    [
+        _PLAIN_URL,
+        # A platform link inside another site's URL is that site's page, not the platform's.
+        "https://web.archive.org/web/2020/https://twitter.com/jack/status/20",
+        "https://notx.com/jack/status/20",
+        "https://news.example/story?ref=https://x.com/jack/status/20",
+        "https://news.example/story?u=youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://news.example/story?u=bilibili.com/video/BV1xx411c7mD",
+        "https://news.example/story?u=mp.weixin.qq.com/s/abc123",
+    ],
+)
+async def test_a_url_without_a_fast_path_goes_straight_to_the_ladder(engine: FetchEngine, url: str) -> None:
     extractors = {platform.extractor: AsyncMock(return_value=page("fast")) for platform in PLATFORMS}
     ladder = AsyncMock(return_value=(page("ladder"), None))
 
@@ -214,7 +227,7 @@ async def test_a_url_without_a_fast_path_goes_straight_to_the_ladder(engine: Fet
         for name, extractor in extractors.items():
             patches.enter_context(patch(f"{_DISPATCH}.{name}", new=extractor))
         patches.enter_context(patch.object(engine, "_crawl_with_degradation", new=ladder))
-        result = await engine.crawl(_PLAIN_URL)
+        result = await engine.crawl(url)
 
     assert result is not None and result.page_content == "ladder"
     assert all(extractor.await_count == 0 for extractor in extractors.values())
