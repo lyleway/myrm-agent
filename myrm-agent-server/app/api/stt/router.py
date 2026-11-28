@@ -89,7 +89,8 @@ async def transcribe_audio(
     user_id: str = Depends(get_deploy_identity),
 ) -> TranscribeResponse:
     """Transcribe an uploaded audio file using the user's STT configuration."""
-    content_type = (file.content_type or "").lower()
+    # A browser names the container with parameters (MediaRecorder: ``audio/webm;codecs=opus``); the allow-list is by media type.
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     if content_type not in _ALLOWED_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported audio format: {content_type}")
 
