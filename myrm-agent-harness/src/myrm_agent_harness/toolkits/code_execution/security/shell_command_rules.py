@@ -152,7 +152,14 @@ _DANGEROUS_COMMANDS: tuple[tuple[str, str], ...] = (
     (r"\bprintf\s+.*\|\s*(ba)?sh\b", "Printf-piped shell execution"),
     (r"\bxxd\s+-r\s*\|\s*(ba)?sh\b", "Hex-decoded shell execution"),
     # --- interpreter inline execution ---
-    (r"\bpython3?\s+-c\s+", "Python inline execution"),
+    # A ``python -c`` that is the whole command runs in the Python wrapper and never reaches this table; any other
+    # ``python -c`` (behind a pipe, a wrapper, an interpreter path, other commands) is a shell command, refused with
+    # the way to run it.
+    (
+        r"\bpython3?\s+-c\s+",
+        "Python inline execution: send `python -c` alone as the whole command, "
+        "or use a heredoc (`python3 - <<'PY'`) or a script file",
+    ),
     (r"\bnode\s+(-e|--eval)\s+", "Node.js inline execution"),
     (r"\bperl\s+-e\s+", "Perl inline execution"),
     (r"\bruby\s+-e\s+", "Ruby inline execution"),

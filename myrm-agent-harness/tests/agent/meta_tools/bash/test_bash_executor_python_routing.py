@@ -39,7 +39,34 @@ class TestPrepareExecutionPythonRouting:
         assert use_python is True
         assert prepared == "print(1)"
         assert mcp is None
-        assert bash_executor.consume_python_c_transform_hint() is not None
+        hint = bash_executor.consume_python_c_transform_hint()
+        assert hint is not None
+        assert "`python -c` wrapper" in hint
+
+    async def test_a_python_c_command_with_anything_around_it_stays_a_shell_command(
+        self, bash_executor: BashExecutor
+    ) -> None:
+        for command in ('python3 -c "print(1)" && echo done', 'echo PREFIX && python3 -c "print(1)"'):
+            use_python, prepared, mcp, _ = await _prepare(bash_executor, command)
+            assert use_python is False
+            assert prepared == command
+            assert mcp is None
+            assert bash_executor.consume_python_c_transform_hint() is None
+
+    async def test_a_stdin_heredoc_runs_as_python_without_a_rewrite_hint(self, bash_executor: BashExecutor) -> None:
+        use_python, prepared, _, _ = await _prepare(bash_executor, "python3 - <<'EOF'\nprint('python3 -c x')\nEOF")
+        assert use_python is True
+        assert prepared == "print('python3 -c x')"
+        assert bash_executor.consume_python_c_transform_hint() is None
+
+    async def test_a_cat_heredoc_python_file_gets_its_own_rewrite_hint(self, bash_executor: BashExecutor) -> None:
+        command = "cat > job.py <<'EOF'\nprint(1)\nEOF\npython3 job.py"
+        use_python, prepared, _, _ = await _prepare(bash_executor, command)
+        assert use_python is True
+        assert prepared == "print(1)"
+        hint = bash_executor.consume_python_c_transform_hint()
+        assert hint is not None
+        assert "cat > file << EOF" in hint
 
     async def test_multiline_python_enables_python_mode(self, bash_executor: BashExecutor) -> None:
         code = "import os\nimport sys\n\ndef main():\n    pass\nmain()"
@@ -51,6 +78,18 @@ class TestPrepareExecutionPythonRouting:
         with pytest.raises(BashExecutionError) as exc_info:
             await _prepare(bash_executor, 'python3 -c "def broken("')
         assert exc_info.value.phase == "preparation"
+        assert exc_info.value.error_hint is not None
+        assert "python3 -c command produced invalid Python" in exc_info.value.error_hint
+
+    async def test_a_syntax_error_in_a_heredoc_program_is_not_blamed_on_a_python_c_wrapper(
+        self, bash_executor: BashExecutor
+    ) -> None:
+        command = "python3 - <<'EOF'\nprint('python3 -c')\ndef broken(\nEOF"
+        with pytest.raises(BashExecutionError) as exc_info:
+            await _prepare(bash_executor, command)
+        assert exc_info.value.error_category == "syntax"
+        assert exc_info.value.error_hint is not None
+        assert exc_info.value.error_hint.startswith("Pre-execution syntax check failed")
 
     async def test_await_async_python(self, bash_executor: BashExecutor) -> None:
         use_python, prepared, _, _ = await _prepare(bash_executor, "result = await fetch()")

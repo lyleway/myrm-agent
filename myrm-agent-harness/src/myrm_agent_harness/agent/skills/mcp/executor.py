@@ -12,6 +12,8 @@
 - agent.skills.mcp.ipc_proxy::IPCEndpoint (POS: what the generated client needs to reach one IPC server)
 - agent.skills.mcp.tool_name_utils::build_tool_name_map (POS: canonical MCP tool names → Python identifiers)
 - toolkits.code_execution::MCPConfigItem (POS: Code execution toolkit entry point. Aggregates execution configuration, executor implementations, workspace management, and factory functions for the Agent-in-Sandbox architecture.)
+- toolkits.code_execution.python_extractor::SKILL_IMPORT_RE, TOOLS_IMPORT_RE, detect_ptc_imports (POS: Python text helpers of the skill executor, the bash tool's guards and the execution syntax pre-check)
+- toolkits.code_execution.python_program::extract_python_from_bash (POS: Reader that decides which commands the bash tool hands to Python)
 - toolkits.code_execution.saved_script::SavedScript (POS: A workspace script that ``python file.py`` would run; builds its in-process launcher)
 - utils.python_parse::PYTHON_PARSE_ERRORS (POS: Python parse error tuple for AST fallback)
 
@@ -328,9 +330,7 @@ class SkillExecutor:
 
     def _extract_python_code(self, command: str) -> str | None:
         """从 Bash 命令中提取 Python 代码（委托给统一提取器）。"""
-        from myrm_agent_harness.toolkits.code_execution.python_extractor import (
-            extract_python_from_bash,
-        )
+        from myrm_agent_harness.toolkits.code_execution.python_program import extract_python_from_bash
 
         return extract_python_from_bash(command)
 

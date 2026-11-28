@@ -2,7 +2,8 @@
 
 [INPUT]
 - agent.skills.mcp.ipc_endpoint::mcp_ipc_endpoint, ipc_proxy::CallerScope (POS: per-execution MCP IPC server and the run it serves)
-- toolkits.code_execution.code_detector::code_detector, CodeType (POS: Code type detector)
+- toolkits.code_execution.code_detector::code_detector, CodeType (POS: Python vs Bash code type detector)
+- toolkits.code_execution.python_program::PythonWrapper (POS: Reader that decides which commands the bash tool hands to Python)
 - toolkits.code_execution.saved_script::resolve_saved_script (POS: ``python file.py`` -> the workspace script it runs)
 - agent.skills.runtime.command_paths::rewrite_skill_paths, detect_skill_script_command (POS: Skill command path utilities for bash execution.)
 - .error::BashExecutionError (POS: Shared error type for BashExecutor mixins and bash_code_execute_tool error surfacing)
@@ -43,6 +44,7 @@ from myrm_agent_harness.toolkits.code_execution.code_detector import (
     CodeType,
     code_detector,
 )
+from myrm_agent_harness.toolkits.code_execution.python_program import PythonWrapper
 from myrm_agent_harness.toolkits.code_execution.saved_script import resolve_saved_script
 from myrm_agent_harness.toolkits.code_execution.utils import WorkspacePathResolver
 
@@ -152,13 +154,13 @@ class BashExecutorPrepareMixin:
                 use_python_execution = True
                 prepared_code = user_code = detection_result.extracted_code
                 logger.info(f" Python code detected ({detection_result.detection_reason})")
-                if "python" in command and "-c" in command:
+                if detection_result.wrapper is PythonWrapper.INLINE_FLAG:
                     self._last_python_c_transform_hint = (
                         "Detected `python -c` wrapper — auto-rewrote to file-mode "
                         "execution. Next time pass Python source directly; the "
                         "tool auto-detects code type and avoids shell quoting bugs."
                     )
-                elif "cat >" in command and "<<" in command:
+                elif detection_result.wrapper is PythonWrapper.FILE_HEREDOC:
                     self._last_python_c_transform_hint = (
                         "Detected `cat > file << EOF` shell wrapper — auto-rewrote to "
                         "file-mode execution. Next time pass Python source directly to "
@@ -189,7 +191,7 @@ class BashExecutorPrepareMixin:
         if error is None:
             return
 
-        is_python_c = "python" in original_command and "-c" in original_command
+        is_python_c = code_detector.detect(original_command).wrapper is PythonWrapper.INLINE_FLAG
         hint = (
             (
                 "The python3 -c command produced invalid Python after shell quote processing. "

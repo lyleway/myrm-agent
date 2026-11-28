@@ -12,6 +12,7 @@ from myrm_agent_harness.toolkits.code_execution.code_detector import (
     detect_for_execution,
     runs_as_python,
 )
+from myrm_agent_harness.toolkits.code_execution.python_program import PythonWrapper
 
 PYTHON_SOURCE = "\n".join(
     (
@@ -182,11 +183,11 @@ print("done")
         assert "import asyncio" in result.extracted_code
         assert "extracted" in result.detection_reason
 
-    def test_python_c_complex_nested_quotes_greedy_match(self) -> None:
-        """Greedy regex matches from first to last quote, extracting valid Python."""
-        cmd = "python3 -c 'print('hello')'"
-        result = code_detector.detect(cmd)
+    def test_python_c_payload_is_what_the_shell_passes_after_quote_removal(self) -> None:
+        """Adjacent quoted pieces join into one word, so the inner quotes vanish exactly as they do in a shell."""
+        result = code_detector.detect("python3 -c 'print('hello')'")
         assert result.code_type == CodeType.PYTHON
+        assert result.extracted_code == "print(hello)"
 
     def test_leading_comments_do_not_make_a_shell_command_python(self) -> None:
         code = "# comment 1\n# comment 2\n# comment 3\n# comment 4\necho hello"
@@ -282,6 +283,73 @@ class TestRoutingBySyntaxTree:
         assert code_detector.detect(python_opening).code_type == CodeType.PYTHON
         assert code_detector.detect(no_python_opening).code_type == CodeType.BASH
         assert code_detector.detect("echo " + "a" * 40_000).code_type == CodeType.BASH
+
+
+class TestWholeCommandRouting:
+    """A command goes to the interpreter only when it is one Python program; a shell runs everything around it."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'python3 -c "print(1)" && echo done',
+            'echo PREFIX && python3 -c "print(1)"',
+            'python3 -c "print(1)" | tr a-z A-Z',
+            'python3 -c "print(1)" > out.txt',
+            "python3 -c 'print(1)' arg",
+            'PYTHONPATH=. python3 -c "print(1)"',
+            '/usr/bin/python3 -c "print(1)"',
+            'uv run python -c "print(1)"',
+            'python3 -u -c "print(1)"',
+            "python3 - <<'EOF'\nprint(1)\nEOF\necho done",
+            "cat > j.py <<'EOF'\nprint(1)\nEOF\npython3 other.py",
+            'python3 -c "from skills.x_skill import y; y()" && echo done',
+            '/usr/bin/python3 -c "from skills.x_skill import y; y()"',
+        ],
+    )
+    def test_a_python_command_with_anything_around_it_goes_to_the_shell(self, command: str) -> None:
+        result = code_detector.detect(command)
+
+        assert result.code_type == CodeType.BASH
+        assert result.wrapper is None
+        assert not runs_as_python(command)
+
+    def test_python_source_that_imports_a_skill_goes_to_the_interpreter_as_it_is(self) -> None:
+        command = "from skills.x_skill import y\ny()"
+        result = code_detector.detect(command)
+
+        assert result.code_type == CodeType.PYTHON
+        assert result.extracted_code == command
+        assert result.wrapper is None
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'grep -rn "from skills.x_skill import" .',
+            "printf 'from skills.x_skill import y\\ny()' | python3 -",
+            "cat > notes.txt <<'EOF'\nfrom skills.x_skill import y\nEOF",
+        ],
+    )
+    def test_a_shell_command_that_only_mentions_a_skill_import_goes_to_the_shell(self, command: str) -> None:
+        assert code_detector.detect(command).code_type == CodeType.BASH
+
+
+class TestWrapper:
+    """The wrapper a program was written in picks the hint the model gets about its own command."""
+
+    @pytest.mark.parametrize(
+        ("command", "wrapper"),
+        [
+            ('python3 -c "print(1)"', PythonWrapper.INLINE_FLAG),
+            ("python3 -c print(1)", PythonWrapper.INLINE_FLAG),
+            ("python3 - <<'EOF'\nprint(1)\nEOF", PythonWrapper.STDIN_HEREDOC),
+            ("cat > j.py <<'EOF'\nprint(1)\nEOF\npython3 j.py", PythonWrapper.FILE_HEREDOC),
+            ("print(1)", None),
+            ("ls -la", None),
+        ],
+        ids=["inline", "inline-raw", "stdin-heredoc", "file-heredoc", "bare-source", "shell"],
+    )
+    def test_the_wrapper_names_how_the_program_was_written(self, command: str, wrapper: PythonWrapper | None) -> None:
+        assert code_detector.detect(command).wrapper is wrapper
 
 
 # Parses a command whose string holds an invalid Python escape (``"\\d+"``): the compiler warns for every parse of it.

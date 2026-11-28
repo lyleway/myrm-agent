@@ -1,13 +1,9 @@
-"""Unified Python Code Extractor for Bash Commands.
-
-Single-source extractor for all Python-from-bash extraction needs.
-Quote-aware parsing prevents greedy-regex extraction errors.
+"""Python text helpers for bash commands: syntax pre-check, PTC import detection and the pipe-stdin surface.
 
 [INPUT]
 - utils.python_parse::PYTHON_PARSE_ERRORS (POS: What the Python parser raises for text that is not a usable program)
 
 [OUTPUT]
-- extract_python_from_bash: Extract Python code from bash commands (quote-aware).
 - extract_python_from_pipe_stdin: Extract Python fed via ``quoted_payload | python3`` stdin.
 - extract_cat_py_paths_from_pipe_feeders: Resolve ``.py`` paths from ``cat`` pipe feeder segments.
 - validate_python_syntax: Pre-check extracted Python, compiled as the execution wrapper compiles it (top-level
@@ -15,12 +11,12 @@ Quote-aware parsing prevents greedy-regex extraction errors.
   around the column).
 - SKILL_IMPORT_RE: Compiled pattern for ``from skills.xxx_skill import`` detection.
 - TOOLS_IMPORT_RE: Compiled pattern for ``from tools.xxx import`` detection.
+- detect_ptc_imports: AST detection of every static and literal dynamic form of a skill or built-in tool import.
 - SKILLS_NAMESPACE_ADVICE: Guidance for a failed ``No module named 'skills'`` import.
 
 [POS]
-Centralised Python extraction with quote-aware parsing, heredoc support, and
-ast.parse pre-validation.  Used by SkillExecutor, CodeTypeDetector,
-BaseExecutor, and PTC verifier.
+Python text helpers of the skill executor, the bash tool's guards and the execution syntax pre-check. Which program a
+command consists of is decided by ``python_program``, which builds on these helpers.
 """
 
 from __future__ import annotations
@@ -29,38 +25,6 @@ import ast
 import re
 
 from myrm_agent_harness.utils.python_parse import PYTHON_PARSE_ERRORS
-
-
-def extract_python_from_bash(command: str) -> str | None:
-    """Extract Python code from a bash command string.
-
-    Supports (in priority order):
-    1. ``python3 -c "..."`` / ``python3 -c '...'`` — quote-aware extraction
-    2. ``python3 <<EOF ... EOF`` / ``python3 - <<EOF ... EOF`` — heredoc
-    3. ``cat > file.py <<EOF ... EOF`` / ``cat <<EOF > file.py ... EOF`` — heredoc writes of a Python script,
-       alone or after ``cd ... &&``
-    4. Raw Python containing ``from skills.`` / ``from tools.`` imports (non-shell)
-
-    Returns the extracted Python source or ``None`` if no Python is detected.
-    """
-    code = _extract_python_c(command)
-    if code is not None:
-        return code
-
-    code = _extract_heredoc(command)
-    if code is not None:
-        return code
-
-    code = _extract_cat_heredoc(command)
-    if code is not None:
-        return code
-
-    if SKILL_IMPORT_RE.search(command) or TOOLS_IMPORT_RE.search(command) or _IMPORT_STYLE_SKILL_RE.search(command):
-        if _looks_like_shell_wrapper(command):
-            return None
-        return command
-
-    return None
 
 
 def extract_python_from_pipe_stdin(command: str) -> str | None:
@@ -153,18 +117,6 @@ def validate_python_syntax(code: str) -> str | None:
 SKILL_IMPORT_RE = re.compile(r"from\s+(?:skills\.)?([\w]+_skill)(?:\.\w+)?\s+import")
 TOOLS_IMPORT_RE = re.compile(r"(?:from\s+tools\.\w+\s+import|import\s+tools\.)")
 
-_IMPORT_STYLE_SKILL_RE = re.compile(
-    r"(?:^\s*import\s+(?:skills\.)?[\w]+_skill\b)"
-    r"|(?:import_module\s*\(\s*['\"]skills\.[\w]+_skill['\"])"
-    r"|(?:__import__\s*\(\s*['\"](?:skills\.)?[\w]+_skill['\"])",
-    re.MULTILINE,
-)
-"""Bare ``import skills.x_skill`` / dynamic import statements for raw-Python extraction.
-
-``SKILL_IMPORT_RE`` only covers ``from ... import``, so a bare-module import used
-as raw shell input was never recognized as Python and never reached PTC.
-"""
-
 _SKILL_MODULE_MARKER = "_skill"
 _TOOLS_MODULE = "tools"
 _SKILLS_PACKAGE = "skills"
@@ -178,8 +130,8 @@ SKILLS_NAMESPACE_ADVICE = (
 )
 """What to tell a model whose code failed with ``No module named 'skills'``.
 
-The namespace is armed only for inline code the extractor recognises as a skill call (see ``SKILL_IMPORT_RE``) and
-for a saved script the host reads itself (see ``saved_script``).
+The namespace is armed only for inline code that ``python_program.extract_python_from_bash`` reads as a skill call (see
+``SKILL_IMPORT_RE``) and for a saved script the host reads itself (see ``saved_script``).
 """
 
 
@@ -267,62 +219,9 @@ def _detect_dynamic_ptc_import(tree: ast.AST) -> tuple[bool, str | None] | None:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-_PYTHON_CMD_RE = re.compile(r"python3?\s+-c\s+")
-
-_HEREDOC_OPEN = r"<<-?\s*['\"]?(\w+)['\"]?"
-
-# ``python3 <<EOF`` and the stdin form ``python3 - <<EOF``; any ``cd ... &&`` prefix is ignored by ``search``.
-_HEREDOC_RE = re.compile(
-    rf"python3?\s+(?:-\s+)?{_HEREDOC_OPEN}\s*\n(.+?)\n\1\b",
-    re.DOTALL,
-)
-
-# A ``cat`` that writes a ``.py`` file, at the start of a line or of a ``&&`` / ``;`` step, with the redirect on either
-# side of the heredoc marker: ``cat > job.py <<EOF`` and ``cat <<EOF > job.py`` are the same command to the shell.
-# Only a Python target is rewritten: any other file (JSON, ini, ``.env``, notes) is written by the shell verbatim, even
-# when its text happens to parse as Python.
-_CAT_HEREDOC_RES = tuple(
-    re.compile(rf"(?:^|&&|;)[ \t]*cat\s+{shape}\s*\n(.+?)\n\1\b", re.DOTALL | re.MULTILINE)
-    for shape in (rf">\s*\S+\.py['\"]?\s+{_HEREDOC_OPEN}", rf"{_HEREDOC_OPEN}\s*>\s*\S+\.py['\"]?(?=\s|$)")
-)
-
-_SHELL_WRAPPER_PREFIXES = (
-    "cat ",
-    "echo ",
-    "bash ",
-    "sh ",
-    "/bin/bash",
-    "/bin/sh",
-    "cd ",
-    "export ",
-    "pwd",
-    "ls ",
-    "mkdir ",
-    "rm ",
-    "cp ",
-    "mv ",
-)
-
 _BARE_PYTHON_BIN_RE = re.compile(r"^python3?\b", re.IGNORECASE)
 
 _CAT_PY_PATH_RE = re.compile(r"\bcat\s+([^\s|]+\.py)\b", re.IGNORECASE)
-
-
-def _extract_python_c(command: str) -> str | None:
-    """Quote-aware extraction from ``python -c`` commands."""
-    m = _PYTHON_CMD_RE.search(command)
-    if m is None:
-        return None
-
-    rest = command[m.end() :]
-    if not rest:
-        return None
-
-    quote = rest[0]
-    if quote not in ('"', "'"):
-        return None
-
-    return _scan_quoted(rest[1:], quote)
 
 
 def _scan_quoted(text: str, quote: str) -> str | None:
@@ -342,41 +241,6 @@ def _scan_quoted(text: str, quote: str) -> str | None:
         buf.append(ch)
         i += 1
     return "".join(buf) if buf else None
-
-
-def _extract_heredoc(command: str) -> str | None:
-    match = _HEREDOC_RE.search(command)
-    return match.group(2).strip() if match else None
-
-
-def _extract_cat_heredoc(command: str) -> str | None:
-    """Extract Python body from ``cat > file.py << EOF ... EOF`` shell wrappers.
-
-    Returns the body only when the target is a ``.py`` file and the body parses as valid Python.  Every other
-    heredoc write (a JSON or ini file, ``.env``, notes, YAML, a shell script) falls back to bash execution so the
-    file is written verbatim: running its text as Python would report success and leave no file behind.
-    """
-    for pattern in _CAT_HEREDOC_RES:
-        match = pattern.search(command)
-        if match is None:
-            continue
-        body = match.group(2).strip()
-        if body and validate_python_syntax(body) is None:
-            return body
-        return None
-    return None
-
-
-def _looks_like_shell_wrapper(command: str) -> bool:
-    """True when the command starts with shell syntax rather than raw Python."""
-    stripped = command.lstrip()
-    if not stripped:
-        return False
-    first_line = stripped.split("\n", 1)[0].strip()
-    if "<<" in first_line:
-        return True
-    lowered = first_line.lower()
-    return any(lowered.startswith(prefix) for prefix in _SHELL_WRAPPER_PREFIXES)
 
 
 def _split_pipe_segments(command: str) -> list[str]:

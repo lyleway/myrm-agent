@@ -5,7 +5,7 @@ to extract MCP intent and arguments (e.g., path parameters) before execution.
 This enables fine-grained Path Policy enforcement and shows the approval card the tool a script calls.
 
 [INPUT]
-- toolkits.code_execution.python_extractor::extract_python_from_bash (POS: Unified Python extraction with quote-aware parsing)
+- toolkits.code_execution.python_program::extract_python_from_bash (POS: Reader that decides which commands the bash tool hands to Python)
 - utils.python_parse::PYTHON_PARSE_ERRORS (POS: What the Python parser raises for text that is not a usable program)
 
 [OUTPUT]
@@ -22,7 +22,7 @@ from __future__ import annotations
 import ast
 from types import EllipsisType
 
-from myrm_agent_harness.toolkits.code_execution.python_extractor import extract_python_from_bash
+from myrm_agent_harness.toolkits.code_execution.python_program import extract_python_from_bash
 from myrm_agent_harness.utils.python_parse import PYTHON_PARSE_ERRORS
 
 # A keyword argument written as a literal: ``ast.Constant`` also holds bytes, complex numbers and ``...``.

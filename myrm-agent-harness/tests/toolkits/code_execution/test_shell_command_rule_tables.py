@@ -325,6 +325,14 @@ class TestInterpreterInlineExecution:
     def test_python3_c(self):
         assert has_block_threat("python3 -c 'import os'")
 
+    def test_python_c_refusal_names_the_ways_to_run_it(self):
+        """The refusal is all the model sees of a ``python -c`` that was not the whole command."""
+        threat = has_block_threat("echo go && python3 -c 'print(1)'")
+
+        assert threat is not None
+        assert "alone as the whole command" in threat.detail
+        assert "python3 - <<'PY'" in threat.detail
+
     def test_node_eval(self):
         assert has_block_threat("node -e 'process.exit(1)'")
 

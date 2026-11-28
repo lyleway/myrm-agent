@@ -3,7 +3,8 @@
 The route is decided from the syntax tree, never from line counts or keywords in the text: a shell command that
 mentions ``await`` or ``import`` in a string stays shell, and a one-line ``print(1)`` is Python. The set covers the
 shell words that also parse as Python, everyday shell, PowerShell, Python of every statement kind, Python that does
-not parse, and three commands whose route is wrong by construction (``DOCUMENTED_LIMITS``). It is the specification
+not parse, Python in a ``python -c`` or heredoc wrapper and the commands that hold such a program among other
+statements, and three commands whose route is wrong by construction (``DOCUMENTED_LIMITS``). It is the specification
 of the router: a change that moves any row has to say why.
 """
 
@@ -83,6 +84,40 @@ ORDINARY_SHELL: list[tuple[str, str]] = [
     ("import -window root shot.png", "ImageMagick with flags"),
 ]
 
+# A Python program that is not the whole command: the wrapper would drop every other word, so a shell runs it.
+PYTHON_AMONG_SHELL: list[tuple[str, str]] = [
+    ('python3 -c "print(1)" && echo done', "statement after"),
+    ('echo go && python3 -c "print(1)"', "statement before"),
+    ('python3 -c "print(1)" | tr a-z A-Z', "pipe"),
+    ('python3 -c "print(1)" > out.txt', "redirect"),
+    ("python3 -c 'print(1)' arg", "argument"),
+    ('PYTHONPATH=. python3 -c "print(1)"', "environment prefix"),
+    ('/usr/bin/python3 -c "print(1)"', "path-spelled interpreter"),
+    ('uv run python -c "print(1)"', "wrapped interpreter"),
+    ('time python3 -c "print(1)"', "wrapped interpreter"),
+    ('python3 -u -c "print(1)"', "flag before -c"),
+    ("python3 -c 'import os; print(os.environ[\"HOME\"])' | head", "pipe after a quoted payload"),
+    ("python3 -c \"print('$HOME')\"", "payload the shell expands"),
+    ("python3 - <<'EOF'\nprint(1)\nEOF\necho done", "statement after a heredoc"),
+    ("cat > job.py <<'EOF'\nprint(1)\nEOF\npython3 other.py", "runs another file"),
+    ('grep -rn "python3 -c" docs/', "mention"),
+    ('grep -rn "from skills.x_skill import" .', "skill import in a string"),
+    ("printf 'from skills.x_skill import y\\ny()' | python3 -", "skill import fed through a pipe"),
+    ("cat > notes.txt <<'EOF'\nfrom skills.x_skill import y\nEOF", "skill import in a text file"),
+]
+
+PYTHON_IN_A_WRAPPER: list[tuple[str, str]] = [
+    ('python3 -c "print(1)"', ""),
+    ("python -c 'print(1)'", ""),
+    ('python3 -c "print(1)" 2>&1', "stderr merge"),
+    ('python3 -c "print(1)";', "closing semicolon"),
+    ('cd proj && python3 -c "print(1)"', "after cd"),
+    ("python3 - <<'EOF'\nprint(1)\nEOF", "stdin heredoc"),
+    ("python3 <<EOF\nprint(1)\nEOF", "heredoc without the dash"),
+    ("cat > job.py <<'EOF'\nprint(1)\nEOF", "file heredoc, nothing runs it"),
+    ("cat > job.py <<'EOF'\nprint(1)\nEOF\npython3 job.py", "file heredoc, then the same file"),
+]
+
 POWERSHELL: list[tuple[str, str]] = [
     ("Get-ChildItem -Recurse | Where-Object { $_.Length -gt 1MB }", "PowerShell"),
     ('Write-Host "hi"', "PowerShell"),
@@ -157,12 +192,18 @@ DOCUMENTED_LIMITS: list[tuple[str, str, str]] = [
 ]
 
 
-@pytest.mark.parametrize(("command", "note"), SHELL_WORDS_THAT_PARSE_AS_PYTHON + ORDINARY_SHELL + POWERSHELL)
+@pytest.mark.parametrize(
+    ("command", "note"),
+    SHELL_WORDS_THAT_PARSE_AS_PYTHON + ORDINARY_SHELL + PYTHON_AMONG_SHELL + POWERSHELL,
+)
 def test_a_shell_command_runs_in_a_shell(command: str, note: str) -> None:
     assert _route(command) == "shell", note
 
 
-@pytest.mark.parametrize(("command", "note"), PYTHON_BY_CONSTRUCTION + PYTHON_THAT_DOES_NOT_PARSE)
+@pytest.mark.parametrize(
+    ("command", "note"),
+    PYTHON_BY_CONSTRUCTION + PYTHON_IN_A_WRAPPER + PYTHON_THAT_DOES_NOT_PARSE,
+)
 def test_python_runs_in_the_wrapper(command: str, note: str) -> None:
     assert _route(command) == "python", note
 
