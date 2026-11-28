@@ -6,8 +6,9 @@
 - myrm_agent_harness.utils.clean_json::MAX_NESTING (POS: the deepest nesting of a document the loader accepts)
 
 [OUTPUT]
-- Fails when a plugin.json or mcp.json that is nested too deeply, or built to make the nesting scan slow, turns the preview into
-  a server error or holds it for seconds, or when a refused mcp.json stops the skills of the same archive from being installed.
+- Fails when a plugin.json or mcp.json that is nested too deeply, holds an integer of more digits than the interpreter converts,
+  or is built to make the nesting scan slow, turns the preview into a server error or holds it for seconds, or when a refused
+  mcp.json stops the skills of the same archive from being installed.
 
 [POS]
 ``tests/api/plugins`` runs the same archives against a route whose installation state and security scan are replaced. This
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import time
 import zipfile
 from collections.abc import AsyncIterator, Iterator
@@ -41,6 +43,11 @@ SKILL_PATH = f"skills/{SKILL_NAME}/SKILL.md"
 SKILL = f"---\nname: {SKILL_NAME}\ndescription: Keeps notes tidy\n---\n\n# Notes\n\nFile every finding.\n"
 # A depth ``json.loads`` accepts but a pickle of the staged session does not.
 TOO_DEEP_TO_STAGE = 5_000
+# One digit more than the interpreter converts, which is when ``json.loads`` gives up on an integer.
+DIGIT_LIMIT = sys.get_int_max_str_digits()
+OVERLONG_INTEGER = "9" * (DIGIT_LIMIT + 1)
+OVERLONG_MESSAGE = f"Number has more than {DIGIT_LIMIT} digits"
+needs_digit_limit = pytest.mark.skipif(not DIGIT_LIMIT, reason="the interpreter converts integers of any length")
 # Escaped quotes make a 40 KiB text in which a scan that restarts from every quote reads the same characters over and over,
 # where one pass over it takes milliseconds.
 ESCAPED_QUOTES = 20_000
@@ -123,6 +130,24 @@ async def test_a_manifest_nested_too_deeply_is_reported_and_nothing_is_staged(cl
     assert preview.skills == []
 
 
+async def _install_the_skill_of(client: AsyncClient, preview: PluginImportPreviewResponse, installed_skills: list[str]) -> None:
+    """Confirm the import of the archive's one skill: it is installed, and nothing else is."""
+    [skill] = preview.skills
+    assert skill.name == SKILL_NAME
+    request = PluginImportConfirmRequest(
+        session_id=preview.session_id,
+        skills=[PluginConfirmComponent(component="skill", virtual_id=skill.virtual_id, name=skill.name, resolution="install")],
+        servers=[],
+        agents=[],
+    )
+    response = await client.post("/api/plugins/import/confirm", json=request.model_dump())
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["imported_skills"], result["imported_servers"], result["failures"]) == (1, 0, [])
+    [installed] = [item for item in await skills_service.list_skills() if item.name == SKILL_NAME]
+    installed_skills.append(installed.id)
+
+
 @pytest.mark.asyncio
 async def test_a_refused_mcp_config_costs_the_connectors_and_not_the_skills(
     client: AsyncClient, installed_skills: list[str]
@@ -138,20 +163,41 @@ async def test_a_refused_mcp_config_costs_the_connectors_and_not_the_skills(
     [diagnostic] = preview.diagnostics
     assert diagnostic.code == "mcp_invalid_json"
     assert preview.servers == []
-    [skill] = preview.skills
-    assert skill.name == SKILL_NAME
-    request = PluginImportConfirmRequest(
-        session_id=preview.session_id,
-        skills=[PluginConfirmComponent(component="skill", virtual_id=skill.virtual_id, name=skill.name, resolution="install")],
-        servers=[],
-        agents=[],
-    )
-    response = await client.post("/api/plugins/import/confirm", json=request.model_dump())
-    assert response.status_code == 200, response.text
-    result = response.json()
-    assert (result["imported_skills"], result["imported_servers"], result["failures"]) == (1, 0, [])
-    [installed] = [item for item in await skills_service.list_skills() if item.name == SKILL_NAME]
-    installed_skills.append(installed.id)
+    await _install_the_skill_of(client, preview, installed_skills)
+
+
+@needs_digit_limit
+@pytest.mark.asyncio
+async def test_a_manifest_with_an_overlong_integer_is_reported_and_nothing_is_staged(client: AsyncClient) -> None:
+    files = {"plugin.json": _manifest(f', "x-unknown": {OVERLONG_INTEGER}'), SKILL_PATH: SKILL}
+
+    preview = await _preview(client, files)
+
+    [diagnostic] = preview.diagnostics
+    assert diagnostic.code == "manifest_invalid_json"
+    assert OVERLONG_MESSAGE in diagnostic.message
+    assert "set_int_max_str_digits" not in diagnostic.message
+    assert preview.skills == []
+
+
+@needs_digit_limit
+@pytest.mark.asyncio
+async def test_an_mcp_config_with_an_overlong_integer_costs_the_connectors_and_not_the_skills(
+    client: AsyncClient, installed_skills: list[str]
+) -> None:
+    files = {
+        "plugin.json": _manifest(),
+        "mcp.json": _mcp_config(f', "x-unknown": {OVERLONG_INTEGER}'),
+        SKILL_PATH: SKILL,
+    }
+
+    preview = await _preview(client, files)
+
+    [diagnostic] = preview.diagnostics
+    assert diagnostic.code == "mcp_invalid_json"
+    assert OVERLONG_MESSAGE in diagnostic.message
+    assert preview.servers == []
+    await _install_the_skill_of(client, preview, installed_skills)
 
 
 @pytest.mark.asyncio

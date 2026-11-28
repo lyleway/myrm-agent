@@ -9,15 +9,18 @@
 - PLUGIN_NAME, SERVER_NAME: names inside the archives
 - TECHNICAL_DETAIL: what the backend's English diagnostic of an unreadable document says, which must never reach the dialog
 - archive_with_nested_mcp_config / archive_with_nested_manifest: a plugin whose one document is valid in every respect but its depth
+- archive_with_overlong_integer_mcp_config / archive_with_overlong_integer_manifest: the same, but for an integer of more digits
+  than the interpreter converts
+- needs_digit_limit: skips a node on an interpreter that converts integers of any length
 - open_import_dialog: Settings > Skills with the import dialog open on its file input
 - choose_archive: puts a ZIP of the given files in the dialog's file input, as the file chooser does
 
 [POS]
 The three nodes of ``test_plugin_import_hostile_json_*`` differ in what they read from the dialog, not in how they reach it
 or what they feed it. The notice a user reads is worded the same for every unreadable mcp.json (and for every unreadable
-plugin.json), so each archive is valid except for its depth: only then does the notice prove that the depth was the reason.
-A document takes arbitrary JSON in one place only, the value of a ``capabilities`` field of an mcp.json server and of an
-``extensions`` namespace of a plugin.json; the nested value goes there and the enclosing levels are counted.
+plugin.json), so each archive is valid except for its depth or its integer: only then does the notice prove that this was the
+reason. A document takes arbitrary JSON in one place only, the value of a ``capabilities`` field of an mcp.json server and of
+an ``extensions`` namespace of a plugin.json; the hostile value goes there and the enclosing levels are counted.
 """
 
 from __future__ import annotations
@@ -26,10 +29,12 @@ import base64
 import io
 import json
 import re
+import sys
 import zipfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 
+import pytest
 from myrm_agent_harness.utils.clean_json import MAX_NESTING
 
 from tests.support.chrome_mcp_e2e import (
@@ -50,7 +55,11 @@ SERVER_NAME = "hostile-json-server"
 _ARCHIVE_NAME = f"{PLUGIN_NAME}.zip"
 # The preview carries the parser's English message of an unreadable document; the client logs it to the console and
 # shows a sentence of its own, so none of it may be on screen.
-TECHNICAL_DETAIL = re.compile(r"not valid JSON|Nesting is deeper|_invalid_json|column \d+", re.IGNORECASE)
+TECHNICAL_DETAIL = re.compile(r"not valid JSON|Nesting is deeper|Number has more than|_invalid_json|column \d+", re.IGNORECASE)
+# One digit more than the interpreter converts, which is when the JSON parser gives up on an integer.
+_DIGIT_LIMIT = sys.get_int_max_str_digits()
+_OVERLONG_INTEGER = "9" * (_DIGIT_LIMIT + 1)
+needs_digit_limit = pytest.mark.skipif(not _DIGIT_LIMIT, reason="the interpreter converts integers of any length")
 # The root object, ``mcpServers`` and the server entry enclose the value of ``capabilities``.
 _LEVELS_ABOVE_CAPABILITIES = 3
 # The root object and ``extensions`` enclose the value of a namespace.
@@ -116,10 +125,9 @@ def _skill_files(skill_name: str) -> dict[str, str]:
     return {f"skills/{skill_name}/SKILL.md": skill_md}
 
 
-def archive_with_nested_mcp_config(skill_name: str, *, depth: int = MAX_NESTING + 1) -> dict[str, str]:
-    """A plugin whose mcp.json is ``depth`` levels deep and valid in every other respect, next to a skill that is fine."""
-    nested = _nested(depth - _LEVELS_ABOVE_CAPABILITIES)
-    server = f'{{"type": "stdio", "command": "tool", "capabilities": {nested}}}'
+def _archive_with_capabilities(skill_name: str, capabilities: str) -> dict[str, str]:
+    """A plugin whose mcp.json server takes ``capabilities`` and is valid in every other respect, next to a skill that is fine."""
+    server = f'{{"type": "stdio", "command": "tool", "capabilities": {capabilities}}}'
     return {
         "plugin.json": json.dumps({"$schema": PLUGIN_SCHEMA, "name": PLUGIN_NAME}),
         "mcp.json": f'{{"$schema": "{MCP_SCHEMA}", "mcpServers": {{"{SERVER_NAME}": {server}}}}}',
@@ -127,11 +135,30 @@ def archive_with_nested_mcp_config(skill_name: str, *, depth: int = MAX_NESTING 
     }
 
 
+def _archive_with_extension(skill_name: str, extension: str) -> dict[str, str]:
+    """A plugin whose plugin.json keeps ``extension`` under a namespace and is valid in every other respect, next to a skill that is fine."""
+    manifest = f'{{"$schema": "{PLUGIN_SCHEMA}", "name": "{PLUGIN_NAME}", "extensions": {{"ai.example": {extension}}}}}'
+    return {"plugin.json": manifest, **_skill_files(skill_name)}
+
+
+def archive_with_nested_mcp_config(skill_name: str, *, depth: int = MAX_NESTING + 1) -> dict[str, str]:
+    """A plugin whose mcp.json is ``depth`` levels deep and valid in every other respect, next to a skill that is fine."""
+    return _archive_with_capabilities(skill_name, _nested(depth - _LEVELS_ABOVE_CAPABILITIES))
+
+
 def archive_with_nested_manifest(skill_name: str, *, depth: int = MAX_NESTING + 1) -> dict[str, str]:
     """A plugin whose plugin.json is ``depth`` levels deep and valid in every other respect, next to a skill that is fine."""
-    nested = _nested(depth - _LEVELS_ABOVE_EXTENSION)
-    manifest = f'{{"$schema": "{PLUGIN_SCHEMA}", "name": "{PLUGIN_NAME}", "extensions": {{"ai.example": {nested}}}}}'
-    return {"plugin.json": manifest, **_skill_files(skill_name)}
+    return _archive_with_extension(skill_name, _nested(depth - _LEVELS_ABOVE_EXTENSION))
+
+
+def archive_with_overlong_integer_mcp_config(skill_name: str) -> dict[str, str]:
+    """A plugin whose mcp.json holds an integer of more digits than the interpreter converts and is valid in every other respect."""
+    return _archive_with_capabilities(skill_name, _OVERLONG_INTEGER)
+
+
+def archive_with_overlong_integer_manifest(skill_name: str) -> dict[str, str]:
+    """A plugin whose plugin.json holds an integer of more digits than the interpreter converts and is valid in every other respect."""
+    return _archive_with_extension(skill_name, f'{{"n": {_OVERLONG_INTEGER}}}')
 
 
 def _zip_base64(files: Mapping[str, str]) -> str:
