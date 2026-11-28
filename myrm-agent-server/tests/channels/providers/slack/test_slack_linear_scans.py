@@ -1,7 +1,7 @@
-"""The converter's scans for ``<...>`` find what the patterns they replace found, and its links and mentions come out as
-the patterns gave them, in linear time.
+"""The converter's scans for ``<...>`` find exactly what the reference patterns find, and its links and mentions come out
+as the patterns give them, in linear time.
 
-The patterns below are the ones the scans replace. They are the reference, not the code under test: backtracking from
+The patterns below are the specification, not the code under test: backtracking from
 every opener makes a line of unclosed ``<`` or ``[`` cost the square of its length. The scans must return the same
 spans on every short text over a small alphabet, on random longer ones, and take time in proportion to the length of a
 hostile line.
@@ -46,7 +46,7 @@ def _random_strings(pieces: tuple[str, ...], count: int, longest: int, seed: int
 
 
 def _reference_escape(text: str) -> str:
-    """``_escape_slack_content`` as it was written with the backtracking pattern."""
+    """Reference ``_escape_slack_content``, written with the backtracking pattern."""
     if not text:
         return ""
     if "&" not in text and "<" not in text and ">" not in text:
@@ -167,7 +167,7 @@ def _convert_in(text: str) -> float:
 
 
 class TestLinearTime:
-    # The backtracking patterns took 1.3 s on 20,000 characters of these and over 5 s on 40,000, all of it on the event
+    # The backtracking patterns take 1.3 s on 20,000 characters of these and over 5 s on 40,000, all of it on the event
     # loop that serves every channel. A scan that restarts from each opener but looks for its closer with ``str.find``
     # is quick enough at that size to pass a fixed limit, so the line grows eightfold instead: linear time grows about
     # eightfold, quadratic time about sixty-four-fold.

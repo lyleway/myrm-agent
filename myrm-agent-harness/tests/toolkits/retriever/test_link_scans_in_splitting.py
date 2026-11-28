@@ -1,8 +1,8 @@
 """Splitting and quality assessment read hostile text in time proportional to its length.
 
-The old patterns are the reference. The lazy link pattern took the cube of a line (4,000 characters of ``[a](``:
-about 4.5 s), and ``^\\s*`` at every line start read a page of blank lines to its end once per line (20,000 of them:
-about 1.4 s).
+The reference patterns are the specification. The lazy link pattern takes the cube of a line (4,000 characters of
+``[a](``: about 4.5 s), and ``^\\s*`` at every line start reads a page of blank lines to its end once per line (20,000
+of them: about 1.4 s).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from myrm_agent_harness.toolkits.retriever.splitter.chunk_processor import (
 )
 from myrm_agent_harness.toolkits.retriever.splitter.markdown_link_handler import MarkdownLinkHandler
 
-_OLD_LINK_PATTERN = re.compile(r"(?<!\!)\[(.+?)\]\(([^)]+)\)", re.MULTILINE | re.DOTALL)
+_REFERENCE_LINK_PATTERN = re.compile(r"(?<!\!)\[(.+?)\]\(([^)]+)\)", re.MULTILINE | re.DOTALL)
 _PIECES = (
     "[", "]", "(", ")", "!", "a", " ", "\n", "\n\n", "](", "![", "[a](b)", "[long\nlink](https://x.y/z)", "![i](j)", "- ",
     "* ", "1. ", "12. ", "• ", "\t", "\r", "Sentence one. ", "Another one! ", "## ", "```", "é",
@@ -57,12 +57,12 @@ def _assert_linear(make: Callable[[int], str], work: Callable[[str], object], sm
 
 
 class TestLinkProtection:
-    def test_protects_the_links_the_pattern_matched(self) -> None:
+    def test_protects_the_links_the_reference_pattern_matches(self) -> None:
         handler = MarkdownLinkHandler()
         for text in _texts(10_000, 12, seed=41):
             protected, link_map = handler.protect_markdown_links(text)
 
-            expected = [match.group(0) for match in _OLD_LINK_PATTERN.finditer(text) if "\n" in match.group(0)]
+            expected = [match.group(0) for match in _REFERENCE_LINK_PATTERN.finditer(text) if "\n" in match.group(0)]
             assert list(link_map.values()) == expected, repr(text)
             assert handler.restore_markdown_links(protected, link_map) == text, repr(text)
 
@@ -109,8 +109,8 @@ class TestLinkProtection:
         _assert_linear(make, handler.protect_markdown_links)
 
 
-def _old_assess_content_quality(content: str) -> str:
-    """``assess_content_quality`` as it was: the navigation check on every text, ``^\\s*`` list patterns."""
+def _reference_assess_content_quality(content: str) -> str:
+    """Reference ``assess_content_quality``: the navigation check on every text, ``^\\s*`` list patterns."""
     if not content or not isinstance(content, str):
         return "low"
 
@@ -164,16 +164,16 @@ def _old_assess_content_quality(content: str) -> str:
 
 
 class TestContentQuality:
-    def test_assesses_what_the_old_code_assessed(self) -> None:
+    def test_assesses_what_the_reference_assesses(self) -> None:
         for text in _texts(30_000, 24, seed=43):
-            assert assess_content_quality(text) == _old_assess_content_quality(text), repr(text)
+            assert assess_content_quality(text) == _reference_assess_content_quality(text), repr(text)
 
-    def test_counts_the_list_items_the_old_patterns_counted(self) -> None:
-        old_list = re.compile(r"^\s*[-*+•]\s+", re.MULTILINE)
-        old_numbered = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)
+    def test_counts_the_list_items_the_reference_patterns_count(self) -> None:
+        reference_list = re.compile(r"^\s*[-*+•]\s+", re.MULTILINE)
+        reference_numbered = re.compile(r"^\s*\d+\.\s+", re.MULTILINE)
         for text in _texts(30_000, 16, seed=47):
-            assert len(_LIST_ITEM_RE.findall(text)) == len(old_list.findall(text)), repr(text)
-            assert len(_NUMBERED_ITEM_RE.findall(text)) == len(old_numbered.findall(text)), repr(text)
+            assert len(_LIST_ITEM_RE.findall(text)) == len(reference_list.findall(text)), repr(text)
+            assert len(_NUMBERED_ITEM_RE.findall(text)) == len(reference_numbered.findall(text)), repr(text)
 
     def test_a_menu_of_links_is_low_quality_and_prose_is_high(self) -> None:
         assert assess_content_quality("[Home](/)\n[About](/about)\n[Contact](/contact)") == "low"

@@ -1,6 +1,6 @@
-"""The Feishu Markdown scans read what the patterns they replace read, in time proportional to the message.
+"""The Feishu Markdown scans read exactly what their reference patterns read, in time proportional to the message.
 
-The old patterns are the reference here, not the code under test. The lazy link pattern costs the cube of the line when
+The reference patterns are the specification here, not the code under test. The lazy link pattern costs the cube of the line when
 ``[`` openers have no closer (1,000 repeats of ``[a](``: 4.6 s with the interpreter lock held, so the whole server waits),
 and the italic-underscore pattern the square.
 """
@@ -18,20 +18,20 @@ import pytest
 from app.channels.providers.feishu.cards import build_post_content, has_rich_text
 from app.channels.providers.feishu.cards.text import _bolded, _has_underscore_emphasis, _is_word_char, _parse_post_line
 
-_OLD_RICH_TEXT_RE = re.compile(r"\*\*.+?\*\*" r"|(?<!\w)_.+?_(?!\w)" r"|\[.+?\]\(.+?\)" r"|~~.+?~~" r"|`[^`]+`")
-_OLD_HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
-_OLD_POST_INLINE_RE = re.compile(r"(\*\*(.+?)\*\*)" r"|(~~(.+?)~~)" r"|(`([^`]+)`)" r"|(\[(.+?)\]\((.+?)\))")
-_OLD_UNDERSCORE_RE = re.compile(r"(?<!\w)_.+?_(?!\w)")
+_REFERENCE_RICH_TEXT_RE = re.compile(r"\*\*.+?\*\*" r"|(?<!\w)_.+?_(?!\w)" r"|\[.+?\]\(.+?\)" r"|~~.+?~~" r"|`[^`]+`")
+_REFERENCE_HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_REFERENCE_POST_INLINE_RE = re.compile(r"(\*\*(.+?)\*\*)" r"|(~~(.+?)~~)" r"|(`([^`]+)`)" r"|(\[(.+?)\]\((.+?)\))")
+_REFERENCE_UNDERSCORE_RE = re.compile(r"(?<!\w)_.+?_(?!\w)")
 
 
-def _old_has_rich_text(content: str) -> bool:
-    return bool(_OLD_RICH_TEXT_RE.search(content) or _OLD_HEADING_RE.search(content))
+def _reference_has_rich_text(content: str) -> bool:
+    return bool(_REFERENCE_RICH_TEXT_RE.search(content) or _REFERENCE_HEADING_RE.search(content))
 
 
-def _old_parse_post_line(line: str) -> list[dict[str, object]]:
+def _reference_parse_post_line(line: str) -> list[dict[str, object]]:
     elements: list[dict[str, object]] = []
     pos = 0
-    for m in _OLD_POST_INLINE_RE.finditer(line):
+    for m in _REFERENCE_POST_INLINE_RE.finditer(line):
         if m.start() > pos:
             elements.append({"tag": "text", "text": line[pos : m.start()]})
         if m.group(2) is not None:
@@ -48,14 +48,14 @@ def _old_parse_post_line(line: str) -> list[dict[str, object]]:
     return elements or [{"tag": "text", "text": line}]
 
 
-def _old_post_paragraphs(content: str) -> list[list[dict[str, object]]]:
+def _reference_post_paragraphs(content: str) -> list[list[dict[str, object]]]:
     paragraphs: list[list[dict[str, object]]] = []
     for line in content.split("\n"):
-        heading_match = _OLD_HEADING_RE.match(line)
+        heading_match = _REFERENCE_HEADING_RE.match(line)
         if heading_match:
-            paragraphs.append([_bolded(element) for element in _old_parse_post_line(line[heading_match.end() :])])
+            paragraphs.append([_bolded(element) for element in _reference_parse_post_line(line[heading_match.end() :])])
         else:
-            paragraphs.append(_old_parse_post_line(line))
+            paragraphs.append(_reference_parse_post_line(line))
     return paragraphs
 
 
@@ -80,32 +80,32 @@ def _random_strings(count: int, longest: int, seed: int, pieces: tuple[str, ...]
 class TestReadsWhatTheOldPatternsRead:
     def test_rich_text_on_every_short_text(self) -> None:
         for text in _every_string(("[", "]", "(", ")", "_", "a", "\n"), 6):
-            assert has_rich_text(text) == _old_has_rich_text(text), repr(text)
+            assert has_rich_text(text) == _reference_has_rich_text(text), repr(text)
 
     def test_rich_text_on_every_short_text_with_the_other_delimiters(self) -> None:
         for text in _every_string(("**", "~~", "`", "_", "a", " ", "#"), 5):
-            assert has_rich_text(text) == _old_has_rich_text(text), repr(text)
+            assert has_rich_text(text) == _reference_has_rich_text(text), repr(text)
 
     def test_rich_text_on_random_text(self) -> None:
         for text in _random_strings(30_000, 14, seed=3):
-            assert has_rich_text(text) == _old_has_rich_text(text), repr(text)
+            assert has_rich_text(text) == _reference_has_rich_text(text), repr(text)
 
     def test_post_line_on_every_short_line(self) -> None:
         for text in _every_string(("[", "]", "(", ")", "*", "a", "`"), 6):
-            assert _parse_post_line(text) == _old_parse_post_line(text), repr(text)
+            assert _parse_post_line(text) == _reference_parse_post_line(text), repr(text)
 
     def test_post_line_on_random_lines(self) -> None:
         for text in _random_strings(30_000, 14, seed=5):
             line = text.replace("\n", " ")
-            assert _parse_post_line(line) == _old_parse_post_line(line), repr(line)
+            assert _parse_post_line(line) == _reference_parse_post_line(line), repr(line)
 
     def test_post_payload_on_random_messages(self) -> None:
         for text in _random_strings(10_000, 20, seed=9):
-            assert build_post_content(text) == {"zh_cn": {"title": "", "content": _old_post_paragraphs(text)}}, repr(text)
+            assert build_post_content(text) == {"zh_cn": {"title": "", "content": _reference_post_paragraphs(text)}}, repr(text)
 
     def test_underscore_emphasis_on_every_short_text_over_word_and_other_characters(self) -> None:
         for text in _every_string(("_", "a", "٣", "é", " ", "-", "²"), 6):
-            assert _has_underscore_emphasis(text) == bool(_OLD_UNDERSCORE_RE.search(text)), repr(text)
+            assert _has_underscore_emphasis(text) == bool(_REFERENCE_UNDERSCORE_RE.search(text)), repr(text)
 
     def test_a_word_character_is_what_the_pattern_calls_one(self) -> None:
         word = re.compile(r"\w")
@@ -143,7 +143,7 @@ class TestExamples:
     )
     def test_has_rich_text(self, content: str, rich: bool) -> None:
         assert has_rich_text(content) is rich
-        assert _old_has_rich_text(content) is rich
+        assert _reference_has_rich_text(content) is rich
 
     def test_a_link_after_text_that_looks_like_an_unclosed_one_is_still_a_link(self) -> None:
         assert _parse_post_line("[a [b](c)") == [

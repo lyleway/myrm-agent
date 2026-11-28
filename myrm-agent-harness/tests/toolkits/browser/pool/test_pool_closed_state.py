@@ -1,7 +1,7 @@
 """A pool that was shut down launches nothing and hands out no page, even to a caller that still holds it.
 
-A session that outlives the application's shutdown, or an acquisition that was already queued on the pool lock, used
-to bring a browser back: the pool launched a new one and restarted its lifecycle loop, and nothing closed them again.
+A session that outlives the application's shutdown, or an acquisition that was already queued on the pool lock, would
+bring a browser back without the closed state: the pool launches a new one and restarts its lifecycle loop, and nothing closes them again.
 Only the browsers are doubles: pool, lock, semaphore, page pools and the lifecycle loop are the real ones.
 """
 

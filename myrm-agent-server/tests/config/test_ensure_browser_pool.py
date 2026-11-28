@@ -1,7 +1,7 @@
 """``ensure_browser_pool`` is the one way the global browser pool comes to exist, and it builds the pool complete.
 
-The harness singleton keeps the arguments of its first caller and ignores every later one. The pool used to be built by
-several callers, each with part of the deployment's recipe, so the pool a process got depended on which of them ran
+The harness singleton keeps the arguments of its first caller and ignores every later one. Were the pool built by
+several callers, each with part of the deployment's recipe, the pool a process got would depend on which of them ran
 first. The real singleton and the real builder run here; only the pool class is replaced, by a double that records how
 it was built.
 """

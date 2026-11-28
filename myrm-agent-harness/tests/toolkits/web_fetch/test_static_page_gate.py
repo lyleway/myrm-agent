@@ -114,24 +114,24 @@ class TestStaticPageGateConditions:
         )
 
 
-_OLD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
-_OLD_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_REFERENCE_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_REFERENCE_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
 
-def _count_with_the_old_patterns(raw_markdown: str) -> int:
-    text_only = _OLD_LINK_RE.sub(r"\1", _OLD_IMAGE_RE.sub(" ", raw_markdown))
+def _count_with_the_reference_patterns(raw_markdown: str) -> int:
+    text_only = _REFERENCE_LINK_RE.sub(r"\1", _REFERENCE_IMAGE_RE.sub(" ", raw_markdown))
     return sum(1 for ch in text_only if not ch.isspace() and unicodedata.category(ch)[0] not in ("P", "S", "C", "Z"))
 
 
 class TestLinkSyntaxScan:
-    """Unclosed ``[`` must cost time in proportion to the page, as the patterns did not (20,000 of them: about 0.9 s)."""
+    """Unclosed ``[`` must cost time in proportion to the page; the reference patterns do not (20,000 of them: about 0.9 s)."""
 
-    def test_counts_what_the_patterns_counted(self) -> None:
+    def test_counts_what_the_reference_patterns_count(self) -> None:
         rng = random.Random(21)
         pieces = ("[", "]", "(", ")", "!", "a", "b", " ", "![", "](", "[x](y)", "![i](j)", "\n", "é", "—")
         for _ in range(20_000):
             text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 16)))
-            assert count_visible_markdown_chars(text) == _count_with_the_old_patterns(text), repr(text)
+            assert count_visible_markdown_chars(text) == _count_with_the_reference_patterns(text), repr(text)
 
     @pytest.mark.parametrize(
         "make",

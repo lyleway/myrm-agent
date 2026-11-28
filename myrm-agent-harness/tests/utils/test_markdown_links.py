@@ -287,7 +287,7 @@ def _scan_in(text: str) -> float:
 
 
 class TestLinearTime:
-    # The patterns took 0.9 s on 20,000 characters of the openers and, the lazy ones, 4.5 s on 4,000 characters of
+    # The reference patterns take 0.9 s on 20,000 characters of the openers and, the lazy ones, 4.5 s on 4,000 characters of
     # ``[a](``. A scan that restarts from each opener but looks for its closer with ``str.find`` is quick enough at that
     # size to pass a fixed limit, so the text grows eightfold instead: linear time grows about eightfold, quadratic
     # time about sixty-four-fold.

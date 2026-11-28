@@ -1,8 +1,8 @@
-"""The Obsidian import reads the image embeds its pattern read, in time proportional to the note.
+"""The Obsidian import reads exactly the image embeds its reference pattern reads, in time proportional to the note.
 
-The old pattern is the reference here, not the code under test. A name holds no ``]``, and the pattern read up to the
-first ``]`` from every ``![[`` that did not close there: a vault note of 100,000 characters of ``![[a.txt`` took four
-seconds.
+The reference pattern is the specification here, not the code under test. A name holds no ``]``, and the pattern reads
+up to the first ``]`` from every ``![[`` that does not close there: a vault note of 100,000 characters of ``![[a.txt``
+takes four seconds.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ import pytest
 
 from app.services.wiki.obsidian.adapter import _image_embeds, rewrite_image_embeds
 
-_OLD_RE = re.compile(r"!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|svg|webp|bmp|avif))\]\]", re.IGNORECASE)
+_REFERENCE_RE = re.compile(r"!\[\[([^\]]+\.(?:png|jpg|jpeg|gif|svg|webp|bmp|avif))\]\]", re.IGNORECASE)
 
 
-def _old_embeds(text: str) -> list[tuple[int, int, str]]:
-    return [(m.start(), m.end(), m.group(1)) for m in _OLD_RE.finditer(text)]
+def _reference_embeds(text: str) -> list[tuple[int, int, str]]:
+    return [(m.start(), m.end(), m.group(1)) for m in _REFERENCE_RE.finditer(text)]
 
 
 _PIECES = (
@@ -42,11 +42,11 @@ class TestFindsWhatThePatternFound:
     def test_every_text_of_that_length(self, length: int) -> None:
         for pieces in itertools.product(("![[", "[", "]", "]]", "a", ".png", ".SVG", " "), repeat=length):
             text = "".join(pieces)
-            assert list(_image_embeds(text)) == _old_embeds(text), text
+            assert list(_image_embeds(text)) == _reference_embeds(text), text
 
     def test_random_text(self) -> None:
         for text in _random_strings(40_000, 14, seed=61):
-            assert list(_image_embeds(text)) == _old_embeds(text), repr(text)
+            assert list(_image_embeds(text)) == _reference_embeds(text), repr(text)
 
     @pytest.mark.parametrize(
         ("text", "embeds"),
@@ -62,7 +62,7 @@ class TestFindsWhatThePatternFound:
         ],
     )
     def test_examples(self, text: str, embeds: list[tuple[int, int, str]]) -> None:
-        assert list(_image_embeds(text)) == embeds == _old_embeds(text)
+        assert list(_image_embeds(text)) == embeds == _reference_embeds(text)
 
 
 class TestRewriteImageEmbeds:
