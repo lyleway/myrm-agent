@@ -166,7 +166,7 @@ class TestConverterReuse:
 
 class TestNestedTableOracleAndPerformance:
     def test_bottom_up_table_set_matches_subtree_find_on_3000_random_pages(self) -> None:
-        """G7 等价预言机：自底向上预计算的含行表格集合在 3,000 个随机页面上与逐节点 node.find('tr') 完全等价。"""
+        """等价预言机：自底向上预计算的含行表格集合在 3,000 个随机页面上与逐节点 node.find('tr') 完全等价。"""
         import random
 
         from bs4 import BeautifulSoup, Tag
@@ -195,7 +195,7 @@ class TestNestedTableOracleAndPerformance:
 
     @pytest.mark.timeout(10)
     def test_deeply_nested_tables_convert_in_linear_time(self) -> None:
-        """G10：4,000 层嵌套表格不再触发 O(N^2) 停摆。"""
+        """4,000 层嵌套表格在线性时间内转换完成，不会触发 O(N^2) 停摆。"""
         import time
 
         depth = 4000

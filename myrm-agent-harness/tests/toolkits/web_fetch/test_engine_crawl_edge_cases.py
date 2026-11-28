@@ -119,6 +119,3 @@ class TestCrawlGuardsAndFastPaths:
         assert success == []
         assert len(failed) == 2
         await engine.shutdown()
-
-
-

@@ -117,7 +117,7 @@ class TestDomainMetrics:
         assert restored.last_access == metrics.last_access
 
     def test_persisted_data_with_unknown_keys_and_removed_tiers_still_loads(self):
-        """已落盘的数据含未知字段或已迁出的 BROWSER/STEALTH 键时，共享学习数据照常恢复（E53）"""
+        """已落盘的数据含未知字段，或含 BROWSER/STEALTH 这类当前没有的抓取档键时，共享学习数据照常恢复。"""
         now = time.time()
         persisted = {
             "domain": "old.com",

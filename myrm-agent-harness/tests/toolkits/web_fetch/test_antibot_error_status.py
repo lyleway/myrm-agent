@@ -14,12 +14,9 @@ import pytest
 
 from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine
 from myrm_agent_harness.toolkits.web_fetch.engine.types import DEGRADABLE_4XX
-from myrm_agent_harness.toolkits.web_fetch.fetchers.protocols import FetcherType
 from myrm_agent_harness.toolkits.web_fetch.processing.antibot_detector import is_blocked
 from tests.toolkits.web_fetch._degradation_support import (
-    RICH_HTML,
     http_result,
-    make_document,
     stub_fetchers,
 )
 
