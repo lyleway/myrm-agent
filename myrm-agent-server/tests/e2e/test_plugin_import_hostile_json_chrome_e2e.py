@@ -14,8 +14,8 @@ Browser-lane check of the path ``tests/integration`` covers without a UI: the ar
 opened from Settings > Skills, so the preview request, its diagnostics and the sentences the user reads are the product's own.
 The notice is worded the same for every invalid mcp.json, so the archive's mcp.json is valid in every respect but its depth:
 the value of ``capabilities`` is the one place a valid server entry takes any JSON, and the same document one level shallower
-lists its server instead. The preview only stages the archive; nothing is installed, so the node reads and writes no
-application state.
+lists its server instead. The preview persists the archive as an import session under a random id, which the server sweeps
+after 24 hours; nothing is installed, so that session is the node's only write.
 """
 
 from __future__ import annotations
@@ -132,7 +132,7 @@ def _archive_base64() -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-@pytest.mark.chrome_e2e(execution_mode="SHARED", access_scope="READ", workload="STANDARD")
+@pytest.mark.chrome_e2e(execution_mode="SHARED", access_scope="NAMESPACE_WRITE", workload="STANDARD")
 @pytest.mark.integration
 @pytest.mark.timeout(600)
 def test_a_nested_mcp_config_is_reported_in_the_import_dialog_and_the_skill_stays() -> None:
