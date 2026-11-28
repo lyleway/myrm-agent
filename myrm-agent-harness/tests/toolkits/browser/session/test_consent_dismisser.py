@@ -1,9 +1,13 @@
-"""Unit tests for ConsentDismisser."""
+"""Unit tests for ConsentDismisser and the consent step of ``BrowserSession.navigate``."""
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from myrm_agent_harness.toolkits.browser.pool.config import BrowserEngine
+from myrm_agent_harness.toolkits.browser.session.browser_session_navigation_mixin import (
+    BrowserSessionNavigationMixin,
+)
 from myrm_agent_harness.toolkits.browser.session.consent_dismisser import ConsentDismisser
 
 
@@ -113,3 +117,73 @@ class TestDismissErrors:
         mock_page.evaluate.side_effect = TimeoutError("Evaluation timed out")
         result = await dismisser.dismiss(mock_page)
         assert result is None
+
+
+class _NavigateProbe(BrowserSessionNavigationMixin):
+    """The collaborators ``navigate`` touches for a loaded page without a challenge; the rest is stubbed."""
+
+    def __init__(self, dismisser: ConsentDismisser, page: MagicMock) -> None:
+        self._domain_blocklist = None
+        self._terminal_challenges: dict[str, float] = {}
+        self._allow_private_networks = True
+        self._extension_bridge = None
+        self._engine_preference = BrowserEngine.CHROMIUM_PATCHRIGHT
+        self._pending_tab_reset = None
+        self._captcha_coordinator = None
+        self._consent_dismisser = dismisser
+        self._tab_controller = MagicMock()
+        self._tab_controller.list_tabs.return_value = ["tab"]
+        self._tab_controller.get_active_page.return_value = page
+        self._navigator = MagicMock()
+        self._navigator.goto = AsyncMock(return_value=("Example", "https://example.com/", 200))
+        self._snapshot_manager = MagicMock()
+        self._ensure_not_user_takeover = AsyncMock()
+        self._ensure_components = AsyncMock()
+        self._append_navigate_interactive_summary = AsyncMock(side_effect=lambda result: result)
+        self._publish_inspector_view = AsyncMock()
+        self._get_site_experience_hint = lambda url: ""
+
+    def _require_navigator(self) -> MagicMock:
+        return self._navigator
+
+    def _require_snapshot_manager(self) -> MagicMock:
+        return self._snapshot_manager
+
+
+class TestNavigateConsentStep:
+    @pytest.mark.asyncio
+    async def test_dismissed_banner_is_reported_before_the_snapshot_baseline(self, mock_page: MagicMock) -> None:
+        order: list[str] = []
+
+        async def dismiss_script(_script: str) -> dict[str, object]:
+            order.append("dismiss")
+            return {"dismissed": True, "method": "cmp-selector"}
+
+        mock_page.evaluate = AsyncMock(side_effect=dismiss_script)
+        probe = _NavigateProbe(ConsentDismisser(enabled=True), mock_page)
+        probe._snapshot_manager.reset_diff_baseline.side_effect = lambda: order.append("baseline")
+
+        result = await probe.navigate("https://example.com/")
+
+        assert "Navigated to https://example.com/ (status=200, title=Example)" in result
+        assert "[Cookie consent auto-accepted via cmp-selector]" in result
+        assert order == ["dismiss", "baseline"]
+
+    @pytest.mark.asyncio
+    async def test_page_without_a_banner_adds_nothing(self, mock_page: MagicMock) -> None:
+        mock_page.evaluate = AsyncMock(return_value={"dismissed": False})
+        probe = _NavigateProbe(ConsentDismisser(enabled=True), mock_page)
+
+        result = await probe.navigate("https://example.com/")
+
+        mock_page.evaluate.assert_awaited_once()
+        assert "Cookie consent" not in result
+
+    @pytest.mark.asyncio
+    async def test_disabled_dismisser_never_touches_the_page(self, mock_page: MagicMock) -> None:
+        probe = _NavigateProbe(ConsentDismisser(enabled=False), mock_page)
+
+        result = await probe.navigate("https://example.com/")
+
+        mock_page.evaluate.assert_not_called()
+        assert "Cookie consent" not in result
