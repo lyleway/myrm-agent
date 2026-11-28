@@ -2,6 +2,7 @@
 
 [INPUT]
 - toolkits.acp.auth._profiles::command_profile (POS: Single source of truth for per-backend CLI auth and launch behaviour)
+- toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.runtime._base::build_safe_env (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.codex.protocol::MINIMUM_SERVER_VERSION, initialize_params, login_params, server_version (POS: What the host says to Codex's app server)
 - toolkits.acp.runtime.codex.rpc::JsonRpcPeer, NotificationObserver, RpcClosedError, RpcError, RpcTimeoutError, ServerRequestHandler (POS: A JSON-RPC peer over the stdio of Codex's app server)
@@ -31,6 +32,7 @@ from collections.abc import Mapping
 from contextlib import AsyncExitStack
 
 from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     MINIMUM_SERVER_VERSION,
@@ -123,8 +125,9 @@ class AppServerConnection:
         on_server_request: ServerRequestHandler,
         observe: NotificationObserver,
         api_key: str | None,
+        client: ClientIdentity,
     ) -> AppServerConnection:
-        """Start the server, shake hands and log in with ``api_key`` (when given).
+        """Start the server, shake hands as ``client`` and log in with ``api_key`` (when given).
 
         Raises:
             ProcessLaunchError: the executable does not exist.
@@ -138,8 +141,8 @@ class AppServerConnection:
             peer = JsonRpcPeer(process, on_server_request=on_server_request, observe=observe)
             stack.push_async_callback(peer.aclose)
             try:
-                greeting = await peer.request("initialize", initialize_params(), timeout=_HANDSHAKE_SECONDS)
-                version = _supported_version(greeting)
+                greeting = await peer.request("initialize", initialize_params(client), timeout=_HANDSHAKE_SECONDS)
+                version = _supported_version(greeting, client)
                 await peer.notify("initialized")
                 if api_key is not None:
                     await peer.request("account/login/start", login_params(api_key), timeout=_HANDSHAKE_SECONDS)
@@ -170,12 +173,12 @@ class AppServerConnection:
         return await _exit_reason(self.process, "The Codex app server exited")
 
 
-def _supported_version(greeting: Json) -> tuple[int, int, int] | None:
+def _supported_version(greeting: Json, client: ClientIdentity) -> tuple[int, int, int] | None:
     """The version the server says it is, or None when it does not say.
 
     A server older than the host speaks to is refused; one that does not say its version is let through and noted.
     """
-    version = server_version(greeting)
+    version = server_version(greeting, client)
     if version is None:
         logger.warning("codex_server_version_unreadable user_agent=%r", as_str(greeting.get("userAgent"))[:120])
     elif version < MINIMUM_SERVER_VERSION:

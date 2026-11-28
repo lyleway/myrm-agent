@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib
 import inspect
+import subprocess
 import sys
 from pathlib import Path
 from typing import Protocol
@@ -81,6 +82,81 @@ def test_api_types_submodule_exports_without_factory() -> None:
     assert hasattr(types_mod, "AgentRuntimeConfig")
     assert hasattr(types_mod, "AgentStreamEvent")
     assert hasattr(types_mod, "CompletionStatus")
+
+
+# What a host that embeds the harness gets for running turns on an agent it does not own. Every name here is a promise
+# of compatibility, so the list is spelled out and a name is added only on purpose; the login and credential state of
+# the vendors' CLIs, installing a CLI and the inbound ACP server are deliberately not in it.
+_DELEGATION_SURFACE = frozenset(
+    {
+        "AcpError",
+        "AcpErrorCode",
+        "AuthMode",
+        "BackendType",
+        "CliSessionRecord",
+        "CliSessionStore",
+        "ClientIdentity",
+        "ContinuityStatus",
+        "HttpMcpServer",
+        "McpServerConfig",
+        "PermissionBroker",
+        "PermissionMode",
+        "PermissionRequest",
+        "PermissionVerdict",
+        "RuntimeConfig",
+        "RuntimeEvent",
+        "RuntimeEventType",
+        "RuntimePool",
+        "StdioMcpServer",
+        "StopReason",
+        "create_invoke_acp_agent_tool",
+    }
+)
+
+# The smallest CLI a host can delegate to: one event line carrying the prompt it was given as its last argument.
+_FAKE_CLI = (
+    'import json, sys\nprint(json.dumps({"type": "assistant", "content": "[cli] " + sys.argv[-1]}), flush=True)\n'
+)
+
+
+@pytest.mark.api
+def test_api_delegation_submodule_is_exactly_the_committed_surface() -> None:
+    delegation = importlib.import_module("myrm_agent_harness.api.delegation")
+
+    assert set(delegation.__all__) == _DELEGATION_SURFACE
+    assert delegation.__all__ == sorted(delegation.__all__)
+    for name in delegation.__all__:
+        assert getattr(delegation, name) is not None
+
+
+@pytest.mark.api
+def test_api_delegation_imports_without_the_acp_extra() -> None:
+    """A host that installed the harness alone imports the surface; only a turn on an ACP agent needs the extra."""
+    code = "import sys; sys.modules['acp'] = None; import myrm_agent_harness.api.delegation"
+
+    imported = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False)
+
+    assert imported.returncode == 0, imported.stderr
+
+
+@pytest.mark.api
+async def test_api_delegation_runs_a_turn_with_nothing_but_its_own_names(tmp_path: Path) -> None:
+    """The example a host copies: register a CLI, run a turn, read the events."""
+    from myrm_agent_harness.api.delegation import RuntimeConfig, RuntimeEventType, RuntimePool
+
+    script = tmp_path / "fakecli.py"
+    script.write_text(_FAKE_CLI, encoding="utf-8")
+    pool = RuntimePool(max_concurrent=1)
+    pool.register(
+        "fake", RuntimeConfig(backend_type="cli", command=sys.executable, args=[str(script)], timeout_seconds=60)
+    )
+    try:
+        events = [event async for event in pool.run_turn("fake", "ping", session_id="chat-1", workspace=str(tmp_path))]
+    finally:
+        await pool.close_all()
+
+    assert "".join(str(e.data["content"]) for e in events if e.type is RuntimeEventType.TEXT_DELTA) == "[cli] ping"
+    assert events[-1].type is RuntimeEventType.DONE
 
 
 @pytest.mark.api

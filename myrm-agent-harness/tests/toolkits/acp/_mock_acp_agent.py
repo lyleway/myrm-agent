@@ -14,6 +14,7 @@ the client the way a real agent does, over the real SDK, and report what came ba
 ``/argv`` -> ``[argv] <the arguments the agent was started with, as JSON>``;
 ``/mode`` -> ``[mode] <the session's current mode>``;
 ``/capabilities`` -> ``[capabilities] <the capabilities the client offered in initialize, as JSON>``;
+``/client`` -> ``[client] <the name, title and version the client introduced itself with in initialize, as JSON>``;
 ``/session`` -> ``[session] <the ACP session id the prompt runs in>``;
 ``/history`` -> ``[history] <the earlier prompts of the session, joined by "|">``;
 ``/story`` says "before", runs a tool call and then says "after", as an agent that speaks around a tool call does;
@@ -105,6 +106,7 @@ class MockAcpAgent:
         self._cancelled: set[str] = set()
         self._stop_reason: StopReason | None = None
         self._client_capabilities: ClientCapabilities | None = None
+        self._client_info: object | None = None
         self._state_path = _flag_value("--state-file")
         self._restore()
 
@@ -155,6 +157,7 @@ class MockAcpAgent:
     ) -> InitializeResponse:
         advertise_images = "--images" in sys.argv[1:]
         self._client_capabilities = client_capabilities
+        self._client_info = client_info
         sessions = SessionCapabilities(resume=SessionResumeCapabilities()) if "--resume" in sys.argv[1:] else None
         return InitializeResponse(
             protocol_version=protocol_version,
@@ -275,6 +278,8 @@ class MockAcpAgent:
             offered = self._client_capabilities
             dumped = None if offered is None else offered.model_dump(exclude_none=True)
             return f"[capabilities] {json.dumps(dumped, sort_keys=True)}"
+        if verb == "/client":
+            return f"[client] {json.dumps(cast(Any, self._client_info).model_dump(exclude_none=True), sort_keys=True)}"
         if verb == "/session":
             return f"[session] {session_id}"
         if verb == "/history":

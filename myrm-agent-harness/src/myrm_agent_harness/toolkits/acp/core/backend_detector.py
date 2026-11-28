@@ -5,7 +5,7 @@ common installation paths, and npm global. Maintains process-wide caches
 for versioned and non-versioned detection results to avoid repeated scans.
 
 [INPUT]
-- myrm_agent_harness.toolkits.acp.toolchains::TOOLCHAIN_BASE_DIR (POS: Isolated toolchain manager for external CLI agents — keeps tool installations out of the global OS environment)
+- myrm_agent_harness.toolkits.acp.toolchains::toolchain_base_dir (POS: Isolated toolchain manager for external CLI agents — keeps tool installations out of the global OS environment)
 - myrm_agent_harness.toolkits.acp.auth.credential_store::CredentialState (POS: Credential persistence and detection layer for the ACP auth subsystem) [TYPE_CHECKING]
 - myrm_agent_harness.toolkits.acp.auth._profiles::known_backends (POS: Authentication profile registry; the agents that have a contract)
 - myrm_agent_harness.toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, ClassVar
 from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.core.probe import run_probe
-from myrm_agent_harness.toolkits.acp.toolchains import TOOLCHAIN_BASE_DIR
+from myrm_agent_harness.toolkits.acp.toolchains import toolchain_base_dir
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -43,12 +43,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_COMMON_PATHS = (
-    TOOLCHAIN_BASE_DIR / "bin",  # Check isolated toolchain first
-    Path.home() / ".local" / "bin",
-    Path("/usr/local/bin"),
-    Path("/opt/homebrew/bin"),
-)
+
+def _common_paths() -> tuple[Path, ...]:
+    """Where an installed CLI is looked for besides ``PATH``, the isolated toolchain first."""
+    return (
+        toolchain_base_dir() / "bin",
+        Path.home() / ".local" / "bin",
+        Path("/usr/local/bin"),
+        Path("/opt/homebrew/bin"),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,7 +202,7 @@ class BackendDetector:
         if found:
             return found
 
-        for base_path in _COMMON_PATHS:
+        for base_path in _common_paths():
             candidate = base_path / name
             if candidate.is_file() and _is_executable(candidate):
                 return str(candidate)

@@ -124,7 +124,7 @@ class TestWhatIsTyped:
         assert profile is not None
         node_bin = tmp_path / "toolchains" / f"node-{manager.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)
-        monkeypatch.setattr(manager, "TOOLCHAIN_BASE_DIR", tmp_path / "toolchains")
+        monkeypatch.setenv(manager.TOOLCHAIN_DIR_ENV, str(tmp_path / "toolchains"))
         installed = tmp_path / "toolchains" / "claude" / "bin" / "claude"
 
         login = terminal_login(profile, str(installed))
@@ -165,7 +165,7 @@ class TestAPosixShell:
         assert profile is not None
         node_bin = tmp_path / "toolchains" / f"node-{manager.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)
-        monkeypatch.setattr(manager, "TOOLCHAIN_BASE_DIR", tmp_path / "toolchains")
+        monkeypatch.setenv(manager.TOOLCHAIN_DIR_ENV, str(tmp_path / "toolchains"))
         cli = _install_stand_in(tmp_path / "toolchains" / "claude" / "bin")
         command = terminal_login(profile, str(cli), account_home=tmp_path / "work").render("posix")
 

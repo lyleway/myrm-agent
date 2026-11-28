@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import MINIMUM_SERVER_VERSION
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
@@ -295,6 +296,38 @@ async def test_a_server_of_the_oldest_version_the_host_speaks_to_is_used(tmp_pat
         await pool.close_all()
 
     assert ended_cleanly(events)
+
+
+async def test_the_host_names_itself_to_the_server_and_the_version_is_read_after_that_name(
+    tmp_path: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    host = ClientIdentity(name="acme.runner", title="Acme Runner", version="2.0.1")
+    server = ScriptedServer(tmp_path / "s", {"turns": [[complete()]]})
+    pool = server.pool(client=host)
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    assert ended_cleanly(events)
+    (handshake,) = server.received("initialize")
+    assert handshake["clientInfo"] == {"name": "acme.runner", "title": "Acme Runner", "version": "2.0.1"}
+    assert "codex_server_version_unreadable" not in caplog.text
+
+
+async def test_a_server_too_old_is_refused_whatever_the_host_names_itself(tmp_path: Path, workspace: Path) -> None:
+    host = ClientIdentity(name="acme.runner")
+    server = ScriptedServer(tmp_path / "s", {"server_version": "0.100.0", "turns": [[complete()]]})
+    pool = server.pool(client=host)
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    (error,) = errors_of(events)
+    message = failure_of(error).message
+    assert "0.100.0" in message
+    assert "Update Codex" in message
 
 
 async def test_the_connection_knows_the_version_the_server_said(tmp_path: Path, workspace: Path) -> None:

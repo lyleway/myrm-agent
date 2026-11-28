@@ -11,6 +11,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.connection import AppServerConnection, server_environment
 from myrm_agent_harness.toolkits.acp.runtime.codex.rpc import Notification
@@ -91,7 +92,9 @@ def echo_mcp_server() -> McpServerConfig:
     )
 
 
-async def open_connection(command: str, env: Mapping[str, str], workspace: Path) -> AppServerConnection:
+async def open_connection(
+    command: str, env: Mapping[str, str], workspace: Path, client: ClientIdentity | None = None
+) -> AppServerConnection:
     """A greeted server process opened the way the runtime opens one before a turn, to look at the connection itself."""
 
     async def unanswered(method: str, params: Mapping[str, object]) -> Mapping[str, object]:
@@ -100,7 +103,7 @@ async def open_connection(command: str, env: Mapping[str, str], workspace: Path)
     def ignored(notification: Notification) -> None:
         return None
 
-    config = RuntimeConfig(backend_type="app_server", command=command, env=dict(env))
+    config = RuntimeConfig(backend_type="app_server", command=command, env=dict(env), client=client or ClientIdentity())
     safe_env, api_key = server_environment(NAME, config, command)
     return await AppServerConnection.open(
         [command, "app-server"],
@@ -109,6 +112,7 @@ async def open_connection(command: str, env: Mapping[str, str], workspace: Path)
         on_server_request=unanswered,
         observe=ignored,
         api_key=api_key,
+        client=config.client,
     )
 
 

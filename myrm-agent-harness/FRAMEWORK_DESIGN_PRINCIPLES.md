@@ -79,10 +79,11 @@
 
 | 类别 | 路径 | 位置 |
 |---|---|---|
-| 有意的例外 | ACP 工具链安装 `~/.myrm-agent/toolchains`：按版本号分目录、所有 Myrm 进程共用的第三方安装，如同包管理器缓存 | `toolkits/acp/toolchains/manager.py` |
+| 有意的例外 | ACP 工具链安装 `~/.myrm-agent/toolchains`：按版本号分目录、所有 Myrm 进程共用的第三方安装，如同包管理器缓存；宿主用 `MYRM_TOOLCHAIN_DIR` 指向自己的目录，每次调用时读取，安装、探测与启动环境始终一致 | `toolkits/acp/toolchains/manager.py::toolchain_base_dir` |
 | 有意的例外 | 记忆导入读取其他工具（`~/.claude`、`~/.codex` 等）自己的历史目录，不属于 Myrm 目录 | `toolkits/memory/onboarding/adapters.py` |
 | 已知偏离（§8） | 未设置 `MYRM_DATA_DIR` 时落 cwd 相对的 `.myrm/…`：子 agent JSON checkpoint（已设置 `{root}/checkpoints`）、Camoufox 指纹（已设置 `{root}/browser_fingerprints`）、动态工作流事件库的回退（优先落工作区 `.myrm/`，取不到工作区才看 `MYRM_DATA_DIR`，再回退 cwd） | `agent/sub_agents/checkpoint/saver.py`、`toolkits/browser/pool/pool_scheduling.py::_resolve_fingerprint_dir`、`agent/dynamic_workflow/paths.py` |
 | `MYRM_PERSISTENT_ROOT` | `.context` / `.memories` / `workspace` 由它派生 | `/persistent` |
+| `MYRM_TOOLCHAIN_DIR` | ACP 工具链安装目录（外部 CLI 与其专用 Node） | `~/.myrm-agent/toolchains` |
 | `MYRM_LOCALES_DIR` | 覆盖诊断 i18n 目录 | 内置 `agent/errors/diagnostics/i18n/locales/`（en / zh-CN） |
 | `MYRM_GATEWAY_URL` / `_TOKEN` | 第三方工具中继地址与凭证 | 不需要该能力时不必设置 |
 

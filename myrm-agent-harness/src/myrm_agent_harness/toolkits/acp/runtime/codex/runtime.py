@@ -311,6 +311,7 @@ class CodexRuntime(BaseRuntime):
             on_server_request=self._approvals.handle,
             observe=self._items.observe,
             api_key=api_key,
+            client=self._config.client,
         )
         self._workspace_write = await self._read_workspace_write(self._connection.peer)
         logger.info("codex_app_server_started name=%s", self._name)

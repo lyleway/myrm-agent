@@ -110,7 +110,7 @@ class TestCliBaseEnv:
     def test_a_cli_installed_by_the_toolchain_gets_its_node_first(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(manager_module, "TOOLCHAIN_BASE_DIR", tmp_path)
+        monkeypatch.setenv(manager_module.TOOLCHAIN_DIR_ENV, str(tmp_path))
         node_bin = tmp_path / f"node-{manager_module.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)
 
@@ -119,7 +119,7 @@ class TestCliBaseEnv:
         assert env["PATH"] == f"{node_bin}{os.pathsep}/usr/bin:/bin"
 
     def test_a_system_cli_keeps_the_path_it_was_given(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(manager_module, "TOOLCHAIN_BASE_DIR", tmp_path)
+        monkeypatch.setenv(manager_module.TOOLCHAIN_DIR_ENV, str(tmp_path))
         (tmp_path / f"node-{manager_module.NODE_VERSION}" / "bin").mkdir(parents=True)
 
         assert cli_base_env("/usr/local/bin/claude", self.SOURCE)["PATH"] == "/usr/bin:/bin"

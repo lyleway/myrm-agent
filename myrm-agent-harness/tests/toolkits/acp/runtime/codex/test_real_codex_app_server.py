@@ -18,6 +18,7 @@ from typing import cast
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import MINIMUM_SERVER_VERSION
 from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeEvent, RuntimeEventType
 from tests.toolkits.acp._brokers import AnsweringBroker
@@ -268,6 +269,23 @@ async def test_the_server_says_its_version_the_way_the_host_reads_it(tmp_path: P
     """The host refuses a server older than it speaks to by the version in ``initialize``; a Codex that words it
     differently would be let through whatever its version, so that is a failure here."""
     connection = await open_connection(cli_binary("codex"), write_codex_home(tmp_path, "http://127.0.0.1:9"), workspace)
+    try:
+        assert connection.version is not None
+        assert connection.version >= MINIMUM_SERVER_VERSION
+    finally:
+        await connection.close(graceful=True)
+
+
+@pytest.mark.parametrize("name", ["acme.runner", "Acme-Runner_2"])
+async def test_a_host_that_names_itself_still_gets_its_servers_version_read(
+    name: str, tmp_path: Path, workspace: Path
+) -> None:
+    """The server repeats the client name in its user-agent string and the host reads the version after that name, so
+    every character a client name may hold has to come back unchanged."""
+    host = ClientIdentity(name=name, title="Acme Runner", version="2.0.1")
+    connection = await open_connection(
+        cli_binary("codex"), write_codex_home(tmp_path, "http://127.0.0.1:9"), workspace, host
+    )
     try:
         assert connection.version is not None
         assert connection.version >= MINIMUM_SERVER_VERSION

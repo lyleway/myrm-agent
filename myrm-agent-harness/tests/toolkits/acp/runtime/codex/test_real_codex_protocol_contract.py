@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     OPT_OUT_NOTIFICATIONS,
@@ -197,7 +198,7 @@ def test_the_notifications_the_host_reads_or_opts_out_of_exist(schema: Schema) -
 
 
 def test_the_handshake_and_login_use_fields_the_server_knows(schema: Schema) -> None:
-    handshake = initialize_params()
+    handshake = initialize_params(ClientIdentity())
 
     assert _unknown(handshake, schema.fields("InitializeParams")) == []
     assert _unknown(_obj(handshake["capabilities"]), schema.fields("InitializeCapabilities")) == []

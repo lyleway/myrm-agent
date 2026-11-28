@@ -1,7 +1,7 @@
 """What the host says to Codex's app server: the handshake, the policy of a turn, and the shape of its requests.
 
 [INPUT]
-- myrm_agent_harness::__version__ (POS: the harness version a client announces)
+- toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.runtime.codex.wire::Json, as_bool, as_list, as_obj, as_str (POS: Typed reads of the decoded JSON that Codex's app server sends)
 - toolkits.acp.mcp_servers::HttpMcpServer, McpServerConfig, StdioMcpServer (POS: The MCP servers a host hands a delegated agent)
 - toolkits.acp.types::PermissionMode (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
@@ -26,12 +26,10 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from myrm_agent_harness import __version__
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.wire import Json, as_bool, as_list, as_obj, as_str
 from myrm_agent_harness.toolkits.acp.types import PermissionMode
-
-_CLIENT_NAME = "myrm_agent_harness"
 
 # The oldest app server the host speaks to: the real-binary contract tests run against exactly this one in CI. An older
 # one asks to approve an MCP tool without naming the tool, so a person would be asked to allow a call without being
@@ -71,21 +69,21 @@ OPT_OUT_NOTIFICATIONS: tuple[str, ...] = (
 )
 
 
-def initialize_params() -> dict[str, object]:
+def initialize_params(client: ClientIdentity) -> dict[str, object]:
     """The handshake: who the client is, and the notifications it does not want."""
     return {
-        "clientInfo": {"name": _CLIENT_NAME, "title": "Myrm Agent", "version": __version__},
+        "clientInfo": {"name": client.name, "title": client.title, "version": client.version},
         "capabilities": {"optOutNotificationMethods": list(OPT_OUT_NOTIFICATIONS)},
     }
 
 
-def server_version(greeting: Json) -> tuple[int, int, int] | None:
+def server_version(greeting: Json, client: ClientIdentity) -> tuple[int, int, int] | None:
     """The version of the server that answered ``initialize``, or None when it does not say.
 
     The server reports ``userAgent`` as ``<client name>/<server version> (...)``, with the name the client announced.
     """
     user_agent = as_str(greeting.get("userAgent"))
-    head = f"{_CLIENT_NAME}/"
+    head = f"{client.name}/"
     found = _SERVER_VERSION.match(user_agent, len(head)) if user_agent.startswith(head) else None
     return (int(found[1]), int(found[2]), int(found[3])) if found else None
 

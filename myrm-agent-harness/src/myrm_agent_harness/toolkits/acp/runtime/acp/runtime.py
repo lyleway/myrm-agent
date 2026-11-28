@@ -357,10 +357,11 @@ class AcpRuntime(BaseRuntime):
         self._process = process
         self._alive = True
 
+        client = self._config.client
         init_response = await conn.initialize(
             protocol_version=PROTOCOL_VERSION,
             client_capabilities=client_capabilities(),
-            client_info=Implementation(name="myrm-acp-client", version="1.0.0"),
+            client_info=Implementation(name=client.name, title=client.title, version=client.version),
         )
         self._agent = AgentCapabilities.of(init_response)
         logger.info("acp_runtime_connected name=%s pid=%s capabilities=%s", self._name, process.pid, self._agent)

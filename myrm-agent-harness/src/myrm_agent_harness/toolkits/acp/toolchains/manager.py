@@ -11,7 +11,8 @@ reports success it did not observe, waits without a bound, or leaves a child pro
 - utils.os_compat::SIGKILL, get_process_group_kwargs, kill_spawned_group (POS: Unified abstractions for POSIX/Windows differences (file locks, process groups))
 
 [OUTPUT]
-- TOOLCHAIN_BASE_DIR: Base directory for isolated toolchain installations.
+- TOOLCHAIN_DIR_ENV: The environment variable a host sets to move the toolchain directory.
+- toolchain_base_dir: Where the isolated toolchain lives, read on every call.
 - ToolchainError: An install step failed; the message says what and why.
 - toolchain_node_bin: The managed Node a CLI installed by this manager needs on PATH.
 - IsolatedToolchainManager: Downloads portable environments and installs CLI tools.
@@ -47,7 +48,7 @@ from myrm_agent_harness.utils.os_compat import SIGKILL, get_process_group_kwargs
 
 logger = logging.getLogger(__name__)
 
-TOOLCHAIN_BASE_DIR = Path.home() / ".myrm-agent" / "toolchains"
+TOOLCHAIN_DIR_ENV = "MYRM_TOOLCHAIN_DIR"
 # Node 24.6 and later read NODE_USE_SYSTEM_CA, which npm needs behind a TLS-inspection proxy.
 NODE_VERSION = "v24.22.2"
 
@@ -72,15 +73,29 @@ _OUTPUT_TAIL_LINES = 8
 _TERMINATE_GRACE_SECONDS = 5.0
 
 
+def toolchain_base_dir() -> Path:
+    """Where CLI agents are installed: ``$MYRM_TOOLCHAIN_DIR`` when a host names one, else ``~/.myrm-agent/toolchains``.
+
+    Read on every call, never at import: a host that sets it after the harness is imported still moves the
+    installer, the detector and the launch environment to the same directory. A relative name is taken from the
+    working directory of the call, so every consumer compares absolute paths.
+    """
+    named = os.environ.get(TOOLCHAIN_DIR_ENV, "").strip()
+    if named:
+        return Path(named).expanduser().absolute()
+    return Path.home() / ".myrm-agent" / "toolchains"
+
+
 def toolchain_node_bin(command: str) -> Path | None:
     """The managed Node's ``bin`` directory when ``command`` is a CLI this manager installed.
 
     Such a CLI starts with ``#!/usr/bin/env node``; on a host that has no Node of its own it runs only with this one
     on ``PATH``. Any other command (a system install, a bare name) needs nothing added, so it gets ``None``.
     """
-    if not os.path.isabs(command) or not Path(command).is_relative_to(TOOLCHAIN_BASE_DIR):
+    base_dir = toolchain_base_dir()
+    if not os.path.isabs(command) or not Path(command).is_relative_to(base_dir):
         return None
-    node_bin = TOOLCHAIN_BASE_DIR / f"node-{NODE_VERSION}" / "bin"
+    node_bin = base_dir / f"node-{NODE_VERSION}" / "bin"
     return node_bin if node_bin.is_dir() else None
 
 
@@ -139,7 +154,7 @@ class IsolatedToolchainManager:
     """Manages isolated toolchains for external CLI agents."""
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        self.base_dir = base_dir or TOOLCHAIN_BASE_DIR
+        self.base_dir = base_dir or toolchain_base_dir()
         self.node_dir = self.base_dir / f"node-{NODE_VERSION}"
         self.bin_dir = self.base_dir / "bin"
         self.base_dir.mkdir(parents=True, exist_ok=True)

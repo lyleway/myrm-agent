@@ -77,7 +77,7 @@ class TestTheCliIsAskedAsATurnWouldRunIt:
     ) -> None:
         node_bin = tmp_path / "toolchains" / f"node-{manager.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)
-        monkeypatch.setattr(manager, "TOOLCHAIN_BASE_DIR", tmp_path / "toolchains")
+        monkeypatch.setenv(manager.TOOLCHAIN_DIR_ENV, str(tmp_path / "toolchains"))
         cli = _install(tmp_path / "toolchains" / "claude" / "bin")
 
         await login_state("claude", str(cli))
