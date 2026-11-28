@@ -1,4 +1,4 @@
-"""A manual compaction runs in the background: a request starts it, the page asks for it until it ends.
+"""A manual compaction runs in the background: a request starts it, the page asks for it by its id until it ends.
 
 A compaction has a model summarise a whole history and takes longer than a proxy lets one request wait, so the request
 only starts it. Each test here drives a stand-in for the service's ``compact_chat`` that finishes when the test says so.
@@ -105,7 +105,7 @@ async def test_a_run_starts_at_once_however_long_the_compaction_takes(compaction
 
     assert time.monotonic() - started < 0.5
     assert run.state is CompactRunState.RUNNING
-    assert get_compact_run("chat-1") is run
+    assert get_compact_run("chat-1", run.run_id) is run
     compaction.finish()
     await _ended(run)
 
@@ -117,12 +117,12 @@ async def test_a_finished_run_carries_what_the_service_answered(compaction: _Com
 
     assert run.state is CompactRunState.RUNNING
     compaction.finish()
-    await _ended(run)
+    ended = await _ended(run)
 
-    assert run.state is CompactRunState.SUCCEEDED
-    assert run.result == _COMPACTED
-    assert run.failure is None
-    assert run.focus_topic == "billing"
+    assert ended.state is CompactRunState.SUCCEEDED
+    assert ended.result == _COMPACTED
+    assert ended.failure is None
+    assert ended.focus_topic == "billing"
 
 
 @pytest.mark.asyncio
@@ -184,20 +184,24 @@ async def test_chats_compact_side_by_side(compaction: _Compaction) -> None:
 
     assert one is not other
     assert sorted(call[1] for call in compaction.calls) == ["chat-1", "chat-2"]
-    assert (get_compact_run("chat-1"), get_compact_run("chat-2")) == (one, other)
+    assert (get_compact_run("chat-1", one.run_id), get_compact_run("chat-2", other.run_id)) == (one, other)
 
 
 @pytest.mark.asyncio
-async def test_the_next_run_replaces_the_one_that_ended(compaction: _Compaction) -> None:
+async def test_the_next_run_of_a_chat_is_a_run_of_its_own_and_the_one_that_ended_stays_readable(
+    compaction: _Compaction,
+) -> None:
+    """The page that started the first run asks for it after a second page's run of the same chat has ended."""
+    declined = CompactResult(compacted=False, message_count=3, reason=CompactReason.TOO_FEW_MESSAGES)
     compaction.finish()
-    first = await _ended(start_compact_run("chat-1", ""))
+    first = await _ended(start_compact_run("chat-1", "first"))
+    compaction.outcome = declined
+    second = await _ended(start_compact_run("chat-1", "second"))
 
-    second = start_compact_run("chat-1", "again")
-
-    assert second is not first
-    assert get_compact_run("chat-1") is second
-    assert first.state is CompactRunState.SUCCEEDED
-    await _ended(second)
+    assert second.run_id != first.run_id
+    assert get_compact_run("chat-1", first.run_id) is first
+    assert get_compact_run("chat-1", second.run_id) is second
+    assert (first.result, second.result) == (_COMPACTED, declined)
 
 
 @pytest.mark.asyncio
@@ -213,8 +217,50 @@ async def test_a_failed_run_is_not_joined_the_next_request_starts_afresh(compact
     assert (await _ended(retry)).state is CompactRunState.SUCCEEDED
 
 
-def test_a_chat_that_never_compacted_has_no_run() -> None:
-    assert get_compact_run("chat-never") is None
+def test_a_run_the_registry_does_not_hold_is_not_found() -> None:
+    assert get_compact_run("chat-1", "never-started") is None
+
+
+@pytest.mark.asyncio
+async def test_a_run_is_found_only_under_the_chat_it_belongs_to(compaction: _Compaction) -> None:
+    compaction.finish()
+    run = await _ended(start_compact_run("chat-1", ""))
+
+    assert get_compact_run("chat-2", run.run_id) is None
+    assert get_compact_run("chat-1", run.run_id) is run
+
+
+@pytest.fixture
+def history_of_three() -> Iterator[None]:
+    with patch.object(compact_run, "COMPACT_RUN_HISTORY", 3):
+        yield
+
+
+@pytest.mark.asyncio
+async def test_the_registry_keeps_the_newest_runs_and_drops_the_oldest_ended_ones(
+    compaction: _Compaction, history_of_three: None
+) -> None:
+    compaction.finish()
+    runs = [await _ended(start_compact_run(f"chat-{n}", "")) for n in range(5)]
+
+    assert [get_compact_run(run.chat_id, run.run_id) is run for run in runs] == [False, False, True, True, True]
+
+
+@pytest.mark.asyncio
+async def test_a_run_still_going_is_never_dropped_whatever_the_history_holds(
+    compaction: _Compaction, history_of_three: None
+) -> None:
+    going = [start_compact_run(f"chat-{n}", "") for n in range(5)]
+
+    assert [get_compact_run(run.chat_id, run.run_id) is run for run in going] == [True] * 5
+
+    compaction.finish()
+    for run in going:
+        await _ended(run)
+    newest = start_compact_run("chat-5", "")
+
+    assert [get_compact_run(run.chat_id, run.run_id) is run for run in [*going, newest]] == [False] * 3 + [True] * 3
+    await _ended(newest)
 
 
 @pytest.mark.asyncio

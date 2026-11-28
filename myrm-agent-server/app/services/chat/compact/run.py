@@ -4,37 +4,41 @@
 - app.database.connection::get_session (POS: the run's own database session; the request that started the run is gone)
 - app.services.chat.compact_service::compact_chat (POS: the compaction itself, imported when a run begins)
 - app.core.utils.errors::validation_error, internal_error (POS: the failure classes a failed run is reported with)
+- app.services.chat.compact._constants::COMPACT_RUN_DRAIN_TIMEOUT_S, COMPACT_RUN_HISTORY (POS: shutdown wait, runs kept)
 
 [OUTPUT]
 - CompactRunState / CompactRunFailure / CompactRun: lifecycle states, why a run failed, and the record of a run
 - start_compact_run: start the run for a chat in the background, or join the one in flight
-- get_compact_run: the latest run of a chat
+- get_compact_run: a run of a chat by its id
 - drain_compact_runs: wait for the runs in flight (shutdown)
 
 [POS]
 A compaction has a model summarise a whole history and takes tens of seconds to minutes, longer than a proxy between the
 page and this server lets one request wait (Next's rewrite 30 s, a customer's nginx or load balancer 60 s). The request
-therefore only starts the run, and the page asks for it until it ends.
-Each chat keeps only its latest run, which the next run replaces: a request for a chat whose run is still going joins
-it, because a second record would hide the one the page is polling. The registry lives in memory, like the memory
-reindex and wiki maintenance runs: this server is one process, and a run the registry no longer knows (after a restart)
-is one the page reads as failed. The run holds its task, the event loop keeps only a weak reference to one, and gives
-it up when it ends. The per-chat compaction lock stays in the service, so the idle and pre-reply compactions that take
-it answer a run with ``concurrent_compaction_in_progress`` exactly as they answered a request.
+therefore only starts the run and names it, and the page asks for that run by its id until it ends.
+Runs are kept by id, the newest ``COMPACT_RUN_HISTORY`` of them: a page reads the run it started even after another
+request for the same chat started a later one, and what is kept does not grow with the compactions callers start. A
+request for a chat whose run is still going joins that run, because a second compaction of one chat would only wait on
+the first one's lock. A run still going is never dropped. The registry lives in memory, like the memory reindex and wiki
+maintenance runs: this server is one process, and a run the registry no longer knows (after a restart) is one the page
+reads as failed. The run holds its task, the event loop keeps only a weak reference to one, and gives it up when it
+ends. The per-chat compaction lock stays in the service, so the idle and pre-reply compactions that take it answer a run
+with ``concurrent_compaction_in_progress`` exactly as they answered a request.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
 
 from app.core.utils.errors import StandardHTTPException, internal_error, validation_error
 from app.database.connection import get_session
 from app.schemas.responses import StandardErrorResponse
-from app.services.chat.compact._constants import COMPACT_RUN_DRAIN_TIMEOUT_S
+from app.services.chat.compact._constants import COMPACT_RUN_DRAIN_TIMEOUT_S, COMPACT_RUN_HISTORY
 from app.services.chat.compact._types import CompactResult
 
 logger = logging.getLogger(__name__)
@@ -62,6 +66,8 @@ class CompactRun:
     chat_id: str
     # The topic of the request that started the run; a request that joins the run does not change it.
     focus_topic: str
+    # What the page asks for: a later run of the same chat does not take this one's answer away.
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     state: CompactRunState = CompactRunState.RUNNING
     # A compaction the service declined is a finished run with a result: ``compacted`` is False and ``reason`` says why.
     result: CompactResult | None = None
@@ -69,7 +75,8 @@ class CompactRun:
     task: asyncio.Task[None] | None = None
 
 
-_latest_by_chat: dict[str, CompactRun] = {}
+# By run id, oldest first.
+_runs: dict[str, CompactRun] = {}
 
 
 def start_compact_run(chat_id: str, focus_topic: str) -> CompactRun:
@@ -77,23 +84,35 @@ def start_compact_run(chat_id: str, focus_topic: str) -> CompactRun:
 
     Nothing is awaited between the check and the claim, so two requests cannot both start a run.
     """
-    current = _latest_by_chat.get(chat_id)
-    if current is not None and current.state is CompactRunState.RUNNING:
-        return current
+    for going in _runs.values():
+        if going.chat_id == chat_id and going.state is CompactRunState.RUNNING:
+            return going
     run = CompactRun(chat_id=chat_id, focus_topic=focus_topic)
-    _latest_by_chat[chat_id] = run
+    _runs[run.run_id] = run
+    _drop_surplus_ended_runs()
     run.task = asyncio.create_task(_execute(run), name=f"compact-run:{chat_id}")
     run.task.add_done_callback(partial(_settle, run))
     return run
 
 
-def get_compact_run(chat_id: str) -> CompactRun | None:
-    return _latest_by_chat.get(chat_id)
+def get_compact_run(chat_id: str, run_id: str) -> CompactRun | None:
+    """The run, if the registry still holds it and it is one of this chat's: the path names both, so both must match."""
+    run = _runs.get(run_id)
+    return run if run is not None and run.chat_id == chat_id else None
+
+
+def _drop_surplus_ended_runs() -> None:
+    """Keep the registry within ``COMPACT_RUN_HISTORY`` by dropping the oldest ended runs; a run still going stays."""
+    surplus = len(_runs) - COMPACT_RUN_HISTORY
+    if surplus > 0:
+        ended = [run_id for run_id, run in _runs.items() if run.state is not CompactRunState.RUNNING]
+        for run_id in ended[:surplus]:
+            del _runs[run_id]
 
 
 async def drain_compact_runs(timeout_s: float = COMPACT_RUN_DRAIN_TIMEOUT_S) -> None:
     """Wait, up to ``timeout_s``, for the runs in flight to end; one still going after that is left to the shutdown."""
-    tasks = [run.task for run in _latest_by_chat.values() if run.task is not None]
+    tasks = [run.task for run in _runs.values() if run.task is not None]
     if not tasks:
         return
     _, pending = await asyncio.wait(tasks, timeout=timeout_s)

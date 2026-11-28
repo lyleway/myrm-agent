@@ -2,8 +2,8 @@
 
 The run turns a ``ValueError`` into "invalid request" (400) and everything else into its catch-all (500). A provider's
 failure is not the caller's invalid input, so an unreadable provider answer takes the catch-all too. The request that
-started the run was accepted and is long gone, so the failure is what the run endpoint reports, with the status the
-failure would have had as a response.
+started the run was accepted and is long gone, so the failure is what the endpoint of that run reports, with the status
+the failure would have had as a response.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from myrm_agent_harness.toolkits.llms.transport.errors import LLMResponseError
 
 from app.api.chats.chat.compaction import router
 from app.schemas.responses import BusinessCode
-from tests.support.compact_run_stub import compaction_answering, wait_for_run
+from tests.support.compact_run_stub import compaction_answering, run_route, wait_for_run
 from tests.support.provider_failures import provider_failure
 
 _SECRET = "sk-live-0123456789abcdef"
@@ -50,8 +50,8 @@ def test_a_failed_summary_model_is_a_500_named_by_what_the_provider_answered(
 ) -> None:
     with compaction_answering(AsyncMock(side_effect=failure)):
         started = client.post(_ROUTE)
-        data = wait_for_run(client)
-        reported = client.get("/chat-1/compact/run")
+        data = wait_for_run(client, started)
+        reported = client.get(run_route(started))
 
     assert started.status_code == 202
     error = data["error"]
@@ -65,8 +65,8 @@ def test_a_failed_summary_model_is_a_500_named_by_what_the_provider_answered(
 
 def test_an_invalid_request_is_still_a_400(client: TestClient) -> None:
     with compaction_answering(AsyncMock(side_effect=ValueError("Cannot resolve before_message_id for chat_id=chat-1"))):
-        client.post(_ROUTE)
-        data = wait_for_run(client)
+        started = client.post(_ROUTE)
+        data = wait_for_run(client, started)
 
     error = data["error"]
     assert isinstance(error, dict)

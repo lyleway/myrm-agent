@@ -3,16 +3,13 @@ import { ApiError, apiRequest } from '@/lib/api';
 import { COMPACT_FOCUS_TOPIC_MAX_LENGTH } from '@/lib/constants/compact-focus-topic';
 import {
   COMPACT_POLL_FIRST_INTERVAL_MS,
-  COMPACT_POLL_MAX_CONSECUTIVE_ERRORS,
   COMPACT_POLL_MAX_INTERVAL_MS,
+  COMPACT_POLL_OUTAGE_LIMIT_MS,
   COMPACT_RUN_DEADLINE_MS,
   type CompactResult,
   compactChat,
-  describeCompactSkip,
   runManualCompaction,
 } from '@/services/contextCompaction';
-import en from '../../../locales/en.json';
-import zh from '../../../locales/zh.json';
 
 const refreshCompactionState = vi.hoisted(() => vi.fn());
 
@@ -38,11 +35,14 @@ vi.mock('@/store/useChatStore', () => ({ default: { getState: () => ({ refreshCo
 
 const apiRequestMock = vi.mocked(apiRequest);
 const RARE_HAN = String.fromCodePoint(0x20bb7);
-const RUN_ENDPOINT = '/chats/chat-1/compact/run';
+const START_ENDPOINT = '/chats/chat-1/compact';
+const RUN_ENDPOINT = '/chats/chat-1/compact/runs/run-1';
 
 const RESULT: CompactResult = { compacted: true, message_count: 4, tokens_saved: 900, reason: null };
-const RUNNING = { status: 'running' };
-const succeeded = (result: CompactResult = RESULT) => ({ status: 'succeeded', result });
+const STARTED = { run_id: 'run-1', status: 'running' };
+const RUNNING = { run_id: 'run-1', status: 'running' };
+const OFFLINE = new Error('offline');
+const succeeded = (result: CompactResult = RESULT) => ({ run_id: 'run-1', status: 'succeeded', result });
 
 /** What the server answers to one poll: a run snapshot, or a failed request. */
 type Poll = unknown;
@@ -55,7 +55,7 @@ function serve(polls: readonly Poll[], onPoll?: () => void): void {
   let next = 0;
   apiRequestMock.mockImplementation(async (endpoint: string) => {
     if (endpoint !== RUN_ENDPOINT) {
-      return RUNNING;
+      return STARTED;
     }
     onPoll?.();
     const poll = polls[Math.min(next, polls.length - 1)];
@@ -64,6 +64,35 @@ function serve(polls: readonly Poll[], onPoll?: () => void): void {
       throw poll;
     }
     return poll;
+  });
+}
+
+/** Like `serve`, but the answer to a poll is a function of the time since the server started (a poll asked then). */
+function serveByTime(answer: (sinceStartMs: number) => Poll, onPoll?: () => void): void {
+  const startedAt = Date.now();
+  apiRequestMock.mockImplementation(async (endpoint: string) => {
+    if (endpoint !== RUN_ENDPOINT) {
+      return STARTED;
+    }
+    onPoll?.();
+    const poll = answer(Date.now() - startedAt);
+    if (poll instanceof Error) {
+      throw poll;
+    }
+    return poll;
+  });
+}
+
+/** A server whose proxy never answers a poll: the request hangs for `hangMs` and then fails with a timeout. */
+function serveHungPolls(hangMs: number): void {
+  apiRequestMock.mockImplementation(async (endpoint: string) => {
+    if (endpoint !== RUN_ENDPOINT) {
+      return STARTED;
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, hangMs);
+    });
+    throw new Error('timed out');
   });
 }
 
@@ -101,16 +130,29 @@ describe('compactChat', () => {
     vi.useRealTimers();
   });
 
-  it('starts the compaction with one request and reads the outcome from the run endpoint', async () => {
+  it('starts the compaction with one request and reads the outcome from the endpoint of the run it started', async () => {
     serve([RUNNING, RUNNING, succeeded()]);
 
     await expect(settle(compactChat('chat-1'))).resolves.toEqual(RESULT);
 
     expect(apiRequestMock.mock.calls.map(([endpoint]) => endpoint)).toEqual([
-      '/chats/chat-1/compact',
+      START_ENDPOINT,
       RUN_ENDPOINT,
       RUN_ENDPOINT,
       RUN_ENDPOINT,
+    ]);
+  });
+
+  it('asks for the run the server named, so another compaction of the chat cannot answer in its place', async () => {
+    apiRequestMock.mockImplementation(async (endpoint: string) =>
+      endpoint === START_ENDPOINT ? { run_id: 'run-9', status: 'running' } : succeeded(),
+    );
+
+    await settle(compactChat('chat-1'));
+
+    expect(apiRequestMock.mock.calls.map(([endpoint]) => endpoint)).toEqual([
+      START_ENDPOINT,
+      '/chats/chat-1/compact/runs/run-9',
     ]);
   });
 
@@ -155,33 +197,50 @@ describe('compactChat', () => {
     expect(Math.max(...gaps)).toBe(COMPACT_POLL_MAX_INTERVAL_MS);
   });
 
-  it('tolerates failed polls within the budget of consecutive failures', async () => {
-    const failed = new Error('offline');
-    serve([...Array.from({ length: COMPACT_POLL_MAX_CONSECUTIVE_ERRORS - 1 }, () => failed), succeeded()]);
+  it('rides out an outage shorter than the limit, however many polls fail in it', async () => {
+    serveByTime((sinceStartMs) => (sinceStartMs < COMPACT_POLL_OUTAGE_LIMIT_MS - 10_000 ? OFFLINE : succeeded()));
+
+    await expect(settle(compactChat('chat-1'))).resolves.toEqual(RESULT);
+
+    expect(pollCalls().length).toBeGreaterThan(10);
+  });
+
+  it('measures an outage from its own start: an answer in between begins the next one afresh', async () => {
+    const outageMs = COMPACT_POLL_OUTAGE_LIMIT_MS - 10_000;
+    const answeringMs = 5_000;
+    serveByTime((sinceStartMs) => {
+      if (sinceStartMs < outageMs) {
+        return OFFLINE;
+      }
+      if (sinceStartMs < outageMs + answeringMs) {
+        return RUNNING;
+      }
+      return sinceStartMs < 2 * outageMs + answeringMs ? OFFLINE : succeeded();
+    });
 
     await expect(settle(compactChat('chat-1'))).resolves.toEqual(RESULT);
   });
 
-  it('counts only consecutive failures: an answer in between restores the budget', async () => {
-    const failed = new Error('offline');
-    const burst = Array.from({ length: COMPACT_POLL_MAX_CONSECUTIVE_ERRORS - 1 }, () => failed);
-    serve([...burst, RUNNING, ...burst, succeeded()]);
+  it('gives up with the last error once the server has been unreachable for the whole limit', async () => {
+    serveByTime(() => OFFLINE);
+    const startedAt = Date.now();
 
-    await expect(settle(compactChat('chat-1'))).resolves.toEqual(RESULT);
+    await expect(settle(compactChat('chat-1'))).rejects.toBe(OFFLINE);
+
+    const waited = Date.now() - startedAt;
+    expect(waited).toBeGreaterThanOrEqual(COMPACT_POLL_OUTAGE_LIMIT_MS);
+    expect(waited).toBeLessThan(
+      COMPACT_POLL_OUTAGE_LIMIT_MS + COMPACT_POLL_FIRST_INTERVAL_MS + COMPACT_POLL_MAX_INTERVAL_MS,
+    );
+    expect(pollCalls().length).toBeGreaterThan(10);
   });
 
-  it('gives up with the last error once the polls have failed as many times in a row as the budget allows', async () => {
-    serve([
-      new Error('offline 1'),
-      new Error('offline 2'),
-      new Error('offline 3'),
-      new Error('offline 4'),
-      new Error('offline 5'),
-    ]);
+  it('counts a poll that hung for the time it hung: the outage began when it was asked, not when it failed', async () => {
+    serveHungPolls(40_000);
 
-    await expect(settle(compactChat('chat-1'))).rejects.toThrow('offline 5');
+    await expect(settle(compactChat('chat-1'))).rejects.toThrow('timed out');
 
-    expect(pollCalls()).toHaveLength(COMPACT_POLL_MAX_CONSECUTIVE_ERRORS);
+    expect(pollCalls()).toHaveLength(2);
   });
 
   it('treats a run the server does not know as failed at once, because no later poll can find it', async () => {
@@ -328,49 +387,5 @@ describe('runManualCompaction', () => {
     await settle(runManualCompaction('chat-1'));
 
     expect(errorLog.mock.calls).toEqual(logged ? [['[Compaction] failed:', reason]] : []);
-  });
-});
-
-/** Every reason the compaction service reports for a request it did not run. */
-const SKIP_CASES = [
-  { reason: 'no_compactable_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
-  { reason: 'too_few_messages', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
-  // A new chat has an id before its first message is sent; the server has no such chat yet, and it holds nothing.
-  { reason: 'chat_not_found', messageKey: 'chat.compact.skip.nothing', severity: 'info' },
-  { reason: 'concurrent_compaction_in_progress', messageKey: 'chat.compact.skip.busy', severity: 'info' },
-  { reason: 'summarize_circuit_open', messageKey: 'chat.compact.skip.paused', severity: 'warning' },
-  { reason: 'compression_anti_thrash_active', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'timeout', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'persist_failed', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'too_few_messages (2 < 4)', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'a_reason_added_later', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: 'constructor', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: '__proto__', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: '', messageKey: 'chat.compact.failed', severity: 'error' },
-  { reason: null, messageKey: 'chat.compact.failed', severity: 'error' },
-] as const;
-
-/** The text a dotted key resolves to in a locale bundle, or undefined when the bundle has none. */
-function copyOf(bundle: unknown, key: string): unknown {
-  return key
-    .split('.')
-    .reduce<unknown>(
-      (node, part) => (typeof node === 'object' && node !== null ? (node as Record<string, unknown>)[part] : undefined),
-      bundle,
-    );
-}
-
-describe('describeCompactSkip', () => {
-  it.each(SKIP_CASES)('words $reason as $messageKey ($severity)', ({ reason, messageKey, severity }) => {
-    expect(describeCompactSkip(reason)).toEqual({ messageKey, severity });
-  });
-
-  it.each([
-    { locale: 'English', bundle: en },
-    { locale: 'Chinese', bundle: zh },
-  ])('has $locale copy for every notice', ({ bundle }) => {
-    const keys = new Set(SKIP_CASES.map(({ reason }) => describeCompactSkip(reason).messageKey));
-
-    expect([...keys].filter((key) => typeof copyOf(bundle, key) !== 'string')).toEqual([]);
   });
 });

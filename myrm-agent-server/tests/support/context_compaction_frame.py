@@ -141,11 +141,12 @@ _ANSWER_COMPACT_JS = r"""((answer) => {
         Promise.resolve(
           new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
         );
-      // The request that starts the run is accepted at once; the run it asks about next ends with the chosen answer.
+      // The request that starts the run is accepted at once and names the run; that run, which the app asks about next,
+      // ends with the chosen answer.
       if (/\/chats\/[^/]+\/compact$/.test(path)) {
-        return reply({ success: true, code: 0, data: { status: 'running' } }, 202);
+        return reply({ success: true, code: 0, data: { run_id: 'e2e-run', status: 'running' } }, 202);
       }
-      if (/\/chats\/[^/]+\/compact\/run$/.test(path)) {
+      if (/\/chats\/[^/]+\/compact\/runs\/e2e-run$/.test(path)) {
         return reply(window.__e2eCompactAnswer, 200);
       }
       return window.__e2eRealFetch(input, init);
@@ -192,7 +193,7 @@ def attach_chat_in_frame(client: ChromeMcpClient, page: McpPage, chat_id: str) -
 
 
 def answer_compact_with_js(answer: dict[str, object]) -> str:
-    """Make every compaction the app in the frame starts from now on end with ``answer`` (a whole ``GET /compact/run`` body)."""
+    """Make every compaction the app in the frame starts from now on end with ``answer`` (a whole ``GET /compact/runs/{run_id}`` body)."""
     return in_frame(f"({_ANSWER_COMPACT_JS})({json.dumps(answer)})")
 
 

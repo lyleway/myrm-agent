@@ -7,8 +7,8 @@
  *
  * [OUTPUT]
  * - CompactResult: 一次手动压缩上下文的结果
- * - compactChat: 压缩会话上下文，可带聚焦主题；先让服务端受理，再按间隔询问到它给出结果
- * - COMPACT_POLL_FIRST_INTERVAL_MS / COMPACT_POLL_MAX_INTERVAL_MS / COMPACT_POLL_MAX_CONSECUTIVE_ERRORS / COMPACT_RUN_DEADLINE_MS: 轮询的间隔、连续失败预算与页面等一次压缩的期限
+ * - compactChat: 压缩会话上下文，可带聚焦主题；先让服务端受理并取得运行 id，再按间隔询问这个运行到它给出结果
+ * - COMPACT_POLL_FIRST_INTERVAL_MS / COMPACT_POLL_MAX_INTERVAL_MS / COMPACT_POLL_OUTAGE_LIMIT_MS / COMPACT_RUN_DEADLINE_MS: 轮询的间隔、服务端不可达的容忍时长与页面等一次压缩的期限
  * - runManualCompaction: 手动压缩，并把省下 token 的结果交给 store；输入框、`/compact`、策略面板三个入口共用
  * - CompactNotice / describeCompactSkip / COMPACT_FAILED_NOTICE: 服务端没有压缩时展示给用户的提示（文案键 + 严重度）
  * - DONT_REMIND_COMPACT_STORAGE_KEY: 「手动压缩前不再提醒」偏好的 localStorage 键
@@ -17,7 +17,8 @@
  * 上下文压缩的前端服务。聚焦主题发出前按服务端上限截断，所以输入框与 `/compact <主题>` 两条路径都不会被服务端拒收；
  * 压缩后的 store 同步与「没压缩」的措辞各只有一处，三个入口因此对同一次压缩给出同一个结果；
  * 压缩由模型摘要整段历史，耗时远超一个请求能在代理链上存活的时间（本地 Next 重写默认 30 秒，运营方的 Nginx 或负载均衡默认 60 秒）：
- * 请求只让服务端受理并立刻返回，页面再询问运行状态，直到服务端自己给出结果，不在服务端仍在压缩时先报「失败」。
+ * 请求只让服务端受理并立刻返回运行 id，页面再按这个 id 询问运行状态，直到服务端自己给出结果，不在服务端仍在压缩时先报「失败」；
+ * 询问的是自己受理的那次运行，所以同一聊天另一个页面随后发起的压缩不会把这次的结果顶掉。
  */
 
 import { ApiError, apiRequest } from '@/lib/api';
@@ -47,8 +48,19 @@ export const COMPACT_RUN_DEADLINE_MS = 11 * 60 * 1000;
 export const COMPACT_POLL_FIRST_INTERVAL_MS = 300;
 export const COMPACT_POLL_MAX_INTERVAL_MS = 2000;
 const COMPACT_POLL_INTERVAL_GROWTH = 1.5;
-/** As many failed polls in a row as the memory reindex poll tolerates: a few are a blip, more are a server that is gone. */
-export const COMPACT_POLL_MAX_CONSECUTIVE_ERRORS = 5;
+/**
+ * How long the polls may keep failing before the server counts as gone. A failed poll says the server could not be
+ * reached (a network switch, a proxy restarting), not that the compaction failed: it goes on without the page. A count of
+ * failed polls cannot measure that, because quick failures spend it in seconds while a poll that hangs takes its whole
+ * 30 s request timeout to fail. The time is counted from when the first failing poll was asked and starts afresh at the
+ * next answer.
+ */
+export const COMPACT_POLL_OUTAGE_LIMIT_MS = 60_000;
+
+/** What the server answers when it accepts a compaction: the id of the run that does it. */
+interface CompactRunStarted {
+  run_id: string;
+}
 
 /** What the server says of a compaction run; a failed one carries the failure in the terms of an HTTP error. */
 type CompactRun =
@@ -69,21 +81,26 @@ const pollInterval = (attempt: number): number =>
 
 /**
  * Asks for the run until it ends. The polls are silent: the default handling would toast every blip with a retry button,
- * and a failed compaction is worded by the caller. A 404 is the server saying it holds no such run (it restarted), which no
- * later poll can change, so it ends the wait at once.
+ * and a failed compaction is worded by the caller. A 404 is the server saying it holds no such run (it restarted, or
+ * dropped the run among newer ones), which no later poll can change, so it ends the wait at once.
  */
-async function awaitCompactRun(chatId: string): Promise<CompactResult> {
+async function awaitCompactRun(chatId: string, runId: string): Promise<CompactResult> {
   const deadline = Date.now() + COMPACT_RUN_DEADLINE_MS;
-  let failedPolls = 0;
+  // When the first of the polls that have failed since the last answer was asked; null while the server answers.
+  let unreachableSince: number | null = null;
   for (let attempt = 0; Date.now() < deadline; attempt += 1) {
     await sleep(pollInterval(attempt));
+    const askedAt = Date.now();
     let run: CompactRun;
     try {
-      run = await apiRequest<CompactRun>(`/chats/${chatId}/compact/run`, { silent: true });
-      failedPolls = 0;
+      run = await apiRequest<CompactRun>(`/chats/${chatId}/compact/runs/${runId}`, { silent: true });
+      unreachableSince = null;
     } catch (error) {
-      failedPolls += 1;
-      if ((error instanceof ApiError && error.code === 404) || failedPolls >= COMPACT_POLL_MAX_CONSECUTIVE_ERRORS) {
+      unreachableSince ??= askedAt;
+      if (
+        (error instanceof ApiError && error.code === 404) ||
+        Date.now() - unreachableSince >= COMPACT_POLL_OUTAGE_LIMIT_MS
+      ) {
         throw error;
       }
       continue;
@@ -106,11 +123,11 @@ export const compactChat = async (chatId: string, focusTopic?: string): Promise<
     ? JSON.stringify({ focus_topic: firstChars(focusTopic, COMPACT_FOCUS_TOPIC_MAX_LENGTH) })
     : undefined;
   // The server only starts the compaction and answers at once, so this request needs no budget of its own.
-  await apiRequest(`/chats/${chatId}/compact`, {
+  const started = await apiRequest<CompactRunStarted>(`/chats/${chatId}/compact`, {
     method: 'POST',
     ...(body ? { body, headers: { 'Content-Type': 'application/json' } } : {}),
   });
-  return awaitCompactRun(chatId);
+  return awaitCompactRun(chatId, started.run_id);
 };
 
 export interface CompactNotice {

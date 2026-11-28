@@ -50,14 +50,17 @@ _LAYOUTS = [
 
 
 def _ended_run(api_url: str, chat_id: str) -> dict[str, object]:
-    """Ask the server to compact a short chat and return its whole ``GET /compact/run`` body once the run has ended.
+    """Ask the server to compact a short chat and return its whole ``GET /compact/runs/{run_id}`` body once the run has ended.
 
-    The server only accepts the request (202) and declines a chat this short within a moment.
+    The server only accepts the request (202), names the run, and declines a chat this short within a moment.
     """
-    http_json("POST", f"{api_url}/api/v1/chats/{chat_id}/compact", expected_statuses=frozenset({202}))
+    started = http_json("POST", f"{api_url}/api/v1/chats/{chat_id}/compact", expected_statuses=frozenset({202}))
+    started_data = started.get("data") if isinstance(started, dict) else None
+    run_id = started_data.get("run_id") if isinstance(started_data, dict) else None
+    assert isinstance(run_id, str), f"the server did not name the compaction run: {started!r}"
     deadline = time.monotonic() + _DECLINE_TIMEOUT_SEC
     while time.monotonic() < deadline:
-        body = http_json("GET", f"{api_url}/api/v1/chats/{chat_id}/compact/run")
+        body = http_json("GET", f"{api_url}/api/v1/chats/{chat_id}/compact/runs/{run_id}")
         data = body.get("data") if isinstance(body, dict) else None
         if isinstance(body, dict) and isinstance(data, dict) and data.get("status") != "running":
             return body
