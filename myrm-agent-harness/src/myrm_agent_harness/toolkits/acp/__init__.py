@@ -10,7 +10,7 @@ Facades and contracts (root):
 
 Shared infrastructure (core/):
 - core/backend_detector.py: CLI backend auto-detection
-- auth/: subscription login, credential detection, and credential import for CLI backends
+- auth/: the login commands and login state of CLI backends (a credential is never held or relayed here)
 
 
 [INPUT]

@@ -101,7 +101,7 @@ class RuntimePool:
     Usage::
 
         pool = RuntimePool(max_concurrent=4)
-        pool.register("reviewer", RuntimeConfig(backend_type="acp", command="my-acp-agent"))
+        pool.register("reviewer", RuntimeConfig(backend_type="cli", command="claude"))
         response = await pool.prompt("reviewer", "Fix the bug in main.py", workspace="/work/repo")
     """
 
