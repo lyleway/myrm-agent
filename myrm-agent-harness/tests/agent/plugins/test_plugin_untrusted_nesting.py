@@ -12,8 +12,8 @@
   nothing else.
 
 [POS]
-The parser accepts nesting that the staged import session cannot be pickled with, and nesting deeper still that it cannot even
-read; either would fail the import preview with a server error instead of a diagnostic.
+``json.loads`` accepts nesting that the staged import session cannot be pickled with and cannot read nesting deeper still; the
+parser has to answer both with a diagnostic, because an exception would fail the import preview with a server error.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 SKILL = b"---\nname: s\ndescription: d\n---\nBody."
 NESTING_MESSAGE = f"Nesting is deeper than {MAX_NESTING} levels"
-# A depth the parser accepts but a pickle of the result does not, and one the parser cannot read at all.
+# A depth ``json.loads`` accepts but a pickle of the result does not, and one it cannot read at all.
 TOO_DEEP_TO_STAGE = 5_000
 TOO_DEEP_TO_PARSE = 20_000
 

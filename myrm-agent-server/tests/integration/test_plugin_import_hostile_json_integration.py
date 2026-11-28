@@ -39,11 +39,12 @@ MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
 SKILL_NAME = "hostile-json-notes"
 SKILL_PATH = f"skills/{SKILL_NAME}/SKILL.md"
 SKILL = f"---\nname: {SKILL_NAME}\ndescription: Keeps notes tidy\n---\n\n# Notes\n\nFile every finding.\n"
-# A depth the parser accepts but a pickle of the staged session does not.
+# A depth ``json.loads`` accepts but a pickle of the staged session does not.
 TOO_DEEP_TO_STAGE = 5_000
-# Escaped quotes make a 40 KiB text that the scan took tens of seconds to read, where reading it once takes milliseconds.
+# Escaped quotes make a 40 KiB text in which a scan that restarts from every quote reads the same characters over and over,
+# where one pass over it takes milliseconds.
 ESCAPED_QUOTES = 20_000
-# Far above what the request costs once the text is read once, far below what rereading it from every quote cost.
+# Far above what the request costs once the text is read once, far below what rereading it from every quote costs.
 PREVIEW_TIME_LIMIT = 5.0
 
 
