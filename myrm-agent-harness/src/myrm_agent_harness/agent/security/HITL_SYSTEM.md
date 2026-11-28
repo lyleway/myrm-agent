@@ -288,7 +288,7 @@ const resumeValue = { decisions };
 ### 目录授权（path-ASK grant）
 文件工具点名工作区与允许根之外的目录时，PathPolicy 返回 ASK，审批卡片提供「同时授予文件夹访问」勾选项：
 
-- **一份计划**：`session_access.plan_directory_grants` 统一规划授权目录（每个目录一次；写入类工具为可读写，其余只读；规划的对象是调用可能打开的文件，即写下的路径，读取还包括写下的路径不存在时改开的那个写法，见 `SECURITY_SYSTEM.md`「纵深防御」的「判什么就打开什么」）。`build_interrupt_payload` 把计划放进动作请求的 `grantDirectories`（`[{path, writable}]`），卡片只展示不推断；用户批准并勾选时，`apply_approval_decisions` 按同一计划授权，与审批理由的语言无关。禁区目录与超出每会话 5 个授权根上限的目录不会被提供。
+- **一份计划**：`session_access.plan_directory_grants` 统一规划授权目录（每个目录一次；写入类工具为可读写，其余只读；规划的对象是调用可能打开的文件，即写下的路径，读取还包括写下的路径不存在时改开的那个写法，见 `SECURITY_SYSTEM.md`「纵深防御」的「判什么就打开什么」）。`build_interrupt_payload` 把计划放进动作请求的 `grantDirectories`（`[{path, writable}]`），卡片只展示不推断；`grantDirectories` 是客户端原样回传、服务端照它打开的数据，网关出站洗刷对它放行（只放行动作请求里的这一个位置，紧挨着的工具参数仍洗刷；其余字符串里的 `/Users/x`、`/tmp/x` 会被洗成 `<HOME>`、`<ABS_PATH>`，洗过的文件夹授权不到任何东西，`myrm-agent-server/app/services/agent/streaming_support/outbound_scrub.py`）；用户批准并勾选时，`apply_approval_decisions` 按同一计划授权，与审批理由的语言无关。禁区目录与超出每会话 5 个授权根上限的目录不会被提供。
 - **升级**：对已持有的只读根发起写入时，计划提供升级为可读写，授权后原地改为可写，不占名额；授权永远不会把可写根降为只读。
 - **范围**：只有 `approve` 决议授权，`edit` 与 `reject` 不授权；「全部批准」不携带授权。
 - **生效面**：授权根存放在本次运行的 `AccessGrants` 容器（`core.context_vars.access_grants_var`；运行入口 `open_access_grants` 打开一次，之后只原地修改，因为图的每个节点在复制的上下文里运行，重新绑定的 ContextVar 对后续节点不可见），权限引擎与沙箱执行器共用（执行器边界见 `EXECUTION_SYSTEM.md`「文件操作边界」）。容器分三层：`declared`（`PathPolicy.access_roots`，整个运行固定）、`session`（用户选择记住的目录，业务层在运行前也会预置）、`once`（见下）。

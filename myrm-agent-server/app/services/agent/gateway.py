@@ -640,18 +640,7 @@ class AgentGateway:
         event_key = session_id or f"_anon_{id(interrupt_event)}"
         self._interrupt_events.setdefault("sandbox", {})[event_key] = interrupt_event
 
-        def _recursive_scrub(data: object) -> object:
-            from myrm_agent_harness.toolkits.code_execution.executors.models import (
-                scrub_sensitive_info,
-            )
-
-            if isinstance(data, dict):
-                return {k: _recursive_scrub(v) for k, v in data.items()}
-            if isinstance(data, list):
-                return [_recursive_scrub(item) for item in data]
-            if isinstance(data, str):
-                return scrub_sensitive_info(data)
-            return data
+        from app.services.agent.streaming_support.outbound_scrub import scrub_outbound_event
 
         idle_threshold = self._resolve_idle_threshold(goal_active=goal_active, fission_active=fission_active)
         loop = asyncio.get_running_loop()
@@ -673,7 +662,7 @@ class AgentGateway:
                         break
 
                     # Myrm-Guard: Final outbound filter at the very edge of the server
-                    scrubbed = _recursive_scrub(event)
+                    scrubbed = scrub_outbound_event(event)
                     if isinstance(scrubbed, dict):
                         yield {str(k): v for k, v in scrubbed.items()}
                     else:
