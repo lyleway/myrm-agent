@@ -22,8 +22,8 @@ SessionVault cookie store (Bilibili AI subtitles) without requiring a browser.
 |------|------|-------------|-------|
 | __init__.py | Package | Aggregation facade — re-exports the extractors' public symbols. | ✅ |
 | weixin_extractor.py | Core | WeChat Official Account fast-path — MicroMessenger UA + `#js_content` extraction (host `/s` URLs, data-src images, publish_time metadata); follows the article's one `?nwr_flag=1` bounce but never leaves https `mp.weixin.qq.com` article URLs; HTTP/L4 fallback when blocked. | ✅ |
-| bilibili_extractor.py | Core | Bilibili subtitle fast-path — public API + SessionVault cookie for AI subtitles; HTTP/L4 fallback when unavailable. | ✅ |
-| youtube_extractor.py | Core | YouTube transcript fast-path — `[web]` optional `youtube-transcript-api` + oEmbed metadata (title/author); HTML fallback when missing. | ✅ |
+| bilibili_extractor.py | Core | Bilibili subtitle fast-path — public API + SessionVault cookie for AI subtitles; HTTP/L4 fallback when unavailable. Only a URL that starts with the video link takes the fast path: one inside another site's URL is fetched like any page. | ✅ |
+| youtube_extractor.py | Core | YouTube transcript fast-path — `[web]` optional `youtube-transcript-api` + oEmbed metadata (title/author); HTML fallback when missing. Only a URL that starts with the video link takes the fast path: one inside another site's URL is fetched like any page. | ✅ |
 | x_extractor.py | Core | Twitter / X post fast-path — FxTwitter API / oEmbed structured extraction (text, metrics, media); HTTP/L4 fallback on failure. Only a URL whose host is X's starts the fast path: a status link inside another site's URL is fetched like any page. | ✅ |
 
 ## Key Dependencies

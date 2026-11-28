@@ -17,7 +17,7 @@ Design pattern: analogous to youtube_extractor.py — special content source rou
 - (none — standalone module; uses only stdlib urllib + json)
 
 [OUTPUT]
-- is_bilibili_url: Check if a URL is a Bilibili video URL
+- is_bilibili_url: Check if a URL is a Bilibili video URL; the video link must start the URL, one nested in another site's URL is no video
 - extract_bilibili_subtitle: Extract subtitle and return as Document, or None
 
 [POS]
@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The video link starts the URL (matched with ``re.match``): one carried inside another site's URL (an archive copy,
+# a redirect path, a query parameter) makes that site's page, not the video, and must be fetched like any page.
 _BILIBILI_URL_RE = re.compile(
     r"(?:https?://)"
     r"(?:www\.|m\.)?"
@@ -66,12 +68,13 @@ _DEFAULT_HEADERS = {
 
 def is_bilibili_url(url: str) -> bool:
     """Check if a URL points to a Bilibili video."""
-    return _BILIBILI_URL_RE.search(url) is not None or _BILIBILI_SHORT_URL_RE.search(url) is not None
+    target = url.strip()
+    return _BILIBILI_URL_RE.match(target) is not None or _BILIBILI_SHORT_URL_RE.match(target) is not None
 
 
 def _extract_bvid(url: str) -> str | None:
     """Extract BV ID from a Bilibili URL."""
-    match = _BILIBILI_URL_RE.search(url)
+    match = _BILIBILI_URL_RE.match(url.strip())
     if match:
         video_id = match.group(1)
         if video_id.startswith("BV"):

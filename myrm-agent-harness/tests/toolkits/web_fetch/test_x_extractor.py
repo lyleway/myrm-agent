@@ -58,6 +58,12 @@ def test_a_status_link_inside_another_url_is_not_an_x_post(url: str):
     assert extract_status_info(url) is None
 
 
+def test_surrounding_whitespace_is_ignored():
+    url = "  https://x.com/sama/status/987654321\n"
+    assert is_x_url(url)
+    assert extract_status_info(url) == ("sama", "987654321")
+
+
 def test_extract_status_info():
     info = extract_status_info("https://x.com/karpathy/status/1234567890123456789?s=20")
     assert info == ("karpathy", "1234567890123456789")
