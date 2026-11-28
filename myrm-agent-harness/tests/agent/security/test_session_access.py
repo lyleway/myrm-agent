@@ -168,6 +168,55 @@ def test_revoke_unknown_path_is_noop(tmp_path) -> None:
     assert len(get_session_access_roots()) == 1
 
 
+def _hold_folders(tmp_path, *folders) -> str:
+    """Start an empty session that holds ``folders``; returns its workspace."""
+    set_session_access_roots(())
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    for folder in folders:
+        grant_session_access_root(
+            AccessRoot(path=str(folder), writable=False, source="hitl_grant"),
+            workspace_root=str(workspace),
+        )
+    return str(workspace)
+
+
+def test_revoke_removes_the_root_of_a_folder_that_was_deleted(tmp_path) -> None:
+    """The roots list names a held folder by its path, also once the folder is gone."""
+    gone = tmp_path / "gone"
+    gone.mkdir()
+    workspace = _hold_folders(tmp_path, gone)
+    gone.rmdir()
+
+    revoke_session_access_root(str(gone), workspace_root=workspace)
+
+    assert get_session_access_roots() == ()
+
+
+def test_revoke_of_a_deleted_folder_keeps_the_root_above_it(tmp_path) -> None:
+    parent = tmp_path / "parent"
+    child = parent / "child"
+    child.mkdir(parents=True)
+    workspace = _hold_folders(tmp_path, parent, child)
+    child.rmdir()
+
+    revoke_session_access_root(str(child), workspace_root=workspace)
+
+    assert [root.path for root in get_session_access_roots()] == [os.path.realpath(parent)]
+
+
+def test_revoke_by_the_path_of_a_file_keeps_the_folders_root(tmp_path) -> None:
+    """A path that names a file is no root, so it does not take the grant of the folder holding it."""
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    (downloads / "doc.txt").write_text("x")
+    workspace = _hold_folders(tmp_path, downloads)
+
+    revoke_session_access_root(str(downloads / "doc.txt"), workspace_root=workspace)
+
+    assert [root.path for root in get_session_access_roots()] == [os.path.realpath(downloads)]
+
+
 class TestGrantDirectoriesForCall:
     """The directories a user approves for a file call: one per file outside the allowed zones, whatever the argument is called."""
 

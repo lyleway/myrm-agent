@@ -9,7 +9,7 @@
 - get_session_access_roots / set_session_access_roots / grant_session_access_root
 - plan_directory_grants / grant_directories_for_call (what a call's approval can grant, by the call's permission type)
 - grant_paths_once / drop_once_grants (what approving a single call opens, until the next model response)
-- revoke_session_access_root
+- revoke_session_access_root (the root a path names, a deleted folder's own root included, never the folder above it)
 - resolve_grant_directory_path
 - merge_path_policy_with_session_access
 - render_session_access_context
@@ -274,12 +274,16 @@ def revoke_session_access_root(
     *,
     workspace_root: str | None = None,
 ) -> tuple[AccessRoot, ...]:
-    """Remove a HITL-granted root by normalized path. Returns updated tuple."""
-    normalized = resolve_grant_directory_path(raw_path, workspace_root)
-    if not normalized:
+    """Remove the HITL-granted root a path names. Returns updated tuple.
+
+    The path is read as the roots list shows it, so a root whose folder was deleted since still goes, and a path
+    that names a file is no root and takes no folder's grant with it (a grant reads a file as its folder; a
+    revoke must not widen to the folder above the one it names).
+    """
+    target = _resolve_named_path(raw_path, workspace_root)
+    if not target:
         return get_session_access_roots()
 
-    target = os.path.realpath(normalized)
     current = get_session_access_roots()
     updated = tuple(root for root in current if _realpath(root.path) != target)
     if len(updated) == len(current):
