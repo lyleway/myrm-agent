@@ -9,10 +9,11 @@ app.services.memory.backup.remote_sync.storage.base::RemoteBackupStrategy/Remote
 WebDAVBackupConfig / WebDAVBackupStrategy: the WebDAV implementation of the storage contract
 
 [POS]
-A missing backup folder (HTTP 404) lists as empty because the first upload creates it; any other listing refusal, and
-any answer that is not a multistatus document, raises ``RemoteStorageError``. The answer is parsed as namespaced XML
-(each server picks its own prefix for ``DAV:``), in time linear in its size. Listed names are percent-decoded and only
-direct ``.gz`` children count.
+A missing backup folder (HTTP 404) lists as empty because the first upload creates it; any other listing refusal, any
+answer that is not a multistatus document, and any answer larger than ``_MAX_LISTING_BYTES`` raises
+``RemoteStorageError``. The answer is read as a stream that stops at that size and parsed as namespaced XML (each
+server picks its own prefix for ``DAV:``), in time linear in its size. Listed names are percent-decoded and only direct
+``.gz`` children count.
 """
 
 from __future__ import annotations
@@ -41,6 +42,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DAV = "{DAV:}"
+
+# Holding and parsing a listing costs about eight times its size in memory (a 7.9 MiB answer raised the process peak
+# by 62 MiB) and an entry is about 300 bytes, so 8 MiB is some 27,000 entries: far above a backup folder that rotates,
+# small enough that no single answer can exhaust the process.
+_MAX_LISTING_BYTES = 8 * 1024 * 1024
 
 
 @dataclass
@@ -195,22 +201,25 @@ class _WebDAVClient:
             "<prop><getlastmodified/><getcontentlength/></prop>"
             "</propfind>"
         )
-        async with httpx.AsyncClient(
-            auth=(self._username, self._password),
-            timeout=30.0,
-            follow_redirects=True,
-        ) as client:
-            resp = await client.request(
+        async with (
+            httpx.AsyncClient(
+                auth=(self._username, self._password),
+                timeout=30.0,
+                follow_redirects=True,
+            ) as client,
+            client.stream(
                 "PROPFIND",
                 self._url() + "/",
                 content=propfind_body.encode(),
                 headers={"Depth": "1", "Content-Type": "application/xml"},
-            )
-        if resp.status_code == 404:
-            return []  # nothing has been uploaded yet: the first upload creates the folder
-        if resp.status_code != 207:
-            raise RemoteStorageError(f"WebDAV listing refused: HTTP {resp.status_code}")
-        return sorted(_parse_webdav_multistatus(resp.text), key=lambda f: f.modified_time, reverse=True)
+            ) as resp,
+        ):
+            if resp.status_code == 404:
+                return []  # nothing has been uploaded yet: the first upload creates the folder
+            if resp.status_code != 207:
+                raise RemoteStorageError(f"WebDAV listing refused: HTTP {resp.status_code}")
+            listing = await _read_listing(resp)
+        return sorted(_parse_webdav_multistatus(listing), key=lambda f: f.modified_time, reverse=True)
 
     async def delete_file(self, remote_name: str) -> bool:
         import httpx
@@ -226,6 +235,32 @@ class _WebDAVClient:
         except Exception as e:
             logger.error("WebDAV delete error: %s", e)
             return False
+
+
+async def _read_listing(resp: "httpx.Response") -> str:
+    """The body of a listing answer; raises ``RemoteStorageError`` once it is known to exceed ``_MAX_LISTING_BYTES``.
+
+    The size is checked against the announced length first, then against the bytes actually received, because a server
+    may announce nothing (chunked) or announce less than it sends. The answer is never truncated: half a listing would
+    make a backup folder look smaller than it is, and rotation would then keep the wrong files.
+    """
+    announced = resp.headers.get("content-length", "")
+    # ``isascii`` first: ``str.isdigit`` also accepts characters such as "²" that ``int`` rejects.
+    if announced.isascii() and announced.isdigit() and int(announced) > _MAX_LISTING_BYTES:
+        raise _listing_too_large()
+    body = bytearray()
+    async for chunk in resp.aiter_bytes():
+        body += chunk
+        if len(body) > _MAX_LISTING_BYTES:
+            raise _listing_too_large()
+    return body.decode(resp.encoding or "utf-8", errors="replace")
+
+
+def _listing_too_large() -> RemoteStorageError:
+    return RemoteStorageError(
+        f"WebDAV listing is larger than {_MAX_LISTING_BYTES // (1024 * 1024)} MiB; "
+        "keep fewer files in the backup folder (rotate old backups or use a folder of its own)"
+    )
 
 
 def _property(response: ET.Element, name: str) -> str | None:
