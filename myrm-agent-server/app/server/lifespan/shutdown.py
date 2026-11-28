@@ -37,6 +37,7 @@ from app.server.shutdown import (
     safe_close_checkpointer,
     safe_close_external_agent_pools,
     safe_close_model_transport,
+    safe_drain_compact_runs,
     safe_shutdown_observability,
     safe_stop_cron,
     safe_stop_gateway,
@@ -81,6 +82,10 @@ async def _shutdown(app_instance: FastAPI) -> None:
     except Exception as e:
         logger.error("[Shutdown] Wake schedule reporter stop failed: %s", e)
 
+    # A manual compaction in flight is drained beside the Agent turns, not after them: the two waits overlap, so together
+    # they stay inside the stop grace the container is given, and both end before the components they use are stopped.
+    compact_drain = asyncio.create_task(safe_drain_compact_runs())
+
     try:
         from app.services.agent.gateway import get_agent_gateway
 
@@ -89,6 +94,8 @@ async def _shutdown(app_instance: FastAPI) -> None:
             await gateway.begin_drain()
     except Exception as e:
         logger.error("[Shutdown] Agent gateway drain failed: %s", e)
+
+    await compact_drain
 
     try:
         from app.remote_access.tunnel_manager import get_tunnel_manager

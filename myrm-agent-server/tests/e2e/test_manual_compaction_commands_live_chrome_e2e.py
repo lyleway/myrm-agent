@@ -25,6 +25,7 @@ from tests.support.context_compaction_e2e import (
     prepare_live_model,
     read_compaction_state,
 )
+from tests.support.context_compaction_requests import read_compact_requests, record_compact_requests
 from tests.support.context_compaction_ui import (
     compact_dialog_is_open,
     confirm_compact_dialog,
@@ -32,9 +33,7 @@ from tests.support.context_compaction_ui import (
     forget_compact_reminder,
     press_enter,
     read_compact_reminder,
-    read_compact_requests,
     read_toasts,
-    record_compact_requests,
     record_toasts,
     tick_dont_remind,
     type_in_composer,
@@ -93,7 +92,7 @@ def test_slash_compact_from_the_palette_compacts_the_chat_with_live_model() -> N
         requests = read_compact_requests(client, page)
         toasts = read_toasts(client, page)
 
-    assert len(requests) == 1 and requests[0].status == 200 and requests[0].compacted, f"compact requests: {requests}"
+    assert len(requests) == 1 and requests[0].status == 202 and requests[0].compacted, f"compact requests: {requests}"
     assert requests[0].sent is None, f"a bare /compact sent a topic: {requests[0].sent}"
     assert (shown_messages, shown_saved) == (requests[0].message_count, requests[0].tokens_saved), (values, requests)
     stored = read_compaction_state(api_url, chat_id)

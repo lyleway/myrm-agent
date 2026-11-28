@@ -93,6 +93,17 @@ def _isolate_task_metrics_registry() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_compact_runs() -> Iterator[None]:
+    """The latest manual compaction run is kept per chat id in a process-wide registry, and tests share ids such as
+    ``chat-1``: a run one test leaves behind would be joined by the next test that compacts the same chat, or be read
+    as that test's own outcome."""
+    yield
+    module = sys.modules.get("app.services.chat.compact.run")
+    if module is not None:
+        module._latest_by_chat.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_settings_singleton() -> Iterator[None]:
     """``get_settings`` builds a new object after its cache is cleared, and the one every module imported as
     ``settings`` stays the old one: a test that patches ``settings`` would then not reach code that calls

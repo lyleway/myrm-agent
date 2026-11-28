@@ -16,7 +16,10 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from app.services.chat.compact._types import CompactReason, CompactResult
+from app.services.chat.compact.run import drain_compact_runs
 from app.services.copilot.advisor_thread_store import AdvisorThreadStore
+from tests.support.compact_run_stub import compaction_answering
 from tests.support.minimal_app import build_minimal_app
 
 _LIMITS_PATH = Path(__file__).resolve().parents[4] / "shared" / "config" / "chat_input_limits.json"
@@ -48,7 +51,14 @@ async def _search_shared_context_history(client: httpx.AsyncClient, text: str) -
 
 
 async def _compact_chat(client: httpx.AsyncClient, text: str) -> httpx.Response:
-    return await client.post(f"{_API}/chats/chat-1/compact", json={"focus_topic": text})
+    # Past the length check the route starts a run that would compact the chat; the stub keeps it from the database and
+    # the summary model, and the run is let to end before the test does.
+    compaction = AsyncMock(return_value=CompactResult(compacted=False, reason=CompactReason.NO_COMPACTABLE_MESSAGES))
+    with compaction_answering(compaction):
+        try:
+            return await client.post(f"{_API}/chats/chat-1/compact", json={"focus_topic": text})
+        finally:
+            await drain_compact_runs(timeout_s=5.0)
 
 
 async def _ask_advisor(client: httpx.AsyncClient, text: str) -> httpx.Response:

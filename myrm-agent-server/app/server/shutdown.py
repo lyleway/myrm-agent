@@ -12,6 +12,7 @@
 - safe_close_checkpointer: 安全关闭 Checkpointer
 - safe_close_external_agent_pools: 安全关闭外部 CLI/ACP Agent 运行时池
 - safe_stop_maintenance_daemon: 安全停止维护守护进程
+- safe_drain_compact_runs: 等待进行中的手动压缩运行结束
 - safe_wait_background_tasks: 等待 Harness 后台任务完成
 - safe_close_model_transport: 有界等待地关闭模型传输层的共享 HTTP 客户端
 - safe_shutdown_observability: 安全关闭 OpenTelemetry
@@ -78,6 +79,16 @@ async def safe_stop_maintenance_daemon() -> None:
     from app.services.background.daemon import maintenance_daemon
 
     await maintenance_daemon.stop(timeout_seconds=5.0)
+
+
+async def safe_drain_compact_runs() -> None:
+    """Wait for the manual compactions in flight: the summary a model was paid to write is lost with the process."""
+    try:
+        from app.services.chat.compact.run import drain_compact_runs
+
+        await drain_compact_runs()
+    except Exception as e:
+        logger.warning("[Shutdown] Compaction run drain failed: %s", e)
 
 
 async def safe_wait_background_tasks() -> None:

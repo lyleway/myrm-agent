@@ -1,8 +1,9 @@
 """Chrome E2E: compressing a long chat by hand from the context strategy panel, in both shipped languages.
 
 A user opens a chat with a long history, opens the panel behind the usage ring and presses "compress". The real model
-writes the summary, which for a history of this size takes longer than the page's default request budget; the panel must
-wait for the server's answer and then say how many tokens it saved, in the page's language. Pressing it again has nothing
+writes the summary, which for a history of this size takes longer than a proxy lets one request wait: the server accepts
+the request at once and the page asks for its run until it ends. The panel must show the server's answer and say how many
+tokens it saved, in the page's language. Pressing it again has nothing
 left to compress, and the panel says so in the language the page was switched to. What the server stored is checked too:
 the summary must still carry the facts the conversation was about, and the tokens it saved must be the figure the panel
 showed.
@@ -28,12 +29,11 @@ from tests.support.context_compaction_e2e import (
     read_compaction_state,
     switch_locale,
 )
+from tests.support.context_compaction_requests import read_compact_requests, record_compact_requests
 from tests.support.context_compaction_ui import (
     outcome_js,
     panel_ready_js,
     press_compress_js,
-    read_compact_requests,
-    record_compact_requests,
     tokens_from_shown,
 )
 
@@ -84,7 +84,9 @@ def test_manual_compaction_from_strategy_panel_with_live_model() -> None:
         assert abs(tokens_from_shown(shown) - saved) <= 60, f"panel shows {shown!r}, server stored {saved}"
         # The summary is what the model reads from now on: the project's codename must have survived it.
         assert PROJECT_CODENAME in str(stored["summary"]), f"codename lost from summary: {str(stored['summary'])[:600]}"
-        assert [(request.status, request.error) for request in requests_zh] == [(200, None)], requests_zh
+        assert [(request.status, request.error, request.state) for request in requests_zh] == [(202, None, "succeeded")], (
+            requests_zh
+        )
 
         # English: nothing is left to compress, and the panel says so in the language of the page.
         switch_locale(client, page, "en", page_url=page_url)

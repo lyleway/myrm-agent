@@ -1,4 +1,4 @@
-"""What the manual-compaction Chrome E2Es share on the page side: the compact requests, the toasts, the composer and the strategy panel.
+"""What the manual-compaction Chrome E2Es share on the page side: the toasts, the composer and the strategy panel.
 
 [INPUT]
 - tests.support.chrome_mcp_e2e (POS: CDP page helpers, wait_for_state)
@@ -6,7 +6,6 @@
 - tests.support.context_compaction_e2e (POS: locale_text, the shipped wording)
 
 [OUTPUT]
-- record_compact_requests() / read_compact_requests() / wait_for_compact_answers(): every compact request the page sends, with what it sent and what the server answered
 - record_toasts() / wait_for_toast() / read_toasts(): every toast the page shows, in the order it showed them, and a wait for one by its wording
 - type_in_composer() / wait_for_palette_choice() / press_enter() / wait_for_composer(): a command typed and entered the way a user does
 - wait_for_compact_dialog() / compact_dialog_is_open() / tick_dont_remind() / confirm_compact_dialog() / forget_compact_reminder() / read_compact_reminder(): the confirmation a typed `/compact <topic>` asks for, and the choice it stores
@@ -15,51 +14,17 @@
 
 [POS]
 The page's own words are what a user reads, so a test takes them from the locale files and watches the page for them:
-a toast outlives a poll only briefly, hence the observer instead of a look at the screen. A compaction takes the real
-model minutes, so the request is recorded rather than awaited by the test.
+a toast outlives a poll only briefly, hence the observer instead of a look at the screen.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
 
 from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, wait_for_state
 from tests.support.chrome_skill_hooks_slash_js import COMPOSER_READY_JS, TYPE_JS
 from tests.support.context_compaction_e2e import locale_text
-
-# Passive: every compact request goes through unchanged; what it sent, how the server answered and how long the page waited are kept.
-_RECORD_COMPACT_REQUESTS_JS = r"""(() => {
-  if (window.__e2eCompactRequests) return { ok: true, installed: false };
-  const requests = [];
-  window.__e2eCompactRequests = requests;
-  const original = window.fetch.bind(window);
-  window.fetch = async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (!/\/chats\/[^/]+\/compact(\?|$)/.test(url)) return original(input, init);
-    const request = { status: null, error: null, ms: null, sent: null, result: null };
-    const started = performance.now();
-    requests.push(request);
-    try {
-      request.sent = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
-    } catch {
-      request.sent = null;
-    }
-    try {
-      const response = await original(input, init);
-      request.status = response.status;
-      response.clone().json().then((body) => { request.result = body?.compacted !== undefined ? body : (body?.data ?? body); }).catch(() => {});
-      return response;
-    } catch (error) {
-      request.error = error?.name ?? String(error);
-      throw error;
-    } finally {
-      request.ms = Math.round(performance.now() - started);
-    }
-  };
-  return { ok: true, installed: true };
-})()"""
 
 # A toast changes in place (a loading one turns into its result), so each look at a toast keeps the type and text it showed then.
 _RECORD_TOASTS_JS = """(() => {
@@ -103,15 +68,6 @@ _TOAST_SHOWN_JS = """((fragments, type) => {
 # The key the confirm dialog's "don't remind me" box writes to the browser's storage (DONT_REMIND_COMPACT_STORAGE_KEY).
 _REMINDER_KEY = "dontRemindCompact"
 
-# Ready once every compact request the page sent has been answered (or has failed), and at least `count` were sent.
-_COMPACT_ANSWERED_JS = """((count) => {
-  const requests = window.__e2eCompactRequests ?? [];
-  const answered = (request) =>
-    request.error !== null || (request.status !== null && (request.status !== 200 || request.result !== null));
-  const open = requests.filter((request) => !answered(request)).length;
-  return { ready: requests.length >= count && open === 0, sent: requests.length, unanswered: open };
-})"""
-
 _DIALOG_JS = """((title) => {
   const dialog = document.querySelector('[role="alertdialog"]');
   const text = dialog ? dialog.innerText : '';
@@ -148,63 +104,10 @@ _PALETTE_CHOICE_JS = """((needle) => {
 })"""
 
 
-@dataclass(frozen=True)
-class CompactRequest:
-    """One compact request as the page saw it: what it sent, how the server answered and how long the page waited."""
-
-    status: int | None
-    error: str | None
-    ms: int | None
-    sent: dict[str, object] | None
-    result: dict[str, object] | None
-
-    @property
-    def compacted(self) -> bool:
-        return bool(self.result and self.result.get("compacted") is True)
-
-    @property
-    def reason(self) -> object:
-        return self.result.get("reason") if self.result else None
-
-    @property
-    def tokens_saved(self) -> int:
-        saved = self.result.get("tokens_saved") if self.result else None
-        return saved if isinstance(saved, int) else 0
-
-    @property
-    def message_count(self) -> int:
-        count = self.result.get("message_count") if self.result else None
-        return count if isinstance(count, int) else 0
-
-
 def _evaluated(client: ChromeMcpClient, page: McpPage, script: str) -> dict[str, object]:
     state = client.evaluate(page, script, timeout_sec=15.0)
     assert isinstance(state, dict), state
     return state
-
-
-def record_compact_requests(client: ChromeMcpClient, page: McpPage) -> None:
-    installed = _evaluated(client, page, _RECORD_COMPACT_REQUESTS_JS)
-    assert installed.get("ok") is True, f"request recorder not installed: {installed!r}"
-
-
-def read_compact_requests(client: ChromeMcpClient, page: McpPage) -> list[CompactRequest]:
-    """The compact requests since ``record_compact_requests``; a request still waiting for its answer has no result yet."""
-    seen = client.evaluate(page, "(() => ({ requests: window.__e2eCompactRequests ?? null }))()", timeout_sec=15.0)
-    assert isinstance(seen, dict) and isinstance(seen.get("requests"), list), (
-        f"the request recorder was lost with the page: {seen!r}"
-    )
-    return [
-        CompactRequest(
-            status=item.get("status") if isinstance(item.get("status"), int) else None,
-            error=item.get("error") if isinstance(item.get("error"), str) else None,
-            ms=item.get("ms") if isinstance(item.get("ms"), int) else None,
-            sent=item.get("sent") if isinstance(item.get("sent"), dict) else None,
-            result=item.get("result") if isinstance(item.get("result"), dict) else None,
-        )
-        for item in seen["requests"]
-        if isinstance(item, dict)
-    ]
 
 
 def record_toasts(client: ChromeMcpClient, page: McpPage) -> None:
@@ -260,11 +163,6 @@ def wait_for_composer(client: ChromeMcpClient, page: McpPage, page_url: str, tex
   return {{ ready: value === {json.dumps(text)}, value }};
 }})()"""
     wait_for_state(client, page, script, timeout_sec=20.0, page_url=page_url)
-
-
-def wait_for_compact_answers(client: ChromeMcpClient, page: McpPage, page_url: str, count: int, *, timeout_sec: float) -> None:
-    """Wait until at least ``count`` compact requests were sent and none is still waiting for the server."""
-    wait_for_state(client, page, f"({_COMPACT_ANSWERED_JS})({count})", timeout_sec=timeout_sec, page_url=page_url)
 
 
 def forget_compact_reminder(client: ChromeMcpClient, page: McpPage) -> None:
