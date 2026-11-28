@@ -279,7 +279,7 @@ class RetrievalConfig:
     cross_rerank_min_candidates: int = 3
     """Skip the gate at or below this candidate count (no signal on tiny lists)."""
     cross_rerank_batch_size: int = 32
-    """Query-document pairs per rerank call, aligned with RerankingPipeline."""
+    """Query-document pairs per rerank call."""
     cross_rerank_timeout: float = 8.0
     """Wall-clock ceiling (seconds) for the rerank gate, also bounded by the
     pipeline deadline remainder; timeout degrades to the fused order."""

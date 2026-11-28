@@ -6,11 +6,13 @@
 
 [OUTPUT]
 - compaction_answering(): while it is open, a manual compaction run calls the given stand-in with no session
-- wait_for_run(): asks an endpoint for the run until it leaves ``running``
+- run_route(): the endpoint of the run a start request was answered with
+- wait_for_run(): asks that endpoint for the run until it leaves ``running``
 
 [POS]
-A request to the compact endpoint only starts a run; the compaction happens afterwards on the event loop of the server,
-and the page reads the outcome from a second endpoint. A test therefore holds the stand-in open across both requests.
+A request to the compact endpoint only starts a run and names it; the compaction happens afterwards on the event loop of
+the server, and the page reads the outcome from the endpoint of that run. A test therefore holds the stand-in open across
+both requests.
 """
 
 from __future__ import annotations
@@ -18,14 +20,16 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from app.services.chat.compact._types import CompactResult
 
-RUN_ROUTE = "/chat-1/compact/run"
+if TYPE_CHECKING:
+    from httpx2 import Response  # the response type starlette's TestClient returns
+
 _RUN_DEADLINE_S = 5.0
 
 Compaction = Callable[..., Awaitable[CompactResult]]
@@ -45,8 +49,18 @@ def compaction_answering(compaction: Compaction) -> Iterator[None]:
         yield
 
 
-def wait_for_run(client: TestClient, route: str = RUN_ROUTE) -> dict[str, object]:
-    """The ``data`` of the run once it has ended. The run goes on in the loop thread of the client while this polls."""
+def run_route(started: Response) -> str:
+    """The endpoint of the run ``started`` was answered with: the path the request was posted to, then ``/runs/<run id>``."""
+    run_id = cast("dict[str, dict[str, str]]", started.json())["data"]["run_id"]
+    return f"{started.request.url.path}/runs/{run_id}"
+
+
+def wait_for_run(client: TestClient, started: Response) -> dict[str, object]:
+    """The ``data`` of the run ``started`` was answered with, once it has ended.
+
+    The run goes on in the loop thread of the client while this polls.
+    """
+    route = run_route(started)
     deadline = time.monotonic() + _RUN_DEADLINE_S
     while True:
         response = client.get(route)

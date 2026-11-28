@@ -20,8 +20,9 @@ from dataclasses import dataclass
 
 from tests.support.chrome_mcp_e2e import ChromeMcpClient, McpPage, wait_for_state
 
-# Passive: every compaction the page starts goes through unchanged. The request that starts one is answered 202 at once and the
-# page then polls its run, so a poll that reads an ended run gives every accepted request of that chat still waiting its outcome.
+# Passive: every compaction the page starts goes through unchanged. The request that starts one is answered 202 at once, naming
+# the run, and the page then polls that run, so a poll that reads an ended run gives every request that was answered with
+# that run id its outcome (a request that joined a run in flight was answered with the same id).
 _RECORD_COMPACT_REQUESTS_JS = r"""(() => {
   if (window.__e2eCompactRequests) return { ok: true, installed: false };
   const requests = [];
@@ -30,22 +31,22 @@ _RECORD_COMPACT_REQUESTS_JS = r"""(() => {
   const elapsed = (request) => Math.round(performance.now() - request.startedAt);
   window.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    const matched = /\/chats\/([^/]+)\/compact(\/run)?(\?|$)/.exec(url);
+    const matched = /\/chats\/([^/]+)\/compact(\/runs\/([^/?]+))?(\?|$)/.exec(url);
     if (!matched) return original(input, init);
-    const chatId = matched[1];
-    if (matched[2]) {
+    const polledRunId = matched[3];
+    if (polledRunId) {
       const polled = await original(input, init);
       polled.clone().json().then((body) => {
         const run = body?.data ?? body;
         if (run?.status !== 'succeeded' && run?.status !== 'failed') return;
         for (const request of requests) {
-          if (request.chatId !== chatId || request.status !== 202 || request.state !== null) continue;
+          if (request.runId !== polledRunId || request.state !== null) continue;
           Object.assign(request, { state: run.status, result: run.result ?? null, failure: run.error ?? null, ms: elapsed(request) });
         }
       }).catch(() => {});
       return polled;
     }
-    const request = { chatId, status: null, error: null, ms: null, sent: null, state: null, result: null, failure: null, startedAt: performance.now() };
+    const request = { runId: null, status: null, error: null, ms: null, sent: null, state: null, result: null, failure: null, startedAt: performance.now() };
     requests.push(request);
     try {
       request.sent = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
@@ -55,7 +56,13 @@ _RECORD_COMPACT_REQUESTS_JS = r"""(() => {
     try {
       const response = await original(input, init);
       request.status = response.status;
-      if (response.status !== 202) request.ms = elapsed(request);
+      if (response.status === 202) {
+        // Read before the response goes on: the page's first poll comes after it and must find the run id already recorded.
+        const accepted = await response.clone().json().catch(() => null);
+        request.runId = (accepted?.data ?? accepted)?.run_id ?? null;
+      } else {
+        request.ms = elapsed(request);
+      }
       return response;
     } catch (error) {
       request.error = error?.name ?? String(error);

@@ -22,96 +22,64 @@ _LOCALES = ("en", "zh-CN")
 
 def test_default_locale_is_english() -> None:
     assert DEFAULT_WEB_FETCH_TOOL_DESCRIPTION_LOCALE == "en"
-    assert resolve_web_fetch_tool_description(False) == (resolve_web_fetch_tool_description(False, None))
+    assert resolve_web_fetch_tool_description() == resolve_web_fetch_tool_description(None)
+    assert resolve_web_fetch_tool_description() == resolve_web_fetch_tool_description("en")
 
 
-def test_web_fetch_tool_description_preserves_operation_guardrails_en() -> None:
-    desc = resolve_web_fetch_tool_description(True, "en")
-    required_fragments = (
-        "fetch_and_extract",
-        "Query rewriting rules",
-        "mp.weixin.qq.com",
-    )
-    for fragment in required_fragments:
-        assert fragment in desc, f"missing operation guardrail fragment: {fragment!r}"
+def test_description_keeps_the_wechat_guardrail_en() -> None:
+    assert "mp.weixin.qq.com" in resolve_web_fetch_tool_description("en")
+    assert "use the article URL exactly as the user provided it" in resolve_web_fetch_tool_description("en")
 
 
-def test_web_fetch_tool_description_preserves_operation_guardrails_zh() -> None:
-    desc = resolve_web_fetch_tool_description(True, "zh-CN")
-    required_fragments = (
-        "fetch_and_extract",
-        "query 改写规则",
-        "mp.weixin.qq.com",
-    )
-    for fragment in required_fragments:
-        assert fragment in desc, f"missing operation guardrail fragment: {fragment!r}"
+def test_description_keeps_the_wechat_guardrail_zh() -> None:
+    assert "mp.weixin.qq.com" in resolve_web_fetch_tool_description("zh-CN")
+    assert "请原样使用用户提供的文章 URL" in resolve_web_fetch_tool_description("zh-CN")
 
 
-def test_every_mode_explains_that_long_pages_are_shortened() -> None:
-    """Both modes end in the same full read, which cuts long pages; the model must be told how to read on."""
-    for enable_extract in (False, True):
-        assert "Long pages come back shortened" in resolve_web_fetch_tool_description(enable_extract, "en")
-        assert "过长的页面会被截短返回" in resolve_web_fetch_tool_description(enable_extract, "zh-CN")
+def test_description_explains_that_long_pages_are_shortened() -> None:
+    """The full read cuts long pages; the model must be told how to read on."""
+    assert "Long pages come back shortened" in resolve_web_fetch_tool_description("en")
+    assert "过长的页面会被截短返回" in resolve_web_fetch_tool_description("zh-CN")
 
 
 def test_description_never_points_at_browser_tools() -> None:
     """Routing between reading and browsing lives on the navigation tool, so this text never dangles without it."""
-    for enable_extract in (False, True):
-        for locale in (None, *_LOCALES):
-            desc = resolve_web_fetch_tool_description(enable_extract, locale)
-            assert "browser" not in desc.lower(), f"dangling browser reference ({enable_extract=}, {locale=})"
-            assert "浏览器" not in desc, f"dangling browser reference ({enable_extract=}, {locale=})"
+    for locale in (None, *_LOCALES):
+        desc = resolve_web_fetch_tool_description(locale)
+        assert "browser" not in desc.lower(), f"dangling browser reference ({locale=})"
+        assert "浏览器" not in desc, f"dangling browser reference ({locale=})"
 
 
 def test_web_fetch_tool_description_never_leaks_policy_details() -> None:
     """Blocklist/decontamination internals must never reach the LLM prompt."""
-    for enable_extract in (False, True):
-        for locale in (None, "en", "zh-CN"):
-            desc = resolve_web_fetch_tool_description(enable_extract, locale)
-            for leaked in ("blocked", "decontam", "Hugging Face", "benchmark"):
-                assert leaked not in desc, f"policy implementation detail leaked into prompt: {leaked!r}"
+    for locale in (None, *_LOCALES):
+        desc = resolve_web_fetch_tool_description(locale)
+        for leaked in ("blocked", "decontam", "Hugging Face", "benchmark"):
+            assert leaked not in desc, f"policy implementation detail leaked into prompt: {leaked!r}"
 
 
-def test_plain_mode_describes_only_what_the_schema_accepts() -> None:
-    """Without extract capability the tool has no ``operation`` argument, so the description must not name one."""
-    limit = create_web_fetch_tool().args_schema.model_json_schema()["properties"]["urls"]["maxItems"]
+def test_description_describes_only_what_the_schema_accepts() -> None:
+    """The tool has no ``operation`` or ``questions`` argument, so the description must not name one."""
+    limit = create_web_fetch_tool().get_input_jsonschema()["properties"]["urls"]["maxItems"]
     for locale, limit_phrase in (("en", f"up to {limit}"), ("zh-CN", f"最多 {limit} 个")):
-        desc = resolve_web_fetch_tool_description(False, locale)
+        desc = resolve_web_fetch_tool_description(locale)
         assert "fetch_and_extract" not in desc
         assert "fetch_full_content" not in desc
         assert "operation" not in desc.lower()
+        assert "questions" not in desc.lower()
         assert limit_phrase in desc, "the per-call URL limit must be stated and match the schema"
 
 
-def test_extract_mode_keeps_naming_both_operations() -> None:
-    en = resolve_web_fetch_tool_description(True, "en")
-    zh = resolve_web_fetch_tool_description(True, "zh-CN")
-    for desc in (en, zh):
-        assert 'operation: "fetch_full_content"' in desc or 'operation："fetch_full_content"' in desc
-        assert 'operation: "fetch_and_extract"' in desc or 'operation："fetch_and_extract"' in desc
-    assert "are supported via fetch_full_content;" in en
-    assert "可通过 fetch_full_content 获取；" in zh
-
-
-def test_plain_tool_schema_takes_urls_and_reason_only() -> None:
-    schema = create_web_fetch_tool().args_schema.model_json_schema()
+def test_tool_schema_takes_urls_and_reason_only() -> None:
+    schema = create_web_fetch_tool().get_input_jsonschema()
 
     assert set(schema["properties"]) == {"urls", "reason"}
     assert set(schema["required"]) == {"urls", "reason"}
     assert (schema["properties"]["urls"]["minItems"], schema["properties"]["urls"]["maxItems"]) == (1, 5)
 
 
-def test_extract_tool_schema_keeps_operation_and_questions() -> None:
-    schema = create_web_fetch_tool(MagicMock(), MagicMock()).args_schema.model_json_schema()
-
-    assert set(schema["properties"]) == {"urls", "operation", "questions", "reason"}
-    assert schema["properties"]["operation"]["default"] == "fetch_and_extract"
-    assert schema["properties"]["questions"]["maxItems"] == 5
-    assert "maxItems" not in schema["properties"]["urls"]
-
-
 @pytest.mark.asyncio
-async def test_plain_tool_refuses_more_urls_than_its_limit() -> None:
+async def test_tool_refuses_more_urls_than_its_limit() -> None:
     tool = create_web_fetch_tool()
     urls = [f"https://example.com/{i}" for i in range(6)]
 
@@ -119,29 +87,28 @@ async def test_plain_tool_refuses_more_urls_than_its_limit() -> None:
         await tool.ainvoke({"urls": urls, "reason": "too many"})
 
 
-def test_plain_tool_urls_field_forbids_inventing_urls_and_states_the_limit() -> None:
-    urls = create_web_fetch_tool().args_schema.model_json_schema()["properties"]["urls"]
+def test_urls_field_forbids_inventing_urls_and_states_the_limit() -> None:
+    urls = create_web_fetch_tool().get_input_jsonschema()["properties"]["urls"]
     assert "never invent URLs" in urls["description"]
     assert f"up to {urls['maxItems']}" in urls["description"]
 
 
 def test_create_web_fetch_tool_default_english_description() -> None:
     tool = create_web_fetch_tool()
-    assert _weave_dynamic_schemas([tool])[0].description == resolve_web_fetch_tool_description(False, "en")
+    assert _weave_dynamic_schemas([tool])[0].description == resolve_web_fetch_tool_description("en")
 
 
 def test_create_web_fetch_tool_chinese_locale() -> None:
     tool = create_web_fetch_tool(description_locale="zh-CN")
     woven = _weave_dynamic_schemas([tool])[0]
-    assert woven.description == resolve_web_fetch_tool_description(False, "zh-CN")
+    assert woven.description == resolve_web_fetch_tool_description("zh-CN")
     assert woven.description.startswith("获取已知 URL 的完整内容")
 
 
-@pytest.mark.parametrize("enable_extract", [False, True])
-def test_every_mode_names_the_document_formats_it_reads(enable_extract: bool) -> None:
+def test_description_names_the_document_formats_it_reads() -> None:
     """Without this sentence the model detours through bash to read a document the tool handles natively."""
-    assert "PDF, DOCX, XLSX and PPTX" in resolve_web_fetch_tool_description(enable_extract, "en")
-    assert "PDF、DOCX、XLSX、PPTX" in resolve_web_fetch_tool_description(enable_extract, "zh-CN")
+    assert "PDF, DOCX, XLSX and PPTX" in resolve_web_fetch_tool_description("en")
+    assert "PDF、DOCX、XLSX、PPTX" in resolve_web_fetch_tool_description("zh-CN")
 
 
 def test_navigation_tool_routes_read_only_reads_to_web_fetch_only_while_it_is_mounted() -> None:

@@ -9,6 +9,12 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database.models.base import Base
 
+# ``stream_loop`` and ``stream_finalize`` bind the agent stream and the timer arming by name when they are first
+# imported, and tests under this directory replace both with stand-ins. A module imported for the first time inside
+# such a test keeps the stand-in for every test after it, so both are imported here, before any test runs.
+from app.services.agent.stream_session import stream_finalize as _stream_finalize  # noqa: F401
+from app.services.agent.stream_session import stream_loop as _stream_loop  # noqa: F401
+
 
 @pytest.fixture
 async def test_db():

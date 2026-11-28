@@ -67,7 +67,7 @@ class TestAnEnvelopeWithMoreThanSources:
     def test_the_model_reads_the_envelope_without_its_sources_in_the_original_order(self) -> None:
         payload = {
             "content": "page text",
-            "metadata": {"operation": "fetch_full_content", "sources": SOURCES, "truncated": False},
+            "metadata": {"sources": SOURCES, "truncated": False, "raw_chars": 9},
             "evicted_ref": None,
         }
 
@@ -76,7 +76,7 @@ class TestAnEnvelopeWithMoreThanSources:
         assert result.content == json.dumps(
             {
                 "content": "page text",
-                "metadata": {"operation": "fetch_full_content", "truncated": False},
+                "metadata": {"truncated": False, "raw_chars": 9},
                 "evicted_ref": None,
             },
             ensure_ascii=False,

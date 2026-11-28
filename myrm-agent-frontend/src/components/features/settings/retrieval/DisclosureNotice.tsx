@@ -17,7 +17,6 @@ const DisclosureNotice = memo(() => {
       <ul className="list-disc space-y-1 pl-6 text-xs leading-relaxed text-muted-foreground">
         <li>{t('disclosure.embedding')}</li>
         <li>{t('disclosure.rerank')}</li>
-        <li>{t('disclosure.pageReading')}</li>
       </ul>
       <p className="pl-6 text-xs leading-relaxed text-muted-foreground">{t('disclosure.coverage')}</p>
     </div>

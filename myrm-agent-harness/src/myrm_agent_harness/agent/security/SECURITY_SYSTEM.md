@@ -1375,6 +1375,8 @@ MCP annotations 是服务端对自己工具的声明，宿主无法核实，所�
 
 同一原则覆盖其余消费者：只读沙箱（子 Agent 与 IPC 脚本）一律拒绝 MCP 工具，保存脚本不得调用 MCP 工具，PTC 客户端从不重放调用，两条结果缓存路径对未列入 `cacheable_tools` 的调用一律清缓存。架构门禁 `tests/architecture/test_mcp_annotations_gate.py` 与不变量测试 `tests/toolkits/mcp/test_annotations_invariants.py` 固定这些行为。
 
+要少弹审批卡，用的是用户在审批卡上授予的 allow-always（可按工具授予，也可限定时长），不是声明。若日后要让某类 MCP 调用整体免审，信任输入只能来自宿主侧（用户对这台服务端的显式授权），不能来自服务端的自述，并且要有真实的审批弹卡频次数据说明值得做。
+
 ### 权限分离的关键意义
 
 `code_interpreter`（沙箱代码执行）和 `shell_exec`（原始 Shell 命令）是两个不同的权限类型，风险等级不同：

@@ -85,10 +85,10 @@ browser = [
 qdrant = [
   "qdrant-client>=1.20.0", # Qdrant SDK (embedded + remote)
 ]
-# toolkits/retriever/ - 高级检索功能（中文分词、向量检索、稀疏检索）
+# toolkits/retriever/ - 检索原语（中文分词、嵌入、稀疏检索、重排序、分块）
 retrieval = [
   "langchain-text-splitters>=1.1.3,<2", # 代码感知文本分块 (retriever/splitter/code_utils.py)
-  "numpy>=2.5.4",     # embedding 序列化 + BM25 数值计算
+  "numpy>=2.5.4",     # rank-bm25 的数值计算依赖（版本下限）
   "tenacity>=9.2.1",  # cloud embedding retries
   "jieba>=0.42.1",    # 中文分词 (BM25 tokenizer)
   "rank-bm25>=0.2.2", # BM25 稀疏检索算法

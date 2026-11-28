@@ -8,6 +8,7 @@ that resolves the policy at call time, the same way the browser tool's domain li
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 from unittest.mock import patch
 
 from app.ai_agents.general_agent.tool_setup import ToolSetupMixin
@@ -20,9 +21,6 @@ class _Host(ToolSetupMixin):
     channel_name = "web_chat"
     enable_web_fetch = True
     fetch_raw_webpage = False
-    enable_advanced_retrieval = False
-    reranker_config = None
-    embedding_config = None
     search_depth = "basic"
     enable_web_search = False
     search_service_cfg = None
@@ -47,7 +45,7 @@ def _blocklist_provider(host: _Host) -> Callable[[], tuple[str, ...]]:
     assert create.call_count == 1
     provider = create.call_args.kwargs["network_blocklist_provider"]
     assert callable(provider)
-    return provider  # type: ignore[no-any-return]
+    return cast("Callable[[], tuple[str, ...]]", provider)
 
 
 def test_the_provider_unites_the_users_and_the_agents_blocklists() -> None:

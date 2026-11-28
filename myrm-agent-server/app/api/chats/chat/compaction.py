@@ -23,8 +23,8 @@ class CompactRequest(BaseModel):
 
 
 def _run_data(run: CompactRun) -> dict[str, object]:
-    """What the page reads of a run: its state, and the result or the failure once the run has ended."""
-    data: dict[str, object] = {"status": run.state.value}
+    """What the page reads of a run: its id and state, and the result or the failure once the run has ended."""
+    data: dict[str, object] = {"run_id": run.run_id, "status": run.state.value}
     if run.result is not None:
         data["result"] = {
             "compacted": run.result.compacted,
@@ -43,24 +43,25 @@ def _run_data(run: CompactRun) -> dict[str, object]:
 
 @router.post("/{chat_id}/compact", response_model=StandardSuccessResponse, status_code=202)
 async def start_compaction(chat_id: str, body: CompactRequest | None = None) -> JSONResponse:
-    """Start compacting the chat context in the background and answer at once; read the outcome from ``/compact/run``.
+    """Start compacting the chat context in the background and answer at once, naming the run that does it.
 
-    The compaction has a model summarise the history and outlasts what a proxy lets one request wait. Original messages
-    are preserved: the summary is used by the Agent layer to reduce token cost on subsequent interactions. The caller
-    asked for this compaction, so the anti-thrash guard that holds back automatic attempts does not apply. A chat whose
-    run is still going is not compacted twice: the request joins that run.
+    The page reads the outcome from ``/compact/runs/{run_id}``: the compaction has a model summarise the history and
+    outlasts what a proxy lets one request wait. Original messages are preserved: the summary is used by the Agent layer
+    to reduce token cost on subsequent interactions. The caller asked for this compaction, so the anti-thrash guard that
+    holds back automatic attempts does not apply. A chat whose run is still going is not compacted twice: the request
+    joins that run.
     """
     focus_topic = body.focus_topic.strip() if body and body.focus_topic else ""
     return success_response(data=_run_data(start_compact_run(chat_id, focus_topic)), status_code=202)
 
 
-@router.get("/{chat_id}/compact/run", response_model=StandardSuccessResponse)
-async def get_compaction_run(chat_id: str) -> JSONResponse:
-    """The latest manual compaction of the chat: running, or ended with its result or its failure.
+@router.get("/{chat_id}/compact/runs/{run_id}", response_model=StandardSuccessResponse)
+async def get_compaction_run(chat_id: str, run_id: str) -> JSONResponse:
+    """A manual compaction of the chat by its id: running, or ended with its result or its failure.
 
-    The server remembers only the latest run per chat and only until it restarts, so a chat with none is a 404.
+    The server remembers only the newest runs and only until it restarts, so a run it does not hold is a 404.
     """
-    run = get_compact_run(chat_id)
+    run = get_compact_run(chat_id, run_id)
     if run is None:
         raise not_found_error("Compaction run")
     return success_response(data=_run_data(run))

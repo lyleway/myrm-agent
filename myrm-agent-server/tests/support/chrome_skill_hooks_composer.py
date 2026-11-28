@@ -255,7 +255,9 @@ def drive_chat_turn(
     page's own route made of the address (the attach would cover for a route that did not open the chat).
     ``before_send`` runs once the chat is attached and the composer is ready, for example to wait until the
     agent's own configuration (its tools) has reached the page: a message sent earlier runs on the defaults.
-    ``while_open`` runs after sending, with the page still open (approval cards live there).
+    ``while_open`` runs after sending, with the page still open (approval cards live there). The call returns when
+    ``while_open`` does, without waiting for the turn to close: a declined approval can leave the model retrying onto a
+    new card that the next turn's page then picks up, so a test puts the declining turn last.
     """
     chat_id, skill_name = probe.chat_id, probe.skill_name
     chat_url = f"{ui_url.rstrip('/')}{probe.ui_path}"

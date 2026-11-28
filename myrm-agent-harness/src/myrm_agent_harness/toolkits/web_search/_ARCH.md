@@ -22,8 +22,8 @@ Bug ledgers (local-only: git-ignored and excluded from the wheel): `web_search_<
 |------|------|-------------|-------|
 | __init__.py | Package | Toolkit entry point; lazy re-exports WebSearchTools, RestSearch, SearchServiceConfig | ✅ |
 | engine.py | Core | WebSearchTools wrapper: parallel per-question search, one shared merge (round-robin, dedup, domain diversity), first `top_k` returned | ✅ |
-| web_search_agent_tools.py | Core | LangChain `web_search_tool` factory; `fetch_and_extract_available` tells it whether the agent's `web_fetch_tool` offers `fetch_and_extract` | ✅ |
-| _web_search_tool_description.py | Core | LLM-visible tool description SSOT (EN/ZH); recommends `fetch_and_extract` only when the agent's `web_fetch_tool` offers it | ✅ |
+| web_search_agent_tools.py | Core | LangChain `web_search_tool` factory | ✅ |
+| _web_search_tool_description.py | Core | LLM-visible tool description SSOT (EN/ZH) | ✅ |
 
 ## Package Root Files (facade only)
 

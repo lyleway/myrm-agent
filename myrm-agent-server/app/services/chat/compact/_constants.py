@@ -9,6 +9,7 @@
 - DEFAULT_TOOL_SCHEMA_TOKEN_RESERVE, MAX_TOOL_OVERHEAD_TOKENS: Token budgets
 - COMPACT_INACTIVITY_TIMEOUT_S, COMPACT_TOTAL_CEILING_S: Timeout guards
 - COMPACT_RUN_DRAIN_TIMEOUT_S: How long shutdown waits for a manual compaction run in flight
+- COMPACT_RUN_HISTORY: How many manual compaction runs the registry keeps
 
 [POS]
 Compaction 子包共享常量。被 service.py、idle_estimate.py、run.py 等引用。
@@ -28,3 +29,6 @@ COMPACT_TOTAL_CEILING_S = 600.0
 # The Agent gateway drains for 120 s and uvicorn's graceful shutdown allows 120 s inside the container's 150 s stop grace;
 # the two drains overlap, so the compaction drain gets the same budget rather than the compaction's own 600 s ceiling.
 COMPACT_RUN_DRAIN_TIMEOUT_S = 120.0
+# A page asks for its run within seconds of the run ending, so only the newest runs are ever read; the cap keeps what the
+# registry holds from growing with every compaction a caller starts. A run still going is never dropped.
+COMPACT_RUN_HISTORY = 64

@@ -69,6 +69,12 @@ _DANGEROUS_CALLS = frozenset(
 )
 
 # Safe standard library modules permitted in scripts alongside skills/tools.
+# ``asyncio`` is deliberately not one of them. A script that passes this check gets an intent, and the intent names
+# the allowlist entry the call is matched against, so admitting the module would let a script that starts a shell
+# with ``asyncio.create_subprocess_shell`` match a tool-call allowance. The entrypoint the bash tool description
+# teaches (``import asyncio`` + ``asyncio.run(main())``) therefore yields no intent and takes the full approval flow.
+# Admitting only ``asyncio.run`` / ``asyncio.gather`` first needs negative cases for aliases and indirection
+# (``x = asyncio``, ``getattr``, ``from asyncio import ...``).
 _SAFE_STDLIB_MODULES = frozenset(
     {
         "json",

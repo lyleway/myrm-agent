@@ -22,10 +22,6 @@ _TABLE_NAMES = ("_EXPORTS", "_LAZY_IMPORTS")
 # ``api`` mirrors its ~300 names in ``api/__init__.pyi`` (checked by tests/api/test_public_surface.py); a second
 # mirror inside ``__init__.py`` would only duplicate it.
 _MIRRORED_BY_STUB = frozenset({"api/__init__.py"})
-# Names a package's ``__getattr__`` builds on first access: no importable definition exists to mirror.
-_BUILT_IN_GETATTR = {
-    "toolkits/retriever/__init__.py": frozenset({"preload_retriever_models", "start_background_preload"}),
-}
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,14 +135,10 @@ def _scan(source: str, package: str) -> _Lazy | None:
     return _Lazy(all_names, bound, table)
 
 
-def _problems(lazy: _Lazy, *, built_in_getattr: frozenset[str] = frozenset()) -> list[str]:
+def _problems(lazy: _Lazy) -> list[str]:
     if lazy.all_names is None:
         return ["__all__ is not a literal list of strings, so the exported names cannot be checked"]
-    found = [
-        f"{name} is exported but not bound for type checkers"
-        for name in lazy.all_names
-        if name not in lazy.bound and name not in built_in_getattr
-    ]
+    found = [f"{name} is exported but not bound for type checkers" for name in lazy.all_names if name not in lazy.bound]
     for name, target in lazy.table.items():
         if name not in lazy.all_names:
             found.append(f"{name} is in the lazy table but not in __all__")
@@ -174,11 +166,7 @@ def test_every_lazily_exported_name_is_typed() -> None:
     packages = _lazy_packages()
     assert len(packages) >= 20, "the scan stopped finding the lazy packages"
 
-    violations = [
-        f"{rel}: {problem}"
-        for rel, lazy in packages.items()
-        for problem in _problems(lazy, built_in_getattr=_BUILT_IN_GETATTR.get(rel, frozenset()))
-    ]
+    violations = [f"{rel}: {problem}" for rel, lazy in packages.items() for problem in _problems(lazy)]
     assert not violations, "\n".join(violations)
 
 
@@ -198,10 +186,6 @@ def test_every_lazily_exported_name_resolves() -> None:
 
 def test_the_exemptions_are_still_needed() -> None:
     """An exemption that no longer applies is removed, so it cannot hide a later regression."""
-    packages = _lazy_packages()
-    for rel, names in _BUILT_IN_GETATTR.items():
-        lazy = packages[rel]
-        assert all(name in (lazy.all_names or ()) and name not in lazy.bound for name in names), rel
     for rel in _MIRRORED_BY_STUB:
         assert (_HARNESS_SRC / rel).with_suffix(".pyi").is_file(), rel
 

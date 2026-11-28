@@ -1,11 +1,8 @@
 """Unit tests for canonical args hash computation."""
 
-import pytest
-from pydantic import BaseModel
-
 from myrm_agent_harness.agent.security.tool_registry import compute_canonical_args_hash
 from myrm_agent_harness.core.security.tool_registry import TOOL_CANONICAL_PARAMS
-from myrm_agent_harness.toolkits.web_fetch.web_fetch_agent_tools import _FetchOrExtractInput, _FullContentInput
+from myrm_agent_harness.toolkits.web_fetch.web_fetch_agent_tools import _FullContentInput
 
 
 class TestCanonicalArgsHash:
@@ -130,12 +127,11 @@ class TestWebFetchCanonicalArgs:
     def test_the_same_pages_hash_alike_whatever_the_auxiliary_fields(self) -> None:
         first = compute_canonical_args_hash("web_fetch_tool", {"urls": ["https://example.com/a"], "reason": "one"})
         second = compute_canonical_args_hash(
-            "web_fetch_tool", {"urls": ["https://example.com/a"], "reason": "two", "operation": "fetch"}
+            "web_fetch_tool", {"urls": ["https://example.com/a"], "reason": "two", "unrelated": "ignored"}
         )
 
         assert first == second
 
-    @pytest.mark.parametrize("schema", [_FullContentInput, _FetchOrExtractInput])
-    def test_every_canonical_parameter_is_an_argument_the_tool_receives(self, schema: type[BaseModel]) -> None:
+    def test_every_canonical_parameter_is_an_argument_the_tool_receives(self) -> None:
         """A canonical name the tool does not take leaves the hash constant for every call."""
-        assert set(TOOL_CANONICAL_PARAMS["web_fetch_tool"]) <= set(schema.model_fields)
+        assert set(TOOL_CANONICAL_PARAMS["web_fetch_tool"]) <= set(_FullContentInput.model_fields)

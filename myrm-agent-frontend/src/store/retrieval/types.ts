@@ -24,7 +24,7 @@ export interface RetrievalConfig {
   rerankerApplyStatus: ApplyStatus;
   rerankerApplyMessage?: string;
 
-  // 高级检索开关（控制网页抓取的嵌入+重排序与记忆召回的重排序）
+  // 重排序开关（仅控制记忆召回的重排序；字段名随已持久化的配置与后端请求字段保持不变）
   enableAdvancedRetrieval: boolean;
 
   // Orphan collection 状态（模型切换后的旧记忆检测）
@@ -52,7 +52,7 @@ interface RetrievalActions {
   applyReranker: () => Promise<{ success: boolean; message: string }>;
   resetRerankerToApplied: () => void;
 
-  // 高级检索开关
+  // 重排序开关
   setEnableAdvancedRetrieval: (enable: boolean) => void;
 
   // Orphan 重建

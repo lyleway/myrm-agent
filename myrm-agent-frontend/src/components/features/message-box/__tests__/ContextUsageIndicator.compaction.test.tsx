@@ -103,9 +103,9 @@ describe('ContextUsageIndicator after a compaction', () => {
     // The server accepts the compaction at once and the page asks for its run; here the run has already succeeded.
     mockApiRequest.mockImplementation(async (url: string) => {
       if (url === `/chats/${chatId}/compact`) {
-        return { status: 'running' };
+        return { run_id: 'run-1', status: 'running' };
       }
-      if (url === `/chats/${chatId}/compact/run`) {
+      if (url === `/chats/${chatId}/compact/runs/run-1`) {
         return {
           status: 'succeeded',
           result: { compacted: true, message_count: 6, tokens_saved: 6000, reason: null },

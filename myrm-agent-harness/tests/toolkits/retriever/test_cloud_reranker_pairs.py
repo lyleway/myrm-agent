@@ -2,16 +2,14 @@
 
 A provider answers with hits ranked by relevance, each labelled with the index of the document it scored. The score
 must follow that label back to the pair; reading the hits in the order they arrive gives every document the score of
-whichever document ranked at its position. The Web reranking pipeline is covered over the same provider because it is
-the consumer that sorts each query's documents by these scores.
+whichever document ranked at its position. The memory rerank gate is the consumer that orders candidates by these
+scores.
 """
 
 from __future__ import annotations
 
 import pytest
-from langchain_core.documents import Document
 
-from myrm_agent_harness.toolkits.retriever.hybrid_search.reranking_pipeline import RerankingPipeline
 from myrm_agent_harness.toolkits.retriever.reranker.base import RerankResult
 from myrm_agent_harness.toolkits.retriever.reranker.cloud_reranker import CloudReranker
 from tests.support.rerank_provider import Relevance, provider_reranker
@@ -81,22 +79,3 @@ async def test_a_hit_labelled_outside_the_queried_documents_is_an_error(index: i
     reranker = _MislabelingReranker(index)
     with pytest.raises(ValueError, match="outside the 2 documents"):
         await reranker.rerank_pairs([(QUERY, LOW), (QUERY, HIGH)])
-
-
-async def test_pipeline_sorts_each_query_by_what_the_provider_scored() -> None:
-    first, second = "first question", "second question"
-    relevance: Relevance = {
-        (first, "a1"): 0.2,
-        (first, "a2"): 0.8,
-        (first, "a3"): 0.5,
-        (second, "b1"): 0.1,
-        (second, "b2"): 0.7,
-    }
-    query_results = {
-        first: [(Document(page_content=text), 0.9 - 0.1 * rank) for rank, text in enumerate(("a1", "a2", "a3"))],
-        second: [(Document(page_content=text), 0.9 - 0.1 * rank) for rank, text in enumerate(("b1", "b2"))],
-    }
-    async with provider_reranker(relevance) as reranker:
-        reranked = await RerankingPipeline(reranker).rerank_query_results(query_results)
-    assert [(doc.page_content, score) for doc, score in reranked[first]] == [("a2", 0.8), ("a3", 0.5), ("a1", 0.2)]
-    assert [(doc.page_content, score) for doc, score in reranked[second]] == [("b2", 0.7), ("b1", 0.1)]
