@@ -75,7 +75,8 @@ def extract_dependencies_from_package_json(
     dependencies: list[DeclaredDependency] = []
     try:
         pkg = json.loads(content)
-    except json.JSONDecodeError as exc:
+    except (ValueError, RecursionError) as exc:
+        # ValueError covers JSONDecodeError and the integer-digit limit; RecursionError covers hostile nesting.
         logger.debug("Failed to parse package.json for dependencies (%s): %s", file_path, exc)
         return dependencies
 

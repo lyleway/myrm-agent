@@ -8,7 +8,7 @@ Tests mirroring `src/myrm_agent_harness/agent/skills/` layout.
 
 | Path | Coverage |
 |------|----------|
-| `market/` | Market sources (Aliyun/ModelScope) + batch installers + BaseSkillMarketService + the file-install gates that refuse a package before it is installed: names the file system cannot hold and the fixed refusal sentences (`market/test_file_install_package_names.py`), plugin documents over their decode ceiling (`market/test_file_install_document_limits.py`) |
+| `market/` | Market sources (Aliyun/ModelScope) + batch installers + BaseSkillMarketService + the file-install gates that refuse a package before it is installed: names the file system cannot hold and the fixed refusal sentences (`market/test_file_install_package_names.py`), plugin documents over their decode ceiling (`market/test_file_install_document_limits.py`); the install and the preview of a package whose plugin documents are nested past the loader's limit (`market/test_market_untrusted_nesting.py`) |
 | `sync/` | Manifest (`test_sync_manifest.py`), manager (`test_sync_manager.py`), quality gate, integration (`test_skill_sync.py`) |
 | `evolution/` | Skill evolution pipeline components |
 | `curator/` | SkillCurator lifecycle + consolidation |

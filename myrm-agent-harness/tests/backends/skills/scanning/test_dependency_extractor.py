@@ -1,6 +1,9 @@
 """Tests for dependency_extractor.py — package.json, requirements.txt, pyproject.toml."""
 
+import sys
 from pathlib import Path
+
+import pytest
 
 from myrm_agent_harness.backends.skills.scanning.dependency_extractor import (
     extract_dependencies_from_files,
@@ -39,6 +42,25 @@ def test_extract_dependencies_from_package_json() -> None:
 def test_extract_dependencies_from_package_json_invalid() -> None:
     assert extract_dependencies_from_package_json("invalid json") == []
     assert extract_dependencies_from_package_json("[]") == []
+
+
+DIGIT_LIMIT = sys.get_int_max_str_digits()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param('{"a":' * 20_000 + "1" + "}" * 20_000, id="nested past the depth the parser reads"),
+        pytest.param(
+            '{"dependencies": {"axios": "^1.2.0"}, "n": ' + "9" * (DIGIT_LIMIT + 1) + "}",
+            id="an integer over the digit limit",
+            marks=pytest.mark.skipif(not DIGIT_LIMIT, reason="the interpreter converts integers of any length"),
+        ),
+    ],
+)
+def test_a_package_json_the_parser_cannot_read_yields_no_dependencies(content: str) -> None:
+    assert extract_dependencies_from_package_json(content, "package.json") == []
+    assert extract_dependencies_from_files({"package.json": content.encode()}) == []
 
 
 def test_extract_dependencies_from_requirements_txt() -> None:
