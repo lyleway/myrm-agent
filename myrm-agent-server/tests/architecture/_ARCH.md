@@ -78,7 +78,7 @@ Server 层架构约束测试：禁止新增 harness 深导入、禁止 `uv.lock`
 | `test_sync_arch_guard.py` | `sync_arch_file_tables.py` 不得覆盖已人工维护的 `_ARCH.md`（混合 stub/✅ 或多余章节） |
 | `test_skill_embedding_removed.py` | 服务端技能侧三处（curator 的 embedding 前置条件与相似度阈值、技能搜索背后的 embedding 引擎、创建期相似度检查）不得出现 harness 已删的类与调参项：按词扫描 `app/` 内的代码、注释、docstring 与架构文档，被删文件不得回归 |
 | `test_no_app_main_in_tests.py` | `tests/**` 禁止 AST 级 `import app.main`（须用 `build_minimal_app`） |
-| `test_dev_stack_state_removal_tolerance.py` | 开发栈生命周期脚本（`scripts/dev/lib/dev_stack/*.sh`）里每一处 `rm -f` 都必须带 `|| true`：脚本在 `set -e` 下运行，reset 杀掉前端时前端会同时删自己的锁，把文件移进废纸篓的 `rm` 包装会对已不存在的路径返回失败，没有 `|| true` 的调用会让 reset 在前端已被杀之后中途退出 |
+| `test_dev_stack_state_removal_tolerance.py` | 开发栈生命周期脚本（`scripts/dev/lib/dev_stack/*.sh`）里每一行以 `rm -f` 开头的调用都必须带 `\|\| true`：脚本在 `set -e` 下运行，reset 杀掉前端时前端会同时删自己的锁，把文件移进废纸篓的 `rm` 包装会对已不存在的路径返回失败，没有 `\|\| true` 的调用会让 reset 在前端已被杀之后中途退出 |
 | `test_memory_search_declares_recall.py` | `app/**` 里每个 `manager.search(...)` 必须写明 `track_access`：检索默认把命中的记忆记为已使用（7 天内用过的记忆不被遗忘），取用类写 `True`，去重、诊断、存在性检查写 `False`；自带检测器正反例，接收者改名致扫描落空时失败 |
 | `test_unit_test_layout.py` | 禁止 `tests/unit/**/api/`（与 `tests/api/` importlib 包名冲突） |
 | `test_instance_archive_report_contract.py` | 整实例备份预览报告的计数键：服务端输出的键集 == 前端 `COUNT_KEYS`，且中英两种语言都有对应标签（前端缺标签或服务端改名都会失败） |

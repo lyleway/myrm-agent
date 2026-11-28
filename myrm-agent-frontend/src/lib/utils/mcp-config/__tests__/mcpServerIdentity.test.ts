@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { findSameMcpServer, partitionByMcpIdentity, uniqueMcpName } from '@/lib/utils/mcp-config';
 
-import { mcpServerIdentity } from '../mcpServerIdentity';
+import { MAX_MCP_IDENTITY_LENGTH, mcpServerIdentity, mcpServerNameResolver } from '../mcpServerIdentity';
 
 /** The segment every ASCII name had before the hash suffix existed, written out independently of the module. */
 const legacyComponent = (name: string): string =>
@@ -17,8 +17,11 @@ const seededRandom = (seed: number) => () => {
   return seed / 2 ** 32;
 };
 
-const randomName = (random: () => number, alphabet: readonly string[]): string =>
-  Array.from({ length: Math.floor(random() * 25) }, () => alphabet[Math.floor(random() * alphabet.length)]).join('');
+const randomName = (random: () => number, alphabet: readonly string[], maxLength = 24): string =>
+  Array.from(
+    { length: Math.floor(random() * (maxLength + 1)) },
+    () => alphabet[Math.floor(random() * alphabet.length)],
+  ).join('');
 
 const ASCII_ALPHABET = Array.from({ length: 95 }, (_, index) => String.fromCharCode(32 + index)).concat('\t', '\n');
 const UNICODE_ALPHABET = [...ASCII_ALPHABET, ...'天气我的服务日本語サーバー서버😀é\u0301ß\u200b', '\ud800', '\udfff'];
@@ -52,6 +55,50 @@ describe('mcpServerIdentity', () => {
     }
   });
 
+  it('折叠后不超过上限的 ASCII 名字同样保持它一直以来的身份', () => {
+    const random = seededRandom(20261130);
+    const alphabet = [...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-. '];
+    for (let round = 0; round < 3000; round += 1) {
+      const name = randomName(random, alphabet, 70);
+      const folded = legacyComponent(name);
+      if (/[A-Za-z0-9]/.test(name) && folded.length <= MAX_MCP_IDENTITY_LENGTH) {
+        expect(mcpServerIdentity(name), JSON.stringify(name)).toBe(folded);
+      }
+    }
+  });
+
+  it.each([MAX_MCP_IDENTITY_LENGTH - 1, MAX_MCP_IDENTITY_LENGTH])(
+    '长度为 %i 的 ASCII 名字就是它自己的身份',
+    (length) => {
+      expect(mcpServerIdentity('a'.repeat(length))).toBe('a'.repeat(length));
+    },
+  );
+
+  it('更长的 ASCII 名字保留可读的开头，各种写法共用同一个哈希', () => {
+    const identity = mcpServerIdentity('abcde-'.repeat(10));
+
+    expect(identity).toBe('abcde_abcde_abcde_abcde_abcde_abcde_abcde_746341');
+    expect(mcpServerIdentity('abcde_'.repeat(10))).toBe(identity);
+    expect(mcpServerIdentity('abcde '.repeat(10))).toBe(identity);
+  });
+
+  it('任何名字的身份都不超过上限', () => {
+    const random = seededRandom(20261201);
+    for (let round = 0; round < 3000; round += 1) {
+      const name = randomName(random, UNICODE_ALPHABET, 200);
+
+      expect(mcpServerIdentity(name).length, JSON.stringify(name)).toBeLessThanOrEqual(MAX_MCP_IDENTITY_LENGTH);
+    }
+    expect(mcpServerIdentity('天气'.repeat(200)).length).toBeLessThanOrEqual(MAX_MCP_IDENTITY_LENGTH);
+    expect(mcpServerIdentity('x'.repeat(5000)).length).toBeLessThanOrEqual(MAX_MCP_IDENTITY_LENGTH);
+  });
+
+  it('只由符号组成的名字再长也彼此区分', () => {
+    expect(mcpServerIdentity('-'.repeat(100))).not.toBe(mcpServerIdentity('-'.repeat(101)));
+    expect(mcpServerIdentity('天'.repeat(100))).not.toBe(mcpServerIdentity('天'.repeat(101)));
+    expect(mcpServerIdentity('天'.repeat(100))).toMatch(/^unnamed_[0-9a-f]{6}$/);
+  });
+
   it('任何名字的身份都不为空，也不含工具名分隔符', () => {
     const random = seededRandom(20261128);
     for (let round = 0; round < 3000; round += 1) {
@@ -64,6 +111,40 @@ describe('mcpServerIdentity', () => {
 
   it('预组合与分解两种写法是同一个服务', () => {
     expect(mcpServerIdentity('caf\u00e9')).toBe(mcpServerIdentity('cafe\u0301'));
+  });
+});
+
+describe('mcpServerNameResolver', () => {
+  const servers = [{ name: '天气' }, { name: 'github' }, { name: 'my-api' }, { name: '我的服务' }];
+
+  it('把工具名里的身份还原成用户起的名字', () => {
+    const resolve = mcpServerNameResolver(servers);
+
+    expect(resolve('unnamed_dd4acd')).toBe('天气');
+    expect(resolve('github')).toBe('github');
+    expect(resolve('my_api')).toBe('my-api');
+    expect(resolve(mcpServerIdentity('我的服务'))).toBe('我的服务');
+  });
+
+  it('不认识的身份返回 undefined', () => {
+    const resolve = mcpServerNameResolver(servers);
+
+    expect(resolve('unnamed_000000')).toBeUndefined();
+    expect(resolve('GitHub')).toBeUndefined();
+    expect(resolve('')).toBeUndefined();
+    expect(mcpServerNameResolver([])('github')).toBeUndefined();
+  });
+
+  it('同一身份的多个服务取排在前面的，与运行时先到先得一致', () => {
+    const resolve = mcpServerNameResolver([{ name: 'my-api' }, { name: 'my_api' }, { name: 'my api' }]);
+
+    expect(resolve('my_api')).toBe('my-api');
+  });
+
+  it('超长名字也能按截短后的身份还原', () => {
+    const name = 'my-very-long-server-name-for-the-weather-service-v2';
+
+    expect(mcpServerNameResolver([{ name }])('my_very_long_server_name_for_the_weather_s_ddb65d')).toBe(name);
   });
 });
 

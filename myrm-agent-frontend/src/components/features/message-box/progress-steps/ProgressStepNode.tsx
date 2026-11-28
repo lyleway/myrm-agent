@@ -15,7 +15,7 @@
  * 有子节点的计划节点只显示头部与子节点，叶子节点显示完整正文。
  */
 
-import type { TranslateFn } from '@/lib/humanize';
+import type { McpServerNameResolver, TranslateFn } from '@/lib/humanize';
 import { cn } from '@/lib/utils/classnameUtils';
 import type { ProgressItem } from '@/store/chat/types';
 import { ArchiveRestoreResultChip } from './ArchiveRestoreResultChip';
@@ -36,6 +36,8 @@ export interface StepNodeContext {
   loading: boolean;
   t: TranslateFn;
   tHumanize: TranslateFn;
+  /** The names the user gave their MCP servers, which a step title shows in place of the identity in a tool name. */
+  serverName: McpServerNameResolver;
   onViewDetail: (step: ProgressItem) => void;
 }
 
@@ -50,7 +52,7 @@ const DROPPED_MANIFEST_LIMIT = 3;
 
 export function ProgressStepNode({ node, depth, ctx }: NodeProps) {
   const { step, originalIndex: index, children } = node;
-  const { messageId, lastIndex, loading, t, tHumanize, onViewDetail } = ctx;
+  const { messageId, lastIndex, loading, t, tHumanize, serverName, onViewDetail } = ctx;
   const state = getStepVisualState(step, index === lastIndex && loading);
   const skillBatchId = extractSkillManageBatchId(step);
   const droppedManifest = step.dropped_manifest ?? [];
@@ -62,7 +64,14 @@ export function ProgressStepNode({ node, depth, ctx }: NodeProps) {
       </div>
 
       <div className="flex flex-col space-y-2 sm:space-y-3 flex-1 min-w-0">
-        <StepNodeHeader step={step} state={state} t={t} tHumanize={tHumanize} onViewDetail={onViewDetail} />
+        <StepNodeHeader
+          step={step}
+          state={state}
+          t={t}
+          tHumanize={tHumanize}
+          serverName={serverName}
+          onViewDetail={onViewDetail}
+        />
 
         {(!step.is_plan || children.length === 0) && (
           <>

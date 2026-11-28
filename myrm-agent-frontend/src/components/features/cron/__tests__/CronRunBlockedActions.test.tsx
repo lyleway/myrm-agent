@@ -14,10 +14,12 @@
  * suite fails on it.
  */
 
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { NextIntlClientProvider } from 'next-intl';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CronBlockedAction } from '@/services/cron';
+import type { MCPServiceConfig } from '@/store/config/types';
+import useConfigStore from '@/store/useConfigStore';
 import CronRunBlockedActions from '../CronRunBlockedActions';
 import en from '../../../../../locales/en.json';
 import zh from '../../../../../locales/zh.json';
@@ -116,5 +118,41 @@ describe('CronRunBlockedActions', () => {
     expect(text).toContain('16');
     expect(text).toContain('12');
     expect(LOCALES[locale].humanize.ask).toHaveProperty('tool_generic');
+  });
+});
+
+describe('CronRunBlockedActions connector names', () => {
+  const FORECAST: CronBlockedAction = {
+    tool: 'mcp__unnamed_dd4acd__get_forecast',
+    reason: 'Capability not granted: mcp',
+    count: 1,
+  };
+  const configured = (name: string): MCPServiceConfig => ({
+    name,
+    type: 'streamable_http',
+    url: 'https://example.com/mcp',
+    description: '',
+    enabled: true,
+  });
+
+  beforeEach(() => {
+    act(() => useConfigStore.setState({ mcpConfigs: [], orgMcpConfigs: [] }));
+  });
+
+  it('names a stopped connector action by the name the user gave the connector', () => {
+    act(() => useConfigStore.setState({ mcpConfigs: [configured('天气')] }));
+
+    renderCard('en', 1, [FORECAST]);
+    expect(screen.getByText('Wanted to use 天气 — get forecast')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['en', 'Wanted to use a connected service — get forecast'],
+    ['zh', '想要使用 已连接的服务 — get forecast'],
+  ] as const)('never shows the internal id of a connector the settings do not know, in %s', (locale, line) => {
+    const { container } = renderCard(locale, 1, [FORECAST]);
+
+    expect(screen.getByText(line)).toBeInTheDocument();
+    expect(container.textContent).not.toContain('unnamed');
   });
 });

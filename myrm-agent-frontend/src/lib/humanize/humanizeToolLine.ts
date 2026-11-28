@@ -1,8 +1,13 @@
-import type { TranslateFn } from './types';
+import type { McpServerNameResolver, TranslateFn } from './types';
 import type { HumanizeContext } from './extractContext';
 import { parseMcpToolName } from './extractContext';
 import { platformLabelFromTarget } from './scopeNote';
 import { displayUrlHost } from './pathUtils';
+
+type ToolLineMode = 'progress' | 'approval' | 'ask';
+
+/** The identity of a server whose name has nothing a person can read: `unnamed` or `unnamed_` and a 6-digit hash. */
+const OPAQUE_SERVER_IDENTITY = /^unnamed(?:_[0-9a-f]{6})?$/;
 
 function normalizeToolKey(toolName: string): string {
   return toolName.replace(/_tool$/, '').replace(/-/g, '_');
@@ -10,6 +15,36 @@ function normalizeToolKey(toolName: string): string {
 
 function isMissingTranslation(key: string, hit: string): boolean {
   return !hit || hit === key || hit.endsWith(`.${key}`) || hit.endsWith(key);
+}
+
+/** The server as the user knows it: the name they gave it, else its identity when that reads, else a generic label. */
+function serverLabel(identity: string, t: TranslateFn, serverName?: McpServerNameResolver): string {
+  const named = serverName?.(identity);
+  if (named) {
+    return named;
+  }
+  if (!OPAQUE_SERVER_IDENTITY.test(identity)) {
+    return identity;
+  }
+  const generic = t('fallback.service');
+  return isMissingTranslation('fallback.service', generic) ? identity : generic;
+}
+
+/** An MCP tool belongs to its server whatever words its own name shares with a built-in tool, so it is worded first. */
+function humanizeMcpToolLine(
+  toolName: string,
+  t: TranslateFn,
+  mode: ToolLineMode,
+  serverName?: McpServerNameResolver,
+): string | undefined {
+  if (!toolName.startsWith('mcp__')) {
+    return undefined;
+  }
+  const { server, tool } = parseMcpToolName(toolName);
+  if (!server || !tool) {
+    return undefined;
+  }
+  return translate(t, `${mode}.mcp`, { server: serverLabel(server, t, serverName), tool: tool.replace(/_/g, ' ') });
 }
 
 function translate(t: TranslateFn, key: string, values?: Record<string, string>): string {
@@ -25,13 +60,21 @@ function translate(t: TranslateFn, key: string, values?: Record<string, string>)
   return String(toolLabel);
 }
 
-/** Human-readable one-liner for tools in progress / approval / ask modes. */
+/**
+ * Human-readable one-liner for tools in progress / approval / ask modes. `serverName` gives the name the user chose for
+ * the MCP server behind a tool name, which carries only its identity.
+ */
 export function humanizeToolLine(
   toolName: string,
   ctx: HumanizeContext,
   t: TranslateFn,
-  mode: 'progress' | 'approval' | 'ask' = 'progress',
+  mode: ToolLineMode = 'progress',
+  serverName?: McpServerNameResolver,
 ): string {
+  const mcpLine = humanizeMcpToolLine(toolName, t, mode, serverName);
+  if (mcpLine !== undefined) {
+    return mcpLine;
+  }
   const normalized = normalizeToolKey(toolName);
   const prefix = mode;
   const fallbackFile = t('fallback.file');
@@ -128,14 +171,6 @@ export function humanizeToolLine(
     }
     return translate(t, `${prefix}.skill_generic`, {});
   }
-  if (toolName.startsWith('mcp__')) {
-    const { server, tool } = parseMcpToolName(toolName);
-    if (server && tool) {
-      const label = tool.replace(/_/g, ' ');
-      return translate(t, `${prefix}.mcp`, { server, tool: label });
-    }
-  }
-
   const label = toolName
     .replace(/_tool$/, '')
     .replace(/_/g, ' ')

@@ -9,13 +9,14 @@ Single frontend module that turns raw `tool_name` + args into human-readable one
 
 ## Public API (`index.ts`)
 
-| Export                    | Role                                                                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `humanizeProgressStep`    | Progress item title（`status=cancelled` → ask tense）                                                                              |
-| `humanizeApprovalTitle`   | Pending approval headline                                                                                                          |
-| `humanizeToolLine`        | One-liner for a tool in `progress` / `approval` / `ask` tense (the two titles above wrap it; blocked-action rows call it directly) |
-| `classifyApprovalSurface` | `compact` vs `full` approval layout                                                                                                |
-| `resolveScopeNote`        | Plain-words scope hint (local / external / connector)                                                                              |
+| Export                    | Role                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `humanizeProgressStep`    | Progress item title（`status=cancelled` → ask tense）                                                                                                                                         |
+| `humanizeApprovalTitle`   | Pending approval headline                                                                                                                                                                     |
+| `humanizeToolLine`        | One-liner for a tool in `progress` / `approval` / `ask` tense (the two titles above wrap it; blocked-action rows call it directly); the optional last parameter names MCP servers (see below) |
+| `McpServerNameResolver`   | Type of that parameter: identity in a tool name → the name the user gave the server, `undefined` when no configured server has it                                                             |
+| `classifyApprovalSurface` | `compact` vs `full` approval layout                                                                                                                                                           |
+| `resolveScopeNote`        | Plain-words scope hint (local / external / connector)                                                                                                                                         |
 
 ## i18n
 
@@ -25,15 +26,27 @@ Subtrees: `progress`, `approval`, `ask`, `scope`, `fallback`.
 
 A tool with no dedicated line reads `fallback.used_tool` ("Used …"); in `ask` tense, where the action never ran, it reads `ask.tool_generic` ("Wanted to use …") instead, and a locale without that key keeps the past-tense line.
 
+## MCP tool lines
+
+The model calls an MCP tool as `mcp__{identity}__{tool}`; the identity is derived from the server's name (`lib/utils/mcp-config/mcpServerIdentity.ts`) and is not the name the user typed (`天气` is `unnamed_dd4acd`). `humanizeToolLine` words every `mcp__` tool first, before the keyword rules of the built-in tools, so a connector tool whose name shares a word with a built-in (`mcp__ops__run_bash`, `mcp__memory__create_entities`) is never worded as that built-in. The server part of the line is:
+
+1. the name the resolver returns for the identity, else
+2. the identity itself when a person can read it (`github`), else
+3. `fallback.service` ("a connected service") for the opaque identities `unnamed` / `unnamed_{6 hex}`, or the identity when a locale lacks that key.
+
+The resolver is injected: this module reads no store. `hooks/shared/useMcpServerNameResolver.ts` builds it from the settings.
+
 ## Wiring
 
-| Consumer                                  | Usage                                                            |
-| ----------------------------------------- | ---------------------------------------------------------------- |
-| `progress-steps/utils.ts`                 | `getStepTitle(..., tHumanize)` — humanize SSOT 唯一标题入口      |
-| `ApprovalDetails.tsx`                     | title + scope note                                               |
-| `SingleApprovalCard.tsx`                  | compact payload hide                                             |
-| `PolymorphicApprovalCard.tsx`             | subagent tool call headers + scope (`ApprovalScopeNoteLine`)     |
-| `features/cron/CronRunBlockedActions.tsx` | rows of the actions a run's safety rules stopped, in `ask` tense |
+| Consumer                                  | Usage                                                                   |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `progress-steps/utils.ts`                 | `getStepTitle(..., tHumanize, serverName)` — humanize SSOT 唯一标题入口 |
+| `ApprovalDetails.tsx`                     | title + scope note                                                      |
+| `SingleApprovalCard.tsx`                  | compact payload hide                                                    |
+| `PolymorphicApprovalCard.tsx`             | subagent tool call headers + scope (`ApprovalScopeNoteLine`)            |
+| `features/cron/CronRunBlockedActions.tsx` | rows of the actions a run's safety rules stopped, in `ask` tense        |
+
+`ProgressSteps`, `ApprovalDetails`, `SubagentApprovalContent` and `CronRunBlockedActions` each call `useMcpServerNameResolver()` and pass the result on.
 
 ## Boundaries
 

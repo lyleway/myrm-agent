@@ -1,9 +1,17 @@
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { McpServerNameResolver } from '@/lib/humanize';
+import type { MCPServiceConfig } from '@/store/config/types';
 import type { ApprovalToolCall } from '@/store/useApprovalStore';
+import useConfigStore from '@/store/useConfigStore';
 import { SubagentApprovalContent } from '../SubagentApprovalContent';
 import { makeApproval, shellCall, subagentApproval } from './approvalKit';
 import { propsOf } from './approvalStubs';
+
+/** Records how each title was asked for; the title itself is `title:<tool>`. */
+const humanizeApprovalTitle = vi.hoisted(() =>
+  vi.fn((toolName: string, _args: unknown, _t: unknown, _serverName?: McpServerNameResolver) => `title:${toolName}`),
+);
 
 vi.mock('next-intl', async () => (await import('./approvalStubs')).nextIntlModule);
 vi.mock('../ShellToolCallApproval', async () => (await import('./approvalStubs')).shellToolCallModule);
@@ -21,10 +29,14 @@ vi.mock(
 );
 vi.mock('@/lib/humanize', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/humanize')>()),
-  humanizeApprovalTitle: (toolName: string) => `title:${toolName}`,
+  humanizeApprovalTitle,
   resolveScopeNote: (toolName: string) => ({ text: `scope:${toolName}`, external: toolName === 'file_edit_tool' }),
 }));
 
+beforeEach(() => {
+  humanizeApprovalTitle.mockClear();
+  act(() => useConfigStore.setState({ mcpConfigs: [], orgMcpConfigs: [] }));
+});
 afterEach(cleanup);
 
 const fileWrite = (args: Record<string, unknown>, name = 'file_write_tool'): ApprovalToolCall => ({ name, args });
@@ -116,6 +128,27 @@ describe('SubagentApprovalContent', () => {
 
       expect(screen.queryByTestId('CompactFileWriteApprovalRow')).toBeNull();
       expect(screen.getByText('title:file_write_tool')).toBeDefined();
+    });
+  });
+
+  describe('a connector call', () => {
+    const connector = (name: string): MCPServiceConfig => ({
+      name,
+      type: 'streamable_http',
+      url: 'https://example.com/mcp',
+      description: '',
+      enabled: true,
+    });
+    const forecast: ApprovalToolCall = { name: 'mcp__unnamed_dd4acd__get_forecast', args: {} };
+
+    it('words its title with the names the user gave the connectors', () => {
+      act(() => useConfigStore.setState({ mcpConfigs: [connector('天气')] }));
+
+      renderCalls([forecast]);
+
+      const serverName = humanizeApprovalTitle.mock.calls.at(-1)?.[3];
+      expect(serverName?.('unnamed_dd4acd')).toBe('天气');
+      expect(serverName?.('github')).toBeUndefined();
     });
   });
 

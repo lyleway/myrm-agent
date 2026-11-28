@@ -2,7 +2,7 @@
 
 [INPUT]
 - agent::MCPAgent (POS: MCP agent layer — shared tool post-processing)
-- config::mcp_tool_prefix, sanitize_mcp_name_component (POS: MCP Configuration — server prefix and tool-name sanitizer)
+- config::mcp_tool_name, mcp_tool_prefix (POS: MCP Configuration — server prefix and the model-visible tool name)
 - config_scan::scan_mcp_runtime_surface (POS: static/runtime MCP scanners)
 - errors::MCPRuntimePostureError (POS: MCP error handling utilities)
 - tool_converter::convert_mcp_tools (POS: MCP→LangChain tool converter)
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, cast
 
 from langchain_core.tools import BaseTool
 
-from .config import mcp_tool_prefix, sanitize_mcp_name_component
+from .config import mcp_tool_name, mcp_tool_prefix
 from .structured_tool import SafeStructuredTool
 
 if TYPE_CHECKING:
@@ -158,10 +158,8 @@ def resolve_actor_tool(actor: MCPSessionActor, tool_name: str) -> BaseTool | Non
         tool = actor._tools.get(variant)
         if tool is not None:
             return tool
-    prefix = mcp_tool_prefix(actor.server_name)
-    if not tool_name.startswith(prefix):
-        prefixed = f"{prefix}{sanitize_mcp_name_component(tool_name)}"
-        return actor._tools.get(prefixed)
+    if not tool_name.startswith(mcp_tool_prefix(actor.server_name)):
+        return actor._tools.get(mcp_tool_name(actor.server_name, tool_name))
     return None
 
 

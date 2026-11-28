@@ -1,4 +1,4 @@
-export type { ApprovalSurface, ScopeNote, TranslateFn } from './types';
+export type { ApprovalSurface, McpServerNameResolver, ScopeNote, TranslateFn } from './types';
 export { classifyApprovalSurface } from './classify';
 export { extractContextFromProgressStep, extractContextFromToolInput } from './extractContext';
 export { humanizeApprovalTitle } from './humanizeApproval';

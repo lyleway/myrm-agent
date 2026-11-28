@@ -4,6 +4,7 @@ MCP server configuration models passed to the Agent.
 
 [INPUT]
 - server_identity::fold_mcp_name, mcp_server_component (POS: server identity rule)
+- tool_name::TOOL_NAME_MARKER, TOOL_NAME_DELIMITER, clamp_tool_name (POS: shape and 64-character budget of a tool name)
 
 [OUTPUT]
 - MCPAuthProvider: Authentication provider protocol for remote MCP servers.
@@ -13,6 +14,7 @@ MCP server configuration models passed to the Agent.
 - sanitize_mcp_name_component: Sanitize name component for ``mcp__{server}__{tool}`` generation (replaces non-alnum, collapses consecutive underscores, strips leading/trailing underscores, falls back to 'unnamed').
 - is_mcp_tool_name: Check if a tool name follows the ``mcp__{server}__{tool}`` convention.
 - mcp_tool_prefix: The ``mcp__{server}__`` prefix every tool of one server carries, the single place it is derived from a server name (the ``{server}`` segment is ``mcp_server_component``).
+- mcp_tool_name: The name the model sees for one tool of one server: the prefix plus the sanitized tool name, clamped to the 64-character name budget; registration and bare-name lookup both build it here.
 - parse_mcp_tool_name: Parse ``mcp__{server}__{tool}`` into (server, tool) tuple.
 - mcp_config_to_runtime_dict: Serialize an MCPServerConfigProtocol into a complete runtime dictionary preserving auth, TLS, filtering, and callback attributes.
 
@@ -27,6 +29,7 @@ from typing import Protocol, runtime_checkable
 from pydantic import BaseModel, Field, model_validator
 
 from .server_identity import fold_mcp_name, mcp_server_component
+from .tool_name import TOOL_NAME_DELIMITER, TOOL_NAME_MARKER, clamp_tool_name
 
 
 @runtime_checkable
@@ -294,13 +297,9 @@ def sanitize_mcp_name_component(value: str) -> str:
     return fold_mcp_name(str(value or "")) or "unnamed"
 
 
-_MCP_PREFIX = "mcp__"
-_MCP_DELIM = "__"
-
-
 def is_mcp_tool_name(name: str) -> bool:
     """Return True if *name* follows the ``mcp__{server}__{tool}`` convention."""
-    return name.startswith(_MCP_PREFIX) and _MCP_DELIM in name[len(_MCP_PREFIX) :]
+    return name.startswith(TOOL_NAME_MARKER) and TOOL_NAME_DELIMITER in name[len(TOOL_NAME_MARKER) :]
 
 
 def mcp_tool_prefix(server_name: str) -> str:
@@ -311,7 +310,17 @@ def mcp_tool_prefix(server_name: str) -> str:
     Names that differ only in characters the component drops (``天气`` and ``我的服务``) still get
     different prefixes: see ``mcp_server_component``.
     """
-    return f"{_MCP_PREFIX}{mcp_server_component(server_name)}{_MCP_DELIM}"
+    return f"{TOOL_NAME_MARKER}{mcp_server_component(server_name)}{TOOL_NAME_DELIMITER}"
+
+
+def mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Return the name the model sees for the tool *tool_name* of *server_name*: ``mcp__{server}__{tool}``.
+
+    The tool name is sanitized (see ``sanitize_mcp_name_component``). A name over the 64-character budget keeps the
+    server's prefix and ends with a digest of the whole name (see ``clamp_tool_name``), so every key derived from the
+    prefix is unchanged. Registration and bare-name lookup both call this, which is what makes them agree.
+    """
+    return clamp_tool_name(mcp_tool_prefix(server_name), sanitize_mcp_name_component(tool_name))
 
 
 def parse_mcp_tool_name(name: str) -> tuple[str, str] | None:
@@ -321,13 +330,13 @@ def parse_mcp_tool_name(name: str) -> tuple[str, str] | None:
     The double-underscore delimiter is unambiguous even when server or
     tool names contain single underscores.
     """
-    if not name.startswith(_MCP_PREFIX):
+    if not name.startswith(TOOL_NAME_MARKER):
         return None
-    rest = name[len(_MCP_PREFIX) :]
-    idx = rest.find(_MCP_DELIM)
+    rest = name[len(TOOL_NAME_MARKER) :]
+    idx = rest.find(TOOL_NAME_DELIMITER)
     if idx <= 0:
         return None
-    return rest[:idx], rest[idx + len(_MCP_DELIM) :]
+    return rest[:idx], rest[idx + len(TOOL_NAME_DELIMITER) :]
 
 
 def mcp_config_to_runtime_dict(cfg: object) -> dict[str, object]:
@@ -377,6 +386,7 @@ __all__ = [
     "MCPConfig",
     "is_mcp_tool_name",
     "mcp_config_to_runtime_dict",
+    "mcp_tool_name",
     "mcp_tool_prefix",
     "parse_mcp_tool_name",
     "sanitize_mcp_name_component",

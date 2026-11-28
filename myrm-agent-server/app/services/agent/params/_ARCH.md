@@ -19,7 +19,7 @@ Web 前端的 `enable_memory` 会在这里进入 Server 业务参数，统一控
 | `models.py` | 核心 | Pydantic 请求模型（AgentRequest, ModelSelection, …），含 `use_workflow`、`workflow_template_id`、`workflow_template_args`（pinned DW rerun）、首轮一次性 `workspace_dir` 绑定、前端记忆开关、`search_depth`、`reasoning_display_mode`、`active_moa_preset_id`、GUI @ 结构化引用、archive restore、`kanban_default_board_id`、`tool_gateway_config`、`turn_capability_telemetry`、`security_preset`；`user_instructions` 由客户端合成（全局指令、伙伴介绍），智能体人设由服务端追加，会话级改写走 `agent_config.system_prompt`。 | — |
 | `mcp_selection.py` | 核心 | Per-agent MCP server+tool 过滤。`apply_agent_mcp_selection()` 按 `mcp_ids` 过滤服务器、按 `mcp_tool_selections` 注入 `tool_include`；`coerce_tool_selections()` 规范化原始元数据。被 converter（经 `conversion/profile_apply`）/executor/agent_bridge/eval/custom_agent_factory 五个入口统一调用 | ✅ |
 | `helpers.py` | 辅助 | 文本提取等辅助函数；`_requested_privacy_params` 提取请求自带的隐私字段（converter 再与已保存设置合并：请求写明的优先，没说的跟随设置）；`_declared_capabilities` 合并多份安全配置里声明的能力名 | — |
-| `media.py` | 辅助 | 多模态媒体参数处理 | — |
+| `media.py` | 辅助 | 把用户保存的图像 / 视频 / 语音选择（`personalSettings` 的 `imageGeneration` / `videoGeneration`，语音设置的 `tts*`）解析成 provider 可用的生成参数，只处理智能体启用的媒体工具；没有选择、或选择已不在目录内时返回 None，不补默认模型；密钥优先取选择自带的，没有则取已配置 provider 的（xAI 再回退到会话凭据） | — |
 
 ## Uploaded File Workspace Sync
 

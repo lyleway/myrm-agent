@@ -728,7 +728,7 @@ API 序列化顺序为 `Tools → System → Messages`（Tools 段内按 CORE �
 ```text
 [Layer 1: CORE 工具定义]          ← web_fetch + file/bash + glob/grep
 [Layer 2: HIGH_PRIORITY 工具定义]  ← web_search + memory×3 + skill_select
-[Layer 3: EXTENDED 工具]          ← todo_write / browser / MCP / request_answer 等
+[Layer 3: EXTENDED 工具]          ← todo_write / browser / MCP 等
 [System Prompt 链]                ← 冻结的 system + user_instructions + memory stable
 [对话历史]                        ← 增量增长
 ```

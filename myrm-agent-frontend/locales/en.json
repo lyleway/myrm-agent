@@ -9502,6 +9502,7 @@
   "humanize": {
     "fallback": {
       "file": "a file",
+      "service": "a connected service",
       "used_tool": "Used {tool}"
     },
     "progress": {

@@ -4,6 +4,7 @@
  * [INPUT]
  * - @/store/chat/types::ToolApprovalRequest (POS: 要展示的审批请求)
  * - @/lib/humanize (POS: 审批标题与 scope 说明)
+ * - @/hooks/shared/useMcpServerNameResolver (POS: 审批标题里 MCP 服务器的名字：用户起的名字，而非工具名里的标识)
  * - @/lib/approval/approvalReasonCode (POS: 审批理由的稳定标识，按码取文案)
  * - @/lib/approval/visualApprovalContext (POS: 桌面/浏览器视觉审批上下文)
  *
@@ -22,6 +23,7 @@ import ApprovalScopeNoteLine from '@/components/approval/ApprovalScopeNoteLine';
 import PtcHintBadges from '@/components/approval/PtcHintBadges';
 import SaveSkillApprovalPreview from '@/components/approval/SaveSkillApprovalPreview';
 import { Badge } from '@/components/primitives/badge';
+import { useMcpServerNameResolver } from '@/hooks/shared/useMcpServerNameResolver';
 import type { BrowserSessionApproval } from '@/lib/approval/browserSession';
 import type { InputEntry } from '@/lib/approval/editedArgs';
 import { resolveVisualApprovalContextForRequest } from '@/lib/approval/visualApprovalContext';
@@ -68,6 +70,7 @@ export default function ApprovalDetails({
 }: ApprovalDetailsProps) {
   const t = useTranslations('toolApproval');
   const tHumanize = useTranslations('humanize');
+  const serverName = useMcpServerNameResolver();
 
   const desktopViewData = useDesktopInspectorStore((s) => selectScopedDesktopViewData(s.viewData, request.chatId));
   const browserViewData = useBrowserInspectorStore((s) => selectScopedBrowserViewData(s.viewData, request.chatId));
@@ -82,8 +85,8 @@ export default function ApprovalDetails({
     : request.reason;
 
   const approvalTitle = useMemo(
-    () => humanizeApprovalTitle(request.toolName, request.toolInput, tHumanize),
-    [request.toolInput, request.toolName, tHumanize],
+    () => humanizeApprovalTitle(request.toolName, request.toolInput, tHumanize, serverName),
+    [request.toolInput, request.toolName, serverName, tHumanize],
   );
 
   if (browserSession) {
