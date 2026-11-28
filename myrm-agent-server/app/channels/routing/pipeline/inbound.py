@@ -6,6 +6,7 @@
 - channels.routing.inbound_risk_gate::hold_risky_inbound (POS: risk screening of a sender's text before any agent reads it)
 - channels.routing.policy_resolver_support::is_admin_sender (POS: the owner rule for admin-only commands)
 - channels.routing.router_constants::_DEDUP_MAX_SIZE, _DEDUP_TTL (POS: dedup window limits)
+- channels.core.inbound_pipeline::dedup_id (POS: the id a redelivery of an inbound message repeats)
 - channels.routing.router_keys::routing_state_key (POS: channel+peer+topic state-map key format)
 - channels.delegation::is_delegation_intent (POS: detection of a delegated-task request)
 - core.cron.adapters.inbound_event_dispatch::dispatch_cron_event_for_inbound_message (POS: event triggers that start unattended jobs)
@@ -28,6 +29,7 @@ import time
 
 from myrm_agent_harness.utils.locale import resolve_locale
 
+from app.channels.core.inbound_pipeline import dedup_id
 from app.channels.delegation import is_delegation_intent
 from app.channels.i18n import get_text, resolve_message_locale
 from app.channels.routing.commands import is_explicit_approval_command, parse_approval_command, start_new_conversation
@@ -307,12 +309,14 @@ class RouterInboundMixin:
         """Check if a message has already been processed (TTL-based dedup).
 
         Dedup key includes the channel name to prevent cross-channel ID collisions
-        (e.g. Telegram's numeric message_id vs WhatsApp's string ID).
+        (e.g. Telegram's numeric message_id vs WhatsApp's string ID). A reaction is keyed by ``dedup_id``, so the
+        reactions of different members, or with different emoji, on one message are not repeats of each other.
         """
-        if not msg.message_id:
+        event_id = dedup_id(msg)
+        if not event_id:
             return False
 
-        dedup_key = f"{msg.channel}:{msg.message_id}"
+        dedup_key = f"{msg.channel}:{event_id}"
         now = time.monotonic()
 
         if dedup_key in self._seen_messages:

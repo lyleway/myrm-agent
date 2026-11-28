@@ -152,7 +152,8 @@ class RouterCommandsApprovalMixin:
         session_key = routing_state_key(msg.channel, chat_id, msg.thread_id)
 
         if session_key not in self._pending_approvals:
-            await _reply_text(self._bus, msg, chat_id, "no_pending_approval")
+            if not msg.metadata.get("reaction"):  # a reaction is no message to the bot: it is dropped, as on a stale card
+                await _reply_text(self._bus, msg, chat_id, "no_pending_approval")
             return
 
         if isinstance(decision, DenyWithReason):

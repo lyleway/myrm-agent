@@ -106,7 +106,7 @@ await channel.send(OutboundMessage(...))
 ```
 平台消息 → _emit_inbound()
     ├── 1. Bot 自消息过滤 (_bot_id)
-    ├── 2. 消息去重 (_dedup_ttl, OrderedDict LRU)
+    ├── 2. 消息去重 (_dedup_ttl, OrderedDict LRU, 键为 dedup_id)
     ├── 3. 访问控制 (AllowPolicy, 可注入白名单/黑名单)
     ├── 4. Debounce (_debounce_seconds, per-chat_id)
     └── 5. Dispatch → MessageBus 入站队列
@@ -286,7 +286,7 @@ LINE 如实报 `is_group` 但不算提及，Teams 的点击不带种类、按私
 取走审批之前判断；按钮点击在 `resolve_approval` 之后，只有聊天里等待的仍是判断时的那条请求才恢复运行，
 期间已结束或被取代的请求不会被碰。被拒的回答仍被认领、不会当成聊天内容交给
 Agent，只记一条 INFO 日志、不回复，审批保持待答，所以群里别人发的 `ok`、`1` 这类裸词在审批待答时
-也被吞掉。`_is_reaction_approval_valid` 只核对聊天正在等审批、反应指向的就是审批卡片。
+也被吞掉。`_is_reaction_approval_valid` 只核对聊天正在等审批、反应指向的就是审批卡片。各渠道的反应事件都把被回应消息的 id 当作自己的 `message_id`，所以去重键 `dedup_id`（渠道入站去重与路由器去重共用）在卡片 id 之外还带上反应者与表情，旁观者先点的反应、或提问成员自己先点的别的表情，都不会让提问成员之后的反应被当成重复投递丢掉；几位成员的反应同时到达时，请求被其中一条取走，其余反应静默丢弃、不回复（文字回答则得到「没有待审批请求」的回复）。
 `_handle_approval_command` 在 `set_approval_user_id`
 绑定下游用户身份后，把 `allowAlways` 透传给 harness，触发
 `add_to_allowlist_if_needed` 完成永久允许。
