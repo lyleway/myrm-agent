@@ -45,6 +45,36 @@ read_file(path='/workspace')
     assert result is None
 
 
+def test_extract_ptc_with_asyncio_entrypoint_yields_no_intent():
+    """``asyncio`` stays off the safe module list, so the entrypoint the bash tool teaches yields no intent.
+
+    Admitting the module would also give a script that starts a shell through asyncio an intent, and the intent
+    is what the allowlist entry is matched against.
+    """
+    taught = """python3 - <<'PY'
+import asyncio
+from skills.mcp_github_skill import read_file
+async def main():
+    print(await read_file(path='/workspace'))
+asyncio.run(main())
+PY"""
+    spawner = """python3 - <<'PY'
+import asyncio
+from skills.mcp_github_skill import read_file
+async def main():
+    await asyncio.create_subprocess_shell('id')
+    print(await read_file(path='/workspace'))
+asyncio.run(main())
+PY"""
+    without_asyncio = """python3 - <<'PY'
+from skills.mcp_github_skill import read_file
+print(read_file(path='/workspace'))
+PY"""
+    assert extract_ptc_intent(without_asyncio) == ("mcp_github_skill", "read_file", {"path": "/workspace"})
+    assert extract_ptc_intent(taught) is None
+    assert extract_ptc_intent(spawner) is None
+
+
 def test_extract_ptc_with_malicious_calls_rejected():
     """Test that calling anything other than allowed builtins and imported tools is rejected."""
     command = '''python -c "
