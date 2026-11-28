@@ -5,6 +5,7 @@
  * - ./StepTimeline::StepRail (POS: 步骤连接线)
  * - ./StepDetailModal::StepDetailModal (POS: 步骤详情弹窗)
  * - ./treeUtils::* + ./skillManageBatch::nodeHasSkillManageUndo (POS: 树构建、折叠规则与撤销入口判断)
+ * - @/hooks/shared/useMcpServerNameResolver (POS: 步骤标题里 MCP 服务器的名字：用户起的名字，而非工具名里的标识)
  *
  * [OUTPUT]
  * - ProgressSteps: renders streamed Agent progress steps as collapsed status or expanded tree.
@@ -20,6 +21,7 @@ import { ChevronUp, ClipboardList } from 'lucide-react';
 import type { ProgressItem } from '@/store/chat/types';
 import { cn } from '@/lib/utils/classnameUtils';
 import { useTranslations } from 'next-intl';
+import { useMcpServerNameResolver } from '@/hooks/shared/useMcpServerNameResolver';
 import { StepDetailModal } from './StepDetailModal';
 
 import { useScrollbarStyles } from './useScrollbarStyles';
@@ -45,6 +47,7 @@ const hasEvictedOutput = (step: ProgressItem): boolean =>
 const ProgressSteps: React.FC<ProgressStepsProps> = React.memo(({ messageId, steps, loading }) => {
   const t = useTranslations('progressSteps');
   const tHumanize = useTranslations('humanize');
+  const serverName = useMcpServerNameResolver();
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedStepForModal, setSelectedStepForModal] = useState<ProgressItem | null>(null);
   const [showAllIntermediateSteps, setShowAllIntermediateSteps] = useState(false);
@@ -98,6 +101,7 @@ const ProgressSteps: React.FC<ProgressStepsProps> = React.memo(({ messageId, ste
     loading,
     t,
     tHumanize,
+    serverName,
     onViewDetail: setSelectedStepForModal,
   };
   // The collapsed summary shows the latest step, unless an image analysis ran: its latest step takes that place.

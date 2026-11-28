@@ -23,7 +23,7 @@ def _disable_ssrf_dns_pin():
 
 
 class TestBrowserPoolDnsProtection:
-    """L2 BrowserPool DNS leak prevention via Chrome launch args."""
+    """BrowserPool DNS leak prevention via Chrome launch args."""
 
     def test_doh_flag_added_with_proxy_pool(self) -> None:
         proxy = ProxyConfig(server="http://proxy.example.com:8080")

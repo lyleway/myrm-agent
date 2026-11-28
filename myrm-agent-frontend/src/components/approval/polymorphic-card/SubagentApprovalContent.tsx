@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 import ApprovalScopeNoteLine from '@/components/approval/ApprovalScopeNoteLine';
 import CompactFileWriteApprovalRow from '@/components/approval/CompactFileWriteApprovalRow';
 import SaveSkillApprovalPreview from '@/components/approval/SaveSkillApprovalPreview';
+import { useMcpServerNameResolver } from '@/hooks/shared/useMcpServerNameResolver';
 import { isSaveSkillApproval } from '@/lib/approval/saveSkillApproval';
 import { isShellApprovalTool } from '@/lib/approval/shellCommandDisplay';
 import { classifyApprovalSurface, humanizeApprovalTitle, resolveScopeNote } from '@/lib/humanize';
@@ -15,12 +16,14 @@ import { ShellToolCallApproval } from './ShellToolCallApproval';
 export function SubagentApprovalContent({ approval }: { approval: ApprovalPayload }) {
   const t = useTranslations('toolApproval');
   const tHumanize = useTranslations('humanize');
+  const serverName = useMcpServerNameResolver();
   const toolCalls = approval.payload?.tool_calls ?? [];
   const humanizeCallTitle = (toolName: string, args: unknown) =>
     humanizeApprovalTitle(
       toolName,
       typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {},
       tHumanize,
+      serverName,
     );
   const payloadRecord = approval.payload ?? {};
   const workspaceRoot =

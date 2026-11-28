@@ -9,7 +9,7 @@
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
 | `__init__.py` | 入口 | 子包标记 | — |
-| `support.py` | 支撑 | 就绪超时、Second Brain 文件锁、`_VALID_CONFIG_KEYS`、写入校验、浏览器/代理热重载 | ✅ |
+| `support.py` | 支撑 | 就绪超时、Second Brain 文件锁、`_VALID_CONFIG_KEYS`、写入校验（`OMNI_CONFIG_MODELS` 里有模型的键校验后存模型的 `model_dump`：模型没声明的字段不会存下来；没有模型的键原样存）、浏览器/代理热重载 | ✅ |
 | `catalog.py` | 路由 | `GET /schema/{key}`、`GET /readiness` | ✅ |
 | `onboarding.py` | 路由 | 引导完成、Second Brain 状态/应用、SearXNG 启停与探测 | ✅ |
 | `media_health.py` | 路由 | `POST /vision-health`、`POST /video-health` | ✅ |

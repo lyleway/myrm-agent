@@ -341,7 +341,8 @@ class BrowserConfig:
 
     Fields: mode, launch_mode, cdp_endpoint, max_concurrent_pages, resource_block,
     default_emulation, navigation_wait, robustness (optional; filled from mode when None),
-    auto_dismiss_popups (default True; auto-dismiss cookie consent banners after navigation),
+    auto_dismiss_popups (default True; the consent-banner setting of a Navigator built from this config;
+    BrowserSession ignores it and dismisses banners through its own auto_dismiss_consent),
     ignore_https_errors (default False; see below).
 
     ``default_emulation`` provides fallback EmulationConfig (e.g. clipboard permissions)

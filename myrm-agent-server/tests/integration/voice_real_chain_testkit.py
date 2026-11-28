@@ -12,11 +12,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import shutil
-import subprocess
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import httpx
 import uvicorn
@@ -27,11 +24,8 @@ from websockets.exceptions import ConnectionClosed
 
 Event = dict[str, object]
 
-SPEECH_TEXT = "Please remember to buy milk and eggs tomorrow morning."
 BROWSER_ORIGIN = "http://localhost:3000"
 
-_SPEECH_VOICE = "Samantha"
-_SPEECH_SYNTHESIS_TIMEOUT_SECONDS = 120.0
 _SERVER_STARTUP_TIMEOUT_SECONDS = 60.0
 _HTTP_TIMEOUT_SECONDS = 30.0
 # 250 ms of 16 kHz 16-bit mono audio: the cadence of the browser recorder's chunks.
@@ -78,16 +72,6 @@ async def serving(app: FastAPI) -> AsyncIterator[str]:
     finally:
         server.should_exit = True
         await running
-
-
-def synthesize_speech(path: Path) -> bytes | None:
-    """The 16 kHz mono WAV of a system voice saying ``SPEECH_TEXT``, or None when the host has no speech synthesizer."""
-    say = shutil.which("say")
-    if say is None:
-        return None
-    command = [say, "-v", _SPEECH_VOICE, "-o", str(path), "--file-format=WAVE", "--data-format=LEI16@16000", SPEECH_TEXT]
-    done = subprocess.run(command, capture_output=True, check=False, timeout=_SPEECH_SYNTHESIS_TIMEOUT_SECONDS)
-    return path.read_bytes() if done.returncode == 0 and path.exists() else None
 
 
 def voice_settings(*, provider: str, api_key: str = "") -> dict[str, object]:

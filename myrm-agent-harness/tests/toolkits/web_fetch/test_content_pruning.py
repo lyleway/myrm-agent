@@ -109,7 +109,7 @@ def test_a_dual_theme_code_block_keeps_the_light_copy_only() -> None:
 
 
 def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
-    """G7 等价预言机：自底向上非递归度量在 4,500 个随机 HTML 页（含引号/Unicode/布尔属性）上与原版逐节点完全一致。"""
+    """等价预言机：自底向上非递归度量在 4,500 个随机 HTML 页（含引号/Unicode/布尔属性）上与逐节点的 BeautifulSoup 度量完全一致。"""
     import random
 
     from bs4 import BeautifulSoup, Tag
@@ -157,7 +157,7 @@ def test_bottom_up_metrics_match_bs4_oracle_on_4500_random_pages() -> None:
 
 
 def test_pruning_survives_depth_1050_without_recursion_error() -> None:
-    """R15：深度超过 1,000 层的页面不再因递归撞栈而整页丢失。"""
+    """深度超过 1,000 层的页面不会因递归撞栈而整页丢失。"""
     depth = 1050
     article_text = "Important paragraph deep inside a nested document. " * 200
     html = (

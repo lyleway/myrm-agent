@@ -78,9 +78,7 @@ class TestCloudMode:
         async def _allow(_url: str) -> SSRFResult:
             return SSRFResult(safe=True)
 
-        monkeypatch.setattr(
-            "myrm_agent_harness.core.security.guards.ssrf.async_validate_url_for_ssrf", _allow
-        )
+        monkeypatch.setattr("myrm_agent_harness.core.security.guards.ssrf.async_validate_url_for_ssrf", _allow)
         monkeypatch.setenv("MYRM_ALLOWED_INTERNAL_HOSTS", "127.0.0.1")
         engine = _engine(allow_private_networks=False)
         with serve({"/secret": page(_ARTICLE)}) as internal:

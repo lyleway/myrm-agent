@@ -5,7 +5,7 @@
 import React from 'react';
 
 import { humanizeProgressStep } from '@/lib/humanize';
-import type { TranslateFn as HumanizeTranslateFn } from '@/lib/humanize';
+import type { McpServerNameResolver, TranslateFn as HumanizeTranslateFn } from '@/lib/humanize';
 import type { ProgressItem } from '@/store/useChatStore';
 import { getStepCategory } from './toolIcons';
 
@@ -202,11 +202,16 @@ export const WARNING_NOTICE = {
   badge: 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400',
 } as const;
 
+/** An MCP tool name never exceeds the 64-character function-name budget, so a longer `tool_name` is text that is no tool name. */
+const MAX_TOOL_NAME_LENGTH = 64;
+
 /**
  * 根据 step_key 获取步骤标题
  * @param step 步骤信息
  * @param t 翻译函数
  * @param useSemantic 是否使用语义化标签（默认true）
+ * @param tHumanize 一句话人话标题的翻译函数
+ * @param serverName 把 MCP 工具名里的服务器标识还原成用户起的名字
  * @returns 步骤标题
  */
 export const getStepTitle = (
@@ -214,6 +219,7 @@ export const getStepTitle = (
   t: TranslateFn,
   useSemantic: boolean = true,
   tHumanize?: HumanizeTranslateFn,
+  serverName?: McpServerNameResolver,
 ): string => {
   const { step_key, tool_name, is_plan, items } = step;
 
@@ -257,11 +263,11 @@ export const getStepTitle = (
     }
   }
 
-  const validToolName = tool_name && tool_name.length <= 50 && !tool_name.includes('\n');
+  const validToolName = tool_name && tool_name.length <= MAX_TOOL_NAME_LENGTH && !tool_name.includes('\n');
 
   // Tool steps: args-aware humanize wins over generic step_key labels (e.g. file_write_tool → "Writing file")
   if (validToolName && useSemantic && tHumanize) {
-    const humanized = humanizeProgressStep(step, tHumanize);
+    const humanized = humanizeProgressStep(step, tHumanize, serverName);
     if (humanized) {
       let baseTitle = humanized;
       if (step.elapsed_ms && step.status !== 'success' && step.status !== 'error') {

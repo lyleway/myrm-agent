@@ -2,7 +2,7 @@
 
 ## Overview
 
-Page navigation utility — reusable across BrowserSession and BrowserFetcher. Provides `Navigator` (throttle + circuit breaker + smart wait + consent dismissal) and a Playwright document-level SSRF guard.
+Page navigation utility used by BrowserSession and open to any caller that drives a pooled page itself. Provides `Navigator` (throttle + circuit breaker + smart wait + optional consent dismissal) and a Playwright document-level SSRF guard.
 
 A navigation that outlives its budget is settled: the load is stopped over CDP, then the document counts as committed only if the page URL changed. A committed document is returned as partial content (HTTP 200 assumed); otherwise the call fails with `BrowserNavigationError`, and a page that no longer answers raises `PageUnresponsiveError` so the session can heal the tab.
 
@@ -10,13 +10,13 @@ A navigation that outlives its budget is settled: the load is stopped over CDP, 
 
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
-| `__init__.py` | Package | Public facade: `Navigator` page navigation manager. In local mode (`allow_private_networks`) it hands the guard the grants of the page's context, or a private set passed as `private_origins` (BrowserFetcher: grants must not outlive one pooled-page use). It also owns the URL policy of downloads, with the same policy and grants as `goto`: `admit_download` (a URL the agent asks to download: in local mode the named origin is granted, then the SSRF check, before the browser is asked) and `assert_landed_allowed` (the address any download came from, the ones a page starts itself included, or the page the tab landed on). | ✅ |
+| `__init__.py` | Package | Public facade: `Navigator` page navigation manager. In local mode (`allow_private_networks`) it hands the guard the grants of the page's context, or a private set passed as `private_origins` (for a caller that borrows a pooled page: grants must not outlive one use). It also owns the URL policy of downloads, with the same policy and grants as `goto`: `admit_download` (a URL the agent asks to download: in local mode the named origin is granted, then the SSRF check, before the browser is asked) and `assert_landed_allowed` (the address any download came from, the ones a page starts itself included, or the page the tab landed on). | ✅ |
 | `ssrf_guard.py` | Core | `canonical_navigation_url` (the canonical spelling of a network URL, `utils/url_syntax.py`; a URL with none is a `BrowserNavigationBlockedError`, a scheme the navigator refuses is returned as written for the scheme check) and `goto_with_ssrf_guard` — document-level route interception plus post-load redirect-chain validation (`request.redirected_from`; patchright does not route redirect hops). Cloud policy: DNS-resolved `async_pin_url`. Local policy (grants given): the canonical host plus the loopback / link-local / metadata address it resolves to, a private origin is reachable only where the agent navigated explicitly, cloud metadata never; the requested URL is checked before `page.goto` because aborting a main-frame navigation in the route commits Chromium's error page and loses the previous one, and a blocked chain resets the tab to `about:blank`. The agent's domain allow/block lists (`domain_filter.context_lists`, bound to the context by the request filter) are applied to every redirect hop after the entry URL, because the request filter is never handed a hop; the entry URL keeps the filter's own verdict. `assert_landed_url_allowed` applies the SSRF check and those domain lists to the address a download came from or a download request ended on and, when asked, resets the tab if that address is the document it shows. A goto that fails because the route aborted it is re-raised as `BrowserNavigationBlockedError`. Non-document routes and passed document routes fall through via `route.fallback()` (not `continue_()`) so subsequent route handlers on the same context still run. A failed or cancelled navigation is aborted at the protocol level (`abort_pending_navigation`) and the route teardown is time-bounded, because `unroute` never answers on a page stuck in a stalled navigation. | ✅ |
 
 ## Key Dependencies
 
 - `toolkits/browser/wait` — `wait_for_page_ready` + `WaitMetrics`
 - `toolkits/browser/pool` — throttle/circuit-breaker/config
-- `toolkits/browser/session.consent_dismisser` — cookie consent auto-dismiss
+- `toolkits/browser/session.consent_dismisser` — cookie consent auto-dismiss (only when `auto_dismiss_popups` is on)
 - `core/security` SSRF guards and `redirect_hop_guard` (`RedirectHopEvaluator`, `PrivateOriginGrants`)
 - `toolkits/browser/utils.private_origins` — per-context grants registry

@@ -60,6 +60,22 @@ class TestIsYoutubeUrl:
     def test_reject_no_protocol(self) -> None:
         assert is_youtube_url("youtube.com/watch?v=dQw4w9WgXcQ") is False
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://web.archive.org/web/2020/https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://news.example/story?u=https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://news.example/redirect/https://youtu.be/dQw4w9WgXcQ",
+        ],
+    )
+    def test_reject_video_link_inside_another_url(self, url: str) -> None:
+        assert is_youtube_url(url) is False
+        assert _extract_video_id(url) is None
+
+    def test_surrounding_whitespace_is_ignored(self) -> None:
+        assert is_youtube_url("  https://youtu.be/dQw4w9WgXcQ\n") is True
+        assert _extract_video_id("  https://youtu.be/dQw4w9WgXcQ\n") == "dQw4w9WgXcQ"
+
     def test_reject_non_url(self) -> None:
         assert is_youtube_url("hello world") is False
 

@@ -4,6 +4,7 @@ import { memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { ShieldWarning } from '@phosphor-icons/react';
 
+import { useMcpServerNameResolver } from '@/hooks/shared/useMcpServerNameResolver';
 import { humanizeToolLine } from '@/lib/humanize';
 import type { CronBlockedAction } from '@/services/cron';
 
@@ -17,6 +18,7 @@ interface CronRunBlockedActionsProps {
 const CronRunBlockedActions = memo<CronRunBlockedActionsProps>(({ count, actions }) => {
   const t = useTranslations('cron');
   const tHumanize = useTranslations('humanize');
+  const serverName = useMcpServerNameResolver();
   const unlisted = count - actions.reduce((sum, action) => sum + action.count, 0);
 
   return (
@@ -30,7 +32,7 @@ const CronRunBlockedActions = memo<CronRunBlockedActionsProps>(({ count, actions
           {actions.map(({ tool, reason, count: occurrences }, index) => (
             <li key={`${index}-${tool}`} className="min-w-0 text-[11px] leading-snug">
               <p className="font-medium text-foreground">
-                {humanizeToolLine(tool, {}, tHumanize, 'ask')}
+                {humanizeToolLine(tool, {}, tHumanize, 'ask', serverName)}
                 {occurrences > 1 && (
                   <span className="ml-1.5 font-normal tabular-nums text-muted-foreground">×{occurrences}</span>
                 )}

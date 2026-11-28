@@ -1,8 +1,9 @@
 """Tests for the MCP server identity rule (``server_identity.py``).
 
 Pins what the registry, approval, eviction and per-tool permission keys depend on: an ASCII name keeps the segment it
-always had, every other name gets a stable hash suffix so distinct names stay distinct, and the TypeScript twin
-(``mcpServerIdentity.ts``) reads the same vectors from ``shared/config/mcp_server_identity.json``.
+always had (up to the length every tool name can still carry), every other name gets a stable hash suffix so distinct
+names stay distinct, no identity outgrows that length, and the TypeScript twin (``mcpServerIdentity.ts``) reads the same
+vectors from ``shared/config/mcp_server_identity.json``.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import pytest
 
 from myrm_agent_harness.toolkits.mcp.config import mcp_tool_prefix, parse_mcp_tool_name
 from myrm_agent_harness.toolkits.mcp.server_identity import _stable_suffix, fold_mcp_name, mcp_server_component
+from myrm_agent_harness.toolkits.mcp.tool_name import MAX_IDENTITY_LENGTH
 
 _VECTORS_FILE = Path(__file__).resolve().parents[4] / "shared" / "config" / "mcp_server_identity.json"
 # The harness can be tested without the rest of the monorepo next to it; the vector tests then have nothing to read.
@@ -74,6 +76,46 @@ def test_ascii_names_that_survive_folding_keep_the_segment_they_always_had() -> 
         name = "".join(rng.choice(string.printable) for _ in range(rng.randint(1, 24)))
         if fold_mcp_name(name):
             assert mcp_server_component(name) == _legacy_component(name), repr(name)
+
+
+def test_ascii_names_up_to_the_bound_keep_the_segment_they_always_had() -> None:
+    rng = random.Random(20261130)
+    alphabet = string.ascii_letters + string.digits + "_-. "
+    for _ in range(3000):
+        name = "".join(rng.choice(alphabet) for _ in range(rng.randint(25, 70)))
+        folded = fold_mcp_name(name)
+        if 0 < len(folded) <= MAX_IDENTITY_LENGTH:
+            assert mcp_server_component(name) == _legacy_component(name), repr(name)
+
+
+@pytest.mark.parametrize("length", [MAX_IDENTITY_LENGTH - 1, MAX_IDENTITY_LENGTH])
+def test_an_ascii_name_of_the_bound_or_less_is_its_own_identity(length: int) -> None:
+    assert mcp_server_component("a" * length) == "a" * length
+
+
+def test_a_longer_ascii_name_keeps_a_readable_head_and_one_hash_for_all_its_spellings() -> None:
+    identity = mcp_server_component("abcde-" * 10)
+
+    assert identity == "abcde_abcde_abcde_abcde_abcde_abcde_abcde_746341"  # the cut never leaves a trailing underscore
+    assert mcp_server_component("abcde_" * 10) == identity
+    assert mcp_server_component("abcde " * 10) == identity
+
+
+def test_no_identity_outgrows_the_bound() -> None:
+    rng = random.Random(20261201)
+    for _ in range(3000):
+        name = "".join(rng.choice(_UNICODE_ALPHABET) for _ in range(rng.randint(0, 200)))
+
+        assert len(mcp_server_component(name)) <= MAX_IDENTITY_LENGTH, repr(name)
+
+    assert len(mcp_server_component("天气" * 200)) <= MAX_IDENTITY_LENGTH
+    assert len(mcp_server_component("x" * 5000)) <= MAX_IDENTITY_LENGTH
+
+
+def test_a_name_made_only_of_symbols_is_still_told_apart_however_long_it_is() -> None:
+    assert mcp_server_component("-" * 100) != mcp_server_component("-" * 101)
+    assert mcp_server_component("天" * 100) != mcp_server_component("天" * 101)
+    assert re.fullmatch(r"unnamed_[0-9a-f]{6}", mcp_server_component("天" * 100))
 
 
 def test_an_identity_is_never_empty_and_never_holds_the_tool_delimiter() -> None:

@@ -1,4 +1,4 @@
-"""Tests for R32 cache freshness contract: 15m default TTL, no stale serving, single-flight revalidation, no-store."""
+"""Tests for the cache freshness contract: 15m default TTL, no stale serving, single-flight revalidation, no-store."""
 
 from __future__ import annotations
 

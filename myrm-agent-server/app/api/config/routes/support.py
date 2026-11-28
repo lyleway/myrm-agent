@@ -6,7 +6,7 @@
 - _second_brain_apply_lock_path: _second_brain_apply_lock_path
 - _acquire_second_brain_cross_process_lock: _acquire_second_brain_cross_process_lock
 - _release_second_brain_cross_process_lock: _release_second_brain_cross_process_lock
-- _validate_config_value: _validate_config_value
+- _validate_config_value: Validate a config value against its Omni-Config model and return the model dump; a field the model does not declare is not stored, and a key without a model is returned as is.
 - _require_local_deploy_mode: _require_local_deploy_mode
 - _hot_reload_cloud_browser: Hot-reload the running browser pool's remote endpoint after cloud browser config changes.
 - _hot_reload_browser_proxy: Hot-reload the running browser pool's proxy pool after browser proxy config changes.

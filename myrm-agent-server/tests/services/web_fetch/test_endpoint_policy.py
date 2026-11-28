@@ -1,4 +1,4 @@
-"""Tests for R26 ①② external L4 endpoint policy, hosted switch, and DNS-pinned validation."""
+"""Tests for the external L4 endpoint policy, hosted switch, and DNS-pinned validation."""
 
 from __future__ import annotations
 

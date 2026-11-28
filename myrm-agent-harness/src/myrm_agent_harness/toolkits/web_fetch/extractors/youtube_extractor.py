@@ -2,9 +2,9 @@
 
 Extracts subtitles/transcripts from YouTube videos when ``youtube-transcript-api``
 (``[web]`` optional extra) is installed. Used as a fast-path shortcut in FetchEngine
-when a YouTube URL is detected, bypassing the three-tier HTML fetcher pipeline.
+when a YouTube URL is detected, bypassing the HTML fetch.
 When the optional dependency is missing or fetch fails, FetchEngine falls back to
-standard HTML crawl.
+the standard HTML fetch.
 
 Design pattern: analogous to binary_router.py — special content source routing.
 
@@ -12,7 +12,7 @@ Design pattern: analogous to binary_router.py — special content source routing
 - (none — standalone module; optional ``youtube-transcript-api`` via ``[web]`` extra)
 
 [OUTPUT]
-- is_youtube_url: Check if a URL is a YouTube video URL
+- is_youtube_url: Check if a URL is a YouTube video URL; the video link must start the URL, one nested in another site's URL is no video
 - extract_youtube_transcript: Extract transcript and return as Document, or None
 
 [POS]
@@ -37,6 +37,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# The video link starts the URL (matched with ``re.match``): one carried inside another site's URL (an archive copy,
+# a redirect path, a query parameter) makes that site's page, not the video, and must be fetched like any page.
 _YOUTUBE_URL_RE = re.compile(
     r"(?:https?://)"
     r"(?:[\w-]+\.)*"
@@ -91,12 +93,12 @@ async def _fetch_oembed_metadata(
 
 def is_youtube_url(url: str) -> bool:
     """Check if a URL points to a YouTube video."""
-    return _YOUTUBE_URL_RE.search(url) is not None
+    return _YOUTUBE_URL_RE.match(url.strip()) is not None
 
 
 def _extract_video_id(url: str) -> str | None:
     """Extract the 11-character video ID from a YouTube URL."""
-    match = _YOUTUBE_URL_RE.search(url)
+    match = _YOUTUBE_URL_RE.match(url.strip())
     return match.group(1) if match else None
 
 

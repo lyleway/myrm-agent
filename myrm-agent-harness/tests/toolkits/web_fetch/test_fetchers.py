@@ -138,7 +138,9 @@ def _mock_response(url: str, content_type: str, body: bytes) -> MagicMock:
 async def test_http_fetcher_keeps_non_text_body_whole(install_fake_curl_session: AsyncMock) -> None:
     """A truncated PDF or Office file cannot be parsed, so no text size ceiling applies to it."""
     document = b"%PDF-1.7\n" + b"x" * (MAX_PLAIN_TEXT_BODY_BYTES + 1_000)
-    install_fake_curl_session.return_value = _mock_response("https://example.com/paper.pdf", "application/pdf", document)
+    install_fake_curl_session.return_value = _mock_response(
+        "https://example.com/paper.pdf", "application/pdf", document
+    )
 
     with patch.dict("os.environ", {"MYRM_ENABLE_SSRF_SHIELD": "false"}):
         result = await HttpFetcher().fetch("https://example.com/paper.pdf")

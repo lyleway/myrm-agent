@@ -1,4 +1,4 @@
-"""Page navigation utility — reusable across browser and web_fetch
+"""Page navigation utility for the browser session and for callers that drive a pooled page themselves
 
 
 [INPUT]
@@ -15,7 +15,7 @@
 - ..utils.page_health::abort_pending_navigation, probe_alive, PageUnresponsiveError (POS: bounded browser and page health primitives)
 
 [OUTPUT]
-- Navigator: page navigation manager (with throttling, smart wait, and consent dismissal) and the SSRF policy of the downloads of a session
+- Navigator: page navigation manager (with throttling, smart wait and optional consent dismissal) and the SSRF policy of the downloads of a session
 
 [POS]
 Page navigation utility module. Responsibilities:
@@ -24,13 +24,14 @@ Page navigation utility module. Responsibilities:
 3. Smart wait (hybrid detection: DOM + network dual guarantee)
 4. Timeout control + full metrics exposure; a navigation that outlives its budget is stopped and
    settled (committed document kept, nothing committed or an unresponsive page raises)
-5. Cookie consent auto-dismiss (optional, for BrowserFetcher path)
+5. Cookie consent auto-dismiss (optional, auto_dismiss_popups): BrowserSession leaves it off because it
+   dismisses banners itself, once the page has settled and before its snapshot baseline
 6. The SSRF and domain-list judgement of downloads: admission of a URL the agent asks to download, and the
    address any download came from (a page-started one included), with the same policy and
    private-origin grants as goto
 
 Design principles:
-- Independent utility module, reusable by BrowserSession and BrowserFetcher
+- Independent utility module: BrowserSession uses it, and so can any caller that drives a pooled page without a session
 - Integrates throttle strategy for unified navigation frequency control
 - Smart wait: hybrid detection (DOM stable + network idle) dual guarantee
 - Single responsibility: only handles navigation logic; does not handle tab management, snapshot, interaction, etc.
@@ -110,7 +111,8 @@ class Navigator:
                 shared by every navigator of the page's context. Pass a private set to keep
                 grants from outliving one pooled-page use.
             auto_dismiss_popups: auto-dismiss cookie consent banners and overlay
-                popups after navigation (default True).
+                popups after navigation (default True). BrowserSession passes False: it
+                dismisses banners itself.
         """
         self._page = page
         self._throttle = throttle

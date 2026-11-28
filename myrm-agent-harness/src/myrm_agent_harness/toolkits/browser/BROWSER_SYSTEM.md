@@ -143,7 +143,7 @@ await pool.release_page(page, ContextType.AGENT)
 **SOLID 设计**：
 - **单一职责**：每个组件仅关注一个职责（Tab / 导航 / 快照 / 交互 / 提取）
 - **组合优于继承**：BrowserSession 作为聚合根，薄层委托各组件
-- **依赖注入**：可选注入 SessionVault 实现加密会话存储，用于在 BrowserFetcher 和 HttpFetcher 之间无缝共享登录态 (Cross-Engine Global Cookie Jar)。close() 时自动保存 auto_restore_domains 中有变化的域名会话（hash-diff 避免无效 I/O），并触发 SessionLifecycleHook 同步 agent 记忆。
+- **依赖注入**：可选注入 SessionVault 实现加密会话存储，用于让 `web_fetch` 的 HttpFetcher 读到浏览器里登录后保存的会话 (Cross-Engine Global Cookie Jar)。close() 时自动保存 auto_restore_domains 中有变化的域名会话（hash-diff 避免无效 I/O），并触发 SessionLifecycleHook 同步 agent 记忆。
 
 **组件架构**：
 ```python
@@ -402,7 +402,7 @@ AES-256-GCM (AEAD)
 - `load()` 时自动检查过期，即时删除
 
 **跨引擎状态共享 (Cross-Engine Global Cookie Jar)**：
-- SessionVault 实例被注入到 `FetchEngine` 及其底层的 `HttpFetcher` 和 `BrowserFetcher` 中。
+- SessionVault 实例被注入到 `FetchEngine` 及其底层的 `HttpFetcher` 中。
 - 当 Agent 使用 `browser_navigate_tool` 登录并保存状态后，`web_fetch_tool` (使用 `HttpFetcher`) 可以自动从 SessionVault 中读取对应域名的 Cookies 并注入到请求中，实现无缝的跨引擎状态共享，极大提升了认证页面的抓取效率。
 
 **可插拔后端**：
@@ -661,7 +661,7 @@ Object.defineProperty(window, 'RTCPeerConnection', {
 
 | 场景 | 优先工具 | 说明 |
 |------|----------|------|
-| 只读内容（文章、文档、博客） | `web_fetch_tool` | 更快、更省 Token；内部 L2 Browser 使用 `ContextType.CRAWL` 池 |
+| 只读内容（文章、文档、博客） | `web_fetch_tool` | 更快、更省 Token；只走 HTTP 读取，不启动浏览器 |
 | 登录、表单、点击、无限滚动 | browser 工具组 | 完整交互；`ContextType.AGENT` 池 + Extension Bridge 登录态 |
 | 先发现 URL | `web_search_tool` | 搜索后再 fetch 或 navigate |
 
@@ -1216,7 +1216,7 @@ browser/
 │   └── page_health.py — 浏览器/页面健康原语（abort_pending_navigation / probe_alive / probe_browser_alive / is_driver_closed_error（含原因链）/ close_page_bounded / detach_cdp_bounded / PageUnresponsiveError / DriverClosedError）
 ├── domain_filter/ — 四层域名过滤（CSP + HTTP + 主线程硬化 + CDP）；支持 allowlist + 用户 blocklist
 ├── session_vault/ — 加密 Session 存储（O(1) LRU + 内存限制 + 并发锁 + Metrics + 批量 API）
-├── navigation/ — Navigator（节流 + 熔断 + 智能等待 + 同意弹窗处理）与文档级 SSRF 守卫，BrowserSession 与 BrowserFetcher 共用
+├── navigation/ — Navigator（节流 + 熔断 + 智能等待 + 可选的同意弹窗处理）与文档级 SSRF 守卫，供 BrowserSession 使用
 ├── enhancers/ — DOM 增强脚本：池建的每个上下文把它注册为 init script（React fiber 钩子、可交互元素注册表、SPA 追踪器）
 ├── action_capture/ — 与智能体无关的 DOM 动作录制器：把点击、输入、选择、按键、导航记成结构化的 ActionStep 序列，供服务端的浏览器技能录制向导使用
 ├── domain_skills/ — 域名可执行技能：manifest 驱动的 Python 工具注册表，脚本经 `browser_manage_tool` 的 `run_site_tool` 按需加载

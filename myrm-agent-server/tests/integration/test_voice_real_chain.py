@@ -16,7 +16,6 @@ import contextlib
 import json
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
-from pathlib import Path
 
 import pytest
 from myrm_agent_harness.core.features import _reset_for_testing
@@ -33,11 +32,11 @@ from tests.integration.voice_real_chain_testkit import (
     save_voice_settings,
     send_audio,
     serving,
-    synthesize_speech,
     until,
     voice_settings,
 )
 from tests.support.feature_flags import seed_voice_interaction_flags
+from tests.support.spoken_audio import SPOKEN_WORDS, synthesize_speech, whisper_base_model_cached
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +50,6 @@ _BATCH_INFO = {"type": "info", "message": "streaming_unavailable", "fallback": "
 # The stand-in does not decode what it receives, so the bytes that reach it only have to arrive.
 _AUDIO_STAND_IN = bytes(24_000)
 _MODEL_TIMEOUT_SECONDS = 240.0
-_WHISPER_MODEL_CACHE = "models--Systran--faster-whisper-base"
 # What the browser sees when the server ends a dictation / a voice session on its own terms: a clean close, not a dropped socket.
 _DICTATION_CLOSED = (1000, "Done")
 _SESSION_CLOSED = (1000, "Session ended")
@@ -76,9 +74,7 @@ def spoken_wav(tmp_path_factory: pytest.TempPathFactory) -> bytes:
 def local_whisper() -> Iterator[None]:
     """The real faster-whisper ``base`` model, released after the test so it does not outlive the event loop."""
     pytest.importorskip("faster_whisper")
-    from huggingface_hub.constants import HF_HUB_CACHE
-
-    if not (Path(HF_HUB_CACHE) / _WHISPER_MODEL_CACHE).is_dir():
+    if not whisper_base_model_cached():
         pytest.skip("the faster-whisper `base` model is not cached; the test does not download it")
     from app.channels.voice.stt.local import _whisper_manager
 
@@ -99,8 +95,7 @@ async def deepgram_stack(
 
 def _assert_spoken(text: object) -> None:
     assert isinstance(text, str)
-    assert "milk" in text.lower()
-    assert "eggs" in text.lower()
+    assert all(word in text.lower() for word in SPOKEN_WORDS), text
 
 
 async def test_dictation_transcribes_real_speech_with_the_local_model(spoken_wav: bytes, local_whisper: None) -> None:

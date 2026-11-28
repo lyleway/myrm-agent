@@ -26,7 +26,10 @@ Submodules, primitives first: each imports only modules listed before it, except
 - ``chat``: Chat page helpers: route readiness, agent binding, the security preset trigger and the send-idle wait.
 - ``chat_search``: Drive the Cmd+K history search and the shared-context history panel, and read the dates and times
   they show.
+- ``devtools_session``: A DevTools session of its own on one page, next to the one the orchestrator holds; the base of
+  ``time_zone`` and ``user_activation``.
 - ``time_zone``: Pin the time zone of one page for the length of a block, through a DevTools session of its own.
+- ``user_activation``: Give a page the user gesture its audio needs to start, which the orchestrator's evaluate cannot.
 - ``plan_api``: Dynamic-workflow plan and stream state read and confirmed through the HTTP API.
 - ``workflow_plan``: Wait for the workflow plan card and confirm the plan in the UI or through the API.
 - ``patching``: Monkeypatch helper for the per-concern layout of this package.
@@ -75,6 +78,7 @@ from .reload import _reapply_shpoib_runtime_after_reload, navigate_mcp_page, rel
 from .settings_open import open_settings_subroute, open_wiki_settings_mcp_page
 from .settings_wait import wait_for_agent_settings_editor, wait_for_settings_layout, wait_for_wiki_settings_shell
 from .time_zone import emulated_time_zone
+from .user_activation import grant_user_activation
 from .wait_state import wait_for_state
 from .warm_ui import _trigger_attach_client_warmup_once, warm_ui_route
 from .workflow_plan import wait_for_workflow_plan_card
@@ -105,6 +109,7 @@ __all__ = [
     "get_e2e_api_url",
     "get_e2e_ui_url",
     "get_first_enabled_model",
+    "grant_user_activation",
     "guarded_httpx_request",
     "guarded_urlopen",
     "http_json",

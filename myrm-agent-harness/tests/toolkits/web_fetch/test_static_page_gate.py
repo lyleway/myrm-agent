@@ -1,4 +1,4 @@
-"""Tests for L1 static long-page fallback gate (R20 / G9)."""
+"""Tests for the L1 static long-page fallback gate."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _long_raw_markdown(chars: int = 3500) -> str:
 
 
 class TestStaticPageGateConditions:
-    """G9：单测覆盖每一个门不触发的条件。"""
+    """单测覆盖每一个门不触发的条件。"""
 
     def test_accepts_l1_2xx_long_dense_markdown(self) -> None:
         raw = _long_raw_markdown(3600)
@@ -194,7 +194,7 @@ def test_pipeline_still_rejects_thin_js_shell_on_l1() -> None:
 
 @pytest.mark.asyncio
 async def test_engine_five_consecutive_static_index_fetches_deliver_on_l1() -> None:
-    """G9：静态长目录页连续 5 次访问都在 L1 交付，不记录失败。"""
+    """静态长目录页连续 5 次访问都在 L1 交付，不记录失败。"""
     from unittest.mock import AsyncMock
 
     from myrm_agent_harness.toolkits.web_fetch.engine import FetchEngine

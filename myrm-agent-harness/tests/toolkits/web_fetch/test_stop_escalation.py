@@ -1,4 +1,4 @@
-"""Tests for R29: stop-escalation boundary (blocked vs needs_javascript), protocol signals, and stop-text guidance."""
+"""Tests for the stop-escalation boundary (blocked vs needs_javascript), protocol signals, and stop-text guidance."""
 
 from __future__ import annotations
 

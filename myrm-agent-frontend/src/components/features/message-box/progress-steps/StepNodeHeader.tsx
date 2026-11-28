@@ -13,7 +13,7 @@
 
 import { Clock, Info } from 'lucide-react';
 import { Badge } from '@/components/primitives/badge';
-import type { TranslateFn } from '@/lib/humanize';
+import type { McpServerNameResolver, TranslateFn } from '@/lib/humanize';
 import { REVEAL_ON_HOVER } from '@/lib/utils/a11y';
 import { cn } from '@/lib/utils/classnameUtils';
 import type { ProgressItem } from '@/store/chat/types';
@@ -26,19 +26,20 @@ interface StepNodeHeaderProps {
   state: StepVisualState;
   t: TranslateFn;
   tHumanize: TranslateFn;
+  serverName: McpServerNameResolver;
   onViewDetail: (step: ProgressItem) => void;
 }
 
 const formatDuration = (ms: number): string => (ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`);
 
-export function StepNodeHeader({ step, state, t, tHumanize, onViewDetail }: StepNodeHeaderProps) {
+export function StepNodeHeader({ step, state, t, tHumanize, serverName, onViewDetail }: StepNodeHeaderProps) {
   return (
     <>
       <div className="flex items-center gap-2">
         <StepStatusIcon step={step} state={state} />
         <StepTitle
           step={step}
-          title={getStepTitle(step, t, true, tHumanize)}
+          title={getStepTitle(step, t, true, tHumanize, serverName)}
           t={t}
           className={cn(
             'text-sm font-normal transition-colors duration-200',
