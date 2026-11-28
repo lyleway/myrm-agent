@@ -18,14 +18,17 @@ from typing import cast
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import MINIMUM_SERVER_VERSION
 from myrm_agent_harness.toolkits.acp.types import PermissionMode, RuntimeEvent, RuntimeEventType
 from tests.toolkits.acp._brokers import AnsweringBroker
 from tests.toolkits.acp._fake_model_apis import FakeResponsesApi, ToolCall
+from tests.toolkits.acp.cli_contract import cli_binary
 from tests.toolkits.acp.runtime.codex._real import (
     codex_pool,
     ended_cleanly,
     failed_tool_results,
     failure_of,
+    open_connection,
     run_turn,
     text_of,
     types_of,
@@ -259,3 +262,14 @@ async def test_a_stop_ends_the_turn_as_cancelled_and_the_server_serves_the_next_
     (error,) = [e for e in events if e.type is RuntimeEventType.ERROR]
     assert failure_of(error).code.value == "cancelled"
     assert ended_cleanly(second)
+
+
+async def test_the_server_says_its_version_the_way_the_host_reads_it(tmp_path: Path, workspace: Path) -> None:
+    """The host refuses a server older than it speaks to by the version in ``initialize``; a Codex that words it
+    differently would be let through whatever its version, so that is a failure here."""
+    connection = await open_connection(cli_binary("codex"), write_codex_home(tmp_path, "http://127.0.0.1:9"), workspace)
+    try:
+        assert connection.version is not None
+        assert connection.version >= MINIMUM_SERVER_VERSION
+    finally:
+        await connection.close(graceful=True)

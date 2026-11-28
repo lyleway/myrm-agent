@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     CliSessionRecord,
@@ -194,6 +195,23 @@ async def test_an_mcp_server_of_the_host_is_offered_asked_about_and_called(tmp_p
     assert "pong:hi" in api.tool_results[0]
     tool_start = next(e for e in events if e.type is RuntimeEventType.TOOL_START)
     assert tool_start.data["tool_name"] == "mcp__echo__ping"
+
+
+async def test_an_mcp_server_of_the_host_that_cannot_start_ends_the_turn_saying_which(
+    tmp_path: Path, workspace: Path
+) -> None:
+    broken = StdioMcpServer(name="broken", command=str(tmp_path / "no-such-server"))
+    async with FakeResponsesApi() as api:
+        pool = codex_pool(write_codex_home(tmp_path, api.base_url), mcp_servers=[broken])
+        try:
+            events = await run_turn(pool, workspace)
+        finally:
+            await pool.close_all()
+
+    (error,) = errors_of(events)
+    assert "broken" in failure_of(error).message
+    # The agent never ran without the tools it was promised.
+    assert api.requests == []
 
 
 async def test_an_api_key_logs_in_through_the_server_and_leaves_the_users_own_login_alone(

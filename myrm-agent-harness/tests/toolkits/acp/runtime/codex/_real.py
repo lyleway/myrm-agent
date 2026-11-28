@@ -8,10 +8,12 @@ server says, which the pool then runs over the transport the agent's contract na
 from __future__ import annotations
 
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, StdioMcpServer
+from myrm_agent_harness.toolkits.acp.runtime.codex.connection import AppServerConnection, server_environment
+from myrm_agent_harness.toolkits.acp.runtime.codex.rpc import Notification
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
@@ -86,6 +88,27 @@ def echo_mcp_server() -> McpServerConfig:
         name="echo",
         command=sys.executable,
         args=[str(Path(__file__).parents[2] / "_echo_mcp_server.py")],
+    )
+
+
+async def open_connection(command: str, env: Mapping[str, str], workspace: Path) -> AppServerConnection:
+    """A greeted server process opened the way the runtime opens one before a turn, to look at the connection itself."""
+
+    async def unanswered(method: str, params: Mapping[str, object]) -> Mapping[str, object]:
+        return {}
+
+    def ignored(notification: Notification) -> None:
+        return None
+
+    config = RuntimeConfig(backend_type="app_server", command=command, env=dict(env))
+    safe_env, api_key = server_environment(NAME, config, command)
+    return await AppServerConnection.open(
+        [command, "app-server"],
+        env=safe_env,
+        cwd=str(workspace),
+        on_server_request=unanswered,
+        observe=ignored,
+        api_key=api_key,
     )
 
 

@@ -179,7 +179,7 @@ class CodexRuntime(BaseRuntime):
             yield _event(session_id, AcpError(AcpErrorCode.BACKEND_NOT_FOUND, str(exc)))
             return
         except AppServerStartError as exc:
-            yield _event(session_id, AcpError(AcpErrorCode.PROCESS_CRASHED, str(exc), retryable=True))
+            yield _event(session_id, AcpError(AcpErrorCode.PROCESS_CRASHED, str(exc), retryable=exc.retryable))
             return
         except _RPC_FAILURES as exc:
             yield _event(session_id, await self._rpc_failure(connection, exc))
