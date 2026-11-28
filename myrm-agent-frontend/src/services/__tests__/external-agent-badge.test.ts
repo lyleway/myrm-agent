@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveExternalCliReadiness, hasAutoDetectedExternalCliBackend } from '@/services/external-agents';
+import {
+  hasAutoDetectedExternalCliBackend,
+  isBlockedInDeployment,
+  resolveExternalCliReadiness,
+} from '@/services/external-agents';
 
 describe('external CLI readiness', () => {
   it('distinguishes not-configured from configured-but-unavailable', () => {
-    const missing = { backend: 'claude', installed: false, authenticated: false } as never;
-    const present = { backend: 'claude', installed: true, authenticated: false } as never;
+    const missing = { backend: 'claude', installed: false, authenticated: false, availableInDeployment: true } as never;
+    const present = { backend: 'claude', installed: true, authenticated: false, availableInDeployment: true } as never;
 
     // Nothing configured: the user still has to add a backend.
     expect(resolveExternalCliReadiness([], [], true)).toBe('not_configured');
@@ -38,7 +42,61 @@ describe('external CLI readiness', () => {
     // A path with no basename cannot be matched to a backend row; it stays trusted.
     expect(resolveExternalCliReadiness([{ enabled: true, command: '/' }], [missing], false)).toBe('ready');
     expect(
-      hasAutoDetectedExternalCliBackend([{ backend: 'claude', installed: true, authenticated: false } as never]),
+      hasAutoDetectedExternalCliBackend([
+        { backend: 'claude', installed: true, authenticated: false, availableInDeployment: true } as never,
+      ]),
     ).toBe(true);
+  });
+});
+
+describe('agents the deployment does not run', () => {
+  const row = (backend: string, availableInDeployment: boolean, installed = availableInDeployment) =>
+    ({ backend, installed, authenticated: false, availableInDeployment }) as never;
+  const hosted = [row('claude', false), row('codex', false), row('gemini', true), row('qwen', true)];
+
+  it.each(['claude', 'codex', 'CLAUDE', '/usr/local/bin/claude', 'C:\\tools\\codex.cmd', 'claude-code', '  codex  '])(
+    'names a blocked agent in %s',
+    (command) => {
+      expect(isBlockedInDeployment(command, hosted)).toBe(true);
+    },
+  );
+
+  it.each(['gemini', 'qwen', '/opt/bin/my-agent', '', '   ', '/'])('does not block %j', (command) => {
+    expect(isBlockedInDeployment(command, hosted)).toBe(false);
+  });
+
+  it('blocks nothing until the server has reported, and nothing where every agent is available', () => {
+    expect(isBlockedInDeployment('claude', [])).toBe(false);
+    expect(isBlockedInDeployment('claude', [row('claude', true), row('codex', true)])).toBe(false);
+  });
+
+  it('reads blocked when every configured agent is blocked, however the command is spelled', () => {
+    const agents = [
+      { enabled: true, command: 'claude' },
+      { enabled: true, command: '/usr/bin/codex' },
+    ];
+
+    expect(resolveExternalCliReadiness(agents, hosted, false)).toBe('blocked');
+    expect(resolveExternalCliReadiness([{ enabled: true, command: 'claude-code' }], hosted, false)).toBe('blocked');
+  });
+
+  it('judges only the agents that are left once the blocked ones are set aside', () => {
+    const blockedAndMine = [
+      { enabled: true, command: 'claude' },
+      { enabled: true, command: 'my-wrapper' },
+    ];
+    const blockedAndMissing = [
+      { enabled: true, command: 'claude' },
+      { enabled: true, command: 'gemini' },
+    ];
+    const noGemini = [row('claude', false), row('codex', false), row('gemini', true, false)];
+
+    expect(resolveExternalCliReadiness(blockedAndMine, hosted, false)).toBe('ready');
+    expect(resolveExternalCliReadiness(blockedAndMissing, hosted, false)).toBe('ready');
+    expect(resolveExternalCliReadiness(blockedAndMissing, noGemini, false)).toBe('unavailable');
+  });
+
+  it('does not read a disabled blocked agent as blocked', () => {
+    expect(resolveExternalCliReadiness([{ enabled: false, command: 'claude' }], hosted, false)).toBe('not_configured');
   });
 });

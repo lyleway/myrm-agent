@@ -49,19 +49,20 @@ def test_a_local_deployment_keeps_the_configured_choice(monkeypatch: pytest.Monk
     assert _auth_mode({"authMode": "api_key"}) == "api_key"
 
 
-def test_the_backend_registered_in_a_sandbox_runs_on_an_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("backend", ["gemini", "qwen"])
+def test_the_backend_registered_in_a_sandbox_runs_on_an_api_key(monkeypatch: pytest.MonkeyPatch, backend: str) -> None:
     _use_deploy_mode(monkeypatch, "sandbox")
     pool = MagicMock()
 
-    _register_backends_on_pool(pool, [{"name": "codex", "command": "codex", "authMode": "subscription"}])
+    _register_backends_on_pool(pool, [{"name": backend, "command": backend, "authMode": "subscription"}])
 
     assert pool.register.call_args.args[1].auth_mode == "api_key"
 
 
 def test_the_pool_fingerprint_follows_the_effective_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """A stored subscription choice and an explicit API-key choice are the same runtime in a sandbox."""
-    stored = [{"name": "codex", "command": "codex", "authMode": "subscription"}]
-    explicit = [{"name": "codex", "command": "codex", "authMode": "api_key"}]
+    stored = [{"name": "gemini", "command": "gemini", "authMode": "subscription"}]
+    explicit = [{"name": "gemini", "command": "gemini", "authMode": "api_key"}]
 
     _use_deploy_mode(monkeypatch, "sandbox")
     assert _config_fingerprint(stored) == _config_fingerprint(explicit)

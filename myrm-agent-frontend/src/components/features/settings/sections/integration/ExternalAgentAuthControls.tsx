@@ -29,6 +29,8 @@ interface Props {
  * Per-agent controls: install while the CLI is missing, otherwise the login-state badge plus login / logout.
  * An agent that runs as a named account shows that account's login, and logs in and out of it. A hosted deployment
  * offers no login (agents run on an API key); it only shows a login left from before, so that it can be removed.
+ * An agent the deployment does not run has no install or login, only a note saying so and, for a login left from
+ * before, the way to remove it.
  */
 const ExternalAgentAuthControls = memo(({ command, status, account, accountState = null, onChanged }: Props) => {
   const t = useTranslations('settings.developer.externalAgents');
@@ -62,6 +64,25 @@ const ExternalAgentAuthControls = memo(({ command, status, account, accountState
   }
 
   const authenticated = account ? (accountState?.authenticated ?? false) : status.authenticated;
+  const logoutButton = (
+    <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={handleLogout} disabled={loggingOut}>
+      {loggingOut && <IconLoader className="w-3 h-3 mr-1 animate-spin" />}
+      {t('logout')}
+    </Button>
+  );
+
+  // Nothing to install or sign in to: the deployment does not run this agent. A login left from before can still be removed.
+  if (!status.availableInDeployment) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {t('blockedInDeployment')}
+        </span>
+        {authenticated && logoutButton}
+      </div>
+    );
+  }
+
   const badgeTone = authenticated
     ? 'bg-green-500/10 text-green-600 dark:text-green-400'
     : 'bg-muted text-muted-foreground';
@@ -88,16 +109,7 @@ const ExternalAgentAuthControls = memo(({ command, status, account, accountState
             {badgeLabel}
           </span>
           {authenticated ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-[11px]"
-              onClick={handleLogout}
-              disabled={loggingOut}
-            >
-              {loggingOut && <IconLoader className="w-3 h-3 mr-1 animate-spin" />}
-              {t('logout')}
-            </Button>
+            logoutButton
           ) : (
             <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={() => setLoginOpen(true)}>
               {t('login')}

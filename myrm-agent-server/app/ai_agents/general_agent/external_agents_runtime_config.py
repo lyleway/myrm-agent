@@ -8,6 +8,7 @@
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
 - app.services.external_agents.accounts::agent_home (POS: The home an external agent's CLI is run in)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
+- app.services.external_agents.deployment_policy::blocked_backend (POS: The known agent a command names when this deployment does not run it) [lazy]
 - app.config.settings::settings (POS: Gateway wall-clock ceiling that bounds a delegated turn)
 - app.services.external_agents.memory_grants::memory_server_for (POS: The MCP server entry that gives an external agent the memory of a Myrm agent) [lazy]
 
@@ -15,7 +16,7 @@
 - _auth_mode / _permission_mode / _share_memory / _cfg_int / _turn_timeout: Config parsing helpers (the memory of the user is shared with an agent only when its config says ``shareMemory: true``, exactly; a deployment that keeps no subscription logins resolves every auth mode to api_key; an unknown permission mode fails closed to safe; the turn timeout defaults to 30 min and stays under the Gateway ceiling)
 - _config_fingerprint: Stable hash aligned with RuntimeConfig-relevant fields (the account an agent runs as included, and whose memory it is given)
 - _resolve_external_agent_cfgs: Resolve explicit config or local auto-detect
-- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted; an agent runs in the home of its account, or in the one a deployment without subscription logins gives every agent; an agent that shares memory is handed the read-only memory server of the Myrm agent the pool belongs to)
+- _register_backends_on_pool: Register normalized runtime configs into RuntimePool (the directory a turn runs in is the turn's, not the config's; the kinds of backend the harness defines are the ones accepted; an agent the deployment does not run is skipped, and so is left out of the fingerprint; an agent runs in the home of its account, or in the one a deployment without subscription logins gives every agent; an agent that shares memory is handed the read-only memory server of the Myrm agent the pool belongs to)
 
 [POS]
 GeneralAgent 外部 Agent 配置归一化与探测装配层。确保 RuntimePool 指纹与注册字段同源，
@@ -154,9 +155,14 @@ def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | No
     """Normalize one external-agent entry so fingerprint and RuntimeConfig stay aligned."""
     from myrm_agent_harness.toolkits.acp.auth import effective_transport
 
+    from app.services.external_agents.deployment_policy import blocked_backend
+
     name = cfg.get("name")
     command = cfg.get("command")
     if not name or not command:
+        return None
+    # An agent the deployment does not run is no agent here: it is neither registered nor part of the fingerprint.
+    if blocked_backend(str(command)) is not None:
         return None
 
     args_raw = cfg.get("args", [])
@@ -295,10 +301,16 @@ def _register_backends_on_pool(
     from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 
     from app.services.external_agents.accounts import agent_home
+    from app.services.external_agents.deployment_policy import blocked_backend
     from app.services.external_agents.memory_grants import memory_server_for
 
     for cfg in agent_cfgs:
         if not cfg.get("enabled", True):
+            continue
+
+        blocked = blocked_backend(str(cfg.get("command") or ""))
+        if blocked is not None:
+            logger.warning("Skipping external agent '%s': %s is not available in this deployment", cfg.get("name"), blocked)
             continue
 
         normalized_cfg = _normalize_runtime_cfg(cfg)

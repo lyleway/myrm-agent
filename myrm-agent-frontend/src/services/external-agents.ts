@@ -8,6 +8,8 @@
  * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
  *   / feedExternalAgentLogin / importExternalAgentCredential / logoutExternalAgent
  * - listExternalAgentAccounts / createExternalAgentAccount / deleteExternalAgentAccount
+ * - isBlockedInDeployment / resolveExternalCliReadiness: whether a command names an agent the deployment does not run,
+ *   and whether delegation can run at all
  *
  * [POS]
  * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
@@ -34,6 +36,8 @@ export interface ExternalAgentAuthStatus {
   needsCodeInput: boolean;
   /** False in a hosted deployment, which runs delegated agents on an API key and never keeps a subscription login. */
   subscriptionLoginAllowed: boolean;
+  /** False where the deployment does not run this agent at all (a hosted deployment), however it would be signed in. */
+  availableInDeployment: boolean;
 }
 
 export interface ExternalAgentAuthEvent {
@@ -80,11 +84,29 @@ function resolveConfiguredBackendStatus(
   return statuses.find((row) => executable === row.backend.toLowerCase());
 }
 
+/** The executable a command starts, lowercased and without extension: `C:\tools\Claude.cmd` is `claude`. */
+function executableOf(command: string): string {
+  return (command.trim().split(/[\\/]/).pop() ?? '').toLowerCase().split('.')[0];
+}
+
 /**
- * Delegation readiness, split so the UI can tell "nothing configured" apart from
- * "configured but not installed" — two different problems needing two different fixes.
+ * Whether the deployment does not run the agent a command names. The server decides which agents those are and reports
+ * them in the status rows; a command names an agent when it is its executable or carries its name (`claude-code`),
+ * which is how the server matches it too.
  */
-export type ExternalCliReadiness = 'not_configured' | 'unavailable' | 'ready';
+export function isBlockedInDeployment(command: string, statuses: ReadonlyArray<ExternalAgentAuthStatus>): boolean {
+  const executable = executableOf(command);
+  return (
+    executable !== '' &&
+    statuses.some((row) => !row.availableInDeployment && executable.includes(row.backend.toLowerCase()))
+  );
+}
+
+/**
+ * Delegation readiness, split so the UI can tell "nothing configured" apart from "configured but not installed" and
+ * from "configured, but the deployment does not run it" — three different problems needing three different fixes.
+ */
+export type ExternalCliReadiness = 'not_configured' | 'unavailable' | 'blocked' | 'ready';
 
 /** True when auth/status reports any backend installed on this machine (PATH auto-detect). */
 export function hasAutoDetectedExternalCliBackend(statuses: ReadonlyArray<ExternalAgentAuthStatus>): boolean {
@@ -111,7 +133,11 @@ export function resolveExternalCliReadiness(
   if (configured.length === 0) {
     return localMode && hasAutoDetectedExternalCliBackend(statuses) ? 'ready' : 'not_configured';
   }
-  const resolvable = configured.some((command) => {
+  const runnable = configured.filter((command) => !isBlockedInDeployment(command, statuses));
+  if (runnable.length === 0) {
+    return 'blocked';
+  }
+  const resolvable = runnable.some((command) => {
     if (/[\\/]/.test(command)) {
       // An explicit path is user-pinned; PATH-based detection says nothing about it.
       return true;

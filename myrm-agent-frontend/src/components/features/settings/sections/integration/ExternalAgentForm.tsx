@@ -15,7 +15,6 @@ import type { ExternalAgentAccount } from '@/services/external-agents';
 import ExternalAgentAccountField from './ExternalAgentAccountField';
 import ExternalAgentEnvEditor from './ExternalAgentEnvEditor';
 import {
-  AGENT_PRESETS,
   PERMISSION_MODE_OPTIONS,
   accountBackend,
   effectiveAuthMode,
@@ -23,6 +22,7 @@ import {
   normalizePermissionMode,
   permissionHintKey,
   toDraft,
+  type AgentPreset,
   type ExternalAgentDraft,
 } from './externalAgentModel';
 
@@ -32,6 +32,8 @@ interface ExternalAgentFormProps {
   fixedTransport: ExternalAgentType | null;
   /** Adding a new agent: offers the one-click presets. */
   isNew: boolean;
+  /** The presets on offer: those whose agent the deployment runs. */
+  presets: readonly AgentPreset[];
   isTesting: boolean;
   /** False in a hosted deployment: agents run on an API key there, so the form offers nothing else. */
   subscriptionLoginAllowed: boolean;
@@ -50,6 +52,7 @@ const ExternalAgentForm = memo(
     draft,
     fixedTransport,
     isNew,
+    presets,
     isTesting,
     subscriptionLoginAllowed,
     accounts,
@@ -67,10 +70,10 @@ const ExternalAgentForm = memo(
 
     return (
       <div className="border border-border rounded-lg p-4 space-y-4 bg-muted/20">
-        {isNew && (
+        {isNew && presets.length > 0 && (
           <div className="flex flex-wrap gap-2">
             <span className="text-xs text-muted-foreground self-center mr-1">{t('presets')}:</span>
-            {AGENT_PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <button
                 key={preset.key}
                 onClick={() => onChange({ ...toDraft(preset.config), envRows: draft.envRows })}

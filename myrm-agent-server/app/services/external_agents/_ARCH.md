@@ -10,6 +10,7 @@
 |------|------|------|-------|
 | `__init__.py` | 入口 | 包导出 Registry / Facade | — |
 | `accounts.py` | 核心 | 命名账号的位置与 Agent 跑在哪个 home：`account_store()`（状态根 `resolve_workspace_state_dir()` 下的 `external-agents/accounts`，每次现建、根跟随 `MYRM_DATA_DIR` 且总是绝对路径）与 `agent_home(command, account)`（托管部署 → 稳定的 api_key 目录；否则该 Agent 指名的账号目录，不存在就创建；没有指名 → `None` = CLI 自己的 home；自定义命令不是已知 Agent，无法被重定向，忽略 `account` 并记 WARNING）。harness 只管怎么把 CLI 搬进一个 home，这里决定搬进哪个 | ✅ |
+| `deployment_policy.py` | 核心 | `blocked_backend(command_or_backend)`：一条命令（或后端名）指的是这个部署不运行的哪一个已知 Agent，没有就 `None`。规则表在 `platform_utils/deployment_capabilities.py`（`blocked_external_backends`），这里只做「命令 → 已知 Agent」的匹配，用 harness 的 `profile_for` 同一条规则，所以 `claude-code`、`codex-cli` 这类带着名字的命令同样被挡；安装接口、运行时装配、状态接口都问这一个函数 | ✅ |
 | `memory_grants.py` | 核心 | 外部 Agent 的只读记忆凭据：`MemoryGrants.issue(owner, agent_id=…, external_agent=…)` 为一个池（`owner`）里的一个外部 Agent 签发令牌（`myrm_dlg_…`，只存摘要）；`/mcp` 中间件用 `resolve` 认出它（同时记下 Agent 已连上），`revoke(owner)` 在池关闭时收回，池被回收也会随 `weakref.finalize` 自动失效。`memory_server_for` 给出交给 harness 的 `HttpMcpServer`（`myrm-memory`，本机 `/mcp/` 地址，`Authorization: Bearer`，`read_only`），`memory_connected(config)` 在回合结束时判断 Agent 有没有连上它（等最多 2 秒，只对交出了记忆的 Agent 才付这笔等待） | ✅ |
 | `logout.py` | 核心 | `log_out_of_home(backend, env)`：让本机检测到的该 CLI 在 `env` 指向的 home 里自己登出，再清凭据文件，返回 CLI 事后自报的登录态（没装 CLI 就只清文件）。退出登录接口与删除账号共用：放在钥匙串里的登录只有 CLI 自己能移除，删文件或删目录都够不着 | ✅ |
 | `cli_session_store.py` | 核心 | `ChatCliSessionStore`：harness `CliSessionStore` 协议的 chat 行实现。`load` / `save` 经 `ChatCliSessionRepository` 读写 `chats.external_cli_sessions`（`save` 在 SQLite 写锁内读后写，并发的两个后端各自写自己的 session 名互不覆盖；不触碰 `updated_at`；不存在的 chat 与无痕 chat 不落库）；损坏的条目按“无会话”读出。异常原样上抛，由 harness 降级为新会话 | ✅ |
@@ -21,7 +22,14 @@
 
 - **账号 = 目录**：同一个 CLI 的多个订阅登录（工作号、个人号）各占一个独立目录 `<状态根>/external-agents/accounts/<后端>/<账号名>`，目录树本身就是登记表，没有第二份要保持同步的记录；状态根取 `resolve_workspace_state_dir()`（云沙箱跟随工作区卷）。CLI 被重定向进该目录（`RuntimeConfig.account_home`，harness 按各 CLI 的契约设置对应变量），登录、设置与历史都只落在账号里；用户自己 home 里的登录既不被碰也不会被读到。
 - **Agent 配置的 `account`**：`external_agents` 配置条目里的可选字段，空表示 CLI 自己的 home（用户在本机已有的登录）。`external_agents_runtime_config` 归一化时校验名字（不合法的名字让该 Agent 被丢弃并记 WARNING，名字不会走到路径上）、把它纳入池指纹（换账号即换池）、注册时经 `agent_home` 取家目录；家目录建不出来（磁盘权限、同名文件挡路）只丢该 Agent，其余 Agent 照常注册。
-- **托管通道**（`allows_subscription_login` 为假）：每个已知 Agent 跑在稳定的 api_key 目录 `<根>/_api_key/<后端>` 里。该目录从不被登录、不是账号、不会被列出，磁盘上遗留的订阅登录因此不会被一次按 key 计费的运行读到；该部署下 `account` 配置被忽略。本机的 api_key 模式不隔离（那是用户自己的机器与自己的选择）。
+- **托管通道**（`allows_subscription_login` 为假）：每个已知 Agent 跑在稳定的 api_key 目录 `<根>/_api_key/<后端>` 里。该目录从不被登录、不是账号、不会被列出，磁盘上遗留的订阅登录因此不会被一次按 key 计费的运行读到；该部署下 `account` 配置被忽略。本机的 api_key 模式不隔离（那是用户自己的机器与自己的选择）。托管部署里 claude 与 codex 被下节的后端闸门挡下，这条通道目前只服务于其余已知 Agent。
+
+## 托管部署的后端闸门
+
+- **一张规则表**：`DeploymentCapabilities.blocked_external_backends` 列出这个部署既不安装也不运行的已知 Agent。托管（`SANDBOX`）部署是 `claude`、`codex`；本机、桌面端与 WebUI 远程（都跑在用户自己的机器上）为空。表与「这个部署留不留订阅登录」同在 `deployment_capabilities.py`，一个部署的取舍在一处读到。
+- **各处只问一个函数**：`deployment_policy.blocked_backend`。`/external-agents/install/{backend}` 在下载任何东西之前以 403 拒绝；运行时装配（`external_agents_runtime_config`）不注册这样的 Agent，也不把它计入池指纹，每建一个池记一次 WARNING（不记配置里的环境变量）；`/external-agents/auth/status` 的该行 `availableInDeployment` 为假，不启动该 CLI 去探测登录，只从文件读出遗留的登录，所以用户仍能看到并退出它。
+- **前端只照状态行办**：`availableInDeployment` 为假的 Agent 在设置里不能启用、不提供预设、不能保存，只显示「此部署不可用」与（有遗留登录时的）退出；对话配置面板里外部 CLI 的就绪度为 `blocked`。
+- **已知的边界**：匹配只看命令本身（可执行名，或带着 Agent 名字的名称），不扫描参数；改了名字的包装二进制无法被识别。规则表目前只含 claude 与 codex，其余已知 Agent 的托管条款尚未逐家核对，没有列入不等于已获准许。
 - **换账号**：账号隔离的也是 CLI 的会话历史，同一聊天里把 Agent 换到另一个账号后，先前记下的 CLI 会话 id 在新账号里不存在，走既有的“会话失效”重试路径（改开新会话并给出一条提示），不需要另存会话与账号的绑定。
 
 ## 记忆随行（只读凭据）
@@ -59,3 +67,4 @@
 
 - `myrm_agent_harness.toolkits.acp.runtime.pool` / `acp.types`（`CliSessionRecord`）— harness Integration 层，无反向依赖
 - `app.database.repositories.chat_cli_session_repo` / `app.database.factory.acquire_write_lock` — `cli_session_store.py` 的持久化与写锁
+- `app.platform_utils.deployment_capabilities` — `deployment_policy.py` 读取这个部署不运行的 Agent 的规则表

@@ -4,7 +4,7 @@
 - app.config.deploy_mode::DeployMode, get_deploy_mode, is_local_mode, is_webui_remote_mode (POS: 部署模式与运行方式枚举与判断)
 
 [OUTPUT]
-- DeploymentCapabilities: 部署能力语义标志数据类
+- DeploymentCapabilities: 部署能力语义标志数据类（含托管沙箱不安装也不运行的外部 Agent 名单）
 - get_deployment_capabilities: 单例缓存获取当前进程部署能力标志
 
 [POS]
@@ -19,6 +19,19 @@ from functools import lru_cache
 
 from app.config.deploy_mode import DeployMode, get_deploy_mode, is_local_mode, is_webui_remote_mode
 
+# The delegated agents a managed sandbox does not run, named as their contract names them (``AuthProfile.backend``).
+# Where the machine is the user's own (desktop, local WebUI, a WebUI exposed from the user's machine) nothing is blocked.
+#
+#   claude  Anthropic asks for a commercial agreement before Claude Code is run on behalf of others. Its terms let an end
+#           user use their own subscription in an unmodified binary, so blocking it here is the conservative default:
+#           once the terms are settled for this product, deleting the name below is the whole change.
+#   codex   OpenAI's terms do not allow hosting or commercial use of ``codex app-server``.
+#   gemini, qwen   hosting terms not verified: neither blocked nor cleared by this table.
+#
+# The rule lives in the server, not in the harness: the harness runs any agent it is told to, and which of them a
+# deployment may offer is a decision of whoever operates it.
+_HOSTED_BLOCKED_EXTERNAL_BACKENDS: frozenset[str] = frozenset({"claude", "codex"})
+
 
 @dataclass(frozen=True, slots=True)
 class DeploymentCapabilities:
@@ -28,6 +41,10 @@ class DeploymentCapabilities:
     WebUI the user exposes remotely from their own machine). A delegated CLI's subscription login leaves the user's
     own credential on the host, which the subscription terms allow only on a machine the user controls; a managed
     sandbox runs delegated CLIs on an API key instead. No environment variable overrides it.
+
+    ``blocked_external_backends`` names the delegated agents this deployment neither installs nor runs, whatever way
+    they are authenticated; like ``allows_subscription_login`` it has no environment override. It has a default, and
+    so must any field added after it, so a snapshot built without it stays valid.
     """
 
     allows_local_skills: bool
@@ -44,6 +61,7 @@ class DeploymentCapabilities:
     runs_sandbox_startup_validation: bool
     skips_webui_model_preflight: bool
     is_sandbox_instance: bool
+    blocked_external_backends: frozenset[str] = frozenset()
 
 
 @lru_cache(maxsize=1)
@@ -75,6 +93,7 @@ def get_deployment_capabilities() -> DeploymentCapabilities:
         runs_sandbox_startup_validation=sandbox,
         skips_webui_model_preflight=sandbox or not local,
         is_sandbox_instance=sandbox,
+        blocked_external_backends=_HOSTED_BLOCKED_EXTERNAL_BACKENDS if sandbox else frozenset(),
     )
 
 

@@ -1,19 +1,23 @@
-"""A managed sandbox never starts a subscription login or stores a subscription credential.
+"""A managed sandbox never starts a subscription login, stores a subscription credential or runs a blocked agent.
 
 [POS]
 Tests for app/api/external_agents/ in a sandbox deployment: login, feed and import are refused before anything runs
-or is written, the status rows say so, and logout still removes a credential left over from before.
+or is written, the status rows say so, logout still removes a credential left over from before, and an agent the
+deployment does not run is neither installed nor probed and is reported as not available.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import json
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialState
+from myrm_agent_harness.toolkits.acp.core.backend_detector import DetectedBackend
 
 from app.api.external_agents._deploy_capability import require_subscription_login_capability
 from app.config.deploy_mode import get_deploy_mode
@@ -141,6 +145,101 @@ class TestSandboxRefusesSubscriptionLogin:
         assert not leftover.exists()
 
 
+def _detector_finding(*found: DetectedBackend) -> MagicMock:
+    detector = MagicMock()
+    detector.detect = AsyncMock(return_value=list(found))
+    return detector
+
+
+_ALL_FOUND = (
+    DetectedBackend(name="claude", path="/bin/claude", version="2.1.0"),
+    DetectedBackend(name="codex", path="/bin/codex", version="0.172.0"),
+    DetectedBackend(name="gemini", path="/bin/gemini", version="0.3.0"),
+    DetectedBackend(name="qwen", path="/bin/qwen", version="0.1.0"),
+)
+
+
+def _login_state_probe(probed: list[str]) -> AsyncMock:
+    async def state(_store: object, backend: str, **_kwargs: object) -> CredentialState:
+        probed.append(backend)
+        return CredentialState(backend=backend, status=AuthStatus.AUTHENTICATED)
+
+    return AsyncMock(side_effect=state)
+
+
+def _install_events(response) -> list[dict[str, object]]:
+    return [json.loads(line[6:]) for line in response.iter_lines() if line.startswith("data: ")]
+
+
+class TestSandboxDoesNotRunBlockedAgents:
+    @pytest.mark.parametrize("backend", ["claude", "codex", "claude-code"])
+    def test_install_is_refused_before_anything_is_downloaded(self, client, sandbox, backend: str) -> None:
+        with patch("myrm_agent_harness.toolkits.acp.toolchains.IsolatedToolchainManager") as manager:
+            resp = client.post(f"{_API}/install/{backend}")
+
+        assert resp.status_code == 403
+        assert "not available in hosted deployments" in resp.json()["detail"]
+        manager.assert_not_called()
+
+    @pytest.mark.parametrize("backend", ["gemini", "qwen"])
+    def test_the_other_agents_can_still_be_installed(self, client, sandbox, backend: str) -> None:
+        class Manager:
+            async def install_backend(self, _backend: str) -> AsyncIterator[str]:
+                yield "downloading"
+
+        with patch("myrm_agent_harness.toolkits.acp.toolchains.IsolatedToolchainManager", return_value=Manager()):
+            with client.stream("POST", f"{_API}/install/{backend}") as resp:
+                assert resp.status_code == 200
+                events = _install_events(resp)
+
+        assert events[-1]["type"] == "success"
+
+    def test_status_reports_blocked_agents_as_absent_and_not_available_without_starting_them(self, client, sandbox) -> None:
+        probed: list[str] = []
+        with (
+            patch(
+                "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+                return_value=_detector_finding(*_ALL_FOUND),
+            ),
+            patch("myrm_agent_harness.toolkits.acp.auth.resolve_login_state", _login_state_probe(probed)),
+        ):
+            resp = client.get(f"{_API}/auth/status")
+
+        rows = {row["backend"]: row for row in resp.json()["backends"]}
+        assert set(rows) == {"claude", "codex", "gemini", "qwen"}
+        for blocked in ("claude", "codex"):
+            assert rows[blocked]["availableInDeployment"] is False
+            assert rows[blocked]["installed"] is False
+            assert rows[blocked]["path"] is None
+            assert rows[blocked]["version"] is None
+            assert rows[blocked]["authenticated"] is False
+            assert rows[blocked]["authStatus"] == "not_authenticated"
+        for allowed in ("gemini", "qwen"):
+            assert rows[allowed]["availableInDeployment"] is True
+            assert rows[allowed]["installed"] is True
+            assert rows[allowed]["authenticated"] is True
+        assert sorted(probed) == ["gemini", "qwen"]
+
+    def test_status_still_shows_a_login_left_from_before_so_that_it_can_be_removed(self, client, sandbox, tmp_path) -> None:
+        leftover = tmp_path / ".claude" / ".credentials.json"
+        leftover.parent.mkdir()
+        leftover.write_text('{"token": "old"}', encoding="utf-8")
+        probed: list[str] = []
+        with (
+            patch(
+                "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+                return_value=_detector_finding(*_ALL_FOUND),
+            ),
+            patch("myrm_agent_harness.toolkits.acp.auth.resolve_login_state", _login_state_probe(probed)),
+        ):
+            resp = client.get(f"{_API}/auth/status")
+
+        claude = next(row for row in resp.json()["backends"] if row["backend"] == "claude")
+        assert claude["authenticated"] is True
+        assert claude["availableInDeployment"] is False
+        assert "claude" not in probed
+
+
 class TestLocalDeploymentKeepsSubscriptionLogin:
     @pytest.mark.parametrize("mode", ["local", "tauri"])
     def test_status_rows_say_that_login_is_available(self, client, monkeypatch, mode: str) -> None:
@@ -152,6 +251,38 @@ class TestLocalDeploymentKeepsSubscriptionLogin:
             resp = client.get(f"{_API}/auth/status")
 
         assert all(row["subscriptionLoginAllowed"] is True for row in resp.json()["backends"])
+
+    @pytest.mark.parametrize("mode", ["local", "tauri"])
+    def test_every_agent_is_available_and_probed(self, client, monkeypatch, mode: str) -> None:
+        _use_deploy_mode(monkeypatch, mode)
+        probed: list[str] = []
+        with (
+            patch(
+                "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+                return_value=_detector_finding(*_ALL_FOUND),
+            ),
+            patch("myrm_agent_harness.toolkits.acp.auth.resolve_login_state", _login_state_probe(probed)),
+        ):
+            resp = client.get(f"{_API}/auth/status")
+
+        rows = resp.json()["backends"]
+        assert all(row["availableInDeployment"] is True and row["installed"] is True for row in rows)
+        assert sorted(probed) == ["claude", "codex", "gemini", "qwen"]
+
+    @pytest.mark.parametrize("backend", ["claude", "codex"])
+    def test_every_agent_can_be_installed(self, client, monkeypatch, backend: str) -> None:
+        _use_deploy_mode(monkeypatch, "local")
+
+        class Manager:
+            async def install_backend(self, _backend: str) -> AsyncIterator[str]:
+                yield "downloading"
+
+        with patch("myrm_agent_harness.toolkits.acp.toolchains.IsolatedToolchainManager", return_value=Manager()):
+            with client.stream("POST", f"{_API}/install/{backend}") as resp:
+                assert resp.status_code == 200
+                events = _install_events(resp)
+
+        assert events[-1]["type"] == "success"
 
     @pytest.mark.parametrize("mode", ["local", "tauri"])
     def test_import_stores_the_credential(self, client, monkeypatch, tmp_path, mode: str) -> None:

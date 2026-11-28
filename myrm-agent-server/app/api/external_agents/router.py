@@ -15,9 +15,10 @@ themselves are managed by ``accounts_router``, mounted under ``/accounts``).
 [INPUT]
 - myrm_agent_harness.toolkits.acp.auth (POS: ACP subscription auth subsystem)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
-- app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
+- app.api.external_agents._deploy_capability::require_subscription_login_capability, require_backend_allowed (POS: subscription login gate, the gate of an agent the deployment does not run)
 - app.api.external_agents._account_scope::account_env (POS: the environment of the account a request names)
 - app.api.external_agents.accounts_router::router (POS: named account endpoints)
+- app.services.external_agents.deployment_policy::blocked_backend (POS: whether the deployment runs an agent, for the status rows)
 - app.services.external_agents.logout::log_out_of_home (POS: logout through the CLI, shared with account removal)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: deploy-mode capability flags)
 
@@ -40,9 +41,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.external_agents._account_scope import account_env
-from app.api.external_agents._deploy_capability import require_subscription_login_capability
+from app.api.external_agents._deploy_capability import require_backend_allowed, require_subscription_login_capability
 from app.api.external_agents.accounts_router import router as accounts_router
 from app.platform_utils.deployment_capabilities import get_deployment_capabilities
+from app.services.external_agents.deployment_policy import blocked_backend
 from app.services.external_agents.logout import log_out_of_home
 
 logger = logging.getLogger(__name__)
@@ -110,6 +112,8 @@ async def external_agent_auth_status() -> dict[str, object]:
 
     The login state is what each CLI says about itself where it can say it (Claude Code keeps its login in the
     macOS Keychain, which no credential-file check sees); a CLI without a status command is judged by its file.
+    An agent the deployment does not run is never started: its row says it is absent and not available, and
+    whether a login is left in its files.
     """
     import asyncio
 
@@ -122,29 +126,40 @@ async def external_agent_auth_status() -> dict[str, object]:
     )
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 
+    capabilities = get_deployment_capabilities()
+    blocked = {name for name in known_backends() if blocked_backend(name) is not None}
     detector = BackendDetector()
     detected = {b.name: b for b in await detector.detect(include_version=True, refresh=True)}
     store = CredentialStore()
-    names = known_backends()
-    states = await asyncio.gather(
-        *(
-            resolve_login_state(
-                store,
-                name,
-                executable=detected[name].path if name in detected else None,
-                env=cli_base_env(detected[name].path if name in detected else None, os.environ),
-            )
-            for name in names
+    # The login of an agent the deployment does not run is only read from its files, so that a login left there can still
+    # be seen and removed.
+    probed = [name for name in known_backends() if name not in blocked]
+    states = dict(
+        zip(
+            probed,
+            await asyncio.gather(
+                *(
+                    resolve_login_state(
+                        store,
+                        name,
+                        executable=detected[name].path if name in detected else None,
+                        env=cli_base_env(detected[name].path if name in detected else None, os.environ),
+                    )
+                    for name in probed
+                )
+            ),
+            strict=True,
         )
     )
 
-    subscription_login_allowed = get_deployment_capabilities().allows_subscription_login
     backends: list[dict[str, object]] = []
-    for name, state in zip(names, states, strict=True):
+    for name in known_backends():
         profile = profile_for(name)
         if profile is None:
             continue
-        found = detected.get(name)
+        available = name not in blocked
+        found = detected.get(name) if available else None
+        state = states[name] if available else store.state(name)
         backends.append(
             {
                 "backend": name,
@@ -157,17 +172,19 @@ async def external_agent_auth_status() -> dict[str, object]:
                 "loginStrategy": profile.login_strategy.value,
                 "scriptableLogin": profile.scriptable_login,
                 "needsCodeInput": profile.needs_code_input,
-                "subscriptionLoginAllowed": subscription_login_allowed,
+                "subscriptionLoginAllowed": capabilities.allows_subscription_login,
+                "availableInDeployment": available,
             }
         )
     return {"backends": backends}
 
 
-@router.post("/install/{backend}")
+@router.post("/install/{backend}", dependencies=[Depends(require_backend_allowed)])
 async def external_agent_install(backend: str) -> StreamingResponse:
     """Install an external agent CLI into the isolated toolchain.
 
     ``success`` is sent only after the toolchain has seen the installed CLI start; any other ending is an ``error``.
+    An agent the deployment does not run (``blocked_external_backends``) is refused before anything is downloaded.
     """
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
     from myrm_agent_harness.toolkits.acp.toolchains import IsolatedToolchainManager, ToolchainError

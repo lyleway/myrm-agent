@@ -34,12 +34,17 @@ import {
   type ExternalAgentType,
   type ExternalAgentsConfigValue,
 } from '@/services/config';
-import { getExternalAgentAuthStatus, type ExternalAgentAuthStatus } from '@/services/external-agents';
+import {
+  getExternalAgentAuthStatus,
+  isBlockedInDeployment,
+  type ExternalAgentAuthStatus,
+} from '@/services/external-agents';
 import ExternalAgentAuthControls from './ExternalAgentAuthControls';
 import ExternalAgentForm from './ExternalAgentForm';
 import {
   DEFAULT_AGENT,
   accountBackend,
+  availablePresets,
   backendKeyFromCommand,
   cleanAgent,
   contractTransport,
@@ -154,6 +159,10 @@ const ExternalAgentsConfig = memo(() => {
       toast.error(t('commandRequired'));
       return;
     }
+    if (isBlockedInDeployment(draft.command, authStatuses)) {
+      toast.error(t('blockedInDeploymentSave'));
+      return;
+    }
 
     const duplicate = agents.some((a, i) => a.name === trimmedName && i !== editingIndex);
     if (duplicate) {
@@ -266,6 +275,9 @@ const ExternalAgentsConfig = memo(() => {
       >
         {isLocalMode() && <p className="text-xs text-muted-foreground -mt-2">{t('tauriAutoDetect')}</p>}
         <p className="text-xs text-muted-foreground">{t('agentToggleHint')}</p>
+        {authStatuses.some((s) => !s.availableInDeployment) && (
+          <p className="text-xs text-muted-foreground">{t('blockedInDeploymentHint')}</p>
+        )}
 
         {agents.length === 0 && !isEditing && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -284,6 +296,7 @@ const ExternalAgentsConfig = memo(() => {
               const accountState = account
                 ? (accounts.find((a) => a.backend === accountOf && a.name === account) ?? null)
                 : null;
+              const blocked = isBlockedInDeployment(agent.command, authStatuses);
               return (
                 <div
                   key={`${agent.name}-${index}`}
@@ -291,7 +304,7 @@ const ExternalAgentsConfig = memo(() => {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div role="presentation" onClick={(e) => e.stopPropagation()}>
-                      <Switch checked={agent.enabled} onCheckedChange={() => handleToggle(index)} />
+                      <Switch checked={agent.enabled} disabled={blocked} onCheckedChange={() => handleToggle(index)} />
                     </div>
                     <TypeIcon className="w-4 h-4 text-muted-foreground shrink-0" />
                     <div className="min-w-0">
@@ -335,6 +348,7 @@ const ExternalAgentsConfig = memo(() => {
             draft={draft}
             fixedTransport={contractTransport(draft.command, authStatuses)}
             isNew={editingIndex === -1}
+            presets={availablePresets(authStatuses)}
             isTesting={isTesting}
             subscriptionLoginAllowed={subscriptionLoginAllowed}
             accounts={accounts}

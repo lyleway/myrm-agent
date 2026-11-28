@@ -6,6 +6,7 @@ import {
   AGENT_PRESETS,
   DEFAULT_AGENT,
   accountBackend,
+  availablePresets,
   backendKeyFromCommand,
   cleanAgent,
   contractTransport,
@@ -200,6 +201,24 @@ describe('permission and backend rules', () => {
   });
 });
 
+describe('the presets a deployment offers', () => {
+  const row = (backend: string, availableInDeployment: boolean) =>
+    ({ backend, installed: false, authenticated: false, availableInDeployment }) as ExternalAgentAuthStatus;
+
+  it('offers every preset until the server has reported, and where every agent is available', () => {
+    expect(availablePresets([])).toEqual(AGENT_PRESETS);
+    expect(availablePresets(['claude', 'codex', 'gemini', 'qwen'].map((backend) => row(backend, true)))).toEqual(
+      AGENT_PRESETS,
+    );
+  });
+
+  it('leaves out the presets of the agents the deployment does not run', () => {
+    const hosted = [row('claude', false), row('codex', false), row('gemini', true), row('qwen', true)];
+
+    expect(availablePresets(hosted).map((preset) => preset.key)).toEqual(['gemini', 'qwen']);
+  });
+});
+
 describe('the transport of a known agent', () => {
   const status = (backend: string, transport: ExternalAgentType): ExternalAgentAuthStatus => ({
     backend,
@@ -213,6 +232,7 @@ describe('the transport of a known agent', () => {
     scriptableLogin: true,
     needsCodeInput: false,
     subscriptionLoginAllowed: true,
+    availableInDeployment: true,
   });
   const statuses = [
     status('claude', 'cli'),

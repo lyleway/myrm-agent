@@ -75,14 +75,15 @@ class TestAnAccountReachesTheRuntime:
 
         assert registered["claude-work"].account_home != registered["claude-home"].account_home  # type: ignore[attr-defined]
 
-    def test_a_sandbox_registers_every_known_agent_in_an_api_key_home(
-        self, accounts_root: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("backend", ["gemini", "qwen"])
+    def test_a_sandbox_registers_the_agents_it_runs_in_an_api_key_home(
+        self, accounts_root: Path, monkeypatch: pytest.MonkeyPatch, backend: str
     ) -> None:
         _use_deploy_mode(monkeypatch, "sandbox")
 
-        registered = _registered([{"name": "codex", "command": "codex", "account": "work"}])
+        registered = _registered([{"name": backend, "command": backend, "account": "work"}])
 
-        assert registered["codex"].account_home == str(accounts_root / "_api_key" / "codex")  # type: ignore[attr-defined]
+        assert registered[backend].account_home == str(accounts_root / "_api_key" / backend)  # type: ignore[attr-defined]
 
     def test_a_command_that_is_not_a_known_agent_is_registered_where_it_is(self, accounts_root: Path) -> None:
         registered = _registered([{"name": "mine", "command": "/opt/bin/my-agent", "account": "work"}])

@@ -17,7 +17,8 @@ vi.mock('next-intl', () => ({
 vi.mock('@/services/config', () => ({
   getConfigSyncManager: () => ({ get: () => mocks.saved, set: mocks.set }),
 }));
-vi.mock('@/services/external-agents', () => ({
+vi.mock('@/services/external-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => [],
   listExternalAgentAccounts: async () => [],
 }));

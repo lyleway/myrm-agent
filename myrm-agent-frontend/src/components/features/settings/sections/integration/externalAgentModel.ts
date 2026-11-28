@@ -1,10 +1,11 @@
 /**
  * [INPUT]
  * - @/services/config::ExternalAgentConfig (POS: one stored external agent entry)
- * - @/services/external-agents::ExternalAgentAuthStatus (POS: what the server reports for a known agent, its transport included)
+ * - @/services/external-agents::ExternalAgentAuthStatus, isBlockedInDeployment (POS: what the server reports for a known agent, its transport and whether the deployment runs it included; whether a command names an agent the deployment does not run)
  *
  * [OUTPUT]
- * - DEFAULT_AGENT, AGENT_PRESETS: the blank entry and the one-click presets of the add form
+ * - DEFAULT_AGENT, AgentPreset, AGENT_PRESETS, availablePresets: the blank entry, the one-click presets of the add form,
+ *   and the ones the deployment runs
  * - PERMISSION_MODE_OPTIONS, permissionHintKey, normalizePermissionMode: the permission modes on offer and what each
  *   means for the agent being edited
  * - knownBackendOfCommand, backendKeyFromCommand: command → the known agent it is, command → the agent its login belongs to
@@ -25,7 +26,7 @@ import type {
   ExternalAgentPermissionMode,
   ExternalAgentType,
 } from '@/services/config';
-import type { ExternalAgentAuthStatus } from '@/services/external-agents';
+import { isBlockedInDeployment, type ExternalAgentAuthStatus } from '@/services/external-agents';
 
 export const DEFAULT_AGENT: ExternalAgentConfig = {
   name: '',
@@ -115,7 +116,12 @@ export function contractTransport(
   return statuses.find((status) => status.backend === backend)?.transport ?? null;
 }
 
-export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
+export interface AgentPreset {
+  key: string;
+  config: ExternalAgentConfig;
+}
+
+export const AGENT_PRESETS: AgentPreset[] = [
   {
     key: 'claude',
     config: {
@@ -160,6 +166,11 @@ export const AGENT_PRESETS: { key: string; config: ExternalAgentConfig }[] = [
     },
   },
 ];
+
+/** The presets whose agent the deployment runs; all of them until the server has reported. */
+export function availablePresets(statuses: readonly ExternalAgentAuthStatus[]): AgentPreset[] {
+  return AGENT_PRESETS.filter((preset) => !isBlockedInDeployment(preset.config.command, statuses));
+}
 
 /** The permission modes every agent offers. */
 export const PERMISSION_MODE_OPTIONS: { value: ExternalAgentPermissionMode; labelKey: string }[] = [

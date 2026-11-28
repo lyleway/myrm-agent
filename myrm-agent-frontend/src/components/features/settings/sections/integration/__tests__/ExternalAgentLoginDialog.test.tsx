@@ -44,6 +44,7 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   scriptableLogin: true,
   needsCodeInput: false,
   subscriptionLoginAllowed: true,
+  availableInDeployment: true,
   ...overrides,
 });
 
