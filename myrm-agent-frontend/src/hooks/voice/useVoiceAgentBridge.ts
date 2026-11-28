@@ -1,13 +1,18 @@
 /**
  * [INPUT]
  * - @/lib/api::getWsUrl (POS: WS URL builder)
+ * - @/lib/backend-health::ensureLocalBackendReady, isLocalBackendReadyCached (POS: Backend readiness facade)
+ * - @/lib/approval/buildToolApprovalRequest::buildToolApprovalRequest (POS: SSE/WS actionRequest → ToolApprovalRequest)
+ * - @/store/useToolApprovalStore::useToolApprovalStore (POS: Pending tool approval request queue)
+ * - ./utteranceUplink::createUtteranceUplink (POS: Microphone → socket uplink that cuts the recording into utterances for batch STT)
  *
  * [OUTPUT]
  * - useVoiceAgentBridge: WebSocket-based voice agent bridge for server-side Agent execution
+ * - AgentBridgeState: Connection state of the server-side Agent WebSocket bridge
  *
  * [POS]
  * Voice Agent Bridge hook. Manages a single WebSocket to /ws/voice/session in agent_bridge mode.
- * Handles: mic audio → server STT → server Agent → streaming TTS audio playback.
+ * Handles: mic audio (uplink delegated to utteranceUplink) → server STT → server Agent → streaming TTS audio playback.
  * Provides state for UI rendering (agent thinking, response text, tool use).
  */
 

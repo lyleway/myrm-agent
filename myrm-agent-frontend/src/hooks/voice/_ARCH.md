@@ -20,7 +20,8 @@
 
 ## 依赖
 
-- `@/store/*`、`@/services/*` — 配置与 API
+- `@/lib/api` — 请求与 WebSocket 地址；`@/lib/backend-health` — 主机就绪门禁；`@/lib/approval/buildToolApprovalRequest` — 审批请求构造；`@/lib/mobileRemote` — 手机配对令牌；`@/lib/deploy-mode` — 桌面运行时判断；`@/lib/utils/*` — toast 与朗读前的 Markdown 清理
+- `@/store/useToolApprovalStore` — 工具审批队列（语音桥写入）；`@/services/liveMeeting` — 会中纪要请求；`@/hooks/ui/persistedStringStore` — 设备端设置存储
 - 消费者：`message-input-actions/`、`features/voice/`、`app-shell/voice-ptt-initializer.tsx`、设置页 `settings/sections/personal/VoiceSessionToggles.tsx` 与 `settings/sections/integration/channels/VoiceSessionModeSettings.tsx`（经 `voiceDeviceSettings`）
 
 ## 约束

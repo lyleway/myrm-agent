@@ -4,8 +4,9 @@
  * - WebSocket (POS: `/ws/voice/session` socket, owned by the caller)
  *
  * [OUTPUT]
+ * - ENDPOINT: speech detection and utterance length thresholds
  * - UtteranceEndpointer: level-driven end-of-speech detector
- * - createUtteranceUplink: microphone → socket uplink that cuts the recording into utterances for batch STT
+ * - UtteranceUplink / createUtteranceUplink: microphone → socket uplink that cuts the recording into utterances for batch STT
  *
  * [POS]
  * Audio uplink of the voice session socket. A streaming STT provider (Deepgram) transcribes one continuous
