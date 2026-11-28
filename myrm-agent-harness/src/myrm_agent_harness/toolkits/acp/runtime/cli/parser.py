@@ -10,7 +10,8 @@ nest several events in one line (Claude content blocks) are split there.
 
 [OUTPUT]
 - parse_json_line: Parse a JSON line, returning None for non-dict values.
-- parse_tool_use / parse_tool_result: tool call and result events with a one-line summary / bounded output
+- parse_tool_use / parse_tool_result: tool call and result events with a one-line summary / bounded output, marked with
+  ``parent_tool_call_id`` when a sub-agent made them
 - parse_usage / parse_thinking: usage and reasoning events
 - error_text: the raw text of an ``error`` line, whatever shape it has
 - extract_text_from_event: text of a flat or nested assistant/text event
@@ -51,7 +52,12 @@ def _result_text(content: object) -> str:
     return ""
 
 
-def parse_tool_use(data: dict[str, object], session_id: str) -> RuntimeEvent:
+def _parent(parent_tool_call_id: str | None) -> dict[str, object]:
+    """The ``parent_tool_call_id`` field of a tool event a sub-agent made; a tool event of the lead agent has none."""
+    return {} if parent_tool_call_id is None else {"parent_tool_call_id": parent_tool_call_id}
+
+
+def parse_tool_use(data: dict[str, object], session_id: str, parent_tool_call_id: str | None = None) -> RuntimeEvent:
     tool_input = data.get("input", {})
     return create_event(
         RuntimeEventType.TOOL_START,
@@ -60,16 +66,18 @@ def parse_tool_use(data: dict[str, object], session_id: str) -> RuntimeEvent:
         tool_input=tool_input,
         tool_call_id=data.get("id", ""),
         summary=tool_summary(tool_input),
+        **_parent(parent_tool_call_id),
     )
 
 
-def parse_tool_result(data: dict[str, object], session_id: str) -> RuntimeEvent:
+def parse_tool_result(data: dict[str, object], session_id: str, parent_tool_call_id: str | None = None) -> RuntimeEvent:
     return create_event(
         RuntimeEventType.TOOL_RESULT,
         session_id,
         tool_call_id=data.get("tool_use_id", ""),
         output=_result_text(data.get("content", ""))[:MAX_TOOL_OUTPUT_CHARS],
         is_error=data.get("is_error", False),
+        **_parent(parent_tool_call_id),
     )
 
 

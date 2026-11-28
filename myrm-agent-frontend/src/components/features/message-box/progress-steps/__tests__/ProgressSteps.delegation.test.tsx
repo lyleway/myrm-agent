@@ -45,6 +45,29 @@ describe('ProgressSteps delegated external agent steps', () => {
     expect(screen.getAllByText('claude: Bash — ls')).toHaveLength(1);
   });
 
+  describe('a helper agent the delegated agent started', () => {
+    const HELPER_LINE = 'claude: Agent — read the note';
+    const lineOf = (text: string) => screen.getByText(text).closest('.group') as HTMLElement;
+
+    it('shows what the helper did under the call that started it', async () => {
+      await open([
+        toolStep({ tool_call_id: 'toolu_agent', items: [{ text: HELPER_LINE }] }),
+        toolStep({ tool_call_id: 'toolu_read', parent_step_key: 'toolu_agent' }),
+      ]);
+
+      expect(lineOf(HELPER_LINE)).toContainElement(lineOf(LINE));
+    });
+
+    it('keeps a call that names no parent beside the others', async () => {
+      await open([
+        toolStep({ tool_call_id: 'toolu_agent', items: [{ text: HELPER_LINE }] }),
+        toolStep({ tool_call_id: 'toolu_read' }),
+      ]);
+
+      expect(lineOf(HELPER_LINE)).not.toContainElement(lineOf(LINE));
+    });
+  });
+
   it('shows what the agent itself reported, such as how long it has been working, in the status line body', async () => {
     await open([
       {

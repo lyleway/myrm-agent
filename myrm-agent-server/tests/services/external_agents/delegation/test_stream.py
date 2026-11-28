@@ -166,6 +166,51 @@ async def test_a_tool_call_is_one_step_that_its_result_updates() -> None:
     assert finished == {**started, "status": "completed"}
 
 
+async def test_what_a_sub_agent_does_is_a_step_under_the_call_that_started_it() -> None:
+    pool = ScriptedPool(
+        playing(
+            scripted_event(RuntimeEventType.TOOL_START, tool_name="Agent", tool_call_id="t1", summary="Read the note"),
+            scripted_event(
+                RuntimeEventType.TOOL_START,
+                tool_name="Read",
+                tool_call_id="t2",
+                summary="a.txt",
+                parent_tool_call_id="t1",
+            ),
+            scripted_event(RuntimeEventType.TOOL_RESULT, tool_call_id="t2", parent_tool_call_id="t1"),
+            scripted_event(RuntimeEventType.TOOL_START, tool_name="Bash", tool_call_id="t3", parent_tool_call_id="t1"),
+            scripted_event(RuntimeEventType.TOOL_RESULT, tool_call_id="t3", parent_tool_call_id="t1", is_error=True),
+            scripted_event(RuntimeEventType.TOOL_RESULT, tool_call_id="t1"),
+        )
+    )
+
+    steps = steps_of(await stream_turn(pool), "delegation_claude_tool")
+
+    # The frontend keys a step by its call id and replaces its parent with what an update carries, so every update
+    # of a sub-agent's step names the parent, and the step of the call that started it names none.
+    assert [(step["tool_call_id"], step.get("parent_step_key"), step.get("status")) for step in steps] == [
+        ("t1", None, None),
+        ("t2", "t1", None),
+        ("t2", "t1", "completed"),
+        ("t3", "t1", None),
+        ("t3", "t1", "error"),
+        ("t1", None, "completed"),
+    ]
+
+
+async def test_a_call_is_never_its_own_parent() -> None:
+    pool = ScriptedPool(
+        playing(
+            scripted_event(RuntimeEventType.TOOL_START, tool_name="Read", tool_call_id="t1", parent_tool_call_id="t1"),
+            scripted_event(RuntimeEventType.TOOL_RESULT, tool_call_id="t1", parent_tool_call_id="t1"),
+        )
+    )
+
+    steps = steps_of(await stream_turn(pool), "delegation_claude_tool")
+
+    assert [step.get("parent_step_key") for step in steps] == [None, None]
+
+
 async def test_a_failed_tool_call_carries_the_start_of_its_error_text() -> None:
     pool = ScriptedPool(
         playing(

@@ -68,6 +68,33 @@ def test_what_the_agent_says_after_a_tool_call_is_set_apart_from_what_it_said_be
     assert parser.result is not None and parser.result.message == "The file says hi."
 
 
+def test_what_a_sub_agent_does_is_marked_with_the_call_that_started_it() -> None:
+    """Claude marks a sub-agent's messages with the id of the call that started it; its report is that call's result."""
+    _, events = _replay("claude_sub_agent")
+
+    tools = [event for event in events if event.type in (RuntimeEventType.TOOL_START, RuntimeEventType.TOOL_RESULT)]
+    starter = tools[0].data["tool_call_id"]
+    assert [
+        (event.type.value, event.data.get("tool_name"), event.data.get("parent_tool_call_id")) for event in tools
+    ] == [
+        ("tool_start", "Agent", None),
+        ("tool_start", "Read", starter),
+        ("tool_result", None, starter),
+        ("tool_result", None, None),
+    ]
+    assert tools[3].data["tool_call_id"] == starter
+    assert "The helper found: hi." in str(tools[3].data["output"])
+
+
+def test_the_answer_of_a_turn_with_a_sub_agent_is_what_the_lead_agent_said() -> None:
+    parser, events = _replay("claude_sub_agent")
+
+    assert _shape(events)[0] == ("text_delta", "I will ask a helper.")
+    assert _shape(events)[-2] == ("text_delta", "\n\nThe helper says the note reads hi.")
+    assert [event.type for event in events].count(RuntimeEventType.TEXT_DELTA) == 2
+    assert parser.result is not None and parser.result.message == "The helper says the note reads hi."
+
+
 def test_stopping_at_the_turn_limit_is_no_failure() -> None:
     parser, events = _replay("claude_turn_limit")
 

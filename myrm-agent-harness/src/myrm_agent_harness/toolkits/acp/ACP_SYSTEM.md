@@ -102,8 +102,8 @@ RuntimeEvent (frozen dataclass)
 |---------|------|----------|
 | `text_delta` | LLM 文本增量 | content: str |
 | `reasoning_delta` | 思维链增量 | content: str |
-| `tool_start` | 工具调用开始 | tool_name, tool_input, tool_call_id, summary（一行摘要，可为空） |
-| `tool_result` | 工具调用结果 | tool_call_id, output（CLI 后端截断到 2000 字符）, is_error |
+| `tool_start` | 工具调用开始 | tool_name, tool_input, tool_call_id, summary（一行摘要，可为空）, parent_tool_call_id（仅子 Agent 做的调用有：启动它的那次调用的 id） |
+| `tool_result` | 工具调用结果 | tool_call_id, output（CLI 后端截断到 2000 字符）, is_error, parent_tool_call_id（同上） |
 | `usage_update` | Token 用量更新 | input_tokens, output_tokens, cache_read, cache_write |
 | `status_update` | 后端状态变化 | status: str, message: str &#124; None |
 | `error` | 错误事件 | error: AcpError |
@@ -479,11 +479,11 @@ acp/
 - **超时/异常/放弃的进程清理**：`BaseRuntime.run_turn` 用 `aclosing` 包住回合生成器，超时、意外异常或消费方提前放弃都会让回合收尾并停掉外部进程；超时与异常再先 `cancel()` 后产出 ERROR 事件，杜绝孤儿进程在后台继续消耗资源
 - **失败路径统一 ERROR**：一个失败的回合只以一个 ERROR 事件结束，不会被静默降级为 DONE 导致 delegate 误判成功：`AcpRuntime._do_run_turn` 在事件被消费到底之后的 prompt 失败会 re-raise，由 `run_turn` 转为 ERROR 并清理进程（消费方先关闭了回合则不同，见停止一节）；`CliRuntime` 在回合末用 `classify_failure` 给出分类后的 ERROR（CLI 已流式给出 ERROR 事件时不重复；CLI 已产出文本、没有 `result` 行却以非零码退出时记 warning 并按 DONE 结束；`result` 行报错时一律是 ERROR）
 - **NDJSON 解析分层**：`turn_parser.TurnParser`（有状态、无 I/O）+ `parser.py`（各格式共享的事件构造），任何 CLI 输出形态都能只凭文本做单测
-- **增量文本与工具事件**：Claude 以 `--include-partial-messages` 启动（仅 stream-json 输出），文本逐段到达，随后重复的完整消息按 API message id 去重；assistant 消息里的 `tool_use` 与 user 消息里的 `tool_result` 映射为 `TOOL_START`（含一行摘要）/ `TOOL_RESULT`
+- **增量文本与工具事件**：Claude 以 `--include-partial-messages` 启动（仅 stream-json 输出），文本逐段到达，随后重复的完整消息按 API message id 去重；assistant 消息里的 `tool_use` 与 user 消息里的 `tool_result` 映射为 `TOOL_START`（含一行摘要）/ `TOOL_RESULT`；Claude 把子 Agent（`Agent` 工具启动的）的消息写进同一条流，并以启动它的那次调用的 id 标记（`parent_tool_use_id`），其工具调用与结果带 `parent_tool_call_id`，而它说的话（整条消息与流式增量）与它的错误提示都不属于主 Agent：不进回合的答案，不算回合的失败，其消息 id 也不干扰主 Agent 的流式去重（Claude 2.1.330 只把子 Agent 的工具调用与结果写进流，它的报告以启动它的那次调用的结果回到主 Agent，真二进制转录 `claude_sub_agent.ndjson` 与 `test_real_claude_sub_agent.py` 为证）
 - **大输出行**：stdout 单行上限 16 MiB（一条工具结果可以是整个文件，asyncio 默认的 64 KiB 会让整回合失败）；stderr 只保留末尾 8 KiB 用于错误摘录
 - **Delegate 元数据 TypedDict**：`DelegateUsage` / `DelegateMeta` 提供精确的类型提示
 - **直连模式 Session 隔离**：基于 `chat_id` 生成独立 `session_id`，不同对话的外部 Agent 上下文互不干扰；用户直接指名的回合与模型调用工具的回合经 `types.delegation_session_id(agent, scope)` 取同一个 session id，对话从任一入口开始都能被另一入口续接
-- **直连模式工具步骤**：外部 Agent 的每次工具调用是一个带 `tool_call_id` 的独立步骤（`delegation_<agent>_tool`，步骤文本为一行「agent: 工具 — 摘要」），对应的 TOOL_RESULT 更新同一步骤的状态（失败时带 CLI 原文的前 300 个字符），而不是覆盖上一个步骤；前端以这一行作标题，不再重复渲染
+- **直连模式工具步骤**：外部 Agent 的每次工具调用是一个带 `tool_call_id` 的独立步骤（`delegation_<agent>_tool`，步骤文本为一行「agent: 工具 — 摘要」），对应的 TOOL_RESULT 更新同一步骤的状态（失败时带 CLI 原文的前 300 个字符），而不是覆盖上一个步骤；子 Agent 做的工具调用带 `parent_step_key`（启动它的那次调用的 `tool_call_id`，每次更新都重发），前端的步骤树把它们收在那一步之下，收集器随步骤持久化它，重载后仍是同一棵树；前端以这一行作标题，不再重复渲染
 - **直连模式收尾与错误处理**：直连路径不重跑整个回合；`CANCELLED`（含用户停止、令牌被取消）只发出 CANCELLED 事件、不发完成状态，`DONE` 的 `stop_reason=max_turn_requests`（外部 Agent 到了自己的轮次上限）按「已停止」收尾而不是错误横幅，其余 ERROR 转成前端 error 事件并以 failed 状态步骤收尾。唯一的自动重来是 `CliRuntime` 对被 CLI 拒绝的续接在同一回合内改开新会话（见「CLI Session 复用」，用户看到一条只带标题的提示）；`invoke_acp_agent_tool` 工具路径另有对 `retryable` 错误的一次重试
 
 ---

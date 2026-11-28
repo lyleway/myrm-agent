@@ -349,6 +349,7 @@ def merge_tasks_step(
         "error_hint",
         "error_category",
         "fault_side",
+        "parent_step_key",
     ):
         value = event.get(key)
         if value is not None:

@@ -12,8 +12,9 @@
 
 [POS]
 绕过 LangChain Agent 的外部 Agent 直连路由的事件翻译层。每次外部工具调用是一个带 tool_call_id 的独立步骤
-（开始与结果落在同一步）。状态步骤的措辞由前端按当前语言给出，这里只带 CLI 自己给的内容（已运行时长、CLI 的
-警告原文）；会话没有被续接、图片没有直接交给外部 Agent、记忆没有交到外部 Agent 手里（它不支持，或宿主给了它却始终没连上）、
+（开始与结果落在同一步）；子 Agent 做的工具调用带 parent_step_key 指向启动它的那次调用，前端把它们收在那一步之下。
+状态步骤的措辞由前端按当前语言给出，这里只带 CLI 自己给的内容（已运行时长、CLI 的警告原文）；
+会话没有被续接、图片没有直接交给外部 Agent、记忆没有交到外部 Agent 手里（它不支持，或宿主给了它却始终没连上）、
 回合在中途结束（停在轮数上限、输出被截断、Agent 拒绝继续），都是只有标题的已完成步骤。停止（令牌取消）经 pool.cancel
 终止外部进程，外部 Agent 静默时同样即时生效。失败时：用户能自己处置的（未登录、未安装、超时）给带处置步骤的
 错误事件（API Key 被拒时点名该 Agent 读取的环境变量），CLI 的原话改记 WARNING 日志（脱敏并截断）；其余保持 CLI 的原话。
@@ -72,6 +73,16 @@ class _Outcome(StrEnum):
     TURN_LIMIT = "turn_limit"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+def _parent_call(data: Mapping[str, object]) -> str:
+    """The call that started the sub-agent a tool event belongs to; empty for a tool event of the lead agent.
+
+    A call is never its own parent: the step tree hangs a step under its parent only, so a step that named itself
+    would have no place in it and vanish from the turn.
+    """
+    parent = data.get("parent_tool_call_id")
+    return parent if isinstance(parent, str) and parent != data.get("tool_call_id") else ""
 
 
 def _token_count(value: object) -> int:
@@ -167,8 +178,11 @@ class _TurnTranslator:
             "data": [],
         }
 
-    def _tool_step(self, call_id: str, line: str, *, state: str | None = None, error: str | None = None) -> SseEvent:
-        # Every update resends the line: the frontend replaces a step's items with whatever the update carries.
+    def _tool_step(
+        self, call_id: str, line: str, *, parent_call_id: str = "", state: str | None = None, error: str | None = None
+    ) -> SseEvent:
+        # Every update resends the line and the parent: the frontend replaces a step's items and parent with whatever
+        # the update carries. A step is told apart by its call id, so that is also what names its parent.
         event: SseEvent = {
             "type": AgentEventType.TASKS_STEPS.value,
             "step_key": f"delegation_{self._agent}_tool",
@@ -177,6 +191,8 @@ class _TurnTranslator:
         }
         if call_id:
             event["tool_call_id"] = call_id
+        if parent_call_id:
+            event["parent_step_key"] = parent_call_id
         if state:
             event["status"] = state
         if error:
@@ -188,7 +204,7 @@ class _TurnTranslator:
         line = f"{self._agent}: {data.get('tool_name') or 'unknown'}" + (f" — {summary}" if summary else "")
         call_id = str(data.get("tool_call_id") or "")
         self._tool_lines[call_id] = line
-        return self._tool_step(call_id, line)
+        return self._tool_step(call_id, line, parent_call_id=_parent_call(data))
 
     def _tool_finished(self, data: Mapping[str, object]) -> SseEvent:
         call_id = str(data.get("tool_call_id") or "")
@@ -198,9 +214,12 @@ class _TurnTranslator:
         if line is None:
             # A result with no start (a file change some CLIs report only once it is done) describes itself.
             line = f"{self._agent}: tool" + (f" — {text.splitlines()[0]}" if text else "")
+        parent_call_id = _parent_call(data)
         if data.get("is_error"):
-            return self._tool_step(call_id, line, state="error", error=text[:_MAX_TOOL_ERROR_CHARS])
-        return self._tool_step(call_id, line, state="completed")
+            return self._tool_step(
+                call_id, line, parent_call_id=parent_call_id, state="error", error=text[:_MAX_TOOL_ERROR_CHARS]
+            )
+        return self._tool_step(call_id, line, parent_call_id=parent_call_id, state="completed")
 
     def _status_update(self, data: Mapping[str, object]) -> SseEvent:
         status = str(data.get("status", ""))

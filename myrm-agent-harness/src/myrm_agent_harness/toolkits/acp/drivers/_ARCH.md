@@ -77,7 +77,9 @@ Framework-level and business-free: a host that embeds the harness gets the same 
   of the checklist. `tests/toolkits/acp/test_login_state.py` requires the parser table of `auth/login_state.py` and
   the agents with a `login_probe` to be the same set; `tests/toolkits/acp/runtime/acp/test_real_agent_admission.py`
   requires every agent driven over ACP to have a scripted model for the real-binary suites and its `initialize`
-  answer on record (`acp_contract.py`).
+  answer on record (`acp_contract.py`); `tests/toolkits/acp/test_contract_workflow.py` requires the contract workflow
+  to install and require the binary of every agent, to run every real-binary test file there is, and to run a real turn
+  of each agent through the runtime built for it (a real-binary test no job runs skips everywhere and proves nothing).
 - **The protocol floor is not a fact of an agent**: `toolkits/acp/runtime/codex/protocol.py::MINIMUM_SERVER_VERSION` is the oldest
   app server whose protocol the runtime speaks, measured against the real binary, and the `codex-floor` CI job reads it
   from there. It stays with the protocol, so `DriverSpec` carries no minimum version.

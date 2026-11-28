@@ -35,6 +35,21 @@ def test_a_tool_step_with_a_known_call_id_updates_that_step_instead_of_adding_on
     assert steps[0]["error"] == "boom"
 
 
+def test_a_step_keeps_the_parent_it_was_shown_under() -> None:
+    steps: list[dict[str, object]] = []
+
+    merge_tasks_step(
+        steps,
+        {"step_key": "delegation_claude_tool", "tool_call_id": "c2", "parent_step_key": "c1", "status": "running"},
+        ["claude: Read"],
+    )
+    merge_tasks_step(steps, {"step_key": "delegation_claude_tool", "tool_call_id": "c2", "status": "completed"}, [])
+
+    assert len(steps) == 1
+    assert steps[0]["parent_step_key"] == "c1"
+    assert steps[0]["status"] == "completed"
+
+
 def test_a_step_that_never_got_a_call_id_takes_the_id_of_the_event_with_the_same_key() -> None:
     steps: list[dict[str, object]] = [{"step_key": "shell", "tool_name": "bash", "items": "old"}]
 

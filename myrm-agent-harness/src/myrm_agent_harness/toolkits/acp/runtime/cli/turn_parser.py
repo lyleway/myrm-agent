@@ -7,7 +7,9 @@ the turn until it ends without a verdict), and which messages already went out a
 (``--include-partial-messages`` repeats each message in full afterwards). Retries are also where a hopeless turn
 shows early: Claude keeps retrying a request the API answers 401 for minutes, and an unbroken run of those retries
 is reported as ``auth_rejection``. The fifth is where a tool call came between two stretches of text: the model's
-words before and after it are separate messages, set apart by a blank line.
+words before and after it are separate messages, set apart by a blank line. Claude also writes the messages of a
+sub-agent into the same stream, marked with the call that started it (``parent_tool_use_id``): its tool calls are
+reported with that call, and its words are not the answer of the turn.
 
 [INPUT]
 - toolkits.acp.runtime._base::UNAUTHORIZED_RETRIES_LIMIT (POS: Base class for RuntimeBackend implementations)
@@ -67,6 +69,12 @@ class CliResult:
 
 def _text(value: object) -> str:
     return value if isinstance(value, str) else ""
+
+
+def _parent_of(data: dict[str, object]) -> str | None:
+    """The call that started the sub-agent a message belongs to; None for a message of the lead agent."""
+    parent = data.get("parent_tool_use_id")
+    return parent if isinstance(parent, str) and parent else None
 
 
 def _parse_result(data: dict[str, object], assistant_error: str) -> CliResult:
@@ -171,9 +179,9 @@ class TurnParser:
         self._text_tail = (self._text_tail + text)[-2:]
         return create_event(RuntimeEventType.TEXT_DELTA, self._session_id, content=text)
 
-    def _tool_start_event(self, data: dict[str, object]) -> RuntimeEvent:
+    def _tool_start_event(self, data: dict[str, object], parent: str | None = None) -> RuntimeEvent:
         self._after_tool_call = True
-        return parse_tool_use(data, self._session_id)
+        return parse_tool_use(data, self._session_id, parent)
 
     def _plain_text(self, line: str) -> list[RuntimeEvent]:
         from myrm_agent_harness.utils.text_utils import strip_ansi
@@ -182,7 +190,13 @@ class TurnParser:
         return [self._text_event(cleaned + "\n")] if cleaned else []
 
     def _stream_event(self, data: dict[str, object]) -> list[RuntimeEvent]:
-        """Text deltas of a message being written (``--include-partial-messages``)."""
+        """Text deltas of a message being written (``--include-partial-messages``).
+
+        A sub-agent's are not the answer, and the ids of its messages must not disturb the bookkeeping of the lead
+        agent's own.
+        """
+        if _parent_of(data) is not None:
+            return []
         event = data.get("event")
         if not isinstance(event, dict):
             return []
@@ -207,16 +221,21 @@ class TurnParser:
         return [self._text_event(text)]
 
     def _assistant(self, data: dict[str, object]) -> list[RuntimeEvent]:
-        """Text and tool calls of an assistant message, in the order of its content blocks."""
+        """Text and tool calls of an assistant message, in the order of its content blocks.
+
+        A sub-agent's message (``parent``) adds its tool calls only: its words are not the answer of the turn.
+        """
+        parent = _parent_of(data)
         error = data.get("error")
         if error:
             # The CLI's own error notice; the final ``result`` line reports the same failure.
-            self._assistant_error = _text(error)
+            if parent is None:
+                self._assistant_error = _text(error)
             return []
         message = data.get("message")
         content = message.get("content") if isinstance(message, dict) else data.get("content")
         if isinstance(content, str):
-            return [self._text_event(content)] if content else []
+            return [self._text_event(content)] if content and parent is None else []
         if not isinstance(content, list):
             return []
 
@@ -230,13 +249,13 @@ class TurnParser:
             block_type = block.get("type")
             if block_type == "text":
                 text = block.get("text")
-                if isinstance(text, str) and text and not already_streamed:
+                if isinstance(text, str) and text and not already_streamed and parent is None:
                     text_parts.append(text)
             elif block_type == "tool_use":
                 if text_parts:
                     events.append(self._text_event("".join(text_parts)))
                     text_parts = []
-                events.append(self._tool_start_event(block))
+                events.append(self._tool_start_event(block, parent))
         if text_parts:
             events.append(self._text_event("".join(text_parts)))
         return events
@@ -247,8 +266,9 @@ class TurnParser:
         content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, list):
             return []
+        parent = _parent_of(data)
         return [
-            parse_tool_result(block, self._session_id)
+            parse_tool_result(block, self._session_id, parent)
             for block in content
             if isinstance(block, dict) and block.get("type") == "tool_result"
         ]
