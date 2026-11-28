@@ -57,6 +57,12 @@ describe('normalizeDesktopPath', () => {
     expect(normalizeDesktopPath('/Users/me/shared ')).toBe('/Users/me/shared ');
     expect(normalizeDesktopPath('/Users/me/shared /')).toBe('/Users/me/shared ');
   });
+
+  it('keeps a backslash in a POSIX folder name, since only a Windows path uses it as a separator', () => {
+    expect(normalizeDesktopPath('/Users/me/a\\b')).toBe('/Users/me/a\\b');
+    expect(normalizeDesktopPath('/Users/me/a\\b/')).toBe('/Users/me/a\\b');
+    expect(normalizeDesktopPath('D:/Users/me/a\\b')).toBe('D:/Users/me/a/b');
+  });
 });
 
 describe('useDesktopFolderDrop', () => {

@@ -21,16 +21,20 @@ import { grantSessionAccessRoot } from '@/services/chat';
 import { refreshSessionAccessRoots } from '@/lib/sessionAccessRefresh';
 import useChatStore from '@/store/useChatStore';
 
+/** A drive letter or a UNC prefix: the only shapes of a path in which a backslash separates folders. */
+const WINDOWS_PATH_PREFIX = /^(?:[A-Za-z]:[\\/]|\\\\)/;
+
 /**
- * Normalizes Windows backslashes to forward slashes and strips trailing slashes (except root). The text is otherwise
- * the dropped path exactly: whitespace at an end belongs to a folder name, and a blank text names no folder.
+ * Normalizes the backslashes of a Windows path to forward slashes and strips trailing slashes (except root). The text
+ * is otherwise the dropped path exactly: whitespace at an end belongs to a folder name, a backslash in a POSIX path is
+ * a character of a folder name, and a blank text names no folder.
  */
 export function normalizeDesktopPath(rawPath: string): string {
   if (!rawPath.trim()) {
     return '';
   }
 
-  let normalized = rawPath.replace(/\\+/g, '/');
+  let normalized = WINDOWS_PATH_PREFIX.test(rawPath) ? rawPath.replace(/\\+/g, '/') : rawPath;
   // Collapse multiple consecutive slashes (except initial // for UNC if any)
   normalized = normalized.replace(/(?!^)\/+/g, '/');
 
