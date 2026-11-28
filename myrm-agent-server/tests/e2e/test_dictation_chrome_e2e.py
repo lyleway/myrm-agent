@@ -32,6 +32,7 @@ from tests.support.chrome_mcp_e2e import (
     ensure_chat_route,
     get_e2e_api_url,
     get_e2e_ui_url,
+    grant_user_activation,
     http_json,
     open_settings_subroute,
     prepare_e2e_ui_session,
@@ -67,18 +68,33 @@ _SWITCH_STT_ON_JS = """(() => {
   return { ok: true };
 })()"""
 
-# The provider select only exists once speech-to-text is on.
-_OPEN_PROVIDER_SELECT_JS = """(() => {
+# The provider select only exists once speech-to-text is on. Radix closes an open select when its window blurs or resizes
+# (the shared E2E Chrome moves focus between tabs), so one poll opens the list and picks from it without yielding for long,
+# and the next poll opens it again if it closed in between.
+_PICK_LOCAL_PROVIDER_JS = """(async () => {
   const trigger = document.getElementById('voice-stt-provider');
   if (!trigger) return { ready: false, why: 'provider select not rendered yet' };
-  trigger.click();
-  return { ready: true };
-})()"""
-
-_PICK_LOCAL_PROVIDER_JS = """(() => {
-  const listbox = document.querySelector('[role="listbox"]');
-  const option = listbox ? Array.from(listbox.querySelectorAll('[role="option"]')).find((el) => /Local Whisper/.test(el.textContent || '')) : null;
-  if (!option) return { ready: false, why: 'Local Whisper option not rendered yet' };
+  const findLocal = () => Array.from(document.querySelectorAll('[role="listbox"] [role="option"]'))
+    .find((el) => /Local Whisper/.test(el.textContent || ''));
+  let option = findLocal();
+  if (!option && trigger.getAttribute('aria-expanded') !== 'true') {
+    trigger.click();
+    for (let waited = 0; waited < 1000 && !option; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      option = findLocal();
+    }
+  }
+  if (!option) {
+    return {
+      ready: false,
+      why: 'Local Whisper option not rendered yet',
+      expanded: trigger.getAttribute('aria-expanded'),
+      listboxes: document.querySelectorAll('[role="listbox"]').length,
+      options: Array.from(document.querySelectorAll('[role="option"]')).map((el) => (el.textContent || '').trim()),
+      focused: document.hasFocus(),
+      visibility: document.visibilityState,
+    };
+  }
   const opts = { bubbles: true, cancelable: true, view: window, pointerId: 1 };
   option.dispatchEvent(new PointerEvent('pointerdown', opts));
   option.dispatchEvent(new PointerEvent('pointerup', opts));
@@ -156,7 +172,8 @@ _PRESS_MIC_JS = f"""(() => {{
 # Placeholders, not an f-string: the script is mostly braces.
 _DICTATION_PROGRESS_JS = """(() => {
   const probe = window.__dictation;
-  if (!probe) return { ready: false, err: 'microphone-not-installed' };
+  // A reload (the dev server hot-reloads) wipes the microphone this test installed: report it instead of waiting it out.
+  if (!probe) return { ready: true, err: 'the page lost the installed microphone, most likely by reloading' };
   const input = document.querySelector('textarea[data-chat-input]');
   const mic = __MIC_BUTTON_FINDER__;
   const label = mic ? (mic.getAttribute('aria-label') || '').trim() : null;
@@ -170,10 +187,13 @@ _DICTATION_PROGRESS_JS = """(() => {
   const sockets = window.__dictationSockets || [];
   const wordsIn = __WORDS__.every((word) => heard.includes(word));
   const socketsClosed = sockets.length > 0 && sockets.every((s) => s.closeCode !== null);
-  // A dictation the server ended badly will never produce the words: report it now instead of after the whole wait.
+  if (socketsClosed && !probe.closedAt) probe.closedAt = Date.now();
+  // A dictation the server ended badly, or ended cleanly without the words reaching the composer, will not produce them
+  // later: report it now instead of after the whole wait.
   const endedBadly = sockets.some((s) => s.closeCode !== null && s.closeCode !== __CLEAN_CLOSE__);
+  const gaveUp = socketsClosed && !wordsIn && Date.now() - probe.closedAt > 5000;
   return {
-    ready: endedBadly || (wordsIn && (!__REQUIRE_CLOSED__ || socketsClosed)),
+    ready: endedBadly || gaveUp || (wordsIn && (!__REQUIRE_CLOSED__ || socketsClosed)),
     text, label, sockets, bodyLength: (document.body?.innerText || '').length,
     microphone: { contextState: probe.contextState, started: probe.started, ended: probe.ended, stopPressed: probe.stopPressed },
   };
@@ -188,6 +208,16 @@ def _dictation_progress_js(*, require_closed: bool) -> str:
         .replace("__CLEAN_CLOSE__", str(_CLEAN_CLOSE))
         .replace("__REQUIRE_CLOSED__", "true" if require_closed else "false")
     )
+
+
+def _wait_for_dictation(client: ChromeMcpClient, page: McpPage, *, require_closed: bool, timeout_sec: float) -> dict[str, object]:
+    """Wait for the dictation to land, or for the page to report that it cannot.
+
+    No ``page_url``: the wait must never reload the page, which would wipe the microphone this test installed.
+    """
+    state = wait_for_state(client, page, _dictation_progress_js(require_closed=require_closed), timeout_sec=timeout_sec)
+    assert "err" not in state, state
+    return state
 
 
 def _wait_for(condition: Callable[[], bool], failure: str, *, timeout_sec: float = 60.0) -> None:
@@ -211,8 +241,7 @@ def _save_voice_settings_on_the_page(client: ChromeMcpClient, page: McpPage, api
     wait_for_state(client, page, _VOICE_PANEL_JS, timeout_sec=90.0, page_url=voice_url)
     switched = client.evaluate(page, _SWITCH_STT_ON_JS, timeout_sec=15.0)
     assert isinstance(switched, dict) and switched.get("ok") is True, switched
-    wait_for_state(client, page, _OPEN_PROVIDER_SELECT_JS, timeout_sec=30.0)
-    wait_for_state(client, page, _PICK_LOCAL_PROVIDER_JS, timeout_sec=30.0)
+    wait_for_state(client, page, _PICK_LOCAL_PROVIDER_JS, timeout_sec=60.0)
     _wait_for(
         lambda: _saved_voice_settings(api_url).get("sttProvider") == "local",
         "the voice settings page never saved Local Whisper as the speech-to-text provider",
@@ -264,6 +293,9 @@ def test_dictation_turns_speech_into_composer_text_after_voice_is_set_up_in_sett
         ensure_chat_route(client, page, target_url=chat_url, timeout_ms=_PAGE_TIMEOUT_MS)
         wait_for_state(client, page, _COMPOSER_JS, timeout_sec=90.0, page_url=chat_url)
         _upload_speech(client, page, wav)
+        # A person at the machine has clicked by now; the orchestrator's evaluate has not, and without a gesture Chrome keeps
+        # every audio context of the page suspended: the speech would never play and the page could not hear it.
+        grant_user_activation(page)
         installed = client.evaluate(page, _INSTALL_MICROPHONE_JS, timeout_sec=60.0)
         assert isinstance(installed, dict) and installed.get("ok") is True, installed
         assert installed.get("contextState") == "running", (
@@ -272,10 +304,11 @@ def test_dictation_turns_speech_into_composer_text_after_voice_is_set_up_in_sett
 
         pressed = client.evaluate(page, _PRESS_MIC_JS, timeout_sec=15.0)
         assert isinstance(pressed, dict) and pressed.get("ok") is True, pressed
-        # No page_url from here on: a reload would "heal" the page by wiping the microphone this test installed.
-        wait_for_state(client, page, _dictation_progress_js(require_closed=False), timeout_sec=_DICTATION_TIMEOUT_SEC)
-        done = wait_for_state(client, page, _dictation_progress_js(require_closed=True), timeout_sec=60.0)
+        _wait_for_dictation(client, page, require_closed=False, timeout_sec=_DICTATION_TIMEOUT_SEC)
+        done = _wait_for_dictation(client, page, require_closed=True, timeout_sec=60.0)
 
+    heard = str(done["text"]).lower()
+    assert all(word in heard for word in SPOKEN_WORDS), f"the spoken words never reached the composer: {done}"
     sockets = done["sockets"]
     assert isinstance(sockets, list) and len(sockets) == 1, f"one dictation opens one socket: {done}"
     assert sockets[0]["closeCode"] == _CLEAN_CLOSE, (
