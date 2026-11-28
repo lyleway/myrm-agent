@@ -20212,7 +20212,7 @@
     "webFetchEscalation": {
       "title": "Remote Web Fetch Fallback",
       "subtitle": "Jina / Firecrawl after direct webpage fetch fails (default OFF)",
-      "description": "When direct webpage fetching fails, optionally send the target URL to a remote reader service (the URL leaves your local machine). Off by default and only used when needed.",
+      "description": "When direct webpage fetching fails, optionally send the target URL to a remote reader service (the URL leaves your local machine). The service decides how it handles pages that block automated access; Firecrawl, for example, may retry with its own stealth proxy by default. Off by default and only used when needed.",
       "jinaApiKey": "Jina Reader API Key (optional)",
       "jinaApiKeyPlaceholder": "Leave empty for free tier (~20 RPM)",
       "jinaApiKeyHint": "Optional paid tier key from jina.ai. Free tier works without a key.",

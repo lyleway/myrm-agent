@@ -20212,7 +20212,7 @@
     "webFetchEscalation": {
       "title": "网页抓取远程兜底",
       "subtitle": "直接读取网页失败后使用 Jina / Firecrawl（默认关闭）",
-      "description": "当直接读取网页失败时，可选将目标 URL 发送至远程读取服务（目标 URL 会离开本机）。默认关闭，仅在需要时启用。",
+      "description": "当直接读取网页失败时，可选将目标 URL 发送至远程读取服务（目标 URL 会离开本机）。拒绝自动访问的页面由该服务按它自己的默认方式处理，例如 Firecrawl 默认可能改用它自己的隐身代理重试。默认关闭，仅在需要时启用。",
       "jinaApiKey": "Jina Reader API Key（可选）",
       "jinaApiKeyPlaceholder": "留空使用免费档（约 20 RPM）",
       "jinaApiKeyHint": "可选付费 Key（jina.ai）。无 Key 时仍可使用免费档。",
