@@ -202,3 +202,41 @@ async def test_dedup_no_message_id(mock_channel: MockChannel) -> None:
 
         eviction_count = mock_channel._dedup_eviction_counter._storage.get(("mock", "lru"), 0)
         assert eviction_count > initial_eviction
+
+
+def _reaction(sender: str, emoji: str = "\U0001f44d") -> InboundMessage:
+    """A reaction on the message ``card``: like the reaction events of every channel, it carries ``card`` as its id."""
+    return InboundMessage(
+        channel="mock",
+        sender_id=sender,
+        content=emoji,
+        chat_id="chat1",
+        is_group=True,
+        mentioned=True,
+        message_id="card",
+        metadata={"reaction": True, "target_message_id": "card"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_dedup_reactions_of_different_members_on_one_message_are_not_repeats(mock_channel: MockChannel) -> None:
+    await mock_channel._emit_inbound(_reaction("alice"))
+    await mock_channel._emit_inbound(_reaction("bob"))
+
+    assert [m.sender_id for m in mock_channel.received_messages] == ["alice", "bob"]
+
+
+@pytest.mark.asyncio
+async def test_dedup_reactions_of_one_member_with_different_emoji_are_not_repeats(mock_channel: MockChannel) -> None:
+    await mock_channel._emit_inbound(_reaction("alice", "\U0001f525"))
+    await mock_channel._emit_inbound(_reaction("alice"))
+
+    assert [m.content for m in mock_channel.received_messages] == ["\U0001f525", "\U0001f44d"]
+
+
+@pytest.mark.asyncio
+async def test_dedup_a_redelivered_reaction_is_still_a_repeat(mock_channel: MockChannel) -> None:
+    await mock_channel._emit_inbound(_reaction("alice"))
+    await mock_channel._emit_inbound(_reaction("alice"))
+
+    assert len(mock_channel.received_messages) == 1

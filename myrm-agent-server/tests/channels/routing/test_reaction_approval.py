@@ -203,11 +203,18 @@ class TestHandleApprovalContract:
         assert resume["decisions"][1]["extensions"] == {"allowAlways": True}
 
     @pytest.mark.asyncio
-    async def test_no_pending_approval_replies_and_skips_gate(self) -> None:
+    async def test_a_typed_answer_with_no_pending_approval_replies_and_skips_gate(self) -> None:
         host = _host()
-        msg = _reaction(sender_id="alice")
+        msg = InboundMessage(channel="slack", sender_id="alice", content="/approve", chat_id="C1", is_group=True)
         await host._handle_approval_command(msg, "allow_once")
         host._bus.publish_outbound.assert_awaited_once()
+        host._gate.submit.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_reaction_with_no_pending_approval_is_dropped_without_a_reply(self) -> None:
+        host = _host()
+        await host._handle_approval_command(_reaction(sender_id="alice"), "allow_once")
+        host._bus.publish_outbound.assert_not_awaited()
         host._gate.submit.assert_not_called()
 
     @pytest.mark.asyncio

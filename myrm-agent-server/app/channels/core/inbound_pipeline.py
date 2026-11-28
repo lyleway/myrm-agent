@@ -10,6 +10,7 @@
 - SenderGate: callable the bus registers to answer whether the access policy admits a sender
 - OwnerGate: callable the bus registers to answer whether a sender is the owner
 - DedupMode: message deduplication mode (LRU or TTL)
+- dedup_id: the id a redelivery of an inbound message repeats; the channel's dedup and the router's dedup both key on it
 - InboundPipelineMixin: ``_build_inbound`` / ``_emit_inbound`` and the pipeline stages behind them, and ``is_sender_admitted`` / ``is_sender_owner`` for work done before a message exists (a slash command, the transcription of an utterance)
 
 [POS]
@@ -56,6 +57,19 @@ class DedupMode(Enum):
 
     TTL = "ttl"
     LRU = "lru"
+
+
+def dedup_id(msg: InboundMessage) -> str | None:
+    """What a redelivery of ``msg`` repeats, ``None`` when ``msg`` carries no id to tell it by.
+
+    A reaction's ``message_id`` is the id of the message it was put on, so every later reaction on that message would
+    read as a redelivery of the first one. Who reacted and with what tell the reactions apart.
+    """
+    if not msg.message_id:
+        return None
+    if msg.metadata.get("reaction"):
+        return f"reaction:{msg.message_id}:{msg.sender_id}:{msg.content}"
+    return msg.message_id
 
 
 class InboundPipelineMixin:
@@ -112,13 +126,14 @@ class InboundPipelineMixin:
         if self._bot_id and msg.sender_id == self._bot_id:
             return
 
-        if msg.message_id and self._dedup_ttl > 0:
+        event_id = dedup_id(msg)
+        if event_id and self._dedup_ttl > 0:
             now = time.monotonic()
-            if msg.message_id in self._seen_msg_ids:
+            if event_id in self._seen_msg_ids:
                 self._dedup_hit_counter.add(1, {"channel": self.name})
                 return
             self._dedup_miss_counter.add(1, {"channel": self.name})
-            self._seen_msg_ids[msg.message_id] = now
+            self._seen_msg_ids[event_id] = now
             self._evict_expired_dedup(now)
 
         if not await self._rate_limiter.check_and_update(msg):
