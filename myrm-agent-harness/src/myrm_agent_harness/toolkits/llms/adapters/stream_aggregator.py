@@ -242,7 +242,7 @@ def finalize_stream(
         tool_schemas: Tool schemas for recovery
         model_name: Resolved model name for attribution; also selects xAI Grok argument decoding
         is_async: Whether this is an async stream (affects reasoning parser)
-        record_usage_fn: Callable to record token usage/cost/latency
+        record_usage_fn: Callable to record token usage/cost/cache savings/latency
         available_tools: Tool names for hallucination filtering in streaming mode
     """
     from myrm_agent_harness.toolkits.llms.utils.logger import log_llm_response
