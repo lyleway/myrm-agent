@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,6 +32,16 @@ from app.services.agent.session_access_service import (
 @pytest.fixture(autouse=True)
 def _reset_session_roots() -> None:
     set_session_access_roots(())
+
+
+@pytest.fixture(autouse=True)
+def _chat_row_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chat id names no stored chat unless a test installs its own row: the grant reads the row, and there is no database."""
+
+    async def _no_such_chat(_chat_id: str) -> None:
+        return None
+
+    monkeypatch.setattr("app.services.chat.chat_service.ChatService.get_chat_metadata", _no_such_chat)
 
 
 def _path_ask_grant(*paths: object, writable: bool = False, junk: tuple[object, ...] = ()) -> dict[str, object]:
@@ -143,6 +155,59 @@ async def test_a_resume_without_the_toggle_or_the_plan_grants_nothing(tmp_path) 
 
     for payload in (toggle_off, no_plan, rejected):
         await apply_directory_resume_grant(None, payload, workspace_dir=str(workspace))
+
+    assert get_session_access_roots() == ()
+
+
+def _chat_holding(monkeypatch: pytest.MonkeyPatch, *folders: Path) -> AsyncMock:
+    """Install a stored chat that holds ``folders`` as a drag-and-drop grant saves them; returns the mock its saves land in."""
+    roots = tuple(AccessRoot(path=os.path.realpath(folder), writable=True, source="desktop_drag_drop") for folder in folders)
+    row = SimpleNamespace(session_access_roots=access_roots_to_json(roots))
+    update = AsyncMock()
+    monkeypatch.setattr("app.services.chat.chat_service.ChatService.get_chat_metadata", AsyncMock(return_value=row))
+    monkeypatch.setattr("app.services.chat.chat_service.ChatService.update_chat_fields", update)
+    return update
+
+
+@pytest.mark.asyncio
+async def test_a_card_grant_joins_the_folders_the_chat_already_holds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A resume request starts with no roots in its context: the chat's row is where the folders it holds are read from."""
+    workspace, held, offered = tmp_path / "ws", tmp_path / "held", tmp_path / "offered"
+    for directory in (workspace, held, offered):
+        directory.mkdir()
+    update = _chat_holding(monkeypatch, held)
+
+    await apply_directory_resume_grant("chat-holding-a-folder", _path_ask_grant(offered), workspace_dir=str(workspace))
+
+    update.assert_awaited_once()
+    _chat_id, updates = update.await_args_list[0].args
+    assert [root["path"] for root in updates["session_access_roots"]] == [os.path.realpath(held), os.path.realpath(offered)]
+
+
+@pytest.mark.asyncio
+async def test_a_card_grant_of_a_folder_the_chat_holds_is_not_saved_again(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    workspace, held = tmp_path / "ws", tmp_path / "held"
+    for directory in (workspace, held):
+        directory.mkdir()
+    update = _chat_holding(monkeypatch, held)
+
+    await apply_directory_resume_grant("chat-holding-the-folder", _path_ask_grant(held), workspace_dir=str(workspace))
+
+    update.assert_not_called()
+    assert [root.path for root in get_session_access_roots()] == [os.path.realpath(held)]
+
+
+@pytest.mark.asyncio
+async def test_a_resume_that_grants_nothing_does_not_read_the_chat(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    async def _no_read(_chat_id: str) -> None:
+        raise AssertionError("a resume without a folder grant has no use for the chat's roots")
+
+    monkeypatch.setattr("app.services.chat.chat_service.ChatService.get_chat_metadata", _no_read)
+    plain_approval = {"decisions": [{"type": "approve", "extensions": {}}]}
+
+    await apply_directory_resume_grant("chat-plain-approval", plain_approval, workspace_dir=str(tmp_path))
 
     assert get_session_access_roots() == ()
 

@@ -117,6 +117,22 @@ async def persist_chat_session_access_roots(
     )
 
 
+async def _load_chat_roots(chat_id: str) -> tuple[AccessRoot, ...] | None:
+    """Put the folders the chat's row holds into the context, exactly as saved; ``None`` when the chat does not exist.
+
+    A request starts with no folders in its context, so a change that is saved back (a grant, a revoke) is made on top of
+    these: saving the change alone would replace the folders the chat already holds.
+    """
+    from app.services.chat.chat_service import ChatService
+
+    chat = await ChatService.get_chat_metadata(chat_id)
+    if chat is None:
+        return None
+    persisted = access_roots_from_json(chat.session_access_roots)
+    set_session_access_roots(persisted)
+    return persisted
+
+
 async def grant_chat_session_access_root(
     chat_id: str,
     raw_path: str,
@@ -131,14 +147,8 @@ async def grant_chat_session_access_root(
     Raises ``DirectoryGrantRefusedError`` when the grant is refused; a folder the chat already holds (or one inside
     a held folder, at the access asked for) is not a refusal.
     """
-    from app.services.chat.chat_service import ChatService
-
-    chat = await ChatService.get_chat_metadata(chat_id)
-    if chat is None:
+    if await _load_chat_roots(chat_id) is None:
         return ()
-
-    persisted = access_roots_from_json(chat.session_access_roots)
-    set_session_access_roots(persisted)
 
     _apply_validated_grant(
         raw_path,
@@ -162,14 +172,9 @@ async def revoke_chat_session_access_root(
     workspace_dir: str | None = None,
 ) -> tuple[AccessRoot, ...]:
     """Remove one persisted session access root and sync the runtime ContextVar."""
-    from app.services.chat.chat_service import ChatService
-
-    chat = await ChatService.get_chat_metadata(chat_id)
-    if chat is None:
+    persisted = await _load_chat_roots(chat_id)
+    if persisted is None:
         return ()
-
-    persisted = access_roots_from_json(chat.session_access_roots)
-    set_session_access_roots(persisted)
 
     updated = revoke_session_access_root(raw_path, workspace_root=workspace_dir)
     if updated == persisted:
@@ -259,27 +264,17 @@ def _apply_validated_grant(
     return updated != roots_before
 
 
-async def apply_directory_resume_grant(
-    chat_id: str | None,
-    resume_value: dict[str, object],
-    *,
-    workspace_dir: str | None = None,
-) -> None:
-    """Persist and bootstrap grants from path-ASK approval resume payloads."""
-    policy = _default_path_policy()
-    granted = False
-
+def _offered_folders(resume_value: dict[str, object]) -> list[tuple[str, bool]]:
+    """The ``(path, writable)`` of every folder an approved card offered and the user ticked the grant for, in card order."""
     decisions = resume_value.get("decisions")
     if not isinstance(decisions, list):
-        return
-
+        return []
+    offered: list[tuple[str, bool]] = []
     for decision in decisions:
         if not isinstance(decision, dict) or decision.get("type") != "approve":
             continue
         extensions = decision.get("extensions")
-        if not isinstance(extensions, dict):
-            continue
-        if extensions.get("grantDirectory") is not True:
+        if not isinstance(extensions, dict) or extensions.get("grantDirectory") is not True:
             continue
         grants = extensions.get("grantDirectories")
         if not isinstance(grants, list):
@@ -287,17 +282,39 @@ async def apply_directory_resume_grant(
         for grant in grants:
             if not isinstance(grant, dict):
                 continue
-            path_obj = grant.get("path")
-            if not isinstance(path_obj, str) or not path_obj.strip():
-                continue
-            if _apply_validated_grant(
-                path_obj,
-                writable=grant.get("writable") is True,
-                source="path_ask_grant",
-                workspace_dir=workspace_dir,
-                policy=policy,
-            ):
-                granted = True
+            path = grant.get("path")
+            if isinstance(path, str) and path.strip():
+                offered.append((path, grant.get("writable") is True))
+    return offered
+
+
+async def apply_directory_resume_grant(
+    chat_id: str | None,
+    resume_value: dict[str, object],
+    *,
+    workspace_dir: str | None = None,
+) -> None:
+    """Persist and bootstrap grants from path-ASK approval resume payloads.
+
+    The grants are added to the folders the chat already holds, which are read only when a card offered one.
+    """
+    offered = _offered_folders(resume_value)
+    if not offered:
+        return
+    if chat_id:
+        await _load_chat_roots(chat_id)
+
+    policy = _default_path_policy()
+    granted = False
+    for path, writable in offered:
+        if _apply_validated_grant(
+            path,
+            writable=writable,
+            source="path_ask_grant",
+            workspace_dir=workspace_dir,
+            policy=policy,
+        ):
+            granted = True
 
     if granted and chat_id:
         await persist_chat_session_access_roots(chat_id)
