@@ -758,7 +758,7 @@ def _build_context_from_resolution(
     else:
         action = "Follow the node planner result and preserve the deployed shared epoch"
     rule = (
-        f"BLOCKED: {blocked_reason}. {action}; "
+        f"{blocked_reason}. {action}; "
         "do not curl shared backend or stop other tests."
     )
     return E2eApiContext(
@@ -1544,13 +1544,13 @@ def _cmd_context_human(_args: argparse.Namespace) -> int:
     except ImportError:
         pass
     if ctx.blocked:
-        sys.stdout.write(f"BLOCKED_REASON={ctx.blocked_reason}\n")
+        sys.stdout.write(f"SHARED_PLANE_REASON={ctx.blocked_reason}\n")
         if not _shared_epoch_match(ctx):
             sys.stdout.write(
-                "E2E_BLOCKED_EPOCH: workspace backend differs from the deployed "
-                "shared epoch; use the node planner's PRIVATE immutable epoch for "
-                "workspace backend code, while tests targeting the deployed shared "
-                "epoch remain SHARED; do not wait, restart the shared backend, or stop peers.\n"
+                "E2E_EPOCH_ROUTE: workspace backend differs from the deployed shared epoch; once a launch is "
+                "admitted, collect routes PRIVATE nodes to an immutable epoch built from this workspace "
+                "and SHARED nodes to the deployed epoch; "
+                "do not wait, restart the shared backend, or stop peers.\n"
             )
     mux_fields = _mux_context_fields()
     parallel_snapshot, parallel_lines = _resolve_parallel_runtime_snapshot()

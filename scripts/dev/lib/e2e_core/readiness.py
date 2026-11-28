@@ -78,16 +78,11 @@ def _status_for_next_action(next_action: str, *, ctx_blocked: bool) -> Readiness
     return "READY"
 
 
-def _token_for_verdict(
-    *, status: ReadinessStatus, next_action: str, ctx: E2eApiContext
-) -> str:
+def _token_for_verdict(*, status: ReadinessStatus, next_action: str) -> str:
+    """Cluster state + next action; launch admission is E2E_LAUNCH_OK / E2E_LAUNCH_DENIED."""
     if status == "READY":
         return "READY"
-    if status == "FAIL":
-        return f"FAIL:{next_action}"
-    if ctx.blocked:
-        return f"WAIT:BLOCKED_{next_action}"
-    return f"WAIT:{next_action}"
+    return f"{status}:{next_action}"
 
 
 def _observability_unknown(
@@ -236,7 +231,7 @@ def evaluate_chrome_e2e_readiness(
         parallel_snapshot=snapshot,
     )
     status = _status_for_next_action(next_action, ctx_blocked=ctx.blocked)
-    token = _token_for_verdict(status=status, next_action=next_action, ctx=ctx)
+    token = _token_for_verdict(status=status, next_action=next_action)
     reason = _reason_for_verdict(next_action=next_action, ctx=ctx)
     return ChromeE2eReadinessVerdict(
         status=status,
