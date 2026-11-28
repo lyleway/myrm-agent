@@ -7,8 +7,8 @@ the AgentBridge.
 
 [INPUT]
 - acp::Client, run_agent (POS: ACP official SDK)
-- myrm_agent_harness.toolkits.acp.server.bridge::AgentBridge, AgentFactory (POS: ACP session-to-agent mapping layer)
-- myrm_agent_harness.toolkits.acp.server.mcp_converter::convert_acp_mcp_servers (POS: ACP MCP schema conversion layer)
+- myrm_agent_harness.agent.acp.bridge::AgentBridge, AgentFactory (POS: ACP session-to-agent mapping layer)
+- myrm_agent_harness.agent.acp.mcp_converter::convert_acp_mcp_servers (POS: ACP MCP schema conversion layer)
 
 [OUTPUT]
 - MyrmAcpServer: ACP server implementation providing the acp.Agent Protocol interface
@@ -45,8 +45,8 @@ from acp.schema import (
     TextContentBlock,
 )
 
-from myrm_agent_harness.toolkits.acp.server.bridge import AgentBridge, AgentFactory
-from myrm_agent_harness.toolkits.acp.server.mcp_converter import convert_acp_mcp_servers
+from myrm_agent_harness.agent.acp.bridge import AgentBridge, AgentFactory
+from myrm_agent_harness.agent.acp.mcp_converter import convert_acp_mcp_servers
 
 if TYPE_CHECKING:
     from acp.schema import (

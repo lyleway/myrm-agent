@@ -15,7 +15,7 @@ from acp.schema import (
 from langchain_core.language_models import FakeListChatModel
 
 from myrm_agent_harness.agent.acp.default_factory import DefaultAgentFactory
-from myrm_agent_harness.toolkits.acp.server.server import MyrmAcpServer
+from myrm_agent_harness.agent.acp.server import MyrmAcpServer
 
 
 class _DummyClient(Client):

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from acp.schema import AgentMessageChunk, PromptResponse
 
-from myrm_agent_harness.toolkits.acp.server.bridge import AgentBridge, AgentFactory
+from myrm_agent_harness.agent.acp.bridge import AgentBridge, AgentFactory
 
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning:unittest.mock")
 

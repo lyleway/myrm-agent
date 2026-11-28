@@ -1,6 +1,6 @@
 # ACP 系统设计方案
 
-> Server 与 Runtime 分层，横切能力开箱即用。
+> 委派外部 Agent 的 Runtime 分层，横切能力开箱即用；入站 ACP 服务（IDE 驱动 Myrm）在 `agent/acp/`，不在本包。
 
 ---
 
@@ -9,7 +9,7 @@
 - **Runtime 独立层**：对外部 Agent 统一抽象为 `RuntimeBackend`（ACP / CLI / app-server）
 - **禁止过度设计**：每个组件有明确职责
 - **Python 原生**：asyncio、Protocol、dataclass、StrEnum，无额外编排框架依赖
-- **Server 层稳定**：server/ 子目录（server.py / bridge.py / event_translator.py）专注 IDE ↔ 宿主 Agent 桥接
+- **入站与出站分包**：IDE ↔ 宿主 Agent 桥接（`agent/acp/` 的 server.py / bridge.py / event_translator.py）与本包互不依赖，`toolkits` 也不允许依赖 `agent`（架构测试守住）
 
 ---
 
@@ -19,11 +19,11 @@
 ╔═══════════════════════════════════════════════════════════════╗
 ║                     ACP 系统架构                              ║
 ╠═══════════════════════════════╦═══════════════════════════════╣
-║  Server 层 (server/)           ║  Runtime 层 (runtime/)         ║
-║  server.py                    ║  RuntimeBackend Protocol       ║
-║  bridge.py                    ║  ├─ AcpRuntime + AcpCallback   ║
-║  event_translator.py          ║  ├─ CliRuntime                 ║
-║                               ║  └─ CodexRuntime               ║
+║  入站 (agent/acp/)            ║  出站 Runtime (runtime/)      ║
+║  server.py                    ║  RuntimeBackend Protocol      ║
+║  bridge.py                    ║  ├─ AcpRuntime + AcpCallback  ║
+║  event_translator.py          ║  ├─ CliRuntime                ║
+║  mcp_converter.py             ║  └─ CodexRuntime              ║
 ╠═══════════════════════════════╩═══════════════════════════════╣
 ║                    横切关注点 (core/)                          ║
 ║  types.py · core/probe                                       ║
@@ -342,12 +342,6 @@ acp/
 │   ├── login_state.py      # probe_login / resolve_login_state：CLI 自述的登录态，文件判断作兜底
 │   ├── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
 │   └── terminal_login.py   # terminal_login：用户在终端里敲的登录命令，三种 shell 的写法
-├── server/                 # ACP Server 方向（IDE → Agent）
-│   ├── __init__.py
-│   ├── server.py           # ACP Server（acp.Agent，支持动态绑定宿主 MCP 工具）
-│   ├── bridge.py           # Session ↔ 宿主 Agent（会话生命周期与多工厂适配）
-│   ├── mcp_converter.py    # ACP MCP Schema → Myrm MCPConfig 协议适配层
-│   └── event_translator.py # AgentEvent → SessionNotification
 ├── runtime/                # Runtime 方向（Agent → 外部 Agent）
 │   ├── __init__.py
 │   ├── _base.py            # BaseRuntime、build_safe_env、各运行时共用的静默心跳（KEEPALIVE_SECONDS / working_status）与连续 401 重试上限 UNAUTHORIZED_RETRIES_LIMIT
@@ -465,7 +459,7 @@ acp/
 - **Deploy 门控（Server）**：`external_cli_deploy.is_external_cli_deploy_supported()` + profile `strip_deploy_incompatible_builtin_tools`；沙箱自动剔除 `external_cli`；BuiltinToolsPanel sandbox 硬禁用 toggle
 - **MCP 会话注入**：`RuntimePool.run_turn` → `AcpRuntime.new_session(mcp_servers=…)`，Codex 经 `thread/start` 的 `config.mcp_servers`（无 MCP 时 Server 不传参数（None）；`RuntimeConfig.mcp_servers` 为配置源；注入前经 `capabilities.supports_mcp` 能力守卫，跳过不支持的 backends 并记录 `pool_mcp_skipped`；Server 的类型与各运行时的交付形态见下一条）
 - **宿主 MCP Server（类型化 API）**：`mcp_servers.py` 的 `StdioMcpServer`（agent 自己启动的程序）与 `HttpMcpServer`（agent 带 header 以 streamable HTTP 连接的端点）。名称只能是字母数字以单个 `-` / `_` 相连的 1–64 个字符（agent 用它拼出 `mcp__<名称>__<工具>`，名称里不能有 `__`，否则名称在哪里结束就说不清），URL 必须是带主机的 http(s) 地址；`env` 与 `headers` 不进 `repr`，URL 不进错误消息，日志里不泄露凭据。`read_only=True` 表示这个 Server 的工具只读，`safe` 模式下不必逐次询问，如同读文件。各运行时按各自 agent 能接受的形态交付：**ACP**（Gemini、Qwen）经 `session/new` 的 `mcpServers`，HTTP Server 只交给声明了 `mcpCapabilities.http` 的 agent，否则不交，并让**每个回合**以 `mcp_not_attached`（`servers`：未交出的 Server 名）开头；**Claude** 把 Server 写进 `0600`、回合结束即删的 `--mcp-config` 临时文件（凭据不进 argv），`read_only` 的追加 `--allowedTools mcp__<名称>`；**Codex** 写进 `thread/start` 的 `config.mcp_servers`（`{command, args, env}` 或 `{url, http_headers}`，一律带 `required = true`：Codex 默认在后台启动 MCP Server，回合可能抢在它启动完成之前向模型发出请求，模型这一回合就看不到它的工具，启动失败也没有人被告知；`required` 让线程打开时等它，起不来就不开线程，错误带着 Server 名与它自己的原话，真二进制测试用一个起不来的 Server 守着：回合以一条点名该 Server 的错误结束，模型一个请求也没发；`read_only` 的加 `default_tools_approval_mode = "approve"`，否则 `on-request` 下 Codex 每次调用前都问）；其余 CLI 与不声明 `supports_mcp` 的后端不交，同样以 `mcp_not_attached` 告知。ACP agent 没有预先批准的机制，所以 `AcpPermissionPolicy` 在 `safe` 模式下放行 agent自己说属于本回合 `read_only` Server 的请求（`runtime/acp/mcp_origin.py`：Gemini 在 `_meta["gemini-cli"]["mcp"]["server_name"]` 给出 Server 名，Qwen 在 `_meta["toolName"]` 给出 `mcp__<server>__<tool>`；别的 agent、agent 自己的工具与没声明的 Server 一律照旧交给 broker）。真二进制事实（`test_real_http_mcp.py`：脚本化的假模型 + 记录每个请求的真 streamable-HTTP 端点，离线）：Claude 2.1.330、Codex 0.172.0、Gemini 0.71.1、Qwen 0.28.6 都带着 Bearer 连上并调用了工具，只读的不问、否则问；Claude 默认把 MCP 工具的结构延后到 `ToolSearch`（脚本化模型不搜索，测试里设 `ENABLE_TOOL_SEARCH=false`）；Gemini 在无头 ACP 里对未受信任的工作区**一个 MCP Server 也不连**（需 `GEMINI_CLI_TRUST_WORKSPACE=true`；宿主不得自动设置它：仓库自带的设置与钩子会借此绕过宿主的 broker），所以 Server 是否已被连上要以服务端见到的连接为准，不能假设；Qwen 在 `session/new` 返回之后才开始连接（约 0.15 s），给远程 Server 5 秒的发现期限（`discoveryTimeoutMs` 默认值），超时就在本会话里丢弃它（机器忙到连 Qwen 自己的工作都排不上时会发生），并把 MCP 工具藏在 `tool_search` / `tool_call` 之后，所以一个会话的首个回合只用来开会话；opencode 的 `_meta` 形态没有核对，它的请求照旧交给 broker。
-- **Host 会话级 MCP 绑定**：ACP Server 侧收到 host 传入的 `mcp_servers` 时，经 `mcp_converter.convert_acp_mcp_servers` 转成 `MCPConfig`，随新建的会话绑定进 agent 管线并记 `acp_host_mcp_bound` INFO（`method`、`raw_count`、`bound_count`）。`new_session` / `fork_session` 总会新建会话并绑定；`resume_session` 只在会话不存在时新建并绑定；`load_session` 只在会话已存在时返回，传入的 `mcp_servers` 被转换并记日志，不改变已有会话的 MCP 绑定
+- **Host 会话级 MCP 绑定**：入站 ACP Server（`agent/acp/server.py`）收到 host 传入的 `mcp_servers` 时，经 `agent/acp/mcp_converter.py` 的 `convert_acp_mcp_servers` 转成 `MCPConfig`，随新建的会话绑定进 agent 管线并记 `acp_host_mcp_bound` INFO（`method`、`raw_count`、`bound_count`）。`new_session` / `fork_session` 总会新建会话并绑定；`resume_session` 只在会话不存在时新建并绑定；`load_session` 只在会话已存在时返回，传入的 `mcp_servers` 被转换并记日志，不改变已有会话的 MCP 绑定
 - **失败分类**：`runtime/cli/failure.classify_failure` 按 CLI 自己的话归类——Claude `result` 行的 `error_max_turns` 不是失败（见「Max Turns 双层安全护栏」，回合以 `DONE` 收尾）；`result` 带 `api_error_status` 时只有 401 → `AUTH_FAILED`（403 是地区封锁或组织策略，Claude 把它和没登录归在同一个 `authentication_failed` 类别，但叫用户重新登录会把人指向错误的方向，所以归 `UNKNOWN`），没有状态码时 `assistant` 行的 `error: authentication_failed`（根本没发出 API 请求，即没登录）→ `AUTH_FAILED`；429 → 可重试的 `RATE_LIMITED`、5xx → 可重试的 `UNKNOWN`；没有上述判决时非零退出码才是 `PROCESS_CRASHED`（带最后一条顶层 `error` 通知，没有则取 stderr 摘录）；本运行时自己停掉的进程一律是 `CANCELLED`（唯一的例外是下一条的 401 快速失败）。拉起进程时程序不存在（`CliLaunchError`）→ 单个 `BACKEND_NOT_FOUND` 错误事件，不做续接失效重试。顶层 `error` 行不是失败：CLI 可能每次请求重试都打印一条，它们只作为通知被记住，判决只来自 `result` / 退出码。消息是 CLI 的原话，经 `event_text.condense_failure_text` 整理成一行有界文本——引用的整页 HTML（代理、防火墙、地区封锁页）缩成 `[web page: <标题>]`，空白折叠，超过 `FAILURE_TEXT_CHARS`（500）字符截断，普通单行消息原样通过；不夹带产品设置建议（给用户的处置指引由宿主按 `AcpErrorCode` 另行组织）
 - **Codex 的失败分类**：`runtime/codex/failure.classify_turn_error` 读 app server 附在失败回合上的结构化 `codexErrorInfo`（一个类别，或以类别为唯一键、带 `httpStatusCode` 的对象），不看措辞猜：类别 `unauthorized` 或状态码 401 → `AUTH_FAILED`；403 不是登录问题（地区封锁也这样回答），归 `UNKNOWN`；`rateLimitExceeded` 或 429 → 可重试的 `RATE_LIMITED`；`serverOverloaded`、`internalServerError` 或 5xx → 可重试的 `UNKNOWN`；其余 → 不可重试的 `UNKNOWN`；消息是 Codex 的原话，同样经 `condense_failure_text` 整理。server 进程在回合中途退出 → 可重试的 `PROCESS_CRASHED`，带退出码与 stderr 摘录（下一回合重新拉起 server）；程序不存在 → `BACKEND_NOT_FOUND`。`test_a_failing_model_api_is_reported_as_a_retryable_failure` 与 `test_a_failure_that_is_not_a_refused_login_does_not_send_the_user_to_sign_in` 用真实二进制与只返回错误的假模型 API 守这些分类
 - **Codex 版本下限与续接失效**：握手时 `initialize` 的 `userAgent`（`<客户端名>/<server 版本> (…)`，客户端名就是宿主自报的 `RuntimeConfig.client.name`）给出 server 版本，低于 `protocol.MINIMUM_SERVER_VERSION`（0.167.0）→ 回合以不可重试的 `PROCESS_CRASHED` 结束，消息（英文）说明已安装的版本、需要的版本与「更新 Codex 后重试」，不开线程、server 进程随即收掉；读不出版本的放行并记 `codex_server_version_unreadable` WARNING。下限由真二进制实测定出：0.163.0 – 0.166.0 的审批请求里没有工具名（只有 `mcp__echo__`，缺 `ping`），人会被问「允许这次调用吗」却看不到是哪个工具，0.166.0 上其余 37 项契约测试全绿；0.167.0 与最新的 0.172.0 都让三份真二进制测试文件（38 项）与 HTTP MCP 测试全绿，MCP 测试另在 0.163.0 – 0.172.0 的 13 个稳定版上逐版本跑过。CI 的 `codex-floor` 任务从代码里读出这个常量，装上恰好这一版再跑一遍真二进制测试。续接线程时只有 server 回答 `no rollout found`（磁盘上没有这个线程的 rollout）才算会话失效（`session_expired`，本回合改开新线程）；别的续接错误（鉴权、限流、server 自己的故障）原样作为失败报出，记录保留，下一回合再试，不把一次暂时的失败当成「对话没了」
@@ -513,14 +507,14 @@ acp/
 
 **设计特性**：
 
-1. **Runtime 与 Server 解耦**：外部 Agent 集成不污染 IDE 桥接路径
+1. **入站与出站分包**：外部 Agent 委派（`toolkits/acp`）与 IDE 桥接（`agent/acp`）互不依赖，委派的演进不触及 IDE 桥接路径
 2. **抽象层次稳定**：`RuntimeBackend` 统一 ACP 与 CLI 两种接入方式，扩展成本低
 3. **生命周期完整**：run_turn + cancel + resume + close + get_info
 4. **结构化错误**：错误码 + retryable + 详情字段
 5. **事件模型克制**：8 种事件类型覆盖委托与观测需求
 6. **安全默认**：环境清理、白名单、工作目录内 FS 回调
 7. **边界清晰**：明确非目标列表，避免范围蔓延
-8. **Server 层职责单一**：桥接与翻译与 Runtime 正交
+8. **入站层职责单一**：桥接与翻译（`agent/acp`）与 Runtime 正交
 9. **依赖面小**：标准库 + 可选依赖 `agent-client-protocol` + 可选 Node 工具链
 10. **并发受控**：RuntimePool Semaphore
 11. **框架/业务可替换**：RuntimeBackend、CliSessionStore 等 Protocol 注入点明确
@@ -528,7 +522,7 @@ acp/
 13. **超时/异常/放弃不留孤儿**：回合生成器由 aclosing 收尾，超时、异常与消费方提前放弃都会停掉存活进程
 14. **双层 Max Turns 安全护栏**：Layer 1（CLI 原生上限）让支持的 CLI 自行停止并如实报告，Layer 2（delegate_tool 工具调用计数）只兜底没有原生上限的后端
 15. **Agent 能力描述**：description 注入 tool description，帮助 LLM 在多 Agent 场景下做出正确的委派决策
-16. **MCP 注入能力守卫**：`supports_mcp` 在 `RuntimePool` 层统一校验，避免向不支持的 ACP 后端注入 MCP 导致 session 崩溃；直接调用 `CliRuntime` 与 ACP Server 侧 host MCP 均显式告警，防御路径零静默降级；没有交出的 Server 一律以 `mcp_not_attached` 状态更新告知宿主
+16. **MCP 注入能力守卫**：`supports_mcp` 在 `RuntimePool` 层统一校验，避免向不支持的 ACP 后端注入 MCP 导致 session 崩溃；直接调用 `CliRuntime` 与入站 ACP Server（`agent/acp`）的 host MCP 均显式告警，防御路径零静默降级；没有交出的 Server 一律以 `mcp_not_attached` 状态更新告知宿主
 
 **已知局限**：
 - 能不能逐条询问取决于 Agent 自己：Claude Code（`--permission-prompt-tool`）与 ACP Agent（`session/request_permission`，含 Gemini、Qwen）能问；Codex 经 app server 能问，但它只在动作超出只读沙箱时才发审批请求，是否去申请由模型决定（真实模型的表现没有验证）

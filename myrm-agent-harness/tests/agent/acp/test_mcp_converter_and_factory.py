@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from myrm_agent_harness.agent.acp.mcp_converter import convert_acp_mcp_servers
 from myrm_agent_harness.agent.acp.skill_factory import SkillAgentFactory
-from myrm_agent_harness.toolkits.acp.server.mcp_converter import convert_acp_mcp_servers
 from myrm_agent_harness.toolkits.mcp.config import MCPConfig
 
 

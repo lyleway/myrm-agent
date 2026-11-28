@@ -1,7 +1,7 @@
 # acp/
 
 ## Overview
-ACP toolkit entry point. Provides lazy-loaded access to server and runtime components
+ACP toolkit: Myrm delegating work to external agents (ACP agents, CLI agents, app-server agents). Provides lazy-loaded access to the runtime components. The opposite direction, an IDE driving Myrm over ACP, is [agent/acp](../../agent/acp/_ARCH.md); nothing here depends on it.
 
 Detailed design: [ACP_SYSTEM.md](ACP_SYSTEM.md)
 
@@ -9,8 +9,7 @@ Detailed design: [ACP_SYSTEM.md](ACP_SYSTEM.md)
 
 | File | Role | Description | I/O/P |
 |------|------|-------------|-------|
-| __init__.py | Package | ACP toolkit entry point. Provides lazy-loaded access to server and runtime components | ✅ |
-| __main__.py | Internal | CLI entry point for the ACP server. | ✅ |
+| __init__.py | Package | ACP toolkit entry point. Provides lazy-loaded access to the runtime components for delegating to external agents | ✅ |
 | acp_agent_tools.py | Core | Invoke external ACP-compatible agents (`invoke_acp_agent_tool`, `create_invoke_acp_agent_tool`); the host names the workspace every delegated turn starts in, and the tool hands the model's task to the agent as written. | ✅ |
 | client_identity.py | Config | `ClientIdentity` — the name, title and version a host announces to every agent it starts (`RuntimeConfig.client`): one identity for the ACP `initialize` and the Codex app-server handshake; the name is restricted to what an agent repeats verbatim in its user-agent string, the string the host reads the Codex server version from | ✅ |
 | delegate_report.py | Internal | What a delegated turn reports: its usage and counts, the title-only notice steps the UI words itself, and the note the model gets when an agent stopped before it finished. | ✅ |
@@ -20,14 +19,13 @@ Detailed design: [ACP_SYSTEM.md](ACP_SYSTEM.md)
 | Submodule | Description |
 |-----------|-------------|
 | auth/ | Subscription authentication for external CLI backends. See [auth/_ARCH.md](auth/_ARCH.md). |
-| core/ | Shared runtime infrastructure — event bus, backend detector. |
+| core/ | Shared infrastructure — CLI backend detection and the process probe it shares with the login-state checks. |
 | drivers/ | The contract of every known external agent: login, transport, launch and permission facts. See [drivers/_ARCH.md](drivers/_ARCH.md). |
 | runtime/ | ACP Runtime backends — unified interface for ACP and CLI agents. |
-| server/ | ACP Server — bridges IDE clients to the agent system via ACP protocol. |
 | toolchains/ | Isolated toolchain manager for external CLI agents. See [toolchains/_ARCH.md](toolchains/_ARCH.md). |
 
 ## Key Dependencies
 
 - `myrm_agent_harness.core`
 - `myrm_agent_harness.utils`
-- Optional: `[acp]` → agent-client-protocol (server/, bridge/, event_translator/)
+- Optional: `[acp]` → agent-client-protocol (`runtime/acp/`; shared with the inbound server in `agent/acp/`)

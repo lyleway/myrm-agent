@@ -162,7 +162,7 @@ Does your code need to import anything from agent/?
 
 | Submodule | Description |
 |-----------|-------------|
-| acp/ | ACP protocol integration — server and runtime components for Agent Communication Protocol. |
+| acp/ | ACP delegation — runtime backends, drivers, auth and toolchains for the external agents a host delegates to. |
 | browser/ | Browser automation — multi-tab control, iframe traversal, session vault, stealth mode, action capture. |
 | code_execution/ | Code execution system — Agent-in-Sandbox mode with multiple executor backends. |
 | memory/proactive/ | Proactive follow-up tracking — implicit promise extraction; the host persists the records. See [COMMITMENT_SYSTEM.md](memory/proactive/COMMITMENT_SYSTEM.md). |

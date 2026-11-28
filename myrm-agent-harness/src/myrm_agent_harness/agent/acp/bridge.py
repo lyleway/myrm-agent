@@ -7,7 +7,7 @@ via the event_translator.
 
 [INPUT]
 - acp::Client (POS: ACP official SDK)
-- myrm_agent_harness.toolkits.acp.server.event_translator::message_notification, translate_agent_event (POS: AgentEvent → ACP notification translation layer)
+- myrm_agent_harness.agent.acp.event_translator::message_notification, translate_agent_event (POS: AgentEvent → ACP notification translation layer)
 - myrm_agent_harness.toolkits.mcp.config::MCPConfig (POS: MCP server configuration)
 - myrm_agent_harness.utils.runtime.cancellation::CancellationToken (POS: cancellation token abstraction)
 
@@ -31,7 +31,7 @@ from uuid import uuid4
 
 from acp.schema import PromptResponse, SessionNotification
 
-from myrm_agent_harness.toolkits.acp.server.event_translator import (
+from myrm_agent_harness.agent.acp.event_translator import (
     message_notification,
     translate_agent_event,
 )

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from acp.schema import TextContentBlock
 
-from myrm_agent_harness.toolkits.acp.server.server import MyrmAcpServer, _extract_text
+from myrm_agent_harness.agent.acp.server import MyrmAcpServer, _extract_text
 
 
 class _StubFactory:

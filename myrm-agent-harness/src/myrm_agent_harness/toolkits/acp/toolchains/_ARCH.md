@@ -19,5 +19,5 @@ Isolated portable toolchain manager for external CLI agents (Node.js download, n
 
 | Package | Responsibility |
 |---------|----------------|
-| `toolkits/acp/` | ACP protocol server, runtime, permission, event bus |
+| `toolkits/acp/` | ACP delegation: runtime, drivers, auth, permission |
 | `toolchains/` | Isolated Node/npm environment for CLI-based ACP backends |

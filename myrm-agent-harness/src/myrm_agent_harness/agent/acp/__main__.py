@@ -13,7 +13,7 @@ Usage:
 [INPUT]
 - agent.acp.default_factory::DefaultAgentFactory (POS: Minimal BaseAgent factory) [lazy]
 - agent.acp.skill_factory::SkillAgentFactory (POS: Full-featured SkillAgent factory) [lazy]
-- toolkits.acp.server.server::run_server (POS: ACP server runner over streams) [lazy]
+- agent.acp.server::run_server (POS: ACP server runner over streams) [lazy]
 - core.security.redact::RedactingFormatter (POS: Log formatter that masks secret-shaped strings in every line)
 
 [OUTPUT]
@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from myrm_agent_harness.core.security.redact import RedactingFormatter
 
 if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.acp.server.bridge import AgentFactory
+    from myrm_agent_harness.agent.acp.bridge import AgentFactory
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def _create_factory(agent_type: str) -> AgentFactory:
 
 async def _run_unix_socket_server(factory: AgentFactory, socket_path: str) -> None:
     """Run ACP server listening on a Unix Domain Socket."""
-    from myrm_agent_harness.toolkits.acp.server.server import run_server
+    from myrm_agent_harness.agent.acp.server import run_server
 
     sock_file = Path(socket_path)
     if sock_file.exists():
@@ -145,7 +145,7 @@ def main() -> None:
     if args.transport == "socket":
         asyncio.run(_run_unix_socket_server(factory, args.socket_path))
     else:
-        from myrm_agent_harness.toolkits.acp.server.server import run_server
+        from myrm_agent_harness.agent.acp.server import run_server
 
         asyncio.run(run_server(factory))
 

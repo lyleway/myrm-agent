@@ -1,7 +1,7 @@
 # core/
 
 ## Overview
-Shared runtime infrastructure for the ACP toolkit — cross-cutting mechanisms consumed by the runtime and server subsystems.
+Shared runtime infrastructure for the ACP toolkit — cross-cutting mechanisms consumed by the auth and runtime subsystems and by hosts that detect installed backends.
 
 ## File & Submodule Index
 

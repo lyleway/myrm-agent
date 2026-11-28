@@ -59,7 +59,7 @@ Myrm Agent Harness 是一个**GUI-first 通用 AI 工作助手运行时框架**�
 | **Core 层** | `myrm_agent_harness/core/`         | **框架无关基础能力层**。提供 security（安全检测/审计/防护）、config（LLM 配置）、events（事件类型/流式枚举）、hooks（Hook 类型定义/生命周期事件）、artifacts（工件类型/映射常量）。同时被 `agent/` 和 `toolkits/` 引用，消除二者间的耦合 |
 | **Public API** | `myrm_agent_harness/api/`       | **公开 API**。第三方框架与 server 的唯一推荐 import 路径（factory、Protocol、DTO）。详见 [DISTRIBUTION_SYSTEM.md](harness_packaging/DISTRIBUTION_SYSTEM.md) |
 | Agent 核心 | `myrm_agent_harness/agent/`         | BaseAgent / SkillAgent 运行时；模块导航见 [agent/_ARCH.md](src/myrm_agent_harness/agent/_ARCH.md) |
-| ACP 薄入口 | `myrm_agent_harness/agent/acp/`    | 独立 ACP Server 的 default factory 与 CLI 入口；完整 ACP runtime 在 `toolkits/acp/`                                                                                                                                                |
+| 入站 ACP | `myrm_agent_harness/agent/acp/`    | IDE 经 ACP 驱动 Myrm：协议服务、会话桥、default factory 与 CLI 入口；委派外部 Agent 的 ACP runtime 在 `toolkits/acp/`                                                                                                                                                |
 | 后端抽象层 | `myrm_agent_harness/backends/`      | Profile / Secret / Skill 三类存储后端的 Protocol（Skill 另含 Storage 实现，Profile / Secret 的存储实现由宿主提供）；Skill 热重载失效信号持久化于 `MYRM_DATA_DIR/.skill_config_version`（server re-export）；公开扩展点见 `api/protocols`                                                                                                                      |
 | 基础设施层 | `myrm_agent_harness/infra/`         | 提供通用机制：消息投递持久化与死信重试（StorageProvider + 弹性机制 + Metrics）、链路追踪、增量状态监控、状态根单一解析入口（`data_dir.py`：所有 Myrm 自有持久化路径由 `resolve_data_dir()` 派生，见 [FRAMEWORK_DESIGN_PRINCIPLES.md](FRAMEWORK_DESIGN_PRINCIPLES.md) §6）                                                                                                                             |
 | 运行时层   | `myrm_agent_harness/runtime/`       | 单 Agent **实例守护**（checkpoint、内存压力、doctor、quota）及 `install_guard/` 双 wheel 安装门禁 — 非 Agent 推理循环，非 `toolkits/tasks/` 作业队列                                                                                                                             |
@@ -126,8 +126,8 @@ Myrm Agent Harness 是一个**GUI-first 通用 AI 工作助手运行时框架**�
 | | `toolkits/*/observability.py` | 各 toolkit 业务中立操作 DTO（非全局 metrics） |
 | **Eval** | `eval/` | Agent 行为评估引擎（Protocol + 断言 + 报告）；Server 实现在 `app/core/eval/` |
 | | `tests/eval/` | Harness 单测；非 shipped 产品面 |
-| **ACP** | `agent/acp/` | 独立 Server 场景的 default factory + `__main__` CLI |
-| | `toolkits/acp/` | ACP runtime、server、toolchains 完整实现 |
+| **ACP** | `agent/acp/` | 入站：IDE 驱动 Myrm 的协议服务、会话桥、default factory + `__main__` CLI |
+| | `toolkits/acp/` | 出站：委派外部 Agent 的 runtime、drivers、auth、toolchains |
 
 ---
 
@@ -161,7 +161,7 @@ Myrm Agent Harness 是一个**GUI-first 通用 AI 工作助手运行时框架**�
 - **`[web]`**: curl_cffi（L1 HTTP 抓取与连接固定）, youtube-transcript-api（YouTube 字幕快路径；缺失时 fallback HTML）
 - **`[file-parsers]`**: python-docx, openpyxl, python-pptx（Office；pdfplumber + pypdfium2 由 core / pdfplumber 传递依赖）
 - **`[retrieval]`**: langchain-text-splitters, numpy, jieba, rank-bm25, tenacity（代码分块 + 云 embedding 重试）
-- **`[acp]`**: agent-client-protocol（外部 Agent 委托 + ACP Server）
+- **`[acp]`**: agent-client-protocol（`toolkits/acp` 委派外部 Agent + `agent/acp` 入站 ACP Server）
 - **`[bedrock]`**: botocore（Bedrock 请求用 AWS 凭证链签名；只用 Bedrock API Key 时不需要）
 - **`[browser]`**: patchright, camoufox（仅 Python 包；约 1.2 GB 的 Camoufox 浏览器构建需另行 `camoufox fetch` 安装，见 `toolkits/browser/pool/camoufox_availability.py`）, orjson（浏览器自动化与会话持久化 JSON）
 - **`[observability]`**: prometheus-client, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc, opentelemetry-exporter-otlp-proto-http, openinference-instrumentation-langchain（Prometheus 指标 + Phoenix / OTLP 追踪，OTLP 支持 HTTP/protobuf 与 gRPC）

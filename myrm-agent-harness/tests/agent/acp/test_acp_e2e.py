@@ -24,9 +24,9 @@ from acp.schema import (
     TextContentBlock,
 )
 
+from myrm_agent_harness.agent.acp.server import MyrmAcpServer
 from myrm_agent_harness.agent.acp.skill_factory import SkillAgentFactory
 from myrm_agent_harness.core.config.llm import LLMConfig
-from myrm_agent_harness.toolkits.acp.server.server import MyrmAcpServer
 
 
 class _E2EAcpClient(Client):
@@ -49,12 +49,7 @@ async def test_acp_uds_live_llm_e2e() -> None:
     """Run real ACP turn using LLM credentials loaded from test environment."""
     from dotenv import load_dotenv
 
-    server_test_env = (
-        Path(__file__).resolve().parents[4]
-        / "myrm-agent"
-        / "myrm-agent-server"
-        / ".env.test"
-    )
+    server_test_env = Path(__file__).resolve().parents[4] / "myrm-agent" / "myrm-agent-server" / ".env.test"
     if server_test_env.exists():
         load_dotenv(server_test_env)
 
@@ -64,7 +59,6 @@ async def test_acp_uds_live_llm_e2e() -> None:
 
     if not api_key or not model:
         pytest.skip("LLM credentials not found in environment for live E2E")
-
 
     llm_config = LLMConfig(
         model=model,

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from acp.schema import SessionNotification
 
+from myrm_agent_harness.agent.acp.event_translator import translate_agent_event
 from myrm_agent_harness.agent.streaming.types import AgentEventType
-from myrm_agent_harness.toolkits.acp.server.event_translator import translate_agent_event
 
 
 class TestTranslateText:

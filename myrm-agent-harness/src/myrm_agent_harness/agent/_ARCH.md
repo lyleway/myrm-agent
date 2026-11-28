@@ -72,7 +72,7 @@ Agent core module — public API for BaseAgent / SkillAgent runtime.
 |-----------|-------------|--------|
 | `_factory/` | SkillAgent assembly: builder, mcp_routing | [_factory/_ARCH.md](_factory/_ARCH.md) |
 | `_internals/` | Private runtime helpers | [_internals/_ARCH.md](_internals/_ARCH.md) |
-| `acp/` | ACP default factory for standalone server | [acp/_ARCH.md](acp/_ARCH.md) |
+| `acp/` | Inbound ACP: an IDE drives a Myrm agent (protocol server, session bridge, agent factories, CLI entry) | [acp/_ARCH.md](acp/_ARCH.md) |
 | `artifacts/` | Artifact lifecycle (registry, vault, UI) | [artifacts/_ARCH.md](artifacts/_ARCH.md) |
 | `background_worker/` | Idle task registry, shadow bulkhead | [background_worker/_ARCH.md](background_worker/_ARCH.md) |
 | `config/` | Unified config types export | [config/_ARCH.md](config/_ARCH.md) |

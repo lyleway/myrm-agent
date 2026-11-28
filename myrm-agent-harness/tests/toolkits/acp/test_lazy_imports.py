@@ -1,4 +1,4 @@
-"""Tests for the lazy import mechanism of the ACP packages."""
+"""Tests for the lazy import mechanism of the ACP toolkit packages."""
 
 from __future__ import annotations
 
@@ -28,16 +28,6 @@ class TestLazyImports:
 
         with pytest.raises(AttributeError, match="has no attribute"):
             _ = acp_mod.NonExistentThing  # type: ignore[attr-defined]
-
-    def test_import_myrm_acp_server(self) -> None:
-        from myrm_agent_harness.toolkits.acp import MyrmAcpServer
-
-        assert MyrmAcpServer is not None
-
-    def test_import_run_server(self) -> None:
-        from myrm_agent_harness.toolkits.acp import run_server
-
-        assert callable(run_server)
 
     def test_runtime_package_lazy_base_runtime(self) -> None:
         import myrm_agent_harness.toolkits.acp.runtime as runtime_pkg
@@ -80,43 +70,13 @@ class TestLazyImports:
         with pytest.raises(AttributeError, match="has no attribute"):
             _ = cli_runtime_pkg.NonExistentThing  # type: ignore[attr-defined]
 
-    def test_server_package_lazy_myrm_acp_server(self) -> None:
-        import myrm_agent_harness.toolkits.acp.server as server_pkg
 
-        assert server_pkg.MyrmAcpServer is not None
+class TestToolkitExports:
+    """The names the toolkit exports import side by side."""
 
-    def test_server_package_lazy_run_server(self) -> None:
-        import myrm_agent_harness.toolkits.acp.server as server_pkg
-
-        assert callable(server_pkg.run_server)
-
-    def test_server_package_lazy_agent_bridge(self) -> None:
-        import myrm_agent_harness.toolkits.acp.server as server_pkg
-
-        assert server_pkg.AgentBridge is not None
-        assert server_pkg.AgentFactory is not None
-
-    def test_server_package_unknown_raises(self) -> None:
-        import myrm_agent_harness.toolkits.acp.server as server_pkg
-
-        with pytest.raises(AttributeError, match="has no attribute"):
-            _ = server_pkg.NonExistentThing  # type: ignore[attr-defined]
-
-
-class TestAcpToolsImport:
-    """Tests for acp_tools.py module imports."""
-
-    def test_import_acp_tools(self) -> None:
-        from myrm_agent_harness.toolkits.acp import (
-            MyrmAcpServer,
-            RuntimeBackend,
-            RuntimeConfig,
-            RuntimePool,
-            run_server,
-        )
+    def test_import_all_exports(self) -> None:
+        from myrm_agent_harness.toolkits.acp import RuntimeBackend, RuntimeConfig, RuntimePool
 
         assert RuntimePool is not None
-        assert MyrmAcpServer is not None
         assert RuntimeConfig is not None
         assert RuntimeBackend is not None
-        assert callable(run_server)
