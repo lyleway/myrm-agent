@@ -32,9 +32,6 @@ class SearchToolsMixin(ToolSetupBaseMixin):
             create_web_search_tool,
         )
 
-        reranker_cfg = self.reranker_config if self.enable_advanced_retrieval else None
-        embedding_cfg = self.embedding_config if self.enable_advanced_retrieval else None
-
         sufficiency_cfg = None
         sufficiency_llm = None
         if self.search_depth == "deep":
@@ -54,19 +51,11 @@ class SearchToolsMixin(ToolSetupBaseMixin):
 
         tool_description_locale = self._tool_description_locale()
 
-        web_fetch_enabled = bool(getattr(self, "enable_web_fetch", True))
-        # web_fetch_tool offers fetch_and_extract only with both retrieval services; web_search recommends it only then.
-        fetch_and_extract_available = web_fetch_enabled and reranker_cfg is not None and embedding_cfg is not None
-
-        if web_fetch_enabled:
+        if bool(getattr(self, "enable_web_fetch", True)):
             tools.append(
                 create_web_fetch_tool(
-                    reranker_config=reranker_cfg,
-                    embedding_config=embedding_cfg,
                     use_raw_markdown=self.fetch_raw_webpage,
                     allow_private_networks=_is_local(),
-                    sufficiency_config=sufficiency_cfg,
-                    sufficiency_llm_config=sufficiency_llm,
                     blocked_hostnames=getattr(self, "benchmark_blocked_hostnames", ()) or None,
                     # Read on every call: a blocklist edited mid-session reaches this pooled agent's next fetch.
                     network_blocklist_provider=lambda: self._merged_security_config().network_blocklist,
@@ -82,7 +71,6 @@ class SearchToolsMixin(ToolSetupBaseMixin):
                     sufficiency_config=sufficiency_cfg,
                     sufficiency_llm_config=sufficiency_llm,
                     description_locale=tool_description_locale,
-                    fetch_and_extract_available=fetch_and_extract_available,
                     blocked_terms=getattr(self, "benchmark_blocked_terms", ()) or None,
                     blocked_hostnames=getattr(self, "benchmark_blocked_hostnames", ()) or None,
                 )

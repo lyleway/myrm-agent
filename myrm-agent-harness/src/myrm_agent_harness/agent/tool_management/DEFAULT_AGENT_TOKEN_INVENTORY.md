@@ -52,7 +52,7 @@
 
 | # | 工具名 | Token (tiktoken) | 来源文件 | 说明 | 加载条件 |
 |---|--------|------------------:|----------|------|----------|
-| 4a | web_fetch_tool | 92 | `harness/toolkits/web_fetch/web_fetch_agent_tools.py` | HTTP 抓取/深读（默认只读全文，含 PDF/DOCX/XLSX/PPTX；同时配置 reranker 与 embedding 时提供 fetch_and_extract，描述为 272）。描述不提浏览器工具：「只读优先 web_fetch」的路由提示只在浏览器一侧，挂载 `web_fetch_tool` 时由 `browser_navigate_tool` 的 Dynamic Hints 追加 | Turn1 基线 |
+| 4a | web_fetch_tool | 92 | `harness/toolkits/web_fetch/web_fetch_agent_tools.py` | HTTP 抓取/深读（只读全文，含 PDF/DOCX/XLSX/PPTX）。描述不提浏览器工具：「只读优先 web_fetch」的路由提示只在浏览器一侧，挂载 `web_fetch_tool` 时由 `browser_navigate_tool` 的 Dynamic Hints 追加 | Turn1 基线 |
 | 6 | **bash_code_execute_tool** | **716** | `harness/agent/meta_tools/bash/_tool/tool_description.py` + `_tool/helpers.py:79` | Shell/Python；描述只留能力范围、专用工具路由与输出约定，timeout / yield / reason 等参数限制写在 `BashInput` 字段，后台作业管理写在 `bash_process_tool`。**宿主相关**：静态描述 659（宿主无关）+ OS hint（含 `os_release`/`arch`，见 `platform.py:116-122`；macOS arm64 58 / ubuntu-latest 32 / 各发行版实测 31–60）+ 可选 toolchain 探测行（干净环境为 0）+ 可选 VNC 视觉桌面行（只有带 DISPLAY、x11vnc 与 websockify 的 Linux 沙箱才有，约 56，示意值，其余宿主为 0）。拼接处 BPE 合并使实测总数比两段之和少 1（659+58=717，实测 716） | 通用 Agent 基线 |
 | 6b | **bash_process_tool** | **175** | `harness/agent/meta_tools/bash/bash_process_tools.py` | 后台进程 list/output/wait/kill/write_stdin/submit_stdin/close_stdin（CORE；与 bash_code_execute 同挂） | enable_shell_tools |
 | 7 | file_edit_tool | 61 | `harness/agent/meta_tools/file_ops/file_edit_tool.py` | 批量 edits[] 原子编辑；编辑已有文件前须先读取一次（带行号范围的读取也算，preview/stream 不算；本会话自己创建或编辑过的免读） | 通用 Agent 基线 |
@@ -75,7 +75,7 @@
 
 | # | 工具名 | Token (tiktoken) | 来源文件 | 说明 | 加载条件 |
 |---|--------|------------------:|----------|------|----------|
-| 12 | **web_search_tool** | **1,134** | `harness/toolkits/web_search/_web_search_tool_description.py` | 网络搜索（EN/ZH LLM-facing query-rewrite SSOT；server 传 locale；web_fetch 提供 fetch_and_extract 时多一段推荐，描述为 1,174） | GUI 可关 |
+| 12 | **web_search_tool** | **1,134** | `harness/toolkits/web_search/_web_search_tool_description.py` | 网络搜索（EN/ZH LLM-facing query-rewrite SSOT；server 传 locale） | GUI 可关 |
 | 13 | **memory_search_tool** | **117** (EN) / **129** (ZH) | `harness/toolkits/memory/agent_surface/_memory_search_description.py` | 统一检索：description 与 args schema 随 `MemorySearchPolicy` 派生，默认仅 memory corpus（schema 无 `corpus` / `expand_*`）；开启会话检索后 description ≈240（EN）/ ≈260（ZH） | enable_memory |
 | 14 | **memory_save_tool** | **578** (EN) / **593** (ZH) | `harness/toolkits/memory/agent_surface/_memory_tool_texts_{en,zh}.py`（`_memory_agent_tool_descriptions.py` 组装） | 写入长期记忆（EN core；wiki/approval 动态段；保留原有关键 guardrail 短语） | enable_memory |
 | 15 | **memory_manage_tool** | **289** (EN) / **348** (ZH) | 同上 | 更新/删除/纠正/评分；仅以 `memory_id` 寻址（类型由已存记忆决定，无 `category` 参数）；correct→knowledge only（preserves history）；update→措辞微调；**user-locked rule 不可 update/delete** | enable_memory |

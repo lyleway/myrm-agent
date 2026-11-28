@@ -1,13 +1,9 @@
 """Web fetch meta-tool
 
 Contains:
-1. create_web_fetch_tool: Web fetch tool (reads known URLs in full; adds fetch_and_extract when retrieval services are configured)
+1. create_web_fetch_tool: Web fetch tool (reads known URLs in full)
 
 [INPUT]
-- toolkits.retriever.embedding.factory::EmbeddingConfig
-- toolkits.retriever.reranker.factory::RerankerConfig
-- toolkits.retriever.engine::RetrieverManager (POS: Hybrid retrieval manager for fetched pages) [lazy]
-- toolkits.retriever.sufficiency (POS: Retrieval Sufficiency Guard 模块入口。)
 - toolkits.web_fetch.processing.full_content_delivery::FetchedPage, plan_full_content, all_failed_content (POS: One shared budget for every fetched page) [lazy]
 - toolkits.web_fetch.processing.spill::store_full_text, emit_web_fetch_evicted_ref, stored_copy_capacity (POS: Sandbox persistence of the full text) [lazy]
 - toolkits.web_fetch.processing.content_sanitize::strip_base64_images_from_markdown (POS: Inline image payload removal) [lazy]
@@ -21,9 +17,9 @@ Contains:
 - create_web_fetch_tool: Create web fetch meta-tool
 
 [POS]
-Web fetch meta-tool for known-URL full read and RAG extract modes. The user's network blocklist is read on every
-call and handed to the engine that call builds, so a list edited mid-session applies to the next fetch and the
-shared engine's caches never hold a page fetched under another list.
+Web fetch meta-tool: one input, ``(urls, reason)``, and one behaviour, reading the known URLs in full. The user's
+network blocklist is read on every call and handed to the engine that call builds, so a list edited mid-session
+applies to the next fetch and the shared engine's caches never hold a page fetched under another list.
 """
 
 from __future__ import annotations
@@ -36,10 +32,6 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from myrm_agent_harness.core.config.llm import LLMConfig
-    from myrm_agent_harness.toolkits.retriever.embedding.factory import EmbeddingConfig
-    from myrm_agent_harness.toolkits.retriever.reranker.factory import RerankerConfig
-    from myrm_agent_harness.toolkits.retriever.sufficiency import SufficiencyConfig
     from myrm_agent_harness.toolkits.web_fetch.processing.spill import StoredFullText
 
 from myrm_agent_harness.core.context_vars import source_indexer_var
@@ -57,34 +49,15 @@ class _FullContentInput(BaseModel):
     reason: str = Field(description=_REASON_DESCRIPTION)
 
 
-class _FetchOrExtractInput(BaseModel):
-    urls: list[str] = Field(description="Real webpage URL list", min_length=1)
-    operation: str = Field(default="fetch_and_extract", description="Operation type (default 'fetch_and_extract')")
-    questions: list[str] = Field(
-        default_factory=list,
-        description="Retrieval query list (fetch_and_extract only, 1-5 queries)",
-        max_length=5,
-    )
-    reason: str = Field(description=_REASON_DESCRIPTION)
-
-
 def create_web_fetch_tool(
-    reranker_config: RerankerConfig | None = None,
-    embedding_config: EmbeddingConfig | None = None,
     *,
     use_raw_markdown: bool = False,
     allow_private_networks: bool = False,
-    sufficiency_config: SufficiencyConfig | None = None,
-    sufficiency_llm_config: LLMConfig | None = None,
     blocked_hostnames: tuple[str, ...] | None = None,
     network_blocklist_provider: Callable[[], tuple[str, ...]] | None = None,
     description_locale: str | None = None,
 ) -> BaseTool:
-    """Create web fetch meta-tool.
-
-    Without retrieval services the tool reads the given pages in full (``urls``
-    only). With both a reranker and an embedding service it also offers
-    ``fetch_and_extract`` and takes an ``operation`` argument.
+    """Create web fetch meta-tool: it reads the given pages (``urls``) in full.
 
     ``blocked_hostnames`` is an optional hostname blocklist (exact or ``*.``
     wildcard patterns). When set, URLs whose host matches a pattern are
@@ -99,64 +72,21 @@ def create_web_fetch_tool(
     ``description_locale`` selects the LLM-facing tool description locale
     (default English).
     """
-    tool_description = resolve_web_fetch_tool_description(
-        reranker_config is not None and embedding_config is not None, description_locale
-    )
+    tool_description = resolve_web_fetch_tool_description(description_locale)
 
-    async def check_urls(urls: list[str]) -> list[str]:
-        return await validate_urls(
-            urls, blocked_hostnames=blocked_hostnames, allow_private_networks=allow_private_networks
-        )
-
-    def current_network_blocklist() -> tuple[str, ...]:
-        return network_blocklist_provider() if network_blocklist_provider is not None else ()
-
-    async def read_in_full(urls: list[str]) -> dict[str, object]:
+    @tool("web_fetch_tool", description=tool_description, args_schema=_FullContentInput)
+    async def full_content_tool(urls: list[str], reason: str = "") -> dict[str, object]:
+        """Read the pages in full."""
         return await _fetch_full_content(
-            urls,
+            await validate_urls(
+                urls, blocked_hostnames=blocked_hostnames, allow_private_networks=allow_private_networks
+            ),
             use_raw_markdown=use_raw_markdown,
             allow_private_networks=allow_private_networks,
-            network_blocklist=current_network_blocklist(),
+            network_blocklist=network_blocklist_provider() if network_blocklist_provider is not None else (),
         )
 
-    if reranker_config is None or embedding_config is None:
-
-        @tool("web_fetch_tool", description=tool_description, args_schema=_FullContentInput)
-        async def full_content_tool(urls: list[str], reason: str = "") -> dict[str, object]:
-            """Read the pages in full."""
-            return await read_in_full(await check_urls(urls))
-
-        return full_content_tool
-
-    @tool("web_fetch_tool", description=tool_description, args_schema=_FetchOrExtractInput)
-    async def fetch_or_extract_tool(
-        urls: list[str],
-        operation: str = "fetch_and_extract",
-        questions: list[str] | None = None,
-        reason: str = "",
-    ) -> dict[str, object]:
-        """Read the pages in full, or retrieve the snippets that answer ``questions``."""
-        urls = await check_urls(urls)
-        if operation == "fetch_full_content":
-            return await read_in_full(urls)
-
-        if not questions:
-            raise ToolError(
-                "'questions' parameter is required for fetch_and_extract operation",
-                user_hint="Provide 1-5 search queries in the 'questions' parameter.",
-            )
-        result = await _fetch_and_extract(
-            urls,
-            questions,
-            reranker_config,
-            embedding_config,
-            allow_private_networks=allow_private_networks,
-            network_blocklist=current_network_blocklist(),
-        )
-        await _append_sufficiency_notice(result, questions, sufficiency_config, sufficiency_llm_config)
-        return result
-
-    return fetch_or_extract_tool
+    return full_content_tool
 
 
 async def _fetch_full_content(
@@ -277,7 +207,6 @@ def _full_content_result(
         "content": content,
         "metadata": {
             "sources": sources,
-            "operation": "fetch_full_content",
             "truncated": truncated,
             "raw_chars": raw_chars,
         },
@@ -286,96 +215,3 @@ def _full_content_result(
         "evicted_total_lines": stored.total_lines if stored else None,
         "evicted_storage_truncated": stored.storage_truncated if stored else False,
     }
-
-
-async def _fetch_and_extract(
-    urls: list[str],
-    questions: list[str],
-    reranker_config: RerankerConfig,
-    embedding_config: EmbeddingConfig,
-    *,
-    allow_private_networks: bool = False,
-    network_blocklist: tuple[str, ...] = (),
-) -> dict[str, object]:
-    """Retrieve relevant content snippets from webpages."""
-    from myrm_agent_harness.toolkits.retriever.embedding.factory import get_embedding_service
-    from myrm_agent_harness.toolkits.retriever.engine import RetrieverManager
-    from myrm_agent_harness.toolkits.retriever.reranker.factory import get_reranker_service
-    from myrm_agent_harness.utils.context_format import wrap_with_external_sources_tag
-
-    reranker = get_reranker_service(reranker_config)
-    embeddings = get_embedding_service(embedding_config)
-    url_metadata_list, formatted_context, error = await RetrieverManager().retrieve_from_urls(
-        urls=urls,
-        questions=questions,
-        reranker=reranker,
-        embeddings=embeddings,
-        top_k=10,
-        allow_private_networks=allow_private_networks,
-        network_blocklist=network_blocklist,
-    )
-
-    if error:
-        raise ToolError(
-            f"Fetch failed: {error}",
-            user_hint="The fetch operation failed. Check if the URLs are valid and the pages are accessible.",
-        )
-    if not formatted_context:
-        raise ToolError(
-            "No relevant content found in the provided URLs",
-            user_hint="The pages were fetched but no content matched the queries. Try broader or different questions.",
-        )
-
-    return {
-        "content": wrap_with_external_sources_tag(formatted_context, source="web_fetch"),
-        "metadata": {
-            "sources": url_metadata_list,
-            "operation": "fetch_and_extract",
-            "questions": questions,
-        },
-    }
-
-
-async def _append_sufficiency_notice(
-    result: dict[str, object],
-    questions: list[str],
-    sufficiency_config: SufficiencyConfig | None,
-    sufficiency_llm_config: LLMConfig | None,
-) -> None:
-    """When the extracted snippets look insufficient for ``questions``, tell the model what is missing."""
-    content = result.get("content")
-    if not (
-        sufficiency_config
-        and sufficiency_config.enabled
-        and sufficiency_llm_config
-        and isinstance(content, str)
-        and content
-    ):
-        return
-
-    from myrm_agent_harness.toolkits.retriever.sufficiency import evaluate_sufficiency
-
-    verdict = await evaluate_sufficiency(
-        query=" | ".join(questions),
-        snippets=content,
-        llm_config=sufficiency_llm_config,
-        config=sufficiency_config,
-    )
-    if verdict.is_sufficient or verdict.confidence < sufficiency_config.confidence_threshold:
-        return
-
-    guidance_parts: list[str] = []
-    if verdict.missing_aspects:
-        guidance_parts.append("**Missing information**: " + "; ".join(verdict.missing_aspects))
-    if verdict.suggested_queries:
-        guidance_parts.append(
-            "**Suggested follow-up searches**: " + ", ".join(f'"{q}"' for q in verdict.suggested_queries)
-        )
-    if verdict.negative_constraint_violations:
-        guidance_parts.append(
-            "**Exclusion violations** (user requested these be excluded): "
-            + "; ".join(verdict.negative_constraint_violations)
-        )
-    if guidance_parts:
-        notice = "\n\n---\n⚠️ **Retrieval Sufficiency Notice**: The extracted content may be incomplete.\n"
-        result["content"] = content + notice + "\n".join(guidance_parts)

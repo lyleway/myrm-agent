@@ -34,8 +34,8 @@ _ROOTS = {
     "myrm_agent_harness": Path(myrm_agent_harness.__file__).resolve().parent,
     "app": Path(__file__).resolve().parents[2] / "app",
 }
-# 52 pairs of strings exist today; a scan that finds far fewer has gone blind (the suffix renamed, a root moved).
-_MIN_COMPARED = 45
+# 44 pairs of strings exist today; a scan that finds far fewer has gone blind (the suffix renamed, a root moved).
+_MIN_COMPARED = 38
 
 # Pairs whose Chinese text lags the English one. An entry fails as stale as soon as the two agree again.
 _KNOWN_DRIFT: dict[str, str] = {}

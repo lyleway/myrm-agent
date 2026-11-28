@@ -240,9 +240,15 @@ describe('RetrievalCard', () => {
   it('states what is sent to the provider and where reranking applies', () => {
     mountLoaded();
 
-    for (const key of ['title', 'embedding', 'rerank', 'pageReading', 'coverage']) {
+    for (const key of ['title', 'embedding', 'rerank', 'coverage']) {
       expect(screen.getByText(`disclosure.${key}`)).toBeInTheDocument();
     }
+  });
+
+  it('does not claim that fetched web pages are sent to the providers', () => {
+    mountLoaded();
+
+    expect(screen.queryByText('disclosure.pageReading')).not.toBeInTheDocument();
   });
 
   it('keeps the per-model configuration collapsed until it is opened', () => {

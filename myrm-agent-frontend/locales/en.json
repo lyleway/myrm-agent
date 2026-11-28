@@ -15757,13 +15757,12 @@
       },
       "rerank": {
         "title": "Reranking",
-        "description": "Puts the most relevant memories and page passages in front of the LLM first."
+        "description": "Puts the most relevant memories in front of the LLM first."
       },
       "disclosure": {
         "title": "What is sent to your provider",
         "embedding": "Semantic search: your queries and text from the knowledge base, memory, FAQ and connected sources.",
         "rerank": "Reranking: your query and the recalled memory snippets being ranked.",
-        "pageReading": "Page reading: when both are on, excerpts of fetched web pages go to both providers together with the query.",
         "coverage": "Reranking works in chat (except Fast Search) and message channels. Scheduled tasks, kanban tasks, unattended goals and voice do not use it, and Fast Search uses no retrieval models."
       },
       "advanced": {

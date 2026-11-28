@@ -129,7 +129,6 @@ async def test_pages_within_budget_are_delivered_whole(crawl: _Crawl) -> None:
             {"url": "https://a.test/1", "title": "First"},
             {"url": "https://b.test/2", "title": ""},
         ],
-        "operation": "fetch_full_content",
         "truncated": False,
         "raw_chars": len(payload),
     }
@@ -231,7 +230,7 @@ async def test_when_every_url_fails_the_result_keeps_the_standard_shape(crawl: _
     assert content.endswith("information.")
     assert result == {
         "content": content,
-        "metadata": {"sources": [], "operation": "fetch_full_content", "truncated": False, "raw_chars": 0},
+        "metadata": {"sources": [], "truncated": False, "raw_chars": 0},
         "evicted_ref": None,
         "evicted_stored_chars": None,
         "evicted_total_lines": None,

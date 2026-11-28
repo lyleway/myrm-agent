@@ -10,7 +10,7 @@ Default locale is English; callers pass BCP-47 locale strings (e.g. ``zh-CN``).
 - utils.locale::is_chinese (POS: BCP-47 Chinese detection for description locale)
 
 [OUTPUT]
-- resolve_web_search_tool_description: Locale-aware description resolver; includes the fetch_and_extract hint only when that operation exists
+- resolve_web_search_tool_description: Locale-aware description resolver
 
 [POS]
 Prompt SSOT for web_search_tool. Imported by web_search_agent_tools.py and static tests.
@@ -41,8 +41,6 @@ _COST_CONTROL_EN = """
 - If results do not cover key aspects needed to answer, prefer rewriting for missing aspects or adding complementary queries.
 - When an information request spans multiple domains or you are uncertain whether a query is general or vertical, use a hybrid strategy: issue 1 general query and 1-2 domain-specific queries in parallel.
 """.strip()
-
-_FETCH_AND_EXTRACT_HINT_EN = "- When search snippets provide insufficient detail or the user needs in-depth data from a retrieved webpage, combine with web_fetch_tool's fetch_and_extract operation to retrieve cleaned, targeted article sections without redundant searches."
 
 _QUERY_REWRITE_EN = """
 ## Query rewrite rules
@@ -111,8 +109,6 @@ _COST_CONTROL_ZH = """
 - 当信息诉求涉及多领域交叉或无法断定属于泛化还是垂直领域时，采用混合策略：并行发起 1 条通用 query 与 1-2 条垂直领域针对性 query。
 """.strip()
 
-_FETCH_AND_EXTRACT_HINT_ZH = "- 当搜索返回的片段（snippet）信息不足或用户需要页面深层细节时，联动 web_fetch_tool 的 fetch_and_extract 操作提取清洗后的正文段落，避免盲目重复搜索。"
-
 _QUERY_REWRITE_ZH = """
 ## Query 改写规则
 
@@ -161,34 +157,11 @@ _QUERY_REWRITE_ZH = """
 """.strip()
 
 
-def resolve_web_search_tool_description(
-    locale: str | None = DEFAULT_WEB_SEARCH_TOOL_DESCRIPTION_LOCALE,
-    *,
-    fetch_and_extract_available: bool = False,
-) -> str:
-    """Return the locale-aware tool description.
-
-    The cost-control hint that points at web_fetch_tool's ``fetch_and_extract`` operation is included only when
-    ``fetch_and_extract_available`` says that operation exists in the same agent, so the model is never sent to a
-    tool or operation it cannot call.
-    """
+def resolve_web_search_tool_description(locale: str | None = DEFAULT_WEB_SEARCH_TOOL_DESCRIPTION_LOCALE) -> str:
+    """Return the locale-aware tool description."""
     if is_chinese(locale):
-        overview, cost_control, hint, rewrite = (
-            _OVERVIEW_PARAMETERS_ZH,
-            _COST_CONTROL_ZH,
-            _FETCH_AND_EXTRACT_HINT_ZH,
-            _QUERY_REWRITE_ZH,
-        )
-    else:
-        overview, cost_control, hint, rewrite = (
-            _OVERVIEW_PARAMETERS_EN,
-            _COST_CONTROL_EN,
-            _FETCH_AND_EXTRACT_HINT_EN,
-            _QUERY_REWRITE_EN,
-        )
-    if fetch_and_extract_available:
-        cost_control = f"{cost_control}\n{hint}"
-    return "\n\n".join((overview, cost_control, rewrite))
+        return "\n\n".join((_OVERVIEW_PARAMETERS_ZH, _COST_CONTROL_ZH, _QUERY_REWRITE_ZH))
+    return "\n\n".join((_OVERVIEW_PARAMETERS_EN, _COST_CONTROL_EN, _QUERY_REWRITE_EN))
 
 
 __all__ = [

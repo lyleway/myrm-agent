@@ -52,7 +52,7 @@
 | 出口 | 范围 | 例外（不包装） | 锚点 |
 |------|------|----------------|------|
 | **Web 搜索** `web_search` | 全部返回 | 无 | `toolkits/web_search/web_search_agent_tools.py::web_search_func`（`source="web_search"`） |
-| **Web 抓取** `web_fetch` | 抓取的正文；全部失败时的失败网址清单 | 无；工具自己生成的指引接在包装之后（见下文） | `toolkits/web_fetch/web_fetch_agent_tools.py::_fetch_full_content`、`::_fetch_and_extract`；`toolkits/web_fetch/processing/full_content_delivery.py::all_failed_content`（`source="web_fetch"`） |
+| **Web 抓取** `web_fetch` | 抓取的正文；全部失败时的失败网址清单 | 无；工具自己生成的指引接在包装之后（见下文） | `toolkits/web_fetch/web_fetch_agent_tools.py::_fetch_full_content`；`toolkits/web_fetch/processing/full_content_delivery.py::all_failed_content`（`source="web_fetch"`） |
 | **知识库查询** | `wiki_query_tool` 的结果；`memory_search_tool` 的 wiki 语料 | 无 | `toolkits/wiki/wiki_agent_tools.py::wiki_query`；`toolkits/memory/agent_surface/memory_search_execution.py::search_wiki_corpus`（`source="LLM-Wiki"`） |
 | **浏览器工具** | snapshot、extract、inspect、navigate、interact、execute_script、接管结果、下载动作；`browser_manage_tool` 的 evaluate、emulate、console、network、web_vitals、run_site_tool 结果 | `browser_manage_tool` 的 `dialog_response` 应答回显（页面对话框文字的前 80 个字符）、站点经验的保存与列表回显、站点脚本的失败文本 | `toolkits/browser/tools/common.py::mark_untrusted`（先 `redact_sensitive_text` 凭据脱敏，再 `wrap_untrusted(..., source="browser")`）；例外 `toolkits/browser/session/dialog_manager.py::respond`、`toolkits/browser/tools/manage.py::_handle_save_site_experience` / `_handle_list_site_experience` / `_handle_run_site_tool` |
 | **MCP 工具** | 字符串结果（含服务端报告的错误）；多模态结果里的文本块 | 框架自己生成的失败消息：超时、不支持的内容（只做凭据脱敏）、授权过期 | `toolkits/mcp/tool_processing.py::wrap_tools_with_timeout`；`toolkits/mcp/result_processing.py::wrap_multimodal_text_blocks`（`source="mcp:{tool_name}"`） |
