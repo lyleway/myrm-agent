@@ -11,4 +11,4 @@ Runtime Events module.
 | bus.py | Core | Event Bus Implementation | ✅ |
 | idle_events.py | Core | `IdleTaskProgressEvent`: structured idle-task progress (`status` is a Literal of working/completed/notification/error/idle; `data` carries structured payload only, user-facing text belongs to the UI layer). | ✅ |
 | skill_events.py | Core | Framework DTOs for non-blocking skill-attributed runtime failure events, including session and LoopGuard evidence fields. | ✅ |
-| system_events.py | Core | Framework-level typed system event DTOs for subagent lifecycle, delegation policy decisions, and resource metrics. | ✅ |
+| system_events.py | Core | Framework-level typed system event DTOs for subagent lifecycle, delegation policy decisions, resource metrics, MCP authorization expiry and locator self-healing. A DTO that offers `to_dict` builds its payload from its own fields only; `tests/runtime/events/test_system_events.py` keeps a working sample for each. | ✅ |

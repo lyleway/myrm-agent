@@ -10,6 +10,7 @@
 - SubagentLifecycleEvent: Event emitted when a subagent changes lifecycle state.
 - ResourceMetricsEvent: Event emitted with current resource usage metrics.
 - MCPAuthExpiredEvent: Event emitted when an MCP session fails due to expired OAuth credentials.
+- LocatorSelfHealedEvent: Event emitted when a broken locator is self-healed by the fingerprint engine.
 - to_json_object: Convert arbitrary mapping data into JSON-compatible event payloads.
 
 [POS]
@@ -110,21 +111,6 @@ class SubagentLifecycleEvent(BaseEvent):
     vault_uri: str | None = None
     thread_id: str | None = None
     created_at: float = 0.0
-
-    def to_dict(self) -> JsonObject:
-        payload: JsonObject = {
-            "message_id": self.message_id,
-            "from_task_id": self.from_task_id,
-            "to_task_id": self.to_task_id,
-            "from_agent_type": self.from_agent_type,
-            "body": self.body,
-            "created_at": self.created_at,
-        }
-        if self.vault_uri:
-            payload["vault_uri"] = self.vault_uri
-        if self.thread_id:
-            payload["thread_id"] = self.thread_id
-        return payload
 
 
 @dataclass(slots=True)
