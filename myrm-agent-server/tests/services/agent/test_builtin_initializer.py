@@ -246,6 +246,40 @@ async def test_search_agents_update_syncs_extended_fields(test_db: sessionmaker)
 
 
 @pytest.mark.asyncio
+async def test_initialize_rewrites_a_deep_search_row_saved_before_answer_tool_was_retired(test_db: sessionmaker) -> None:
+    """Startup stores the spec list without validating it, so the row must come out without the retired entry."""
+    async with test_db() as session:
+        session.add(
+            Agent(
+                id="builtin-deep-search",
+                name="Deep Search",
+                description="Thorough multi-source research — reads full pages, cross-references, and self-validates answers.",
+                avatar="icon:search-deep",
+                is_built_in=True,
+                is_public=True,
+                system_prompt="",
+                enabled_builtin_tools=["web_search", "answer_tool"],
+                prompt_mode="search",
+                skill_ids=[],
+                mcp_servers=[],
+                subagent_ids=[],
+                model_config={},
+            )
+        )
+        await session.commit()
+
+    await initialize_builtin_agents()
+
+    async with test_db() as session:
+        agent = (await session.execute(select(Agent).where(Agent.id == "builtin-deep-search"))).scalar_one()
+
+    spec = next(s for s in _BUILTIN_AGENTS if s.id == "builtin-deep-search")
+    assert agent.enabled_builtin_tools == ["web_search"]
+    assert agent.description == spec.description
+    assert "self-validates" not in agent.description
+
+
+@pytest.mark.asyncio
 async def test_initialize_syncs_hr_screener_tools_without_baseline(test_db: sessionmaker) -> None:
     """Stale file_ops in DB must be replaced with togglable-only list on startup sync."""
     async with test_db() as session:
