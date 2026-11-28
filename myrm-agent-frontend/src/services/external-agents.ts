@@ -4,23 +4,27 @@
  *
  * [OUTPUT]
  * - ExternalAgentAuthStatus / ExternalAgentAuthEvent 类型
- * - ExternalAgentAccount 类型
+ * - ExternalAgentAccount / ExternalAgentTerminalLogin 类型
  * - getExternalAgentAuthStatus / streamExternalAgentInstall / streamExternalAgentLogin
- *   / feedExternalAgentLogin / importExternalAgentCredential / logoutExternalAgent
+ *   / getExternalAgentTerminalLogin / logoutExternalAgent
  * - listExternalAgentAccounts / createExternalAgentAccount / deleteExternalAgentAccount
  * - isBlockedInDeployment / resolveExternalCliReadiness: whether a command names an agent the deployment does not run,
  *   and whether delegation can run at all
  *
  * [POS]
  * 外部委托 Agent 订阅鉴权前端服务层。封装登录状态查询、SSE 安装与交互式登录
- * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、凭据导入/登出，
- * 命名账号的列出、创建、删除，供设置页的鉴权 UI 调用（local + SaaS 全模式可用）。
- * 登录、导入、登出可带账号名，作用于该账号目录里的登录而不是 CLI 自己的。
+ * （共用一个 SSE 解析器，非 2xx 响应抛错而不是静默结束）、用户在自己终端里跑的登录
+ * （取官方登录命令并重新检测）、登出，命名账号的列出、创建、删除，供设置页的鉴权 UI
+ * 调用（local + SaaS 全模式可用）。前端从不接触凭据：登录由 CLI 完成，这里只读「谁登录了」。
+ * 登录、终端登录、登出可带账号名，作用于该账号目录里的登录而不是 CLI 自己的。
  */
 import { apiRequest, fetchWithTimeout } from '@/lib/api';
 import type { ExternalAgentType } from '@/services/config';
 
-export type ExternalAgentLoginStrategy = 'browser_oauth' | 'paste_code' | 'manual_import';
+/** Who runs the login: the host drives it (`browser_oauth`), or the user does in a terminal of their own (`terminal`). */
+export type ExternalAgentLoginStrategy = 'browser_oauth' | 'terminal';
+
+export type ExternalAgentShell = 'posix' | 'powershell' | 'cmd';
 
 export interface ExternalAgentAuthStatus {
   backend: string;
@@ -32,8 +36,6 @@ export interface ExternalAgentAuthStatus {
   authenticated: boolean;
   authStatus: 'authenticated' | 'not_authenticated' | 'unknown';
   loginStrategy: ExternalAgentLoginStrategy;
-  scriptableLogin: boolean;
-  needsCodeInput: boolean;
   /** False in a hosted deployment, which runs delegated agents on an API key and never keeps a subscription login. */
   subscriptionLoginAllowed: boolean;
   /** False where the deployment does not run this agent at all (a hosted deployment), however it would be signed in. */
@@ -51,6 +53,18 @@ interface ExternalAgentCredentialState {
   backend: string;
   authenticated: boolean;
   authStatus: string;
+}
+
+/** The login a user runs in a terminal of their own, and whether it has been made yet. */
+export interface ExternalAgentTerminalLogin {
+  backend: string;
+  account: string | null;
+  authenticated: boolean;
+  authStatus: ExternalAgentAuthStatus['authStatus'];
+  /** The shell of the host's own terminal; the command for it is always among `commands`. */
+  defaultShell: ExternalAgentShell;
+  /** The command for each shell that can spell it. */
+  commands: Partial<Record<ExternalAgentShell, string>>;
 }
 
 /** One named login of a delegated CLI, kept in a home of its own. */
@@ -212,16 +226,15 @@ export async function* streamExternalAgentInstall(
   yield* readSseEvents(response.body);
 }
 
-/** Persist a credential blob captured elsewhere (universal fallback), into the named account when one is given. */
-export function importExternalAgentCredential(
-  backend: string,
-  content: string,
-  filename?: string,
-  account?: string,
-): Promise<ExternalAgentCredentialState> {
-  return apiRequest<ExternalAgentCredentialState>('/external-agents/auth/import', {
+/**
+ * The login the user runs in a terminal of their own (the named account's, when one is given), spelled for each shell,
+ * and whether it has been made yet. Asking again is the re-check: `authenticated` is what the CLI itself reports.
+ */
+export function getExternalAgentTerminalLogin(backend: string, account?: string): Promise<ExternalAgentTerminalLogin> {
+  return apiRequest<ExternalAgentTerminalLogin>('/external-agents/auth/terminal-login', {
     method: 'POST',
-    body: JSON.stringify({ backend, content, filename, account }),
+    body: JSON.stringify({ backend, account }),
+    silent: true,
   });
 }
 
@@ -262,21 +275,14 @@ export function deleteExternalAgentAccount(backend: string, name: string): Promi
   );
 }
 
-/** Forward a user-supplied code to a live login session (paste_code flow). */
-export function feedExternalAgentLogin(sessionId: string, text: string): Promise<{ ok: boolean }> {
-  return apiRequest<{ ok: boolean }>(`/external-agents/auth/login/${encodeURIComponent(sessionId)}/feed`, {
-    method: 'POST',
-    body: JSON.stringify({ text }),
-  });
-}
-
 /**
- * Drive an interactive CLI login over SSE, invoking `onEvent` for each event
- * until the stream closes. Pass an AbortSignal to cancel mid-flight. `remote`: the browser that signs in is on
- * another machine than the CLI, so the CLI is asked for a login that works from there.
+ * Drive the CLI login of an agent whose login the host can run (`browser_oauth`) over SSE, invoking `onEvent` for
+ * each event until the stream closes. Abort the signal to cancel mid-flight: the CLI is stopped with the stream.
+ * `remote`: the browser that signs in is on another machine than the CLI, so the CLI is asked for a login that works
+ * from there.
  */
 export async function streamExternalAgentLogin(
-  params: { command: string; backend?: string; sessionId: string; account?: string; remote?: boolean },
+  params: { command: string; backend?: string; account?: string; remote?: boolean },
   onEvent: (event: ExternalAgentAuthEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -288,7 +294,6 @@ export async function streamExternalAgentLogin(
       body: JSON.stringify({
         command: params.command,
         backend: params.backend,
-        sessionId: params.sessionId,
         account: params.account,
         remote: params.remote,
       }),

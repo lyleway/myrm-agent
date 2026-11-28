@@ -1,7 +1,7 @@
 """A managed sandbox never starts a subscription login, stores a subscription credential or runs a blocked agent.
 
 [POS]
-Tests for app/api/external_agents/ in a sandbox deployment: login, feed and import are refused before anything runs
+Tests for app/api/external_agents/ in a sandbox deployment: login and terminal login are refused before anything runs
 or is written, the status rows say so, logout still removes a credential left over from before, and an agent the
 deployment does not run is neither installed nor probed and is reported as not available.
 """
@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialState
 from myrm_agent_harness.toolkits.acp.core.backend_detector import DetectedBackend
 
-from app.api.external_agents._deploy_capability import require_subscription_login_capability
 from app.config.deploy_mode import get_deploy_mode
 from app.core.security.auth.identity import LOCAL_USER_ID
 from app.platform_utils.deployment_capabilities import _reset_capabilities_cache_for_testing
@@ -90,35 +89,19 @@ class TestSandboxRefusesSubscriptionLogin:
         with patch("myrm_agent_harness.toolkits.acp.auth.CliLoginSession") as session:
             resp = client.post(
                 f"{_API}/auth/login",
-                json={"command": "codex", "backend": "codex", "sessionId": "s1"},
+                json={"command": "codex", "backend": "codex"},
             )
 
         assert resp.status_code == 403
         assert "hosted deployments" in resp.json()["detail"]
         session.assert_not_called()
 
-    def test_feed_is_refused(self, client, sandbox) -> None:
-        resp = client.post(f"{_API}/auth/login/s1/feed", json={"text": "code"})
-
-        assert resp.status_code == 403
-
     @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
-    def test_import_is_refused_and_nothing_is_written(self, client, sandbox, tmp_path, backend: str) -> None:
-        resp = client.post(f"{_API}/auth/import", json={"backend": backend, "content": '{"token": "x"}'})
+    def test_terminal_login_is_refused_and_nothing_is_made(self, client, sandbox, tmp_path, backend: str) -> None:
+        resp = client.post(f"{_API}/auth/terminal-login", json={"backend": backend, "account": "work"})
 
         assert resp.status_code == 403
-        assert list(tmp_path.iterdir()) == []
-
-    def test_the_credential_store_refuses_on_its_own_when_the_route_gate_is_absent(self, client, sandbox, tmp_path) -> None:
-        """Defence in depth: the store is built from the capability, so a route exposed without the gate still stores nothing."""
-        app.dependency_overrides[require_subscription_login_capability] = lambda: None
-        try:
-            resp = client.post(f"{_API}/auth/import", json={"backend": "codex", "content": '{"token": "x"}'})
-        finally:
-            app.dependency_overrides.pop(require_subscription_login_capability, None)
-
-        assert resp.status_code == 403
-        assert "does not store subscription credentials" in resp.json()["detail"]
+        assert "hosted deployments" in resp.json()["detail"]
         assert list(tmp_path.iterdir()) == []
 
     def test_status_rows_say_that_login_is_not_available(self, client, sandbox) -> None:
@@ -285,11 +268,20 @@ class TestLocalDeploymentKeepsSubscriptionLogin:
         assert events[-1]["type"] == "success"
 
     @pytest.mark.parametrize("mode", ["local", "tauri"])
-    def test_import_stores_the_credential(self, client, monkeypatch, tmp_path, mode: str) -> None:
+    def test_the_login_a_user_runs_in_a_terminal_is_described(self, client, monkeypatch, mode: str) -> None:
         _use_deploy_mode(monkeypatch, mode)
-
-        resp = client.post(f"{_API}/auth/import", json={"backend": "codex", "content": '{"token": "x"}'})
+        probed: list[str] = []
+        with (
+            patch(
+                "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+                return_value=_detector_finding(*_ALL_FOUND),
+            ),
+            patch("myrm_agent_harness.toolkits.acp.auth.resolve_login_state", _login_state_probe(probed)),
+        ):
+            resp = client.post(f"{_API}/auth/terminal-login", json={"backend": "gemini"})
 
         assert resp.status_code == 200
-        assert resp.json()["authenticated"] is True
-        assert (tmp_path / ".codex" / "auth.json").is_file()
+        body = resp.json()
+        assert body["authenticated"] is True
+        assert body["commands"]["posix"] == "/bin/gemini"
+        assert probed == ["gemini"]

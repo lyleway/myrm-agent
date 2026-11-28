@@ -1,10 +1,9 @@
 """The interactive login session: what it makes of a CLI's console output, and when a login counts as done.
 
-A login succeeded when the CLI exited cleanly and says it is logged in. The credential file cannot be the judge: a CLI
-that keeps its login elsewhere (Claude Code on macOS: the Keychain) leaves none, and a file left from before says nothing
-about the attempt that just failed. The CLIs' real output is replayed from recordings (``login_transcripts``): a CLI that
-colours its output even into a pipe, prints its URL and its code on separate lines, or writes to stderr must still give
-the user a clean link and the code.
+A login succeeded when the CLI exited cleanly and says it is logged in. The CLIs' real output is replayed from
+recordings (``login_transcripts``): a CLI that colours its output even into a pipe, prints its URL and its code on
+separate lines, or writes to stderr must still give the user a clean link and the code. A login the user runs in a
+terminal is never started from here.
 """
 
 from __future__ import annotations
@@ -16,18 +15,14 @@ from pathlib import Path
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import (
-    AuthEvent,
     AuthEventType,
     AuthProfile,
     CliLoginSession,
     LoginStrategy,
     profile_for,
 )
-from tests.toolkits.acp._fake_claude_login import FakeClaude, install_fake_claude
-from tests.toolkits.acp._login_driver import drive_login
 
 _TRANSCRIPTS = Path(__file__).parent / "login_transcripts"
-_POSIX = os.name == "posix"
 
 _LOGIN_OK_SCRIPT = (
     "import os, pathlib;"
@@ -73,14 +68,22 @@ def _session(tmp_path: Path, login_args: tuple[str, ...], *, timeout_seconds: in
 
 class TestCliLoginSession:
     @pytest.mark.asyncio
-    async def test_non_scriptable_yields_import_prompt(self) -> None:
-        profile = profile_for("gemini")
+    @pytest.mark.parametrize("backend", ["claude", "gemini", "qwen"])
+    async def test_a_login_the_user_runs_in_a_terminal_is_not_started(self, backend: str) -> None:
+        profile = profile_for(backend)
         assert profile is not None
-        session = CliLoginSession("gemini", profile)
-        events = [e async for e in session.run()]
-        assert len(events) == 1
-        assert events[0].type is AuthEventType.PROMPT
-        assert "import" in events[0].message.lower()
+        events = [e async for e in CliLoginSession(backend, profile).run()]
+        assert [e.type for e in events] == [AuthEventType.ERROR]
+        assert "terminal" in events[0].message
+
+    @pytest.mark.asyncio
+    async def test_the_login_has_no_input_to_wait_on(self, tmp_path: Path) -> None:
+        """A CLI that asks for something is told there is nothing, instead of waiting out the timeout."""
+        events = [
+            e async for e in _session(tmp_path, ("-c", "import sys; print('stdin:' + repr(sys.stdin.read()))")).run()
+        ]
+
+        assert any(e.message == "stdin:''" for e in events)
 
     @pytest.mark.asyncio
     async def test_successful_login_persists_and_succeeds(self, tmp_path: Path) -> None:
@@ -131,34 +134,6 @@ class TestCliLoginSession:
         assert "reports no login" in events[-1].message
 
     @pytest.mark.asyncio
-    async def test_feed_forwards_line_to_stdin(self, tmp_path: Path) -> None:
-        echo_stdin = (
-            "import sys, os, pathlib;"
-            "line = sys.stdin.readline();"
-            "print('received:' + line.strip());"
-            "p = pathlib.Path(os.environ['CODEX_HOME']) / 'auth.json';"
-            "p.parent.mkdir(parents=True, exist_ok=True);"
-            "p.write_text('{\"ok\": true}')"
-        )
-        session = _session(tmp_path, ("-c", echo_stdin))
-        iterator = session.run()
-        first = await anext(iterator)  # STATUS: process spawned, stdin open
-        assert first.type is AuthEventType.STATUS
-        # The child blocks on stdin.readline(); unblock it by feeding a line now.
-        await session.feed("ABCD-EFGH")
-        events = [first, *[e async for e in iterator]]
-
-        assert any(e.type is AuthEventType.SUCCESS for e in events)
-        assert any("received:ABCD-EFGH" in e.message for e in events)
-
-    @pytest.mark.asyncio
-    async def test_feed_after_process_exit_is_noop(self, tmp_path: Path) -> None:
-        session = _session(tmp_path, ("-c", "pass"))
-        _ = [e async for e in session.run()]
-        # Process is gone: feed must not raise.
-        await session.feed("ABCD-EFGH")
-
-    @pytest.mark.asyncio
     async def test_cancel_terminates_process_group(self, tmp_path: Path) -> None:
         session = _session(tmp_path, ("-c", "import time; time.sleep(60)"))
         iterator = session.run()
@@ -179,13 +154,6 @@ class TestWhatTheUserIsShown:
     @pytest.mark.parametrize(
         ("recording", "stream", "url", "code"),
         [
-            pytest.param(
-                "claude_auth_login.stdout",
-                "stdout",
-                "https://claude.ai/oauth/authorize?z-" + "A" * 43,
-                None,
-                id="claude-paste-code",
-            ),
             pytest.param(
                 "codex_login.stderr",
                 "stderr",
@@ -241,69 +209,6 @@ class TestWhatTheUserIsShown:
         prompt = next(e for e in events if e.type is AuthEventType.PROMPT)
         assert prompt.url == "https://auth.example.com/x?session=ABCD-1234&k=2"
         assert prompt.code is None
-
-
-@pytest.mark.skipif(not _POSIX, reason="the stand-in CLI is a shell script")
-class TestWhenTheLoginWorked:
-    """A stand-in ``claude`` that keeps its login outside its home, as the real one does in the macOS Keychain."""
-
-    @staticmethod
-    def _session(fake: FakeClaude) -> CliLoginSession:
-        profile = profile_for("claude")
-        assert profile is not None
-        return CliLoginSession(fake.executable, profile, base_env=fake.env())
-
-    @pytest.mark.asyncio
-    async def test_a_login_kept_outside_the_home_is_a_success(self, tmp_path: Path) -> None:
-        fake = install_fake_claude(tmp_path)
-
-        events = await drive_login(self._session(fake), "good-code")
-
-        assert events[-1].type is AuthEventType.SUCCESS
-        assert fake.keychain.is_file()
-        assert list(fake.config_dir.iterdir()) == []  # a credential-file check would have called this a failure
-
-    @pytest.mark.asyncio
-    async def test_a_rejected_code_ends_with_the_cli_own_words(self, tmp_path: Path) -> None:
-        fake = install_fake_claude(tmp_path)
-
-        events = await drive_login(self._session(fake), "wrong-code")
-
-        assert events[-1] == AuthEvent(AuthEventType.ERROR, "Couldn't log in: That code wasn't accepted.")
-        assert not fake.keychain.exists()
-
-    @pytest.mark.asyncio
-    async def test_a_failed_attempt_is_no_success_because_a_login_already_exists(self, tmp_path: Path) -> None:
-        fake = install_fake_claude(tmp_path)
-        fake.keychain.write_text("logged-in")
-
-        events = await drive_login(self._session(fake), "wrong-code")
-
-        assert events[-1].type is AuthEventType.ERROR
-        assert AuthEventType.SUCCESS not in [e.type for e in events]
-
-    @pytest.mark.asyncio
-    async def test_a_clean_exit_that_left_no_login_is_an_error(self, tmp_path: Path) -> None:
-        fake = install_fake_claude(tmp_path)
-
-        events = await drive_login(self._session(fake), "ghost-code")
-
-        assert events[-1].type is AuthEventType.ERROR
-        assert "reports no login" in events[-1].message
-
-    @pytest.mark.asyncio
-    async def test_the_cli_is_asked_without_the_operators_provider_keys(self, tmp_path: Path) -> None:
-        # A key in the operator's environment makes the CLI report a login of its own; the question is asked the way a
-        # subscription turn would see it, so only the subscription login counts.
-        fake = install_fake_claude(tmp_path)
-        profile = profile_for("claude")
-        assert profile is not None
-        session = CliLoginSession(fake.executable, profile, base_env=fake.env(ANTHROPIC_API_KEY="sk-operator"))
-
-        events = await drive_login(session, "good-code")
-
-        assert events[-1].type is AuthEventType.SUCCESS
-        assert fake.status_env.read_text() == ""
 
 
 class TestRemoteLogin:

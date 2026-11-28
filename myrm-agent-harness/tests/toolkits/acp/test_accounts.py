@@ -17,6 +17,7 @@ from myrm_agent_harness.toolkits.acp.auth import (
     known_backends,
     profile_for,
 )
+from tests.toolkits.acp._logins import plant_login
 
 _POSIX = sys.platform != "win32"
 _BACKENDS = list(known_backends())
@@ -221,7 +222,7 @@ class TestTheCliIsRelocatedIntoTheAccount:
         personal = store.create(backend, "personal")
         default_home = {"HOME": str(tmp_path / "home")}
 
-        CredentialStore(work.env(default_home)).import_credential(backend, '{"token": "abc"}')
+        plant_login(work.env(default_home), backend)
 
         assert CredentialStore(work.env(default_home)).is_authenticated(backend)
         assert not CredentialStore(personal.env(default_home)).is_authenticated(backend)
@@ -250,7 +251,7 @@ class TestApiKeyHome:
 
     def test_holds_no_login_the_agents_home_or_an_account_has(self, store: AccountStore, tmp_path: Path) -> None:
         default_home = {"HOME": str(tmp_path / "home")}
-        CredentialStore(store.create("claude", "work").env(default_home)).import_credential("claude", '{"t": 1}')
+        plant_login(store.create("claude", "work").env(default_home), "claude")
 
         env = {**default_home, **profile_for("claude").isolated_env(store.api_key_home("claude"))}  # type: ignore[union-attr]
 

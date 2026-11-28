@@ -141,7 +141,7 @@ describe('streamExternalAgentLogin', () => {
     );
     const seen: ExternalAgentAuthEvent[] = [];
 
-    await streamExternalAgentLogin({ command: 'codex', backend: 'codex', sessionId: 's1' }, (event) => {
+    await streamExternalAgentLogin({ command: 'codex', backend: 'codex' }, (event) => {
       seen.push(event);
     });
 
@@ -149,20 +149,19 @@ describe('streamExternalAgentLogin', () => {
     const [url, init, timeout] = mocks.fetchWithTimeout.mock.calls[0];
     expect(url).toBe('/external-agents/auth/login');
     expect(timeout).toBe(0);
-    expect(JSON.parse(init.body)).toEqual({ command: 'codex', backend: 'codex', sessionId: 's1' });
+    expect(JSON.parse(init.body)).toEqual({ command: 'codex', backend: 'codex' });
   });
 
   it('names the account to log in to when one is given', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(sseResponse([frame({ type: 'success', message: 'done' })]));
 
-    await streamExternalAgentLogin({ command: 'claude', backend: 'claude', sessionId: 's1', account: 'work' }, () => {
+    await streamExternalAgentLogin({ command: 'claude', backend: 'claude', account: 'work' }, () => {
       /* events are not under test */
     });
 
     expect(JSON.parse(mocks.fetchWithTimeout.mock.calls[0][1].body)).toEqual({
       command: 'claude',
       backend: 'claude',
-      sessionId: 's1',
       account: 'work',
     });
   });
@@ -170,14 +169,13 @@ describe('streamExternalAgentLogin', () => {
   it('says so when the browser that signs in is on another machine than the CLI', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(sseResponse([frame({ type: 'success', message: 'done' })]));
 
-    await streamExternalAgentLogin({ command: 'codex', backend: 'codex', sessionId: 's1', remote: true }, () => {
+    await streamExternalAgentLogin({ command: 'codex', backend: 'codex', remote: true }, () => {
       /* events are not under test */
     });
 
     expect(JSON.parse(mocks.fetchWithTimeout.mock.calls[0][1].body)).toEqual({
       command: 'codex',
       backend: 'codex',
-      sessionId: 's1',
       remote: true,
     });
   });
@@ -185,6 +183,6 @@ describe('streamExternalAgentLogin', () => {
   it('throws when the server refuses the login stream', async () => {
     mocks.fetchWithTimeout.mockResolvedValue(new Response('no', { status: 400 }));
 
-    await expect(streamExternalAgentLogin({ command: 'x', sessionId: 's1' }, () => undefined)).rejects.toThrow('400');
+    await expect(streamExternalAgentLogin({ command: 'x' }, () => undefined)).rejects.toThrow('400');
   });
 });

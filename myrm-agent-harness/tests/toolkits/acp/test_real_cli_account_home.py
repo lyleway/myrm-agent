@@ -21,7 +21,6 @@ import pytest
 from myrm_agent_harness.toolkits.acp.auth import (
     Account,
     AccountStore,
-    CredentialStore,
     LoginReport,
     known_backends,
     probe_login,
@@ -38,6 +37,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 from tests.toolkits.acp._fake_anthropic import FakeAnthropicApi
 from tests.toolkits.acp._fake_model_apis import FakeResponsesApi
+from tests.toolkits.acp._logins import plant_login
 from tests.toolkits.acp.cli_contract import CLAUDE_OAUTH, CODEX_API_KEY, cli_binary
 from tests.toolkits.acp.runtime.acp._fakes import MemorySessionStore
 from tests.toolkits.acp.runtime.acp._real_agents import SCRIPTED_AGENTS, scripted_pool
@@ -200,7 +200,7 @@ async def _login_report(account: Account, process_home: Path) -> LoginReport | N
 
 def _store_login(account: Account) -> None:
     content = CLAUDE_OAUTH if account.backend == "claude" else CODEX_API_KEY
-    CredentialStore(account.env({"HOME": str(account.home)})).import_credential(account.backend, json.dumps(content))
+    plant_login(account.env({"HOME": str(account.home)}), account.backend, json.dumps(content))
 
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])

@@ -1,21 +1,18 @@
-"""A stand-in for the ``claude`` executable that logs in the way the real one does on macOS: outside its home.
+"""A stand-in for the ``claude`` executable that keeps its login the way the real one does on macOS: outside its home.
 
-The real CLI prints a URL, asks for the code the page shows, and keeps the login in the system Keychain, so the
-credential file a file-only check looks for never exists. The stand-in keeps its login in a ``keychain`` file next to
-the configuration directory it was relocated into (``CLAUDE_CONFIG_DIR``, a variable every launch of the CLI keeps), and
-answers the three commands the harness drives: ``auth login``, ``auth status`` and ``auth logout``.
-
-The code it accepts is ``good-code``; ``ghost-code`` makes it report a success without keeping a login; any other is
-refused, and it asks for the code again as it exits, as the real one does. A ``logout_fails`` file next to the configuration directory makes its logout fail and leave the login standing;
-what its logout and its status saw of the operator's provider key is written to ``logout_env`` and
-``status_env``.
+The real CLI keeps the login in the system Keychain, so the credential file a file-only check looks for never exists.
+The stand-in keeps its login in a ``keychain`` file next to the configuration directory it was relocated into
+(``CLAUDE_CONFIG_DIR``, a variable every launch of the CLI keeps), and answers the two commands the harness drives:
+``auth status`` and ``auth logout``. A ``logout_fails`` file next to the configuration directory makes its logout fail
+and leave the login standing; what its logout and its status saw of the operator's provider key is written to
+``logout_env`` and ``status_env``.
 
 [OUTPUT]
 - FakeClaude: The installed stand-in with the paths its tests look at.
 - install_fake_claude: Install the stand-in under a directory.
 
 [POS]
-Test support of the login session and logout tests.
+Test support of the logout tests.
 """
 
 from __future__ import annotations
@@ -37,25 +34,6 @@ _IMPLEMENTATION = textwrap.dedent(
     config = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"])
     keychain = config.parent / "keychain"
     args = sys.argv[1:]
-
-    if args[:2] == ["auth", "login"]:
-        print("Opening browser to sign in\\u2026")
-        print("If the browser didn't open, visit:")
-        print("https://claude.ai/oauth/authorize?z-FAKE")
-        sys.stdout.write("Paste code here if prompted > ")
-        sys.stdout.flush()
-        code = sys.stdin.readline().strip()
-        if code == "good-code":
-            keychain.write_text("logged-in")
-            print("\\nLogin successful.")
-            sys.exit(0)
-        if code == "ghost-code":
-            print("\\nLogin successful.")
-            sys.exit(0)
-        print("\\nCouldn't log in: That code wasn't accepted.")
-        sys.stdout.write("Paste code here if prompted > ")
-        sys.stdout.flush()
-        sys.exit(1)
 
     if args[:2] == ["auth", "status"]:
         (config.parent / "status_env").write_text(os.environ.get("ANTHROPIC_API_KEY", ""))
@@ -105,7 +83,7 @@ class FakeClaude:
         return self.config_dir.parent / "logout_fails"
 
     def env(self, **extra: str) -> dict[str, str]:
-        """The environment a login or logout of this stand-in runs in."""
+        """The environment a status check or logout of this stand-in runs in."""
         return {**os.environ, "CLAUDE_CONFIG_DIR": str(self.config_dir), **extra}
 
 

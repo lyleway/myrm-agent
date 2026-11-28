@@ -79,8 +79,6 @@ const hostedStatus = {
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'browser_oauth',
-  scriptableLogin: true,
-  needsCodeInput: false,
   subscriptionLoginAllowed: false,
   availableInDeployment: true,
 };

@@ -14,6 +14,7 @@ import {
 
 import ExternalAgentInstallDialog from './ExternalAgentInstallDialog';
 import ExternalAgentLoginDialog from './ExternalAgentLoginDialog';
+import ExternalAgentTerminalLoginDialog from './ExternalAgentTerminalLoginDialog';
 
 interface Props {
   command: string;
@@ -27,6 +28,7 @@ interface Props {
 
 /**
  * Per-agent controls: install while the CLI is missing, otherwise the login-state badge plus login / logout.
+ * The login is the one its strategy names: the app drives it, or the user runs the CLI's own login in a terminal.
  * An agent that runs as a named account shows that account's login, and logs in and out of it. A hosted deployment
  * offers no login (agents run on an API key); it only shows a login left from before, so that it can be removed.
  * An agent the deployment does not run has no install or login, only a note saying so and, for a login left from
@@ -128,16 +130,26 @@ const ExternalAgentAuthControls = memo(({ command, status, account, accountState
         backend={status.backend}
         onInstalled={onChanged}
       />
-      {status.installed && status.subscriptionLoginAllowed && (
-        <ExternalAgentLoginDialog
-          open={loginOpen}
-          onOpenChange={setLoginOpen}
-          command={command}
-          status={status}
-          account={account}
-          onChanged={onChanged}
-        />
-      )}
+      {status.installed &&
+        status.subscriptionLoginAllowed &&
+        (status.loginStrategy === 'terminal' ? (
+          <ExternalAgentTerminalLoginDialog
+            open={loginOpen}
+            onOpenChange={setLoginOpen}
+            status={status}
+            account={account}
+            onChanged={onChanged}
+          />
+        ) : (
+          <ExternalAgentLoginDialog
+            open={loginOpen}
+            onOpenChange={setLoginOpen}
+            command={command}
+            status={status}
+            account={account}
+            onChanged={onChanged}
+          />
+        ))}
     </>
   );
 });

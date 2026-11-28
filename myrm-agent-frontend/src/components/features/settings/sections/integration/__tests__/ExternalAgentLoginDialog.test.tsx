@@ -10,8 +10,6 @@ const stableT = (key: string, values?: Record<string, string>) =>
 
 const mocks = vi.hoisted(() => ({
   stream: vi.fn(),
-  importCredential: vi.fn(),
-  feed: vi.fn(),
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -26,8 +24,6 @@ vi.mock('sonner', () => ({ toast: mocks.toast }));
 vi.mock('@/lib/deploy-mode', () => deploy);
 vi.mock('@/services/external-agents', () => ({
   streamExternalAgentLogin: mocks.stream,
-  importExternalAgentCredential: mocks.importCredential,
-  feedExternalAgentLogin: mocks.feed,
 }));
 
 import ExternalAgentLoginDialog from '../ExternalAgentLoginDialog';
@@ -41,8 +37,6 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'browser_oauth',
-  scriptableLogin: true,
-  needsCodeInput: false,
   subscriptionLoginAllowed: true,
   availableInDeployment: true,
   ...overrides,
@@ -67,8 +61,6 @@ describe('ExternalAgentLoginDialog', () => {
   beforeEach(() => {
     mocks.stream.mockReset();
     mocks.stream.mockResolvedValue(undefined);
-    mocks.importCredential.mockReset();
-    mocks.feed.mockReset();
     mocks.toast.success.mockClear();
     mocks.toast.error.mockClear();
     deploy.isTauriRuntime.mockReturnValue(false);
@@ -83,7 +75,6 @@ describe('ExternalAgentLoginDialog', () => {
     expect(mocks.stream.mock.calls[0][0]).toEqual({
       command: 'codex',
       backend: 'codex',
-      sessionId: expect.any(String),
       account: undefined,
       remote: false,
     });
@@ -142,7 +133,7 @@ describe('ExternalAgentLoginDialog', () => {
   });
 
   it("shows the CLI's own words when the login fails, with a way to try again", async () => {
-    const reason = "Couldn't log in: That code wasn't accepted.";
+    const reason = "Couldn't log in: the sign-in was not completed.";
     mocks.stream.mockImplementation(async (_params, onEvent: (event: ExternalAgentAuthEvent) => void) => {
       onEvent({ type: 'error', message: reason });
     });
@@ -156,41 +147,6 @@ describe('ExternalAgentLoginDialog', () => {
     await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledTimes(2));
   });
 
-  describe('for a login that asks for a pasted code', () => {
-    const pasteStatus = status({ backend: 'claude', loginStrategy: 'paste_code', needsCodeInput: true });
-
-    it('offers the code box only while the login runs', async () => {
-      let finish: () => void = () => undefined;
-      mocks.stream.mockImplementation(
-        () =>
-          new Promise<void>((resolve) => {
-            finish = resolve;
-          }),
-      );
-      renderDialog({ command: 'claude', status: pasteStatus });
-
-      expect(await screen.findByPlaceholderText('loginCodePlaceholder')).toBeInTheDocument();
-
-      finish();
-
-      await vi.waitFor(() => expect(screen.queryByPlaceholderText('loginCodePlaceholder')).not.toBeInTheDocument());
-    });
-
-    it('hands the pasted code to the login that is running, and leaves the box ready for another try', async () => {
-      mocks.stream.mockImplementation(() => new Promise<void>(() => undefined));
-      mocks.feed.mockResolvedValue({ ok: true });
-      renderDialog({ command: 'claude', status: pasteStatus });
-
-      const box = await screen.findByPlaceholderText('loginCodePlaceholder');
-      await userEvent.type(box, ' abc#def ');
-      await userEvent.click(screen.getByRole('button', { name: 'loginCodeSubmit' }));
-
-      const { sessionId } = mocks.stream.mock.calls[0][0];
-      expect(mocks.feed).toHaveBeenCalledWith(sessionId, 'abc#def');
-      await vi.waitFor(() => expect(box).toHaveValue(''));
-    });
-  });
-
   it('reports a finished login so the badges are read again', async () => {
     const success: ExternalAgentAuthEvent = { type: 'success', message: 'done' };
     mocks.stream.mockImplementation(async (_params, onEvent: (event: ExternalAgentAuthEvent) => void) => {
@@ -202,39 +158,11 @@ describe('ExternalAgentLoginDialog', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('loginSuccess');
   });
 
-  it('imports a pasted credential into the named account and closes', async () => {
-    mocks.importCredential.mockResolvedValue({ backend: 'codex', authenticated: true, authStatus: 'authenticated' });
-    const { onChanged, onOpenChange } = renderDialog({ account: 'work', status: status({ scriptableLogin: false }) });
+  it('has no box to paste a code or a credential into', async () => {
+    mocks.stream.mockImplementation(() => new Promise<void>(() => undefined));
+    renderDialog();
 
-    await userEvent.type(screen.getByPlaceholderText('importPlaceholder'), '{{"token":"t"}');
-    await userEvent.click(screen.getByRole('button', { name: 'import' }));
-
-    expect(mocks.importCredential).toHaveBeenCalledWith('codex', '{"token":"t"}', undefined, 'work');
-    expect(mocks.stream).not.toHaveBeenCalled();
-    expect(mocks.toast.success).toHaveBeenCalledWith('importSuccess');
-    expect(onChanged).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('imports into the login of this machine when no account is named', async () => {
-    mocks.importCredential.mockResolvedValue({ backend: 'codex', authenticated: true, authStatus: 'authenticated' });
-    renderDialog({ status: status({ scriptableLogin: false }) });
-
-    await userEvent.type(screen.getByPlaceholderText('importPlaceholder'), 'blob');
-    await userEvent.click(screen.getByRole('button', { name: 'import' }));
-
-    expect(mocks.importCredential).toHaveBeenCalledWith('codex', 'blob', undefined, undefined);
-  });
-
-  it('keeps the dialog open and says so when the import fails', async () => {
-    mocks.importCredential.mockRejectedValue(new Error('boom'));
-    const { onChanged, onOpenChange } = renderDialog({ status: status({ scriptableLogin: false }) });
-
-    await userEvent.type(screen.getByPlaceholderText('importPlaceholder'), 'blob');
-    await userEvent.click(screen.getByRole('button', { name: 'import' }));
-
-    await vi.waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('loginFailed'));
-    expect(onChanged).not.toHaveBeenCalled();
-    expect(onOpenChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 });

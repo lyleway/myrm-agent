@@ -7,7 +7,7 @@ vi.mock('@/lib/api', () => ({ apiRequest: mocks.apiRequest, fetchWithTimeout: vi
 import {
   createExternalAgentAccount,
   deleteExternalAgentAccount,
-  importExternalAgentCredential,
+  getExternalAgentTerminalLogin,
   listExternalAgentAccounts,
   logoutExternalAgent,
 } from '@/services/external-agents';
@@ -58,11 +58,24 @@ describe('external agent accounts', () => {
     expect(bodyOf(1)).toEqual({ backend: 'claude' });
   });
 
-  it('imports a credential into the named account, or into the login of the machine when none is named', async () => {
-    await importExternalAgentCredential('claude', 'blob', 'credentials.json', 'work');
-    await importExternalAgentCredential('claude', 'blob');
+  it('asks for the terminal login of the named account, or of the machine when none is named, and answers what the server says', async () => {
+    const answer = {
+      backend: 'claude',
+      account: 'work',
+      authenticated: false,
+      authStatus: 'not_authenticated',
+      defaultShell: 'posix',
+      commands: { posix: 'CLAUDE_CONFIG_DIR=/a claude auth login --claudeai' },
+    };
+    mocks.apiRequest.mockResolvedValueOnce(answer);
 
-    expect(bodyOf(0)).toEqual({ backend: 'claude', content: 'blob', filename: 'credentials.json', account: 'work' });
-    expect(bodyOf(1)).toEqual({ backend: 'claude', content: 'blob' });
+    expect(await getExternalAgentTerminalLogin('claude', 'work')).toEqual(answer);
+    await getExternalAgentTerminalLogin('claude');
+
+    const [url, init] = mocks.apiRequest.mock.calls[0];
+    expect(url).toBe('/external-agents/auth/terminal-login');
+    expect(init).toMatchObject({ method: 'POST', silent: true });
+    expect(bodyOf(0)).toEqual({ backend: 'claude', account: 'work' });
+    expect(bodyOf(1)).toEqual({ backend: 'claude' });
   });
 });

@@ -11,6 +11,7 @@ would be left behind, unreachable, by deleting the directory.
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
 - app.api.external_agents._deploy_capability::require_subscription_login_capability (POS: subscription login gate)
 - app.services.external_agents.accounts::account_store (POS: the store of named accounts)
+- app.services.external_agents.login_state::login_state (POS: what the CLI says about the login in one home)
 - app.services.external_agents.logout::log_out_of_home (POS: logout through the CLI, shared with the logout endpoint)
 
 [OUTPUT]
@@ -23,18 +24,14 @@ would be left behind, unreachable, by deleting the directory.
 from __future__ import annotations
 
 import asyncio
-import os
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.external_agents._deploy_capability import require_subscription_login_capability
 from app.services.external_agents.accounts import account_store
+from app.services.external_agents.login_state import login_state
 from app.services.external_agents.logout import log_out_of_home
-
-if TYPE_CHECKING:
-    from myrm_agent_harness.toolkits.acp.auth import Account, CredentialState
 
 router = APIRouter()
 
@@ -44,14 +41,6 @@ class ExternalAgentAccountRequest(BaseModel):
     name: str = Field(..., min_length=1)
 
 
-async def _login_state(account: Account, executable: str | None) -> CredentialState:
-    """What the CLI says about the login in this account's home, or what its credential file says."""
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore, cli_base_env, resolve_login_state
-
-    env = account.env(cli_base_env(executable, os.environ))
-    return await resolve_login_state(CredentialStore(env), account.backend, executable=executable, env=env)
-
-
 @router.get("")
 async def list_external_agent_accounts() -> dict[str, list[dict[str, object]]]:
     """Every account with whether it is logged in, ordered by agent then name."""
@@ -59,7 +48,7 @@ async def list_external_agent_accounts() -> dict[str, list[dict[str, object]]]:
 
     accounts = account_store().list()
     detected = {found.name: found.path for found in await BackendDetector().detect(include_version=False)}
-    states = await asyncio.gather(*(_login_state(account, detected.get(account.backend)) for account in accounts))
+    states = await asyncio.gather(*(login_state(account.backend, detected.get(account.backend), account) for account in accounts))
     return {
         "accounts": [
             {

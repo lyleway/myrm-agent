@@ -2,14 +2,14 @@
 
 Captures, per backend, where its subscription login state lives, how to launch an
 interactive login, and which provider keys map to api-key mode. Business and
-control-plane layers read these to drive GUI login, status badges, and credential
-persistence without hard-coding CLI specifics anywhere upstream.
+control-plane layers read these to drive login, status badges, and logout without
+hard-coding CLI specifics anywhere upstream.
 
 [INPUT]
 no — leaf module, standard library only
 
 [OUTPUT]
-- LoginStrategy: How a CLI performs interactive login.
+- LoginStrategy: Who runs a CLI's interactive login: the host, which relays what the CLI prints, or the user in a terminal.
 - Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
 - AuthProfile: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
 - profile_for: Resolve an AuthProfile from a backend name or command (a name that merely contains a backend's counts).
@@ -39,11 +39,12 @@ Transport = Literal["cli", "acp", "app_server"]
 
 
 class LoginStrategy(StrEnum):
-    """How a CLI backend performs an interactive subscription login."""
+    """Who runs the interactive subscription login of a CLI backend."""
 
-    BROWSER_OAUTH = "browser_oauth"  # CLI opens a browser and runs a local loopback callback
-    PASTE_CODE = "paste_code"  # CLI prints a URL; the page it leads to shows a code the user pastes back via stdin
-    MANUAL_IMPORT = "manual_import"  # no scriptable login on this host; only credential import works
+    # The host runs the CLI's login and relays the link or the device code it prints.
+    BROWSER_OAUTH = "browser_oauth"
+    # The user runs the CLI's own login in a terminal; the host shows the command and then asks the CLI who is logged in.
+    TERMINAL = "terminal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +61,9 @@ class AuthProfile:
     home_dir: str  # default home subdir under $HOME (e.g. ".codex")
     credential_files: tuple[str, ...]  # candidate credential filenames within the home dir
     login_strategy: LoginStrategy
-    login_args: tuple[str, ...]  # args appended to the command to start login; empty: not scriptable
+    login_args: tuple[
+        str, ...
+    ]  # args appended to the command to start login; empty: the CLI asks to sign in when it starts
     logout_args: tuple[str, ...] | None  # args that make the CLI remove its own login, wherever it keeps it
     api_key_env: tuple[str, ...]  # provider key env names used in api_key mode
     # The transport the agent's own contract calls for, and the args that start it that way (never permission flags,
@@ -76,9 +79,6 @@ class AuthProfile:
     # The login for a browser on another machine than the CLI: a loopback callback cannot reach it from there, so the
     # CLI is asked for the flow that works from anywhere. Empty: ``login_args`` already works from anywhere.
     remote_login_args: tuple[str, ...] = ()
-    # The text of the CLI's own prompt for the code the user pastes back through stdin; empty: the login asks for none.
-    # The CLI prints it again after a rejected code, so it is never the reason a login failed.
-    code_prompt: str = ""
     # What a home of its own needs beyond ``home_env``. ``home_env_is_base``: the variable stands in for ``$HOME``, so
     # the CLI's state lives in ``<value>/<home_dir>`` rather than in the value itself. ``isolation_env``: variables that
     # keep the login inside the home; a CLI that keeps it in the operating system's keychain unless told otherwise
@@ -113,30 +113,18 @@ class AuthProfile:
         """The args that start the login, for a browser on another machine than the CLI when ``remote``."""
         return self.remote_login_args if remote and self.remote_login_args else self.login_args
 
-    @property
-    def needs_code_input(self) -> bool:
-        """Whether the login asks the user to paste a code back through stdin."""
-        return bool(self.code_prompt)
-
-    @property
-    def scriptable_login(self) -> bool:
-        """Whether an interactive login can be driven by spawning the CLI."""
-        return bool(self.login_args) and self.login_strategy is not LoginStrategy.MANUAL_IMPORT
-
 
 # Per-backend profiles, in the order agents are detected and listed. Credential locations and home-override vars
-# below reflect each CLI's documented behaviour; the manual-import fallback (credential_store) guarantees a
-# working path even where scripted login is unavailable.
+# below reflect each CLI's documented behaviour.
 _PROFILES: dict[str, AuthProfile] = {
     "claude": AuthProfile(
         backend="claude",
         home_env="CLAUDE_CONFIG_DIR",
         home_dir=".claude",
         credential_files=(".credentials.json",),
-        login_strategy=LoginStrategy.PASTE_CODE,
+        login_strategy=LoginStrategy.TERMINAL,
         login_args=("auth", "login", "--claudeai"),
         logout_args=("auth", "logout"),
-        code_prompt="Paste code here",
         api_key_env=("ANTHROPIC_API_KEY",),
         login_probe=("auth", "status"),
         launch_args=("-p", "--output-format", "stream-json", "--verbose"),
@@ -163,7 +151,7 @@ _PROFILES: dict[str, AuthProfile] = {
         home_dir=".gemini",
         # The legacy file, and the encrypted file the CLI moves it into when it is told to keep its login in a file.
         credential_files=("oauth_creds.json", "gemini-credentials.json"),
-        login_strategy=LoginStrategy.BROWSER_OAUTH,
+        login_strategy=LoginStrategy.TERMINAL,
         login_args=(),
         logout_args=None,
         api_key_env=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
@@ -178,7 +166,7 @@ _PROFILES: dict[str, AuthProfile] = {
         home_env="QWEN_HOME",
         home_dir=".qwen",
         credential_files=("oauth_creds.json",),
-        login_strategy=LoginStrategy.BROWSER_OAUTH,
+        login_strategy=LoginStrategy.TERMINAL,
         login_args=(),
         logout_args=None,
         api_key_env=("DASHSCOPE_API_KEY", "QWEN_API_KEY"),

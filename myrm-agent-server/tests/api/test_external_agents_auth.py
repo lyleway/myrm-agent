@@ -2,13 +2,16 @@
 
 [POS]
 Tests for app/api/external_agents/: login-status reporting, SSE login event
-relay, credential import/logout round-trip, and feed-to-missing-session guard.
+relay, the login a user runs in a terminal, the routes the host does not have
+(it takes no credential), and logout.
 """
 
 from __future__ import annotations
 
+import shlex
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -74,11 +77,12 @@ class TestAuthStatus:
         assert codex["authenticated"] is False
         assert "readyForDelegation" not in codex
         assert codex["loginStrategy"] == "browser_oauth"
-        assert codex["scriptableLogin"] is True
-        assert codex["needsCodeInput"] is False
-        claude = backends["claude"]
-        assert claude["loginStrategy"] == "paste_code"
-        assert claude["needsCodeInput"] is True
+        assert {name: row["loginStrategy"] for name, row in backends.items()} == {
+            "codex": "browser_oauth",
+            "claude": "terminal",
+            "gemini": "terminal",
+            "qwen": "terminal",
+        }
 
     def test_status_names_the_transport_each_agent_runs_over(self, client):
         detector = MagicMock()
@@ -180,29 +184,6 @@ class TestAuthStatus:
         detector.detect.assert_awaited_once_with(include_version=True, refresh=True)
 
 
-class TestAuthFeedMissingSession:
-    """POST /external-agents/auth/login/{session_id}/feed."""
-
-    def test_feed_forwards_to_active_session(self, client):
-        from myrm_agent_harness.toolkits.acp.auth import CliLoginSession
-
-        from app.api.external_agents.router import _login_registry
-
-        mock_session = MagicMock(spec=CliLoginSession)
-        mock_session.feed = AsyncMock()
-        _login_registry.add("sess-feed", mock_session)
-        try:
-            resp = client.post(
-                "/api/v1/external-agents/auth/login/sess-feed/feed",
-                json={"text": "auth-code"},
-            )
-            assert resp.status_code == 200
-            assert resp.json() == {"ok": True}
-            mock_session.feed.assert_awaited_once_with("auth-code")
-        finally:
-            _login_registry.remove("sess-feed")
-
-
 class TestAuthLogoutErrors:
     """POST /external-agents/auth/logout error paths."""
 
@@ -239,7 +220,7 @@ class TestAuthLogin:
         with patch("myrm_agent_harness.toolkits.acp.auth.CliLoginSession", _FakeSession):
             resp = client.post(
                 "/api/v1/external-agents/auth/login",
-                json={"command": "codex", "sessionId": "s1"},
+                json={"command": "codex"},
             )
         assert resp.status_code == 200
         body = resp.text
@@ -250,53 +231,133 @@ class TestAuthLogin:
     def test_login_unknown_backend_returns_400(self, client):
         resp = client.post(
             "/api/v1/external-agents/auth/login",
-            json={"command": "totally-unknown-cli", "sessionId": "s2"},
+            json={"command": "totally-unknown-cli"},
         )
         assert resp.status_code == 400
 
+    @pytest.mark.parametrize("command", ["claude", "gemini", "qwen"])
+    def test_a_login_the_user_runs_in_a_terminal_is_not_started_here(self, client, command):
+        with patch("myrm_agent_harness.toolkits.acp.auth.CliLoginSession") as session:
+            resp = client.post("/api/v1/external-agents/auth/login", json={"command": command})
 
-class TestAuthImportLogout:
-    """POST /external-agents/auth/import and /logout."""
+        assert resp.status_code == 400
+        assert "terminal" in resp.json()["detail"]
+        session.assert_not_called()
 
-    def test_import_persists_then_logout_clears(self, client, tmp_path):
-        cred = tmp_path / ".codex" / "auth.json"
-        resp = client.post(
-            "/api/v1/external-agents/auth/import",
-            json={"backend": "codex", "content": '{"token": "abc"}'},
-        )
+
+def _detecting(*found: MagicMock) -> MagicMock:
+    detector = MagicMock()
+    detector.detect = AsyncMock(return_value=list(found))
+    return detector
+
+
+def _stand_in_claude(directory: Path) -> tuple[MagicMock, Path]:
+    """A detected ``claude`` that reports a login once ``logged-in`` exists next to it, as the real one does after the user logs in."""
+    cli = directory / "claude"
+    marker = directory / "logged-in"
+    cli.write_text(
+        f'#!/bin/sh\nif [ -f \'{marker}\' ]; then echo \'{{"loggedIn": true, "authMethod": "claude.ai"}}\';'
+        ' else echo \'{"loggedIn": false, "authMethod": "none"}\'; fi\n'
+    )
+    cli.chmod(0o755)
+    found = MagicMock()
+    found.name = "claude"
+    found.path = str(cli)
+    found.version = "2.0.0"
+    return found, marker
+
+
+class TestTerminalLogin:
+    """POST /external-agents/auth/terminal-login."""
+
+    def test_it_gives_the_command_for_each_shell_and_says_who_is_logged_in(self, client, tmp_path):
+        found, _marker = _stand_in_claude(tmp_path)
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=_detecting(found),
+        ):
+            resp = client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "claude"})
+
         assert resp.status_code == 200
-        assert resp.json()["authenticated"] is True
-        assert cred.is_file()
+        body = resp.json()
+        assert body["backend"] == "claude"
+        assert body["account"] is None
+        assert body["authenticated"] is False
+        assert body["authStatus"] == "not_authenticated"
+        assert body["commands"]["posix"] == f"{shlex.quote(found.path)} auth login --claudeai"
+        assert set(body["commands"]) == {"posix", "powershell", "cmd"}
+        assert body["defaultShell"] in body["commands"]
+
+    def test_asking_again_after_the_login_is_how_the_user_finds_that_it_worked(self, client, tmp_path):
+        found, marker = _stand_in_claude(tmp_path)
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=_detecting(found),
+        ):
+            before = client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "claude"}).json()
+            marker.touch()
+            after = client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "claude"}).json()
+
+        assert (before["authenticated"], after["authenticated"]) == (False, True)
+        assert after["authStatus"] == "authenticated"
+
+    def test_it_takes_and_stores_nothing(self, client, tmp_path):
+        found, _marker = _stand_in_claude(tmp_path)
+        before = sorted(tmp_path.rglob("*"))
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=_detecting(found),
+        ):
+            client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "claude"})
+
+        assert sorted(tmp_path.rglob("*")) == before
+
+    def test_an_agent_that_is_not_installed_has_no_login_to_run(self, client):
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector",
+            return_value=_detecting(),
+        ):
+            resp = client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "claude"})
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "claude is not installed"
+
+    def test_an_unknown_agent_is_refused(self, client):
+        resp = client.post("/api/v1/external-agents/auth/terminal-login", json={"backend": "no-such-backend"})
+
+        assert resp.status_code == 400
+
+
+class TestAuthLogout:
+    """POST /external-agents/auth/logout."""
+
+    def test_logout_removes_the_login_the_cli_left(self, client, tmp_path):
+        cred = tmp_path / ".codex" / "auth.json"
+        cred.parent.mkdir()
+        cred.write_text('{"token": "abc"}', encoding="utf-8")
 
         resp = client.post(
             "/api/v1/external-agents/auth/logout",
             json={"backend": "codex"},
         )
+
         assert resp.status_code == 200
         assert resp.json()["authenticated"] is False
         assert not cred.exists()
 
-    def test_import_invalid_json_returns_400(self, client):
-        resp = client.post(
-            "/api/v1/external-agents/auth/import",
-            json={"backend": "codex", "content": "not-json"},
-        )
-        assert resp.status_code == 400
 
-    def test_import_unknown_backend_returns_400(self, client):
-        resp = client.post(
-            "/api/v1/external-agents/auth/import",
-            json={"backend": "no-such-backend", "content": "x"},
-        )
-        assert resp.status_code == 400
+class TestTheHostTakesNoCredential:
+    """A login is made by the CLI; no route accepts a credential to keep or a code to relay."""
 
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            ("/auth/import", {"backend": "codex", "content": '{"token": "abc"}'}),
+            ("/auth/login/s1/feed", {"text": "a-code"}),
+        ],
+    )
+    def test_the_route_does_not_exist_and_nothing_is_written(self, client, tmp_path, path, body):
+        resp = client.post(f"/api/v1/external-agents{path}", json=body)
 
-class TestAuthFeed:
-    """POST /external-agents/auth/login/{session_id}/feed."""
-
-    def test_feed_missing_session_returns_404(self, client):
-        resp = client.post(
-            "/api/v1/external-agents/auth/login/nonexistent/feed",
-            json={"text": "code"},
-        )
-        assert resp.status_code == 404
+        assert resp.status_code in {404, 405}
+        assert list(tmp_path.iterdir()) == []

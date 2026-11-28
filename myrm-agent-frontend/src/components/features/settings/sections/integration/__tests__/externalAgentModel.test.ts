@@ -229,8 +229,6 @@ describe('the transport of a known agent', () => {
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed: true,
     availableInDeployment: true,
   });

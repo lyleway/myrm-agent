@@ -1,13 +1,15 @@
 """Named accounts of external agents: made, listed with their login state, logged in to, removed.
 
 [POS]
-Tests for app/api/external_agents/accounts_router.py and the ``account`` field of login, import and logout: an account
+Tests for app/api/external_agents/accounts_router.py and the ``account`` field of login, terminal login and logout: an account
 is a home of its own, so what is done to one never reaches the CLI's own home or another account, and a deployment that
 keeps no subscription logins refuses to make one while still letting a leftover be seen and removed.
 """
 
 from __future__ import annotations
 
+import shlex
+import subprocess
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -216,27 +218,19 @@ class TestLoginStateOfAnAccount:
             assert _listed(client)[0]["authenticated"] is True
 
 
-class TestImportAndLogoutActOnTheAccount:
-    def test_an_import_lands_in_the_account_and_not_in_the_default_home(self, client, accounts_root, default_home) -> None:
-        _make(client)
+def _plant_login(home: Path, content: str) -> None:
+    """The credential file Codex keeps its login in, in ``home``: what the CLI leaves when the user has logged in."""
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "auth.json").write_text(content, encoding="utf-8")
 
-        resp = client.post(
-            f"{_API}/auth/import",
-            json={"backend": "codex", "content": '{"token": "x"}', "account": "work"},
-        )
 
-        assert resp.status_code == 200
-        assert resp.json()["authenticated"] is True
-        assert (accounts_root / "codex" / "work" / "auth.json").is_file()
-        assert not (default_home / ".codex").exists()
-        assert _listed(client)[0]["authenticated"] is True
-
+class TestLogoutActsOnTheAccount:
     def test_a_logout_removes_that_accounts_login_only(self, client, accounts_root, default_home) -> None:
         _make(client, "codex", "work")
         _make(client, "codex", "home")
-        for name in ("work", "home"):
-            client.post(f"{_API}/auth/import", json={"backend": "codex", "content": '{"t": 1}', "account": name})
-        client.post(f"{_API}/auth/import", json={"backend": "codex", "content": '{"t": 2}'})
+        _plant_login(accounts_root / "codex" / "work", '{"t": 1}')
+        _plant_login(accounts_root / "codex" / "home", '{"t": 1}')
+        _plant_login(default_home / ".codex", '{"t": 2}')
 
         resp = client.post(f"{_API}/auth/logout", json={"backend": "codex", "account": "work"})
 
@@ -246,26 +240,107 @@ class TestImportAndLogoutActOnTheAccount:
         assert (accounts_root / "codex" / "home" / "auth.json").is_file()
         assert (default_home / ".codex" / "auth.json").is_file()
 
-    def test_an_import_into_an_account_the_machine_does_not_have_yet_makes_it_first(self, client, accounts_root) -> None:
-        resp = client.post(
-            f"{_API}/auth/import",
-            json={"backend": "codex", "content": '{"token": "x"}', "account": "synced"},
-        )
-
-        assert resp.status_code == 200
-        assert (accounts_root / "codex" / "synced" / "auth.json").is_file()
-
     def test_a_logout_of_an_account_the_machine_does_not_have_is_not_found_and_makes_nothing(self, client, accounts_root) -> None:
         resp = client.post(f"{_API}/auth/logout", json={"backend": "codex", "account": "ghost"})
 
         assert resp.status_code == 404
         assert not accounts_root.exists()
 
-    @pytest.mark.parametrize("path", ["auth/import", "auth/logout"])
-    def test_an_unusable_account_name_is_refused(self, client, path: str) -> None:
-        resp = client.post(f"{_API}/{path}", json={"backend": "codex", "content": '{"t": 1}', "account": "../x"})
+    def test_an_unusable_account_name_is_refused(self, client) -> None:
+        resp = client.post(f"{_API}/auth/logout", json={"backend": "codex", "account": "../x"})
 
         assert resp.status_code == 400
+
+
+_SIGNING_IN_CLAUDE = """#!/bin/sh
+home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+mkdir -p "$home"
+case "$1 $2" in
+  "auth login") touch "$home/.signed-in" ;;
+  "auth status")
+    if [ -f "$home/.signed-in" ]; then echo '{"loggedIn": true, "authMethod": "claude.ai"}'
+    else echo '{"loggedIn": false, "authMethod": "none"}'; fi ;;
+esac
+"""
+
+
+def _detected_claude(tmp_path: Path) -> MagicMock:
+    """A ``claude`` that signs in to the home it is started in, and reports whether that home is signed in."""
+    cli = tmp_path / "claude"
+    cli.write_text(_SIGNING_IN_CLAUDE, encoding="utf-8")
+    cli.chmod(0o755)
+    found = MagicMock()
+    found.name = "claude"
+    found.path = str(cli)
+    detector = MagicMock()
+    detector.detect = AsyncMock(return_value=[found])
+    return detector
+
+
+class TestTerminalLoginActsOnTheAccount:
+    @staticmethod
+    def _ask(client: TestClient, account: str | None) -> dict[str, object]:
+        body: dict[str, object] = {"backend": "claude"}
+        if account is not None:
+            body["account"] = account
+        resp = client.post(f"{_API}/auth/terminal-login", json=body)
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    def test_the_command_moves_the_cli_into_the_home_of_the_account(self, client, tmp_path, accounts_root) -> None:
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", return_value=_detected_claude(tmp_path)
+        ):
+            answer = self._ask(client, "work")
+
+        home = accounts_root / "claude" / "work"
+        assert home.is_dir()
+        assert answer["account"] == "work"
+        assert answer["commands"]["posix"] == (  # type: ignore[index]
+            f"CLAUDE_CONFIG_DIR={shlex.quote(str(home))} {shlex.quote(str(tmp_path / 'claude'))} auth login --claudeai"
+        )
+
+    def test_what_the_user_pastes_signs_in_that_account_and_no_other(self, client, tmp_path, accounts_root, default_home) -> None:
+        _make(client, "claude", "personal")
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", return_value=_detected_claude(tmp_path)
+        ):
+            assert self._ask(client, "work")["authenticated"] is False
+
+            pasted = self._ask(client, "work")["commands"]["posix"]  # type: ignore[index]
+            done = subprocess.run(["sh", "-c", pasted], capture_output=True, text=True, check=False)
+
+            assert done.returncode == 0, done.stderr
+            assert self._ask(client, "work")["authenticated"] is True
+            assert self._ask(client, "personal")["authenticated"] is False
+            assert self._ask(client, None)["authenticated"] is False
+        assert (accounts_root / "claude" / "work" / ".signed-in").is_file()
+        assert not (default_home / ".claude" / ".signed-in").exists()
+
+    def test_without_an_account_the_command_is_for_the_cli_own_home(self, client, tmp_path, accounts_root) -> None:
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", return_value=_detected_claude(tmp_path)
+        ):
+            answer = self._ask(client, None)
+
+        assert answer["account"] is None
+        assert answer["commands"]["posix"] == f"{shlex.quote(str(tmp_path / 'claude'))} auth login --claudeai"  # type: ignore[index]
+        assert not accounts_root.exists()
+
+    def test_an_unusable_account_name_makes_nothing(self, client, tmp_path, accounts_root) -> None:
+        with patch(
+            "myrm_agent_harness.toolkits.acp.core.backend_detector.BackendDetector", return_value=_detected_claude(tmp_path)
+        ):
+            resp = client.post(f"{_API}/auth/terminal-login", json={"backend": "claude", "account": "../x"})
+
+        assert resp.status_code == 400
+        assert not accounts_root.exists()
+
+    def test_an_agent_that_is_not_installed_makes_no_account(self, client, accounts_root) -> None:
+        resp = client.post(f"{_API}/auth/terminal-login", json={"backend": "claude", "account": "work"})
+
+        assert resp.status_code == 409
+        assert not accounts_root.exists()
 
 
 class TestLoginActsOnTheAccount:
@@ -284,7 +359,7 @@ class TestLoginActsOnTheAccount:
             async def cancel(self) -> None:
                 pass
 
-        body: dict[str, object] = {"command": "codex", "sessionId": "s1"}
+        body: dict[str, object] = {"command": "codex"}
         if account is not None:
             body["account"] = account
         with patch("myrm_agent_harness.toolkits.acp.auth.CliLoginSession", _FakeSession):
@@ -339,10 +414,10 @@ class TestSandboxKeepsNoSubscriptionLogin:
         assert client.delete(f"{_API}/accounts/codex/work").status_code == 200
         assert _listed(client) == []
 
-    def test_an_import_into_an_account_is_refused(self, client, accounts_root) -> None:
+    def test_a_terminal_login_into_an_account_is_refused(self, client, accounts_root) -> None:
         (accounts_root / "codex" / "work").mkdir(parents=True)
 
-        resp = client.post(f"{_API}/auth/import", json={"backend": "codex", "content": '{"t": 1}', "account": "work"})
+        resp = client.post(f"{_API}/auth/terminal-login", json={"backend": "codex", "account": "work"})
 
         assert resp.status_code == 403
         assert list((accounts_root / "codex" / "work").iterdir()) == []

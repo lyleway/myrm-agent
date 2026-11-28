@@ -171,8 +171,6 @@ describe('ExternalAgentsConfig auth mode', () => {
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed,
     availableInDeployment: true,
   });
@@ -227,8 +225,6 @@ describe('ExternalAgentsConfig transport', () => {
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed: true,
     availableInDeployment: true,
   });
@@ -312,8 +308,6 @@ describe('ExternalAgentsConfig in a deployment that does not run every agent', (
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed: false,
     availableInDeployment,
   });

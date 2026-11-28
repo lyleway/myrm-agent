@@ -23,6 +23,14 @@ vi.mock('../ExternalAgentLoginDialog', () => ({
   default: ({ open, command, account }: { open: boolean; command: string; account?: string }) =>
     open ? <div>{account ? `login-dialog:${command}:${account}` : `login-dialog:${command}`}</div> : null,
 }));
+vi.mock('../ExternalAgentTerminalLoginDialog', () => ({
+  default: ({ open, status, account }: { open: boolean; status: ExternalAgentAuthStatus; account?: string }) =>
+    open ? (
+      <div>
+        {account ? `terminal-login-dialog:${status.backend}:${account}` : `terminal-login-dialog:${status.backend}`}
+      </div>
+    ) : null,
+}));
 
 import ExternalAgentAuthControls from '../ExternalAgentAuthControls';
 
@@ -35,8 +43,6 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'browser_oauth',
-  scriptableLogin: true,
-  needsCodeInput: false,
   subscriptionLoginAllowed: true,
   availableInDeployment: true,
   ...overrides,
@@ -81,6 +87,36 @@ describe('ExternalAgentAuthControls', () => {
     await userEvent.click(screen.getByRole('button', { name: 'login' }));
 
     expect(screen.getByText('login-dialog:codex')).toBeInTheDocument();
+  });
+
+  it('opens the terminal login, not the one the app drives, for an agent whose login the user runs in a terminal', async () => {
+    render(
+      <ExternalAgentAuthControls
+        command="claude"
+        status={status({ backend: 'claude', loginStrategy: 'terminal' })}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'login' }));
+
+    expect(screen.getByText('terminal-login-dialog:claude')).toBeInTheDocument();
+    expect(screen.queryByText('login-dialog:claude')).not.toBeInTheDocument();
+  });
+
+  it('logs in to the named account in the terminal login too', async () => {
+    render(
+      <ExternalAgentAuthControls
+        command="claude"
+        status={status({ backend: 'claude', loginStrategy: 'terminal' })}
+        account="work"
+        onChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'login' }));
+
+    expect(screen.getByText('terminal-login-dialog:claude:work')).toBeInTheDocument();
   });
 
   it('shows the logged-in badge keyed on the CLI-reported login state, with logout', async () => {

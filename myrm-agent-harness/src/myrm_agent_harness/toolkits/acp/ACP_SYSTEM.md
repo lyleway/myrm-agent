@@ -279,25 +279,26 @@ RuntimeConfig (frozen dataclass)
 
 ### 3.10 auth 子系统（订阅鉴权）
 
-**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动 GUI 登录、状态徽章与凭据持久化，并判定当前部署是否允许保存订阅凭据。
+**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动登录、状态徽章与登出，并判定当前部署是否允许保留订阅登录。宿主从不持有凭据：登录由 CLI 自己完成并保存，这里没有任何接受凭据再存下来的入口。
 
 ```
 auth/
-├── _profiles.py        # AuthProfile：每个 CLI 的凭据路径、登录/登出/查询登录态的命令、本机与远程浏览器各自的登录流程、api_key env
+├── _profiles.py        # AuthProfile：每个 CLI 的凭据路径、登录/登出/查询登录态的命令、谁来跑登录（LoginStrategy）、本机与远程浏览器各自的登录流程、api_key env
 │                       #   环境感知 resolve_home（CODEX_HOME/CLAUDE_CONFIG_DIR → /persistent）
 ├── accounts.py         # AccountStore：同一个 CLI 的多个登录各占一个目录（命名账号 + 按 API Key 计费运行的稳定目录）
-├── credential_store.py # CredentialStore：状态检测 / 通用凭据导入（原子写+0600）/ 清除
-├── login_session.py    # CliLoginSession：驱动 <cli> 登录，流式 AuthEvent（提取链接/设备码），以 CLI 自报的登录态判定成败
+├── credential_store.py # CredentialStore：状态检测 / 清除（从不写入凭据）
+├── login_session.py    # CliLoginSession：驱动 BROWSER_OAUTH 类 CLI（Codex）登录，流式 AuthEvent（提取链接/设备码），以 CLI 自报的登录态判定成败
+├── terminal_login.py   # terminal_login：用户在终端里敲的官方登录命令（账号隔离变量、CLI 的路径与托管 Node），按 POSIX / PowerShell / cmd.exe 各写一份，不启动任何进程
 └── logout.py           # log_out：先让 CLI 自己登出，再清凭据文件，返回 CLI 事后报告的登录态
 ```
 
-**三大机制**：
+**机制**：
 - **登录态检测**（`resolve_login_state`）：该后端是否已登录？有状态命令的 CLI（`claude auth status`、`codex login status`）问 CLI 自己并以它的回答为准，没有的（gemini、qwen）与 CLI 无回应时退回 `CredentialStore.state` 的文件判断；驱动状态徽章；鉴权态从不缓存（用户随时登录/登出）
-- **交互式登录**（`CliLoginSession`）：spawn `<cli> <login_command(remote)>`，并发读 stdout/stderr，去掉色彩转义后把链接/设备码变成可操作 PROMPT 事件（CLI 自己的回调地址不当链接给用户）；进程干净退出且 CLI 自报已登录才算 SUCCESS（登录放在钥匙串里的 CLI 不留凭据文件，文件不能当裁判），失败以 CLI 最后一句话收尾；`needs_code_input` 时经 `feed()` 回填用户粘贴的 code（Claude 走 `claude auth login --claudeai`，Codex 本机浏览器走 `login`、远程浏览器走 `login --device-auth`）
-- **登出**（`log_out`）：删凭据文件够不着放在钥匙串里的登录，所以先让 CLI 自己登出（`claude auth logout`、`codex logout`，带该 home 的环境、不带运营方的 provider 密钥），再清文件，最后返回 CLI 事后自报的登录态；真二进制契约（`test_real_cli_login_flow.py`）盯住各登录命令仍被 CLI 接受、`claude auth login` 经管道给出链接并以 CLI 自己的失败原因收尾、各 CLI 自己的登出让 home 不再有登录
+- **宿主驱动的登录**（`CliLoginSession`，`LoginStrategy.BROWSER_OAUTH`，目前只有 Codex）：spawn `<cli> <login_command(remote)>`，并发读 stdout/stderr，去掉色彩转义后把链接/设备码变成可操作 PROMPT 事件（CLI 自己的回调地址不当链接给用户）；进程干净退出且 CLI 自报已登录才算 SUCCESS（登录放在钥匙串里的 CLI 不留凭据文件，文件不能当裁判），失败以 CLI 最后一句话收尾；Codex 本机浏览器走 `login`、远程浏览器走 `login --device-auth`
+- **终端登录**（`terminal_login`，`LoginStrategy.TERMINAL`：Claude、Gemini、Qwen）：`claude auth login --claudeai` 打印链接并向用户要页面上的验证码，Gemini 与 Qwen 没有登录命令（界面首次启动时才问）；由宿主驱动就得让用户的验证码与登录经过宿主，所以改由用户在终端里跑 CLI 自己的登录，宿主只描述这条命令：CLI 按终端会找到它的方式写（终端按名字能找到的就是这个文件时写名字，否则写路径，由隔离工具链装的 CLI 同时把托管的 Node 放到 `PATH` 前面）、把登录留在账号目录里的变量（`isolated_env`），按 POSIX、PowerShell、cmd.exe 各写一份（cmd.exe 写不出的路径，该写法不给）；之后再问 CLI 自己谁登录了
+- **登出**（`log_out`）：删凭据文件够不着放在钥匙串里的登录，所以先让 CLI 自己登出（`claude auth logout`、`codex logout`，带该 home 的环境、不带运营方的 provider 密钥），再清文件，最后返回 CLI 事后自报的登录态；真二进制契约（`test_real_cli_login_flow.py`）盯住各登录命令（含用户在终端里敲的那条）仍被 CLI 接受、各 CLI 自己的登出让 home 不再有登录
 - **命名账号**（`AccountStore`）：同一个 CLI 的两个订阅登录（工作号、个人号）不能共用 CLI 存登录的那个目录。账号就是宿主在自选根目录下按名字建的目录 `<根>/<后端>/<名字>`，目录树本身是登记表（不存第二份记录，也不跟随符号链接）；CLI 被重定向进去后只看得到该账号的登录、设置与历史，用户自己 home 里的登录不被碰。各 CLI 的搬法是它契约的一部分（`AuthProfile.isolated_env`）：Claude `CLAUDE_CONFIG_DIR`、Codex `CODEX_HOME`、Qwen `QWEN_HOME`、Gemini `GEMINI_CLI_HOME`（状态在 `<根>/.gemini` 下）并加 `GEMINI_FORCE_FILE_STORAGE=true`（否则 Gemini 把凭据放进所有 home 共用的系统钥匙串，账号会悄悄共用一个登录）。`AccountStore.api_key_home` 给按 API Key 计费的运行一个从不被登录、不是账号、不被列出的稳定目录，遗留的订阅登录因此不会被读到。会话与账号的绑定不另存：Agent 换账号后先前的会话 id 在新账号里不存在，走既有的“会话失效”重试开新会话并提示。真二进制契约（`test_real_cli_account_home.py`）逐个 CLI 盯住：作为账号跑一回合，写下的一切都在账号目录里（进程自己的 home 保持为空）、对话只在该账号里续接、一个账号里的登录只是该账号的登录
-- **凭据导入兜底**（`CredentialStore.import_credential`）：登录不可脚本化（gemini/qwen 浏览器流）或不便时的**通用路径**——用户在有浏览器的机器登录后粘贴 `auth.json`，原子安全写入对应路径
-- **拒绝保存凭据**（`CredentialStore(accepts_new_credentials=False)`）：订阅登录会把用户自己的凭据留在宿主上，订阅条款只允许这发生在用户自己控制的机器上；业务层在不属于用户的宿主（托管沙箱）上以该开关构造存储，导入在写任何文件之前抛 `CredentialStorageDisabledError`，而检测与清除照常可用，使开关生效之前留下的凭据仍能被移除。登录会话本身由 CLI 自己落盘，harness 无法拦截，业务层必须在启动 `CliLoginSession` 之前拒绝
+- **不接受凭据**：`CredentialStore` 只检测与清除，没有写入口；订阅登录由 CLI 自己落盘，harness 无法拦截，业务层必须在不属于用户的宿主（托管沙箱）上于启动 `CliLoginSession`、描述终端登录之前拒绝，检测与清除照常可用，使留下的登录仍能被看到并移除
 
 **设计铁律**：
 - 鉴权态**绝不进入** Turn1 工具描述；`create_invoke_acp_agent_tool` 使用**固定 schema**（backend 列表仅在运行时 KeyError 返回值中暴露），不破坏提示词前缀缓存
@@ -326,10 +327,11 @@ acp/
 │   ├── __init__.py         # 公共导出
 │   ├── _profiles.py        # AuthProfile：CLI 凭据路径/登录命令/策略/家目录重定位变量
 │   ├── accounts.py         # AccountStore：命名账号（每个登录一个目录）与按 API Key 计费运行的稳定目录
-│   ├── credential_store.py # 状态检测 + 凭据导入兜底 + 清除
+│   ├── credential_store.py # 状态检测 + 清除
 │   ├── launch_env.py       # cli_base_env：每次启动 CLI 的基线环境（回合与探测共用）；account_env：把 CLI 搬进账号目录的变量
 │   ├── login_state.py      # probe_login / resolve_login_state：CLI 自述的登录态，文件判断作兜底
-│   └── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
+│   ├── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
+│   └── terminal_login.py   # terminal_login：用户在终端里敲的登录命令，三种 shell 的写法
 ├── server/                 # ACP Server 方向（IDE → Agent）
 │   ├── __init__.py
 │   ├── server.py           # ACP Server（acp.Agent，支持动态绑定宿主 MCP 工具）
