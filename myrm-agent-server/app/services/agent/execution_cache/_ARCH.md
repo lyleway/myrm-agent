@@ -67,7 +67,7 @@ Chat 级 `BuiltExecutionUnit` 池（SkillAgent + 它的执行器 + BrowserSessio
 | 工具 | build 固化字段 |
 |------|---------------|
 | web_search | search_service_cfg（search_service/api_base/extra_params/provider_chain；api_key 排除） |
-| web_fetch | enable_advanced_retrieval / reranker_config / embedding_config / fetch_raw_webpage |
+| web_fetch | fetch_raw_webpage |
 | browser | auto_restore_domains / browser_source / dialog_policy |
 | 媒体生成（image/video/tts） | image/video/tts params（model/fallback/size/quality/voice；api_key 排除） |
 | skill_market / skill_manage | enable_skill_market / skill_manage_mounted（`enable_skill_manage` 或 `/learn` 的 `force_skill_manage` 折叠；与 factory 挂载判定同源） |

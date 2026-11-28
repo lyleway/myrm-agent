@@ -354,7 +354,13 @@ async def _invoke_for_caller(actor: MCPSessionActor, call: _ToolCall) -> object:
 
 
 async def serve_actor_queue(actor: MCPSessionActor, session: object) -> object:
-    """Serve queued calls on ``session`` until shutdown or a transport break."""
+    """Serve queued calls on ``session`` until shutdown or a transport break.
+
+    One call runs at a time on purpose: the host cannot know how many requests a server handles at once, and the
+    outer time bound of a script's call (``call_backstop``) counts the wait in this queue. Letting calls overlap on
+    one session first needs a way to tell a busy actor from a wedged one, and a decision on how result-cache writes
+    are ordered against cache clearing.
+    """
     from .session_actor_types import (
         _REFRESH_SIGNAL,
         _SHUTDOWN,

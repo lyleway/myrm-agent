@@ -5,7 +5,7 @@
 - toolkits.web_search.engine::SearchServiceConfig, WebSearchTools (POS: Web search tools wrapper, the toolkit's external interface) [WebSearchTools lazy]
 - toolkits.web_search.processing.citation_resolver::enrich_sources_with_resolved_urls (POS: Redirect-chain resolution and tracking-parameter cleanup of source URLs) [lazy]
 - toolkits.retriever.sufficiency (POS: Retrieval Sufficiency Guard for quality evaluation)
-- toolkits.web_search._web_search_tool_description::resolve_web_search_tool_description (POS: Locale-aware prompt SSOT; recommends fetch_and_extract only when the agent has it)
+- toolkits.web_search._web_search_tool_description::resolve_web_search_tool_description (POS: Locale-aware prompt SSOT)
 - toolkits.web_search.processing._explicit_params::describe_time_range_caveats (POS: Explicit constraint mapper; states how the providers that served the results fall short of a requested time range) [lazy]
 - core.config.llm::LLMConfig (POS: Framework-agnostic LLM configuration SSOT)
 - utils.context_format::wrap_with_external_sources_tag (POS: Context formatting utilities; wraps search text as untrusted data) [lazy]
@@ -14,7 +14,7 @@
 - pydantic::BaseModel, Field, field_validator (POS: parameter validation)
 
 [OUTPUT]
-- create_web_search_tool: factory function to create web search tool (``fetch_and_extract_available`` tells it whether the agent's web_fetch_tool offers fetch_and_extract); the ``metadata.sources`` it returns are the engine's sources without the internal ``search_provider`` tag
+- create_web_search_tool: factory function to create web search tool; the ``metadata.sources`` it returns are the engine's sources without the internal ``search_provider`` tag
 
 [POS]
 Web search meta-tool. Integrates web search capability as a meta-tool (high frequency, 80%+ queries require search).
@@ -66,7 +66,6 @@ def create_web_search_tool(
     sufficiency_llm_config: LLMConfig | None = None,
     *,
     description_locale: str | None = None,
-    fetch_and_extract_available: bool = False,
     blocked_terms: tuple[str, ...] | None = None,
     blocked_hostnames: tuple[str, ...] | None = None,
 ) -> BaseTool:
@@ -77,8 +76,6 @@ def create_web_search_tool(
         sufficiency_config: RSG configuration (optional); enables retrieval quality evaluation
         sufficiency_llm_config: LLM config for the sufficiency evaluator (required if sufficiency_config.enabled)
         description_locale: BCP-47 locale for LLM-facing tool description (default English).
-        fetch_and_extract_available: True when the same agent mounts a web_fetch_tool that offers the
-            ``fetch_and_extract`` operation; the description then recommends it for snippets that lack detail.
         blocked_terms: Optional substring blocklist for search queries. When set, any query
             containing a blocked term (case-insensitive) is rejected before the search runs —
             a generic content policy hook callers can use for benchmark decontamination
@@ -91,9 +88,7 @@ def create_web_search_tool(
     Returns:
         web_search_tool tool function
     """
-    tool_description = resolve_web_search_tool_description(
-        description_locale, fetch_and_extract_available=fetch_and_extract_available
-    )
+    tool_description = resolve_web_search_tool_description(description_locale)
 
     class WebSearchInput(BaseModel):
         questions: list[str] = Field(

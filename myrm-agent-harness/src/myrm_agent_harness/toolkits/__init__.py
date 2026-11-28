@@ -7,7 +7,6 @@ Agent-callable tools are exported via dedicated xx_agent_tools.py files.
 [INPUT]
 - llms::llm_manager, LLMManager, TransportChatModel, create_chat_model (POS: LLM manager and adapters, 100+ provider support)
 - web_fetch::FetchEngine (POS: single-page fetch engine: a bounded HTTP read plus an optional remote fallback)
-- retriever.engine::RetrieverManager (POS: retriever manager class)
 - web_fetch::web_fetch_tools (POS: global FetchEngine instance)
 
 [OUTPUT]
@@ -16,7 +15,6 @@ Agent-callable tools are exported via dedicated xx_agent_tools.py files.
 - TransportChatModel: LangChain chat model over the model transport
 - create_chat_model: chat model factory function
 - FetchEngine: HTTP fetch engine with an optional remote fallback
-- RetrieverManager: retriever manager class
 - web_fetch_tools: global FetchEngine instance
 
 [POS]
@@ -44,7 +42,6 @@ if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.cron.cron_agent_tools import create_cron_tools
     from myrm_agent_harness.toolkits.llms import LLMManager, TransportChatModel, create_chat_model, llm_manager
     from myrm_agent_harness.toolkits.memory.agent_surface.memory_agent_tools import create_memory_tools
-    from myrm_agent_harness.toolkits.retriever.engine import RetrieverManager
     from myrm_agent_harness.toolkits.web_fetch import FetchEngine, web_fetch_tools
     from myrm_agent_harness.toolkits.web_fetch.web_fetch_agent_tools import create_web_fetch_tool
     from myrm_agent_harness.toolkits.web_search.web_search_agent_tools import create_web_search_tool
@@ -53,7 +50,6 @@ __all__ = [
     "TransportChatModel",
     "FetchEngine",
     "LLMManager",
-    "RetrieverManager",
     "create_browser_tools",
     "create_cron_tools",
     "create_invoke_acp_agent_tool",
@@ -71,7 +67,6 @@ _LAZY_IMPORTS = {
     "TransportChatModel": ("myrm_agent_harness.toolkits.llms", "TransportChatModel"),
     "create_chat_model": ("myrm_agent_harness.toolkits.llms", "create_chat_model"),
     "FetchEngine": ("myrm_agent_harness.toolkits.web_fetch", "FetchEngine"),
-    "RetrieverManager": ("myrm_agent_harness.toolkits.retriever.engine", "RetrieverManager"),
     "web_fetch_tools": ("myrm_agent_harness.toolkits.web_fetch", "web_fetch_tools"),
     "create_browser_tools": ("myrm_agent_harness.toolkits.browser.tools", "create_browser_tools"),
     "create_cron_tools": ("myrm_agent_harness.toolkits.cron.cron_agent_tools", "create_cron_tools"),

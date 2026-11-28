@@ -24,9 +24,6 @@ class _Stub(ToolSetupMixin):
     channel_name = None
     enable_web_fetch = True
     fetch_raw_webpage = False
-    enable_advanced_retrieval = False
-    reranker_config = None
-    embedding_config = None
     search_depth = "basic"
     enable_web_search = False
     search_service_cfg = None
