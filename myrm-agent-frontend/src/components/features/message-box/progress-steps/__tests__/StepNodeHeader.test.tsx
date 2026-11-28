@@ -4,15 +4,16 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProgressItem } from '@/store/chat/types';
 import { StepNodeHeader } from '../StepNodeHeader';
 import { getStepVisualState } from '../stepTone';
-import { BARE_DESTRUCTIVE_TEXT, makeStep, translate } from './progressStepsKit';
+import { BARE_DESTRUCTIVE_TEXT, makeStep, noServerNames, translate } from './progressStepsKit';
 
-function renderHeader(step: ProgressItem, onViewDetail = vi.fn()) {
+function renderHeader(step: ProgressItem, onViewDetail = vi.fn(), serverName = noServerNames) {
   const view = render(
     <StepNodeHeader
       step={step}
       state={getStepVisualState(step, false)}
       t={translate}
       tHumanize={translate}
+      serverName={serverName}
       onViewDetail={onViewDetail}
     />,
   );
@@ -45,6 +46,17 @@ describe('StepNodeHeader title', () => {
     renderHeader(makeStep());
 
     expect(screen.getByRole('heading', { level: 4 })).toHaveClass('font-normal');
+  });
+
+  it('names an MCP tool step by the server the user configured, not by the id in its tool name', () => {
+    const tool = 'mcp__unnamed_dd4acd__get_forecast';
+    const serverName = (identity: string) => (identity === 'unnamed_dd4acd' ? '天气' : undefined);
+
+    renderHeader(makeStep({ step_key: tool, tool_name: tool }), vi.fn(), serverName);
+
+    expect(screen.getByRole('heading', { level: 4 })).toHaveTextContent(
+      'progress.mcp:{"server":"天气","tool":"get forecast"}',
+    );
   });
 
   it.each([
@@ -126,6 +138,7 @@ describe('StepNodeHeader detail entry', () => {
           state={getStepVisualState(step, false)}
           t={translate}
           tHumanize={translate}
+          serverName={noServerNames}
           onViewDetail={onViewDetail}
         />
       </div>,

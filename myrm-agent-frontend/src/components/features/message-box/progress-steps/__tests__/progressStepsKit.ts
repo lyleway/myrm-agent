@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 
+import type { McpServerNameResolver } from '@/lib/humanize';
 import type { ProgressItem } from '@/store/chat/types';
 import type { StepNodeContext } from '../ProgressStepNode';
 import type { TreeNode } from '../treeUtils';
@@ -7,6 +8,9 @@ import type { TreeNode } from '../treeUtils';
 /** Echoes the key, followed by the interpolation values when there are any: `key:{"count":3}`. */
 export const translate = (key: string, values?: Record<string, string | number>): string =>
   values === undefined ? key : `${key}:${JSON.stringify(values)}`;
+
+/** A resolver for settings that know no MCP server: every tool line keeps the id its tool name carries. */
+export const noServerNames: McpServerNameResolver = () => undefined;
 
 /** The fill token `destructive` used as a text colour: the contrast bug the destructive-text token replaces. */
 export const BARE_DESTRUCTIVE_TEXT = /(?<![\w-])text-destructive(?![\w-])/;
@@ -34,6 +38,7 @@ export const makeContext = (overrides: Partial<StepNodeContext> = {}): StepNodeC
   loading: false,
   t: translate,
   tHumanize: translate,
+  serverName: noServerNames,
   onViewDetail: vi.fn(),
   ...overrides,
 });

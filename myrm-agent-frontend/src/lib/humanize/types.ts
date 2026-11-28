@@ -6,6 +6,9 @@
 
 export type TranslateFn = (key: string, values?: Record<string, string | number>) => string;
 
+/** The name the user gave an MCP server, from the identity its tool names carry (`mcp__{identity}__{tool}`). */
+export type McpServerNameResolver = (identity: string) => string | undefined;
+
 export type ApprovalSurface = 'compact' | 'full';
 
 export type ScopeNote = {

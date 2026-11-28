@@ -6,7 +6,7 @@ sanitization, safety annotations, name prefixing) live here as stateless
 module-level functions.
 
 [INPUT]
-- config::mcp_tool_prefix, sanitize_mcp_name_component, should_register_mcp_tool (POS: MCP configuration, name sanitization, tool name parsing, and per-server tool filter function)
+- config::mcp_tool_name, mcp_tool_prefix, parse_mcp_tool_name, should_register_mcp_tool (POS: MCP configuration, the model-visible tool name, tool name parsing, and per-server tool filter function)
 - errors::MCPToolFailure (POS: MCP-specific error types; the marked ``str`` a failed call is rendered as)
 - schema::FlattenMeta, canonicalize_schema_for_cache, flatten_deep_schema, flatten_json_schema, has_dot_keys, nest_flat_arguments, coerce_arguments_by_schema, prepare_mcp_call_arguments (POS: MCP inbound tool schema normalization)
 - annotations::judge, recorded_annotations (POS: the only place a server's self-reported hints turn into host behavior)
@@ -20,8 +20,9 @@ module-level functions.
 MCP tool post-processing. Applies config-time least-privilege filtering, caps
 overlong descriptions for token economy, sanitizes argument schemas
 ($ref→canonicalize→flatten→coerce→nest), records each tool's safety metadata in
-the PTC safety registry (judged from the server's declared hints), prefixes
-names with ``mcp__{server}__`` for collision and permission-bypass isolation,
+the PTC safety registry (judged from the server's declared hints), renames
+each tool ``mcp__{server}__{tool}`` for collision and permission-bypass
+isolation within the 64-character name budget (``tool_name``),
 and wraps execution with timeout, result normalization, content boundary
 defense, and oversized-output guarding. No agent/runtime coupling — invoked by
 ``MCPAgent.process_session_tools``.
@@ -43,9 +44,9 @@ from myrm_agent_harness.core.security.tool_registry import (
 
 from .annotations import judge, recorded_annotations
 from .config import (
+    mcp_tool_name,
     mcp_tool_prefix,
     parse_mcp_tool_name,
-    sanitize_mcp_name_component,
     should_register_mcp_tool,
 )
 from .errors import MCPToolFailure
@@ -207,7 +208,7 @@ def evict_tool_annotations(server_name: str) -> int:
 
 
 def prefix_tool_names(tools: list[BaseTool], server_name: str) -> None:
-    """Add ``mcp__{server}__{tool}`` prefix to each tool name.
+    """Rename each tool to ``mcp__{server}__{tool}`` (see ``mcp_tool_name``).
 
     Double-underscore delimiters eliminate the ambiguity that single
     underscores cause when server names contain underscores (e.g.
@@ -216,11 +217,11 @@ def prefix_tool_names(tools: list[BaseTool], server_name: str) -> None:
     always unambiguous: ``mcp__{server}__{tool}``.
 
     Also prevents permission bypass when an MCP tool name
-    coincidentally matches a built-in tool name.
+    coincidentally matches a built-in tool name. A name that would exceed
+    the 64-character budget is shortened behind its prefix (see ``clamp_tool_name``).
     """
-    prefix = mcp_tool_prefix(server_name)
     for tool in tools:
-        tool.name = f"{prefix}{sanitize_mcp_name_component(tool.name)}"
+        tool.name = mcp_tool_name(server_name, tool.name)
 
 
 def _is_mcp_auth_error(exc: Exception) -> bool:
