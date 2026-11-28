@@ -31,7 +31,7 @@ id resolves to: limits and flags carry over, stated prices replace the whole pri
   including its upper bound and a prompt beyond the last bound takes the last row, as the providers publish it. A row carries
   every rate of its tier, so no rate is borrowed from the entry's flat prices. Pinned by `test_pricing_tiers.py`.
 - A model priced only by tiers (`dashscope`, `qwencloud`, `qwen_ai_platform`, `volcengine`) carries no flat price:
-  `cost_per_token` prices it, while the readers of flat fields (the server's model-pricing listing, the cache-savings
-  report) show nothing for it. The snapshot test fails when a sync leaves such a model unpriced.
+  `cost_per_token` prices it, while the readers of flat fields (the server's model-pricing listing) show nothing for
+  it. The snapshot test fails when a sync leaves such a model unpriced.
 - A registration that states a price (flat or `tiered_pricing`) replaces the whole price group of the entry it overlays.
 - A window or a vector size is an `int` in the snapshot, because every reader treats a float as no value.

@@ -1,5 +1,6 @@
 """Tests for myrm_agent_harness.utils.token_economics.cost_engine (catalog-priced)."""
 
+import math
 from collections.abc import Iterator
 
 import pytest
@@ -23,6 +24,7 @@ class TestCostResult:
         r = CostResult()
         assert r.usd == 0.0
         assert r.status == CostStatus.UNKNOWN
+        assert r.cache_savings_usd == 0.0
 
     @pytest.mark.parametrize("status", [CostStatus.ACTUAL, CostStatus.ESTIMATED])
     def test_priced_status_is_known(self, status: CostStatus) -> None:
@@ -109,3 +111,86 @@ class TestGatewayFallback:
         # "deepseek/gpt-4o" must not bill gpt-4o's OpenAI price as the vendor's own price.
         result = compute_cost_by_tokens("deepseek/gpt-4o", 1000, 200)
         assert result.status != CostStatus.ACTUAL
+
+
+_CACHING = "caching-model"
+_TIERED_CACHING = "tiered-caching-model"
+_NO_CACHE_PRICE = "no-cache-price-model"
+_CACHING_RATES = {
+    "input_cost_per_token": 3e-06,
+    "output_cost_per_token": 1.5e-05,
+    "cache_read_input_token_cost": 3e-07,
+    "cache_creation_input_token_cost": 3.75e-06,
+}
+_TIERED_RATES = {
+    **_CACHING_RATES,
+    "input_cost_per_token_above_200k_tokens": 6e-06,
+    "output_cost_per_token_above_200k_tokens": 2.25e-05,
+    "cache_read_input_token_cost_above_200k_tokens": 6e-07,
+    "cache_creation_input_token_cost_above_200k_tokens": 7.5e-06,
+}
+
+
+class TestCacheSavings:
+    """The savings of a call are the same call billed without the cache minus its bill, from the bill's own prices."""
+
+    @pytest.fixture(autouse=True)
+    def _models(self, _isolated_registrations: None) -> None:
+        register_model(_CACHING, _CACHING_RATES)
+        register_model(_TIERED_CACHING, _TIERED_RATES)
+        register_model(_NO_CACHE_PRICE, {"input_cost_per_token": 3e-06, "output_cost_per_token": 1.2e-05})
+
+    def test_a_call_that_touches_no_cache_saves_nothing(self) -> None:
+        assert compute_cost_by_tokens(_CACHING, 50_000, 1_000).cache_savings_usd == 0.0
+
+    @pytest.mark.parametrize(
+        ("model", "prompt", "cached", "written", "savings"),
+        [
+            # 50k prompt tokens bill 0.15; with 40k of them read from the cache the same call bills 0.042.
+            pytest.param(_CACHING, 50_000, 40_000, 0, 0.108, id="reads"),
+            pytest.param(_CACHING, 1_500, 1_000, 500, 0.002325, id="reads-and-writes"),
+            pytest.param(_CACHING, 1_000, 0, 1_000, -0.00075, id="writes-alone-cost-their-premium"),
+            # A count above the prompt is billed as the whole prompt, so it is saved as the whole prompt.
+            pytest.param(_CACHING, 50_000, 90_000, 0, 0.135, id="reads-beyond-the-prompt"),
+            # Above 200k prompt tokens every rate of the tier changes: the flat rates would say 0.54.
+            pytest.param(_TIERED_CACHING, 300_000, 200_000, 0, 1.08, id="above-the-200k-tier"),
+        ],
+    )
+    def test_the_savings_are_what_the_cache_took_off_the_bill(
+        self, model: str, prompt: int, cached: int, written: int, savings: float
+    ) -> None:
+        result = compute_cost_by_tokens(model, prompt, 1_000, cache_read_tokens=cached, cache_write_tokens=written)
+        without_cache = compute_cost_by_tokens(model, prompt, 1_000)
+
+        assert result.cache_savings_usd == pytest.approx(savings, abs=1e-9)
+        assert result.cache_savings_usd == pytest.approx(without_cache.usd - result.usd, abs=1e-9)
+
+    def test_a_provider_hint_prices_the_uncached_bill_with_the_same_entry(self) -> None:
+        register_model("vendor-a/hinted-model", _CACHING_RATES)
+
+        result = compute_cost_by_tokens(
+            "hinted-model", 50_000, 1_000, cache_read_tokens=40_000, custom_llm_provider="vendor-a"
+        )
+
+        assert result.status == CostStatus.ACTUAL
+        assert result.cache_savings_usd == pytest.approx(0.108, abs=1e-9)
+
+    def test_a_gateway_qualified_name_carries_its_savings_with_the_estimated_status(self) -> None:
+        result = compute_cost_by_tokens(f"my-gateway/{_CACHING}", 50_000, 1_000, cache_read_tokens=40_000)
+
+        assert result.status == CostStatus.ESTIMATED
+        assert result.cache_savings_usd == pytest.approx(0.108, abs=1e-9)
+
+    @pytest.mark.parametrize(("prompt", "cached", "written"), [(1_500, 495, 165), (50_000, 5_000, 1_666)])
+    def test_a_model_with_no_cache_prices_saves_exactly_nothing(self, prompt: int, cached: int, written: int) -> None:
+        # Its cached and written tokens bill at the input rate: the two bills are the same money, yet as floats they
+        # differ in the last bits (+8.7e-19 and -2.8e-17 USD for these counts). That noise is not a saving.
+        result = compute_cost_by_tokens(
+            _NO_CACHE_PRICE, prompt, 100, cache_read_tokens=cached, cache_write_tokens=written
+        )
+
+        assert result.cache_savings_usd == 0.0
+        assert math.copysign(1.0, result.cache_savings_usd) == 1.0
+
+    def test_an_unpriced_model_reports_no_savings(self) -> None:
+        assert compute_cost_by_tokens("no-such-model-xyz", 1_000, 50, cache_read_tokens=800) == CostResult()

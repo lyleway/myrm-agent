@@ -267,8 +267,6 @@ async def create_fast_lane_stream(
     from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
     from myrm_agent_harness.api import AgentEventType
     from myrm_agent_harness.toolkits.llms import llm_manager
-    from myrm_agent_harness.utils.token_economics.cache_savings import calculate_cache_savings_usd
-    from myrm_agent_harness.utils.token_economics.usage_fields import extract_cache_write_tokens, extract_cached_tokens
 
     from app.core.utils.chat_utils import convert_chat_history
 
@@ -321,10 +319,7 @@ async def create_fast_lane_stream(
     }
 
     try:
-        # Enable stream_usage for token tracking if supported by the provider; a model that can bind tools is a
-        # simple heuristic for a modern chat model.
-        chunks = llm.astream(messages, stream_usage=True) if hasattr(llm, "bind_tools") else llm.astream(messages)
-        async for chunk in chunks:
+        async for chunk in llm.astream(messages):
             if cancel_token and cancel_token.is_cancelled:
                 break
             if chunk.content:
@@ -332,37 +327,6 @@ async def create_fast_lane_stream(
                     "type": AgentEventType.MESSAGE.value,
                     "messageId": params.message_id or "",
                     "data": chunk.content,
-                }
-
-            # Extract usage metadata from the final chunk
-            if hasattr(chunk, "usage_metadata") and chunk.usage_metadata:
-                usage = chunk.usage_metadata
-                prompt_tokens = usage.get("input_tokens", 0)
-                completion_tokens = usage.get("output_tokens", 0)
-                total_tokens = usage.get("total_tokens", 0)
-
-                # The cache counts are provider-supplied and not ``UsageMetadata`` fields: the shared reader
-                # keeps one payload at one interpretation for this event, the cost figure and the savings.
-                cached_tokens = extract_cached_tokens(usage)
-                cache_write_tokens = extract_cache_write_tokens(usage)
-                cache_hit_rate = round(cached_tokens / prompt_tokens, 4) if prompt_tokens > 0 else 0.0
-
-                active_model = getattr(params, "model", None) or getattr(llm, "model_name", None)
-                net_savings = calculate_cache_savings_usd(usage, active_model)
-
-                yield {
-                    "type": AgentEventType.TOKEN_USAGE.value,
-                    "messageId": params.message_id or "",
-                    "data": {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                        "cached_tokens": cached_tokens,
-                        "cache_write_tokens": cache_write_tokens,
-                        "cache_hit_rate": cache_hit_rate,
-                        "net_savings_usd": round(net_savings, 6),
-                        "has_effective_cache": bool(cached_tokens >= 1024 and net_savings >= 0.0001),
-                    },
                 }
 
         yield {

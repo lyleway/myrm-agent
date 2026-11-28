@@ -1,18 +1,18 @@
 """Token-usage recording shared by the sync and async TransportChatModel paths.
 
-The adapter records usage, cost and latency itself (the transport has no callbacks);
+The adapter records usage, cost, cache savings and latency itself (the transport has no callbacks);
 streaming and non-streaming calls go through the same code so both paths
 converge on the request-scoped ``TokenTracker`` and the audit ledger. Keeping it out
 of the generation mixins leaves those files purely about the provider call.
 
 [INPUT]
 - adapters.streaming::normalize_usage (POS: usage object normalization)
-- utils.token_economics.cost_engine::compute_cost_by_tokens (POS: 按 token 计价)
+- utils.token_economics.cost_engine::compute_cost_by_tokens (POS: 按 token 计价，同一次计价给出缓存节省额)
 - utils.token_economics.usage_fields::extract_cost_tokens (POS: prompt/completion/cache 字段唯一读取入口)
 - utils.token_economics.tracker::record_token_usage, append_to_ledger, record_finish_reason (POS: 请求级追踪与审计账本)
 
 [OUTPUT]
-- record_usage(): 记录一次调用的 usage、成本与延迟，并写入审计账本
+- record_usage(): 记录一次调用的 usage、成本、缓存节省额与延迟，并写入审计账本
 - record_non_stream_usage(): 非流式响应的 finish_reason + usage 记录
 
 [POS]
@@ -23,8 +23,8 @@ from the same instance that made the request.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, Protocol
+from collections.abc import Mapping, Sequence
+from typing import Protocol
 
 
 class _ModelIdentity(Protocol):
@@ -36,14 +36,14 @@ class _ModelIdentity(Protocol):
 
 def record_usage(
     owner: _ModelIdentity,
-    usage: Any,
+    usage: object,
     *,
     model_name: str = "",
     duration_ms: float | None = None,
     ttft_ms: float | None = None,
     finish_reason: str = "",
 ) -> None:
-    """Record token usage, cost, and latency for an LLM response.
+    """Record token usage, cost, cache savings, and latency for an LLM response.
 
     Args:
         owner: the model instance the request ran on (pricing falls back to it).
@@ -86,12 +86,14 @@ def record_usage(
         ttft_ms=ttft_ms,
         cost_usd=cost_result.usd,
         cost_status=cost_result.status,
+        cache_savings_usd=cost_result.cache_savings_usd,
     )
     append_to_ledger(
         usage_dict,
         resolved_model,
         duration_ms,
         cost_result.usd,
+        cache_savings_usd=cost_result.cache_savings_usd,
         ttft_ms=ttft_ms,
         finish_reason=finish_reason,
     )
@@ -99,7 +101,7 @@ def record_usage(
 
 def record_non_stream_usage(
     owner: _ModelIdentity,
-    response: Mapping[str, Any],
+    response: Mapping[str, object],
     *,
     model_name: str,
     duration_ms: float,
@@ -113,10 +115,9 @@ def record_non_stream_usage(
     """
     from myrm_agent_harness.utils.token_economics.tracker import record_finish_reason
 
-    finish_reason = ""
-    choices = response.get("choices") or []
-    if choices and isinstance(choices[0], dict):
-        finish_reason = str(choices[0].get("finish_reason") or "")
+    choices = response.get("choices")
+    first_choice = choices[0] if isinstance(choices, Sequence) and choices else None
+    finish_reason = str(first_choice.get("finish_reason") or "") if isinstance(first_choice, Mapping) else ""
 
     if finish_reason:
         record_finish_reason(finish_reason)

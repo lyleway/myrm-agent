@@ -1,4 +1,4 @@
-"""Provider-cache token extraction shared by cost computation, usage tracking, cache savings and the Fast Lane usage event.
+"""Provider-cache token extraction shared by cost computation, usage tracking and model-call tracing.
 
 Different providers report the same cache quantities under different keys: the transport
 normalises OpenAI/Anthropic/Gemini/DeepSeek into ``prompt_tokens_details.*``, some adapters
@@ -21,9 +21,8 @@ must not break the stream that reports it.
 
 [POS]
 Single reader for provider cache accounting fields. Framework-neutral and safe for
-any layer to import; the LLM adapters, the cost engine, ``TokenTracker``, the cache
-savings figure and the server's Fast Lane usage event all delegate here so one
-payload always yields one interpretation.
+any layer to import; the LLM adapters, the cost engine, ``TokenTracker`` and the
+model-call tracing all delegate here so one payload always yields one interpretation.
 """
 
 from __future__ import annotations

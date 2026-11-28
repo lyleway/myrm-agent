@@ -1,4 +1,4 @@
-"""The Fast Lane streams a bare chat model: the messages it sends, how it asks for usage, and the usage it reports.
+"""The Fast Lane streams a bare chat model: the messages it sends, the plain call it makes, and the text it streams.
 
 The lane has no tools and no graph; all it does is the call it makes to the model and what it makes of the chunks that
 come back. The model is a scripted stand-in and everything else is the real lane.
@@ -38,18 +38,14 @@ class _PlainModel:
 
 
 class _ChatModel(_PlainModel):
-    """A modern chat model: the lane takes one that can bind tools to be one that reports usage while streaming."""
+    """A model that can bind tools, as every chat model the lane meets can."""
 
     def bind_tools(self, *_tools: object) -> None:
         raise NotImplementedError
 
 
 def _text(content: str) -> SimpleNamespace:
-    return SimpleNamespace(content=content, usage_metadata=None)
-
-
-def _usage(**fields: object) -> SimpleNamespace:
-    return SimpleNamespace(content="", usage_metadata=fields)
+    return SimpleNamespace(content=content)
 
 
 async def _run_lane(
@@ -73,24 +69,11 @@ async def _run_lane(
         return [event async for event in create_fast_lane_stream(params, None)]
 
 
-async def _token_usage(model: _PlainModel) -> dict[str, object]:
-    events = await _run_lane(model)
-    (event,) = [e for e in events if e["type"] == AgentEventType.TOKEN_USAGE.value]
-    return cast(dict[str, object], event["data"])
-
-
 @pytest.mark.asyncio
-async def test_a_chat_model_is_asked_to_report_usage_while_it_streams() -> None:
-    model = _ChatModel(_text("hi"))
-
-    await _run_lane(model)
-
-    assert model.stream_kwargs == {"stream_usage": True}
-
-
-@pytest.mark.asyncio
-async def test_a_model_that_cannot_bind_tools_is_streamed_without_the_usage_option() -> None:
-    model = _PlainModel(_text("hi"))
+@pytest.mark.parametrize("model_class", [_PlainModel, _ChatModel], ids=["plain-model", "model-that-binds-tools"])
+async def test_the_model_is_streamed_with_a_plain_call_whatever_it_can_do(model_class: type[_PlainModel]) -> None:
+    # The adapter asks the provider for usage by itself and forwards every other option into the provider request.
+    model = model_class(_text("hi"))
 
     await _run_lane(model)
 
@@ -123,69 +106,3 @@ async def test_the_text_of_each_chunk_is_streamed_and_the_run_ends_with_message_
         (AgentEventType.MESSAGE.value, "llo"),
         (AgentEventType.MESSAGE_END.value, None),
     ]
-
-
-@pytest.mark.asyncio
-async def test_the_cached_tokens_come_from_the_prompt_token_details() -> None:
-    data = await _token_usage(
-        _PlainModel(
-            _usage(
-                input_tokens=2000,
-                output_tokens=10,
-                total_tokens=2010,
-                prompt_tokens_details={"cached_tokens": 1536, "cache_creation_input_tokens": 64},
-            )
-        )
-    )
-
-    assert (data["cached_tokens"], data["cache_write_tokens"], data["cache_hit_rate"]) == (1536, 64, 0.768)
-
-
-@pytest.mark.asyncio
-async def test_a_top_level_cached_count_is_used_when_the_details_carry_none() -> None:
-    data = await _token_usage(_PlainModel(_usage(input_tokens=1000, output_tokens=5, total_tokens=1005, cached_tokens=500)))
-
-    assert data["cached_tokens"] == 500
-
-
-@pytest.mark.asyncio
-async def test_a_cached_count_given_as_a_numeric_string_is_a_number() -> None:
-    data = await _token_usage(_PlainModel(_usage(input_tokens=1000, output_tokens=5, total_tokens=1005, cached_tokens="500")))
-
-    assert (data["cached_tokens"], data["cache_hit_rate"]) == (500, 0.5)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "fields",
-    [
-        {"cached_tokens": "many"},
-        {"cached_tokens": float("nan")},
-        {"cached_tokens": True},
-        {"prompt_tokens_details": {"cached_tokens": "many"}},
-        {"prompt_tokens_details": {"cached_tokens": float("nan")}},
-        {"prompt_tokens_details": {"cached_tokens": float("inf")}},
-    ],
-    ids=["flat-text", "flat-nan", "flat-bool", "details-text", "details-nan", "details-inf"],
-)
-async def test_a_cached_count_that_is_not_a_finite_number_counts_as_none(fields: dict[str, object]) -> None:
-    data = await _token_usage(_PlainModel(_usage(input_tokens=1000, output_tokens=5, total_tokens=1005, **fields)))
-
-    assert (data["cached_tokens"], data["cache_hit_rate"]) == (0, 0.0)
-
-
-@pytest.mark.asyncio
-async def test_the_counts_are_read_the_way_cost_computation_reads_them() -> None:
-    data = await _token_usage(
-        _PlainModel(
-            _usage(
-                input_tokens=1000,
-                output_tokens=5,
-                total_tokens=1005,
-                cache_read_input_tokens=800,
-                cache_creation_input_tokens=100,
-            )
-        )
-    )
-
-    assert (data["cached_tokens"], data["cache_write_tokens"], data["cache_hit_rate"]) == (800, 100, 0.8)

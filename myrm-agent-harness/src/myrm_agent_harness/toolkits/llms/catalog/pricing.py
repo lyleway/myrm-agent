@@ -7,7 +7,7 @@
 - cost_per_token: (prompt_cost, completion_cost) in USD for one call's token counts, or None for an unpriced model
 
 [POS]
-Cache-aware pricing shared by the cost engine and the savings report. ``prompt_tokens`` is the total prompt size
+Cache-aware pricing behind the cost engine's bill and cache savings. ``prompt_tokens`` is the total prompt size
 including cached tokens (the shape every transport wire reports); cache reads and writes are billed at their own
 rates and the rest at the input rate. Models that price long prompts higher switch every rate once the prompt
 crosses a threshold, either as flat ``*_above_200k_tokens`` rates or as ``tiered_pricing`` rows; in both the whole
