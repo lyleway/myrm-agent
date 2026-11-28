@@ -20,7 +20,9 @@ definition whose signature starts on that line: type parameters (`<T>`, `[T]`) a
 are covered, an arrow function whose parameters continue on the next line is not. The scan is a navigation aid, not a
 parser: TypeScript/JavaScript generator functions (`function*`), `abstract class`, `const enum` and `declare`,
 `namespace` and `module` blocks are not listed either. Listing them takes a TypeScript parser, and `grep_tool` finds
-the symbols the outline misses.
+the symbols the outline misses. Markdown code fences follow CommonMark and are tracked from the first line, so a read
+that starts inside a block neither loses the headings after it nor lists its comments; headings nested in list items or
+block quotes are not listed.
 """
 
 from __future__ import annotations
@@ -168,6 +170,29 @@ def _numbered_lines(lines: list[str]) -> list[tuple[int, str]]:
     return [(position, text) for position, (_, text) in enumerate(stripped, start=1)]
 
 
+# A Markdown code fence: three or more backticks or tildes, then an info string.
+_FENCE_RE = re.compile(r"(`{3,}|~{3,})(.*)")
+
+
+def _fence_after(line: str, open_fence: tuple[str, int] | None) -> tuple[str, int] | None:
+    """The code fence still open after ``line`` (stripped), as (marker character, length), or None.
+
+    CommonMark ends a block only at a fence of the same character that is at least as long and has nothing after it.
+    Treating every fence-looking line as a toggle breaks on a Python traceback's pointer line (``~~~~^^^^``) or a
+    shorter fence quoted inside a longer one: the rest of the document is then read inside out, headings are lost and
+    code comments pass for headings.
+    """
+    match = _FENCE_RE.fullmatch(line)
+    if match is None:
+        return open_fence
+    marker, rest = match.groups()
+    if open_fence is None:
+        # A backtick fence's info string has no backtick: "```code```" on one line is inline code.
+        return None if marker[0] == "`" and "`" in rest else (marker[0], len(marker))
+    closes = marker[0] == open_fence[0] and len(marker) >= open_fence[1] and not rest
+    return None if closes else open_fence
+
+
 def _extract_python_ast_symbols(numbered: list[tuple[int, str]], start_line_threshold: int) -> list[OutlineSymbol]:
     """Extract top-level and class-level Python symbols, with their line ranges, using AST."""
     numbers = [number for number, _ in numbered]
@@ -221,17 +246,21 @@ def _extract_regex_symbols(
         return []
 
     symbols: list[OutlineSymbol] = []
-    in_code_block = False
+    open_fence: tuple[str, int] | None = None
     in_frontmatter = False
+    is_markdown = language_key == "markdown"
 
     for line_num, raw_text in numbered:
-        if line_num < start_line_threshold:
+        # Frontmatter and code fences that open before the threshold still decide what the lines after it are, so a
+        # Markdown scan walks every line and only lists from the threshold on.
+        before_threshold = line_num < start_line_threshold
+        if before_threshold and not is_markdown:
             continue
 
         stripped_code = raw_text.strip()
         if not stripped_code:
             continue
-        if language_key == "markdown":
+        if is_markdown:
             # Handle YAML frontmatter at document start
             if line_num == 1 and stripped_code == "---":
                 in_frontmatter = True
@@ -241,10 +270,9 @@ def _extract_regex_symbols(
                     in_frontmatter = False
                 continue
 
-            if stripped_code.startswith(("```", "~~~")):
-                in_code_block = not in_code_block
-                continue
-            if in_code_block:
+            in_fence = open_fence is not None
+            open_fence = _fence_after(stripped_code, open_fence)
+            if before_threshold or in_fence or open_fence is not None:
                 continue
             # CommonMark indented code blocks (4+ leading spaces/tabs) are not headings.
             if len(raw_text) - len(raw_text.lstrip(" \t")) >= 4:
