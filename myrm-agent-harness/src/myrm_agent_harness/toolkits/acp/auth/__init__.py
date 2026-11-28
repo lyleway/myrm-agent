@@ -11,7 +11,6 @@ mechanisms, all GUI/SaaS-driven by the business layer:
 The host never holds a credential: the CLI makes its own login and keeps it, and nothing here accepts one to store.
 
 [INPUT]
-- toolkits.acp.auth._profiles::AuthProfile, LoginStrategy, Transport, cli_launch_args, command_profile, effective_transport, known_backends, profile_for (POS: Authentication profile registry.)
 - toolkits.acp.auth.accounts::Account, AccountError, AccountExistsError, AccountNotFoundError, AccountStore, is_valid_account_name (POS: Account registry of the ACP auth subsystem.)
 - toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStore (POS: Credential detection layer.)
 - toolkits.acp.auth.login_session::AuthEvent, AuthEventType, CliLoginSession (POS: CLI login session management.)
@@ -21,7 +20,6 @@ The host never holds a credential: the CLI makes its own login and keeps it, and
 - toolkits.acp.auth.logout::log_out (POS: Logout of the ACP auth subsystem.)
 
 [OUTPUT]
-- LoginStrategy, AuthProfile, Transport, profile_for, command_profile, known_backends, cli_launch_args, effective_transport
 - Account, AccountError, AccountExistsError, AccountNotFoundError, AccountStore, is_valid_account_name
 - AuthStatus, CredentialState, CredentialStore
 - AuthEventType, AuthEvent, CliLoginSession
@@ -36,16 +34,6 @@ Public surface of the ACP auth subsystem.
 
 from __future__ import annotations
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import (
-    AuthProfile,
-    LoginStrategy,
-    Transport,
-    cli_launch_args,
-    command_profile,
-    effective_transport,
-    known_backends,
-    profile_for,
-)
 from myrm_agent_harness.toolkits.acp.auth.accounts import (
     Account,
     AccountError,
@@ -77,27 +65,19 @@ __all__ = [
     "AccountStore",
     "AuthEvent",
     "AuthEventType",
-    "AuthProfile",
     "AuthStatus",
     "CliLoginSession",
     "CredentialState",
     "CredentialStore",
     "LoginReport",
-    "LoginStrategy",
     "Shell",
     "TerminalLogin",
-    "Transport",
     "account_env",
     "cli_base_env",
-    "cli_launch_args",
-    "command_profile",
     "default_shell",
-    "effective_transport",
     "is_valid_account_name",
-    "known_backends",
     "log_out",
     "probe_login",
-    "profile_for",
     "resolve_login_state",
     "terminal_login",
 ]

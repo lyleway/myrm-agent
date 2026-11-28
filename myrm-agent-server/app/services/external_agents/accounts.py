@@ -2,7 +2,8 @@
 
 [INPUT]
 - myrm_agent_harness.api::resolve_workspace_state_dir (POS: Single entry point for the Myrm state root; harness and server code derive every state path from it)
-- myrm_agent_harness.toolkits.acp.auth::AccountStore, command_profile (POS: The named accounts of an agent and the contract of every known agent)
+- myrm_agent_harness.toolkits.acp.auth::AccountStore (POS: The named accounts of an agent)
+- myrm_agent_harness.toolkits.acp.drivers::command_driver (POS: The contract of every known agent)
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: whether the deployment keeps subscription logins)
 
 [OUTPUT]
@@ -48,9 +49,9 @@ def agent_home(command: str, account: str | None) -> str | None:
     the account it names, or in the CLI's own home (the login the user made on this machine) when it names none. A
     command that is not a known agent cannot be relocated.
     """
-    from myrm_agent_harness.toolkits.acp.auth import command_profile
+    from myrm_agent_harness.toolkits.acp.drivers import command_driver
 
-    profile = command_profile(command)
+    profile = command_driver(command)
     if profile is None:
         if account is not None:
             logger.warning("external_agent_account_ignored command=%s reason=not_a_known_agent", Path(command).name)

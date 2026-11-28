@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import account_env, known_backends, profile_for
+from myrm_agent_harness.toolkits.acp.auth import account_env
+from myrm_agent_harness.toolkits.acp.drivers import driver_for, known_backends
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
@@ -29,14 +30,14 @@ class TestResolveHome:
         [("claude", ".claude"), ("codex", ".codex"), ("gemini", ".gemini"), ("qwen", ".qwen")],
     )
     def test_without_a_variable_it_is_a_directory_of_the_users_home(self, backend: str, expected: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
 
         assert profile.resolve_home({"HOME": "/home/u"}) == Path("/home/u") / expected
 
     @pytest.mark.parametrize("backend", sorted(_ISOLATED))
     def test_the_variable_relocates_it(self, backend: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         env = {"HOME": "/home/u", profile.home_env: "/vol/elsewhere"}
 
@@ -46,7 +47,7 @@ class TestResolveHome:
 
     def test_every_known_agent_can_be_relocated(self) -> None:
         for backend in known_backends():
-            profile = profile_for(backend)
+            profile = driver_for(backend)
             assert profile is not None
             assert profile.home_env
 
@@ -54,7 +55,7 @@ class TestResolveHome:
 class TestIsolatedEnv:
     @pytest.mark.parametrize("backend", sorted(_ISOLATED))
     def test_the_variables_and_the_directory_the_cli_then_uses(self, backend: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         expected_env, expected_home = _ISOLATED[backend]
 

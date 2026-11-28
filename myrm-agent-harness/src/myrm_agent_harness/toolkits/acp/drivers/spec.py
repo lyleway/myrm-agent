@@ -11,11 +11,11 @@ no — leaf module, standard library only
 [OUTPUT]
 - LoginStrategy: Who runs a CLI's interactive login: the host, which relays what the CLI prints, or the user in a terminal.
 - Transport: How a known agent is driven: as a CLI process, over ACP, or over its own app server.
-- AuthProfile: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
-- profile_for: Resolve an AuthProfile from a backend name or command (a name that merely contains a backend's counts).
-- command_profile: Resolve the AuthProfile of a command that is exactly a known agent's executable.
+- DriverSpec: Per-backend contract: login state, launch, transport, and the environment that isolates its home.
+- driver_for: Resolve a DriverSpec from a backend name or command (a name that merely contains a backend's counts).
+- command_driver: Resolve the DriverSpec of a command that is exactly a known agent's executable.
 - effective_transport: The transport an agent really runs over: a known agent's contract wins over a stored choice.
-- all_profiles, known_backends: Every registered profile, and their names.
+- all_drivers, known_backends: Every registered profile, and their names.
 - cli_launch_args: Baseline non-interactive launch args for a backend driven as a CLI process.
 
 [POS]
@@ -48,7 +48,7 @@ class LoginStrategy(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class AuthProfile:
+class DriverSpec:
     """Authentication characteristics of a known CLI agent backend.
 
     Paths are resolved against a supplied environment so the control plane can
@@ -116,8 +116,8 @@ class AuthProfile:
 
 # Per-backend profiles, in the order agents are detected and listed. Credential locations and home-override vars
 # below reflect each CLI's documented behaviour.
-_PROFILES: dict[str, AuthProfile] = {
-    "claude": AuthProfile(
+_PROFILES: dict[str, DriverSpec] = {
+    "claude": DriverSpec(
         backend="claude",
         home_env="CLAUDE_CONFIG_DIR",
         home_dir=".claude",
@@ -129,7 +129,7 @@ _PROFILES: dict[str, AuthProfile] = {
         login_probe=("auth", "status"),
         launch_args=("-p", "--output-format", "stream-json", "--verbose"),
     ),
-    "codex": AuthProfile(
+    "codex": DriverSpec(
         backend="codex",
         home_env="CODEX_HOME",
         home_dir=".codex",
@@ -145,7 +145,7 @@ _PROFILES: dict[str, AuthProfile] = {
         transport="app_server",
         launch_args=("app-server",),
     ),
-    "gemini": AuthProfile(
+    "gemini": DriverSpec(
         backend="gemini",
         home_env="GEMINI_CLI_HOME",
         home_dir=".gemini",
@@ -161,7 +161,7 @@ _PROFILES: dict[str, AuthProfile] = {
         home_env_is_base=True,
         isolation_env=(("GEMINI_FORCE_FILE_STORAGE", "true"),),
     ),
-    "qwen": AuthProfile(
+    "qwen": DriverSpec(
         backend="qwen",
         home_env="QWEN_HOME",
         home_dir=".qwen",
@@ -183,8 +183,8 @@ def _normalize(token: str) -> str:
     return base.split(".", 1)[0]  # drop extensions like .cmd / .exe
 
 
-def profile_for(backend_or_command: str) -> AuthProfile | None:
-    """Resolve an AuthProfile from a backend name or executable command.
+def driver_for(backend_or_command: str) -> DriverSpec | None:
+    """Resolve a DriverSpec from a backend name or executable command.
 
     Matches the executable basename first (``/usr/bin/codex`` → ``codex``), then
     falls back to a substring scan so configured names like ``codex-cli`` or
@@ -202,10 +202,10 @@ def profile_for(backend_or_command: str) -> AuthProfile | None:
     return None
 
 
-def command_profile(command: str | None) -> AuthProfile | None:
+def command_driver(command: str | None) -> DriverSpec | None:
     """The profile of a command that is exactly a known agent's executable (``/usr/bin/gemini``, ``gemini.cmd``).
 
-    ``profile_for`` also accepts a name that merely contains a backend's (``claude-code``), which suits resolving the
+    ``driver_for`` also accepts a name that merely contains a backend's (``claude-code``), which suits resolving the
     login of an agent by its configured name. How an agent is started and driven is decided only for the real
     executable: an adapter or wrapper that happens to carry an agent's name is a command of its own.
     """
@@ -220,11 +220,11 @@ def effective_transport[Configured: str](command: str | None, configured: Config
     Any other command keeps ``configured`` as it is, a value this module does not recognise included, so the layer that
     stored it can still report it.
     """
-    profile = command_profile(command)
+    profile = command_driver(command)
     return profile.transport if profile is not None else configured
 
 
-def all_profiles() -> tuple[AuthProfile, ...]:
+def all_drivers() -> tuple[DriverSpec, ...]:
     """Every registered profile."""
     return tuple(_PROFILES.values())
 
@@ -241,5 +241,5 @@ def cli_launch_args(backend_or_command: str) -> list[str]:
     invocation knowledge stays in this registry and cannot drift across layers. An agent driven over ACP or an app
     server has no baseline to store: its launch args are resolved when it starts.
     """
-    profile = profile_for(backend_or_command)
+    profile = driver_for(backend_or_command)
     return list(profile.launch_args) if profile is not None and profile.transport == "cli" else []

@@ -15,7 +15,7 @@ resident processes of an idle pool while CLI backends keep their resume state. A
 - myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, mcp_not_attached_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime, CodexRuntime (POS: runtime backend implementations)
 - myrm_agent_harness.toolkits.acp.mcp_servers::McpServerConfig (POS: the MCP servers a host hands a delegated agent)
-- myrm_agent_harness.toolkits.acp.auth._profiles::effective_transport (POS: Authentication profile registry; the transport a known agent's contract names)
+- myrm_agent_harness.toolkits.acp.drivers::effective_transport (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - myrm_agent_harness.core.security.redact::command_preview (POS: masked, cut command for a log line)
 
 [OUTPUT]
@@ -37,8 +37,8 @@ from dataclasses import replace
 from uuid import uuid4
 
 from myrm_agent_harness.core.security.redact import command_preview
-from myrm_agent_harness.toolkits.acp.auth._profiles import effective_transport
 from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env
+from myrm_agent_harness.toolkits.acp.drivers import effective_transport
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.types import (
     RESIDENT_BACKEND_TYPES,

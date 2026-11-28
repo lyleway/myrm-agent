@@ -6,7 +6,7 @@ status badges. The store never writes a credential: a login is made by the CLI
 itself, so a credential the host never holds cannot be mishandled by it.
 
 [INPUT]
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry.)
+- toolkits.acp.drivers::driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 
 [OUTPUT]
 - AuthStatus: Authentication state of a backend.
@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class CredentialStore:
 
     def state(self, backend: str) -> CredentialState:
         """Resolve the current authentication state of a backend."""
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         if profile is None:
             return CredentialState(backend=backend, status=AuthStatus.UNKNOWN, detail="no auth profile")
 
@@ -89,7 +89,7 @@ class CredentialStore:
 
     def clear(self, backend: str) -> CredentialState:
         """Remove all known credential files for a backend (logout)."""
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         if profile is None:
             msg = f"No auth profile for backend {backend!r}"
             raise ValueError(msg)

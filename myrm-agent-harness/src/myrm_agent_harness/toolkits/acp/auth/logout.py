@@ -5,7 +5,7 @@ a name derived from the home it is relocated into), so a file-only logout leaves
 by deleting its directory leaves its secret behind.
 
 [INPUT]
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry.)
+- toolkits.acp.drivers::driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.auth.credential_store::CredentialState, CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI agent starts from)
 - toolkits.acp.auth.login_state::resolve_login_state (POS: The login state a CLI reports about itself)
@@ -23,11 +23,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
 from myrm_agent_harness.toolkits.acp.auth.credential_store import CredentialState, CredentialStore
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.auth.login_state import resolve_login_state
 from myrm_agent_harness.toolkits.acp.core.probe import run_probe
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def log_out(
 ) -> CredentialState:
     """Remove the login of ``backend``, and return the state its CLI reports afterwards.
 
-    The CLI is asked to log itself out first (``AuthProfile.logout_args``), then the credential files are removed: they
+    The CLI is asked to log itself out first (``DriverSpec.logout_args``), then the credential files are removed: they
     hold the logins the CLI does not own (an imported file) and the whole login of a CLI that has no logout command. A
     CLI that fails to log out does not stop the files from going; the returned state tells whether a login remains.
     ``env`` is what the CLI runs with, so it acts on the login of the home it is relocated into. ``executable``: the CLI
@@ -51,7 +51,7 @@ async def log_out(
     Raises:
         ValueError: ``backend`` has no auth profile.
     """
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     if profile is None:
         msg = f"No auth profile for backend {backend!r}"
         raise ValueError(msg)

@@ -18,14 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import (
-    Account,
-    AccountStore,
-    LoginReport,
-    known_backends,
-    probe_login,
-)
+from myrm_agent_harness.toolkits.acp.auth import Account, AccountStore, LoginReport, probe_login
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
+from myrm_agent_harness.toolkits.acp.drivers import known_backends
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (

@@ -14,9 +14,8 @@ from myrm_agent_harness.toolkits.acp.auth import (
     AccountStore,
     CredentialStore,
     is_valid_account_name,
-    known_backends,
-    profile_for,
 )
+from myrm_agent_harness.toolkits.acp.drivers import driver_for, known_backends
 from tests.toolkits.acp._logins import plant_login
 
 _POSIX = sys.platform != "win32"
@@ -253,7 +252,7 @@ class TestApiKeyHome:
         default_home = {"HOME": str(tmp_path / "home")}
         plant_login(store.create("claude", "work").env(default_home), "claude")
 
-        env = {**default_home, **profile_for("claude").isolated_env(store.api_key_home("claude"))}  # type: ignore[union-attr]
+        env = {**default_home, **driver_for("claude").isolated_env(store.api_key_home("claude"))}  # type: ignore[union-attr]
 
         assert not CredentialStore(env).is_authenticated("claude")
 

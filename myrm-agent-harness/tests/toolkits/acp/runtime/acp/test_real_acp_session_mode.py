@@ -19,7 +19,7 @@ import pytest
 from acp import PROTOCOL_VERSION, RequestError, spawn_agent_process
 from acp.schema import Implementation
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+from myrm_agent_harness.toolkits.acp.drivers import resolve_acp_args
 from myrm_agent_harness.toolkits.acp.runtime.acp.callback import AcpCallbackHandler, client_capabilities
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, RuntimeConfig, RuntimeEventType

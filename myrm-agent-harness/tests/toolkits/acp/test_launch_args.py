@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
-from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args
+from myrm_agent_harness.toolkits.acp.drivers import cli_launch_args, resolve_cli_args
 
 _MODES = ["safe", "allow_all"]
 

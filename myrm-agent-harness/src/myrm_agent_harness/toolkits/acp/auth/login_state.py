@@ -5,7 +5,7 @@ the CLI's own settings) and trusts a file the CLI may no longer honour. A CLI th
 that has none, or does not answer, falls back to the credential file.
 
 [INPUT]
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry.)
+- toolkits.acp.drivers::driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.auth.credential_store::AuthStatus, CredentialState, CredentialStore (POS: Credential persistence and detection layer for the ACP auth subsystem)
 - toolkits.acp.core.probe::ProbeResult, run_probe (POS: Process primitive of the detection and login-state checks)
 
@@ -25,9 +25,9 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
 from myrm_agent_harness.toolkits.acp.auth.credential_store import AuthStatus, CredentialState, CredentialStore
 from myrm_agent_harness.toolkits.acp.core.probe import ProbeResult, run_probe
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ async def probe_login(
     timeout_seconds: float = 15.0,
 ) -> LoginReport | None:
     """Ask the CLI itself; ``None`` when it has no status command, did not answer, or answered in an unknown shape."""
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     parse = _PARSERS.get(profile.backend) if profile is not None else None
     if profile is None or parse is None or not profile.login_probe:
         return None

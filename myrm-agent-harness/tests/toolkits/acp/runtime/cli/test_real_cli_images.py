@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import cli_launch_args
+from myrm_agent_harness.toolkits.acp.drivers import cli_launch_args
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import AcpErrorCode, RuntimeConfig, RuntimeEvent, RuntimeEventType
 

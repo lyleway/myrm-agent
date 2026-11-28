@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import known_backends
 from myrm_agent_harness.toolkits.acp.core.backend_detector import (
     BackendDetector,
     DetectedBackend,
     _is_executable,
 )
+from myrm_agent_harness.toolkits.acp.drivers import known_backends
 
 pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning:unittest.mock")
 

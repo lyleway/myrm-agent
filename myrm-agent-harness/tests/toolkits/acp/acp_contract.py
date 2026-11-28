@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from acp.schema import InitializeResponse
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+from myrm_agent_harness.toolkits.acp.drivers import resolve_acp_args
 
 # The arguments each agent is started with in ACP mode: the known agents' by their contract, the others' as documented.
 ACP_ARGS: dict[str, tuple[str, ...]] = {

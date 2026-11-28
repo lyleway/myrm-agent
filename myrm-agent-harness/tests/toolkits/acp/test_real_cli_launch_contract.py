@@ -19,12 +19,13 @@ from typing import get_args
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import (
+from myrm_agent_harness.toolkits.acp.drivers import (
+    driver_for,
+    known_backends,
     resolve_acp_args,
     resolve_app_server_args,
     resolve_cli_args,
 )
-from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends, profile_for
 from myrm_agent_harness.toolkits.acp.types import PermissionMode
 from tests.toolkits.acp.cli_contract import (
     SUBCOMMANDS,
@@ -53,7 +54,7 @@ _APP_SERVER_CONFIG = ["-c", 'model="o3"', "--enable", "some_feature", "--disable
 
 def _launch_args(backend: str, mode: str) -> list[str]:
     """What the runtime starts ``backend`` with: an ACP agent by its contract, a CLI agent by the mode's flags."""
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     assert profile is not None
     if profile.transport == "acp":
         return resolve_acp_args(backend, []).args

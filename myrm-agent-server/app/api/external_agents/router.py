@@ -93,8 +93,9 @@ async def external_agent_auth_status() -> dict[str, object]:
     An agent the deployment does not run is never started: its row says it is absent and not available, and
     whether a login is left in its files.
     """
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore, known_backends, profile_for
+    from myrm_agent_harness.toolkits.acp.auth import CredentialStore
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.drivers import driver_for, known_backends
 
     capabilities = get_deployment_capabilities()
     blocked = {name for name in known_backends() if blocked_backend(name) is not None}
@@ -114,7 +115,7 @@ async def external_agent_auth_status() -> dict[str, object]:
 
     backends: list[dict[str, object]] = []
     for name in known_backends():
-        profile = profile_for(name)
+        profile = driver_for(name)
         if profile is None:
             continue
         available = name not in blocked
@@ -179,9 +180,10 @@ async def external_agent_auth_login(
     The stream ends when the login does, and closing it stops the CLI. An agent whose login runs in a terminal is
     refused (400): ask for its terminal login.
     """
-    from myrm_agent_harness.toolkits.acp.auth import CliLoginSession, LoginStrategy, profile_for
+    from myrm_agent_harness.toolkits.acp.auth import CliLoginSession
+    from myrm_agent_harness.toolkits.acp.drivers import LoginStrategy, driver_for
 
-    profile = profile_for(body.backend or body.command)
+    profile = driver_for(body.backend or body.command)
     if profile is None:
         raise HTTPException(
             status_code=400,
@@ -235,9 +237,10 @@ async def external_agent_terminal_login(body: ExternalAgentTerminalLoginRequest)
     login finished: ``authenticated`` is what the CLI itself reports about the login in that home. The account the
     request names is made first when the agent has none of that name.
     """
-    from myrm_agent_harness.toolkits.acp.auth import default_shell, profile_for, terminal_login
+    from myrm_agent_harness.toolkits.acp.auth import default_shell, terminal_login
+    from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
-    profile = profile_for(body.backend)
+    profile = driver_for(body.backend)
     if profile is None:
         raise HTTPException(status_code=400, detail=f"Unknown external agent backend: {body.backend}")
     executable = await detected_executable(profile.backend)

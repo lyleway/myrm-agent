@@ -12,12 +12,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from myrm_agent_harness.toolkits.acp.auth import profile_for
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
 
 def plant_login(env: Mapping[str, str], backend: str, content: str = '{"token": "abc"}') -> Path:
     """Write ``content`` as the credential file ``backend`` keeps its login in, in the home ``env`` reaches."""
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     assert profile is not None, backend
     path = profile.resolve_credential_paths(env)[0]
     path.parent.mkdir(parents=True, exist_ok=True)

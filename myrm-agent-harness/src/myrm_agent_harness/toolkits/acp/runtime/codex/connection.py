@@ -1,7 +1,7 @@
 """One running Codex app-server process, started and greeted: the connection every turn of a runtime rides on.
 
 [INPUT]
-- toolkits.acp.auth._profiles::command_profile (POS: Single source of truth for per-backend CLI auth and launch behaviour)
+- toolkits.acp.drivers::command_driver (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.runtime._base::build_safe_env (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.codex.protocol::MINIMUM_SERVER_VERSION, initialize_params, login_params, server_version (POS: What the host says to Codex's app server)
@@ -31,8 +31,8 @@ import logging
 from collections.abc import Mapping
 from contextlib import AsyncExitStack
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
 from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
+from myrm_agent_harness.toolkits.acp.drivers import command_driver
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     MINIMUM_SERVER_VERSION,
@@ -72,7 +72,7 @@ def server_environment(name: str, config: RuntimeConfig, command: str) -> tuple[
     env = build_safe_env(config)
     if config.auth_mode != "api_key":
         return env, None
-    profile = command_profile(command)
+    profile = command_driver(command)
     names = profile.api_key_env if profile is not None else ()
     configured: Mapping[str, str] = config.env or {}
     key = next((configured[variable] for variable in names if configured.get(variable)), None)

@@ -6,8 +6,8 @@ and communicates via the standard ACP JSON-RPC protocol over stdin/stdout.
 [INPUT]
 - toolkits.acp.mcp_servers::McpServerConfig, read_only_names (POS: The MCP servers a host hands a delegated agent)
 - toolkits.acp.types::AcpError, AcpErrorCode, BackendCapabilities, BackendStatus, CliSessionStore, PermissionBroker, images_not_sent_event, mcp_not_attached_event (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
-- toolkits.acp.auth._launch_args::resolve_acp_args (POS: Sole owner of the launch and permission arguments of every known agent.)
-- toolkits.acp.auth._profiles::command_profile (POS: Authentication profile registry; the contract of a known agent.)
+- toolkits.acp.drivers::resolve_acp_args (POS: The command line of a known agent: one resolver per transport)
+- toolkits.acp.drivers::command_driver (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations.)
 - toolkits.acp.runtime.acp.callback::AcpCallbackHandler, client_capabilities (POS: ACP callback handler for the AcpRuntime backend.)
 - toolkits.acp.runtime.acp.capabilities::AgentCapabilities (POS: What an ACP agent said it can do in ``initialize``)
@@ -53,8 +53,7 @@ from collections.abc import AsyncGenerator, Sequence
 from contextlib import AbstractAsyncContextManager
 from typing import TYPE_CHECKING, NoReturn
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
-from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
+from myrm_agent_harness.toolkits.acp.drivers import command_driver, resolve_acp_args
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, read_only_names
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
@@ -384,7 +383,7 @@ class AcpRuntime(BaseRuntime):
         or a trust rule can still leave the session in one that acts without asking, and the agent's own report is
         the only authority on what it will do.
         """
-        profile = command_profile(self._config.command)
+        profile = command_driver(self._config.command)
         expected = profile.acp_ask_mode if profile is not None else None
         modes = opened.modes
         if self._config.permission_mode != "safe" or expected is None or modes is None:

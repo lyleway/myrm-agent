@@ -14,13 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import (
-    AuthEventType,
-    AuthProfile,
-    CliLoginSession,
-    LoginStrategy,
-    profile_for,
-)
+from myrm_agent_harness.toolkits.acp.auth import AuthEventType, CliLoginSession
+from myrm_agent_harness.toolkits.acp.drivers import DriverSpec, LoginStrategy, driver_for
 
 _TRANSCRIPTS = Path(__file__).parent / "login_transcripts"
 
@@ -43,8 +38,8 @@ _CODEX_LOOPBACK_URL = (
 _REPLAY_SCRIPT = "import sys; stream = getattr(sys, sys.argv[2]); stream.buffer.write(open(sys.argv[1], 'rb').read()); stream.flush()"
 
 
-def _login_profile(login_args: tuple[str, ...], remote_login_args: tuple[str, ...] = ()) -> AuthProfile:
-    return AuthProfile(
+def _login_profile(login_args: tuple[str, ...], remote_login_args: tuple[str, ...] = ()) -> DriverSpec:
+    return DriverSpec(
         backend="codex",
         home_env="CODEX_HOME",
         home_dir=".codex",
@@ -70,7 +65,7 @@ class TestCliLoginSession:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("backend", ["claude", "gemini", "qwen"])
     async def test_a_login_the_user_runs_in_a_terminal_is_not_started(self, backend: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         events = [e async for e in CliLoginSession(backend, profile).run()]
         assert [e.type for e in events] == [AuthEventType.ERROR]
@@ -226,7 +221,7 @@ class TestRemoteLogin:
         assert "ARGS:remote" in remote
 
     def test_a_login_that_already_works_from_anywhere_has_no_remote_variant(self) -> None:
-        claude = profile_for("claude")
+        claude = driver_for("claude")
         assert claude is not None
 
         assert (
@@ -234,7 +229,7 @@ class TestRemoteLogin:
         )
 
     def test_codex_asks_for_the_device_code_flow_for_a_remote_browser(self) -> None:
-        codex = profile_for("codex")
+        codex = driver_for("codex")
         assert codex is not None
 
         assert codex.login_command(remote=False) == ("login",)

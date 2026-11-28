@@ -15,13 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import (
-    TerminalLogin,
-    default_shell,
-    known_backends,
-    profile_for,
-    terminal_login,
-)
+from myrm_agent_harness.toolkits.acp.auth import TerminalLogin, default_shell, terminal_login
+from myrm_agent_harness.toolkits.acp.drivers import driver_for, known_backends
 from myrm_agent_harness.toolkits.acp.toolchains import manager
 
 _POSIX = os.name == "posix"
@@ -53,7 +48,7 @@ def _typed_to_sh(command: str) -> dict[str, object]:
 class TestWhatIsTyped:
     @pytest.mark.parametrize("backend", sorted(known_backends()))
     def test_it_is_the_login_command_of_the_profile(self, backend: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
 
         login = terminal_login(profile, "/opt/agents/bin/agent")
@@ -64,7 +59,7 @@ class TestWhatIsTyped:
 
     @pytest.mark.parametrize("backend", sorted(known_backends()))
     def test_an_account_keeps_the_login_in_its_own_home(self, backend: str, tmp_path: Path) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         home = tmp_path / "work"
 
@@ -76,7 +71,7 @@ class TestWhatIsTyped:
     def test_the_cli_is_typed_by_name_when_the_terminal_finds_this_very_one(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         cli = _install_stand_in(tmp_path / "bin")
         monkeypatch.setenv("PATH", f"{cli.parent}{os.pathsep}{os.environ['PATH']}")
@@ -86,7 +81,7 @@ class TestWhatIsTyped:
     def test_the_cli_is_typed_by_path_when_the_terminal_would_find_another(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         on_path = _install_stand_in(tmp_path / "on-path")
         installed = _install_stand_in(tmp_path / "installed")
@@ -97,7 +92,7 @@ class TestWhatIsTyped:
     def test_the_cli_is_typed_by_path_when_the_terminal_finds_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         installed = _install_stand_in(tmp_path / "installed")
         monkeypatch.setenv("PATH", _CLEAN_PATH)
@@ -108,7 +103,7 @@ class TestWhatIsTyped:
     def test_a_link_to_the_cli_on_the_path_is_the_same_cli(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         installed = _install_stand_in(tmp_path / "installed")
         (tmp_path / "links").mkdir()
@@ -120,7 +115,7 @@ class TestWhatIsTyped:
     def test_a_cli_the_toolchain_installed_brings_its_node_to_the_front_of_the_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         node_bin = tmp_path / "toolchains" / f"node-{manager.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)
@@ -139,7 +134,7 @@ class TestAPosixShell:
         "home_name", ["plain", "with space", "it's", "dollar$HOME", "semi;colon", "back`tick`", 'double"quote', "star*"]
     )
     def test_runs_the_cli_in_the_home_of_the_account_as_it_is_written(self, home_name: str, tmp_path: Path) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         cli = _install_stand_in(tmp_path / "bin with space")
         home = tmp_path / home_name
@@ -150,7 +145,7 @@ class TestAPosixShell:
         assert reached["config"] == str(home)
 
     def test_gives_a_cli_that_has_no_account_its_own_home(self, tmp_path: Path) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         cli = _install_stand_in(tmp_path / "bin")
 
@@ -161,7 +156,7 @@ class TestAPosixShell:
     def test_puts_the_managed_node_ahead_of_the_rest_of_the_path_for_this_command_only(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        profile = profile_for("claude")
+        profile = driver_for("claude")
         assert profile is not None
         node_bin = tmp_path / "toolchains" / f"node-{manager.NODE_VERSION}" / "bin"
         node_bin.mkdir(parents=True)

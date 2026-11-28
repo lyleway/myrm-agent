@@ -3,7 +3,7 @@
 [INPUT]
 - core.security.process_env::EnvInheritPolicy, sanitize_env (POS: Child process environment isolation SSOT)
 - core.security.redact::command_preview (POS: A command shortened and scrubbed for logs and messages)
-- toolkits.acp.auth._profiles::command_profile, profile_for (POS: Authentication profile registry.)
+- toolkits.acp.drivers::command_driver, driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.toolchains::toolchain_node_bin (POS: The managed Node a CLI installed by the isolated toolchain needs on PATH)
 
 [OUTPUT]
@@ -23,7 +23,7 @@ from pathlib import Path
 
 from myrm_agent_harness.core.security.process_env import EnvInheritPolicy, sanitize_env
 from myrm_agent_harness.core.security.redact import command_preview
-from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile, profile_for
+from myrm_agent_harness.toolkits.acp.drivers import command_driver, driver_for
 from myrm_agent_harness.toolkits.acp.toolchains import toolchain_node_bin
 
 
@@ -36,7 +36,7 @@ def cli_base_env(command: str | None, source: Mapping[str, str]) -> dict[str, st
     toolchain's Node on PATH.
     """
     env = sanitize_env(dict(source), EnvInheritPolicy.CORE)
-    profile = profile_for(command) if command else None
+    profile = driver_for(command) if command else None
     for name in profile.relocation_vars if profile is not None else ():
         if name in source:
             env[name] = source[name]
@@ -63,7 +63,7 @@ def account_env(command: str | None, account_home: str | None) -> dict[str, str]
     if not home.is_absolute():
         msg = f"account_home must be an absolute path, got {account_home!r}"
         raise ValueError(msg)
-    profile = command_profile(command)
+    profile = command_driver(command)
     if profile is None:
         msg = f"account_home needs the command of a known agent, got {command_preview(command or '', 120)!r}"
         raise ValueError(msg)

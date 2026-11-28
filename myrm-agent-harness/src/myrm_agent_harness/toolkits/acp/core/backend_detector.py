@@ -7,7 +7,7 @@ for versioned and non-versioned detection results to avoid repeated scans.
 [INPUT]
 - myrm_agent_harness.toolkits.acp.toolchains::toolchain_base_dir (POS: Isolated toolchain manager for external CLI agents — keeps tool installations out of the global OS environment)
 - myrm_agent_harness.toolkits.acp.auth.credential_store::CredentialState (POS: Credential persistence and detection layer for the ACP auth subsystem) [TYPE_CHECKING]
-- myrm_agent_harness.toolkits.acp.auth._profiles::known_backends (POS: Authentication profile registry; the agents that have a contract)
+- myrm_agent_harness.toolkits.acp.drivers::known_backends (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - myrm_agent_harness.toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI starts from)
 - myrm_agent_harness.toolkits.acp.core.probe::run_probe (POS: Process primitive of the detection and login-state checks)
 
@@ -31,9 +31,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import known_backends
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.core.probe import run_probe
+from myrm_agent_harness.toolkits.acp.drivers import known_backends
 from myrm_agent_harness.toolkits.acp.toolchains import toolchain_base_dir
 
 if TYPE_CHECKING:

@@ -1,7 +1,8 @@
 """What an external agent's CLI says about the login in one home, and which CLI that is.
 
 [INPUT]
-- myrm_agent_harness.toolkits.acp.auth::CredentialStore, cli_base_env, profile_for, resolve_login_state (POS: The ACP subscription auth subsystem)
+- myrm_agent_harness.toolkits.acp.auth::CredentialStore, cli_base_env, resolve_login_state (POS: The ACP subscription auth subsystem)
+- myrm_agent_harness.toolkits.acp.drivers::driver_for (POS: The contract of every known agent)
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
 
 [OUTPUT]
@@ -42,10 +43,10 @@ async def detected_executable(backend: str) -> str | None:
     Raises:
         ValueError: ``backend`` is not a known agent.
     """
-    from myrm_agent_harness.toolkits.acp.auth import profile_for
     from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     if profile is None:
         msg = f"Unknown external agent backend: {backend}"
         raise ValueError(msg)

@@ -10,7 +10,7 @@ A backend whose login the user runs in a terminal (``LoginStrategy.TERMINAL``) i
 started: its one event says so.
 
 [INPUT]
-- toolkits.acp.auth._profiles::AuthProfile (POS: Authentication profile registry.)
+- toolkits.acp.drivers::DriverSpec (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.auth.credential_store::CredentialStore (POS: Credential persistence and detection.)
 - toolkits.acp.auth.launch_env::cli_base_env (POS: The environment every launch of a CLI agent starts from)
 - toolkits.acp.auth.login_state::resolve_login_state (POS: The login state a CLI reports about itself)
@@ -36,10 +36,10 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import AuthProfile, LoginStrategy
 from myrm_agent_harness.toolkits.acp.auth.credential_store import CredentialStore
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.auth.login_state import resolve_login_state
+from myrm_agent_harness.toolkits.acp.drivers import DriverSpec, LoginStrategy
 
 # A CLI colours its output even when it writes to a pipe (Codex ignores NO_COLOR), and the escape sequences would end up
 # inside the URL and the code it prints.
@@ -82,13 +82,13 @@ class CliLoginSession:
     to abort. A session instance drives a single login attempt.
 
     ``remote``: the browser that signs in is on another machine than the CLI, so the CLI is asked for the login that
-    works from there (see ``AuthProfile.remote_login_args``).
+    works from there (see ``DriverSpec.remote_login_args``).
     """
 
     def __init__(
         self,
         command: str,
-        profile: AuthProfile,
+        profile: DriverSpec,
         *,
         base_env: Mapping[str, str] | None = None,
         cwd: str | None = None,

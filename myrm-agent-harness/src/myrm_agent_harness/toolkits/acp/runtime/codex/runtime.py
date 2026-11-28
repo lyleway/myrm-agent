@@ -6,7 +6,7 @@ resumes from the thread id the server announced. The prompt and its images trave
 
 [INPUT]
 - core.security.redact::command_preview (POS: masked, cut command for a log line)
-- toolkits.acp.auth._launch_args::resolve_app_server_args (POS: Launch args and permission flags per agent)
+- toolkits.acp.drivers::resolve_app_server_args (POS: The command line of a known agent: one resolver per transport)
 - toolkits.acp.runtime._base::KEEPALIVE_SECONDS, BaseRuntime, build_safe_env, working_status (POS: Base class for RuntimeBackend implementations)
 - toolkits.acp.runtime.codex.approvals::ApprovalResponder (POS: Answers the requests of Codex's app server with what the person decided)
 - toolkits.acp.runtime.codex.connection::AppServerConnection, AppServerStartError, server_environment (POS: One running Codex app-server process, started and greeted)
@@ -42,7 +42,7 @@ from contextlib import aclosing
 from dataclasses import dataclass, field
 
 from myrm_agent_harness.core.security.redact import command_preview
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_app_server_args
+from myrm_agent_harness.toolkits.acp.drivers import resolve_app_server_args
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,

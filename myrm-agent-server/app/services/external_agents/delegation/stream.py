@@ -3,7 +3,7 @@
 [INPUT]
 - myrm_agent_harness.api::AgentEventType (POS: 前端 SSE 事件类型), on_token_cancelled (POS: 令牌取消时从外部终止阻塞的流), redact_sensitive_text (POS: 写日志前的凭证脱敏)
 - myrm_agent_harness.toolkits.acp.types (POS: 外部 Agent 委托协议：运行时事件、错误码、委托池)
-- myrm_agent_harness.toolkits.acp.auth::profile_for (POS: 外部 Agent 的认证档案；API Key 模式读取的环境变量名)
+- myrm_agent_harness.toolkits.acp.drivers::driver_for (POS: 外部 Agent 的契约；API Key 模式读取的环境变量名)
 - app.services.external_agents.delegation.errors::delegate_error_event (POS: 直连委托失败的用户指引)
 - app.services.external_agents.memory_grants::MEMORY_SERVER_NAME, memory_connected (POS: 外部 Agent 的只读记忆凭据，及它有没有连上记忆)
 
@@ -27,7 +27,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, TypeAlias
 
 from myrm_agent_harness.api import AgentEventType, on_token_cancelled, redact_sensitive_text
-from myrm_agent_harness.toolkits.acp.auth import profile_for
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 from myrm_agent_harness.toolkits.acp.types import (
     IMAGES_NOT_SENT_STATUS,
     MCP_NOT_ATTACHED_STATUS,
@@ -299,7 +299,7 @@ async def stream_direct_delegate(
     ``CANCELLED`` event.
     """
     config = pool.get_config(agent_name)
-    profile = profile_for(config.command or agent_name) if config else None
+    profile = driver_for(config.command or agent_name) if config else None
     turn = _TurnTranslator(
         agent_name,
         config.auth_mode if config else "subscription",

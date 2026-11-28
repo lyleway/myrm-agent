@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args, resolve_cli_args
-from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args, effective_transport
+from myrm_agent_harness.toolkits.acp.drivers import (
+    cli_launch_args,
+    effective_transport,
+    resolve_acp_args,
+    resolve_cli_args,
+)
 
 _CONTRACT = ["--acp", "--approval-mode", "default"]
 _ACP_AGENTS = ["gemini", "qwen"]

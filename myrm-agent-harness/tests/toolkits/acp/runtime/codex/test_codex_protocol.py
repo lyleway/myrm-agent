@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_app_server_args
 from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
+from myrm_agent_harness.toolkits.acp.drivers import resolve_app_server_args
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     OPT_OUT_NOTIFICATIONS,

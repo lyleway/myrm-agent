@@ -2,11 +2,11 @@
 
 Two logins of the same CLI (a work and a personal subscription) cannot share the directory the CLI keeps its login
 in. An account is that directory, created by name under a root the host chooses; a CLI relocated into it (see
-``AuthProfile.isolated_env``) finds only that account's login, settings and history, so accounts never mix, and the
+``DriverSpec.isolated_env``) finds only that account's login, settings and history, so accounts never mix, and the
 login of the user's own default home is left alone.
 
 [INPUT]
-- toolkits.acp.auth._profiles::AuthProfile, all_profiles, profile_for (POS: Authentication profile registry.)
+- toolkits.acp.drivers::DriverSpec, all_drivers, driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 
 [OUTPUT]
 - AccountError, AccountExistsError, AccountNotFoundError: Why an account cannot be created, found or removed.
@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import AuthProfile, all_profiles, profile_for
+from myrm_agent_harness.toolkits.acp.drivers import DriverSpec, all_drivers, driver_for
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def is_valid_account_name(name: str) -> bool:
 class Account:
     """One named login of one agent: the directory its CLI keeps its state and its login in."""
 
-    profile: AuthProfile
+    profile: DriverSpec
     name: str
     home: Path
 
@@ -146,7 +146,7 @@ class AccountStore:
 
     def list(self, backend: str | None = None) -> list[Account]:
         """Every account (of one agent, when named), ordered by agent then name."""
-        profiles = (self._profile(backend),) if backend is not None else all_profiles()
+        profiles = (self._profile(backend),) if backend is not None else all_drivers()
         found: list[Account] = []
         for profile in profiles:
             try:
@@ -193,8 +193,8 @@ class AccountStore:
         return Account(profile, name, self._root / profile.backend / name)
 
     @staticmethod
-    def _profile(backend: str) -> AuthProfile:
-        profile = profile_for(backend)
+    def _profile(backend: str) -> DriverSpec:
+        profile = driver_for(backend)
         if profile is None:
             msg = f"Unknown external agent backend: {backend!r}"
             raise AccountError(msg)

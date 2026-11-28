@@ -2,7 +2,7 @@
 
 [INPUT]
 - myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
-- myrm_agent_harness.toolkits.acp.auth::effective_transport, cli_launch_args (POS: The transport and baseline launch args a known agent's contract names; a stored choice cannot override the transport)
+- myrm_agent_harness.toolkits.acp.drivers::effective_transport, cli_launch_args (POS: The transport and baseline launch args a known agent's contract names; a stored choice cannot override the transport)
 - myrm_agent_harness.toolkits.acp.types::RuntimeConfig, BackendType (POS: ACP runtime config contract and the kinds of backend the harness can run)
 - myrm_agent_harness.toolkits.acp.auth::is_valid_account_name (POS: Whether a name is one an account can have)
 - app.config.deploy_mode::is_local_mode (POS: deploy mode guard)
@@ -153,7 +153,7 @@ class _NormalizedRuntimeCfg:
 
 def _normalize_runtime_cfg(cfg: dict[str, object]) -> _NormalizedRuntimeCfg | None:
     """Normalize one external-agent entry so fingerprint and RuntimeConfig stay aligned."""
-    from myrm_agent_harness.toolkits.acp.auth import effective_transport
+    from myrm_agent_harness.toolkits.acp.drivers import effective_transport
 
     from app.services.external_agents.deployment_policy import blocked_backend
 
@@ -254,10 +254,10 @@ async def _resolve_external_agent_cfgs(
         return None
 
     try:
-        from myrm_agent_harness.toolkits.acp.auth import cli_launch_args, effective_transport
         from myrm_agent_harness.toolkits.acp.core.backend_detector import (
             BackendDetector,
         )
+        from myrm_agent_harness.toolkits.acp.drivers import cli_launch_args, effective_transport
 
         detector = BackendDetector()
         detected = await detector.detect(include_version=False)

@@ -1,7 +1,7 @@
 """The command line a known agent is started with: one resolver per transport.
 
 [INPUT]
-- toolkits.acp.auth._profiles::all_profiles, command_profile, profile_for (POS: Authentication profile registry; resolves a command to its agent contract)
+- toolkits.acp.drivers::all_drivers, command_driver, driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.types::AuthMode (POS: Core type definitions for the ACP runtime system)
 
 [OUTPUT]
@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import all_profiles, command_profile, profile_for
+from myrm_agent_harness.toolkits.acp.drivers.spec import all_drivers, command_driver, driver_for
 from myrm_agent_harness.toolkits.acp.types import AuthMode
 
 # Permission-mode args per CLI backend. Index 0 is the flag name, the remainder is its
@@ -77,8 +77,8 @@ def _check_tables() -> None:
     be read. Evaluated on each resolve so a half-added agent fails at first invocation instead of silently
     mis-resolving.
     """
-    cli_backends = {profile.backend for profile in all_profiles() if profile.transport == "cli"}
-    stripped_backends = {profile.backend for profile in all_profiles() if profile.transport != "app_server"}
+    cli_backends = {profile.backend for profile in all_drivers() if profile.transport == "cli"}
+    stripped_backends = {profile.backend for profile in all_drivers() if profile.transport != "app_server"}
     if set(_PERMISSION_FLAGS_BY_BACKEND) != stripped_backends or set(_PERMISSION_MODE_ARGS) != cli_backends:
         msg = (
             "Permission tables are out of sync with _PROFILES: "
@@ -122,7 +122,7 @@ def resolve_cli_args(
     baseline option (a preset's ``--output-format stream-json``) adds nothing; the config's own repeated
     options all stay, since ``-c a=1 -c b=2`` is two settings and not a duplicate.
     """
-    profile = profile_for(backend_or_command)
+    profile = driver_for(backend_or_command)
     if profile is None or profile.transport != "cli":
         # Not a CLI agent we know: we own no permission contract for it, so args pass through
         # untouched rather than stripping flags that may mean something else entirely.
@@ -162,7 +162,7 @@ def resolve_acp_args(command: str, configured_args: list[str]) -> AcpLaunch:
     past the policy, whatever mode the host selected. A command that is not a known ACP agent (the exact executable
     name decides, so an adapter that merely contains an agent's name is not one) keeps its args as configured.
     """
-    profile = command_profile(command)
+    profile = command_driver(command)
     if profile is None or profile.transport != "acp":
         return AcpLaunch(list(configured_args), [])
     _check_tables()
@@ -209,7 +209,7 @@ def resolve_app_server_args(command: str, configured_args: list[str], auth_mode:
     In ``api_key`` mode the login the runtime hands the server is kept in memory. A command that is not a known
     app-server agent keeps its args as configured.
     """
-    profile = command_profile(command)
+    profile = command_driver(command)
     if profile is None or profile.transport != "app_server":
         return AppServerLaunch(list(configured_args), [])
     kept: list[str] = []

@@ -6,7 +6,7 @@ the command to run: in the home of a named account when one is given, with the C
 find it, and spelled for each shell the user may be in.
 
 [INPUT]
-- toolkits.acp.auth._profiles::AuthProfile (POS: Authentication profile registry.)
+- toolkits.acp.drivers::DriverSpec (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.toolchains::toolchain_node_bin (POS: The managed Node a CLI installed by the isolated toolchain needs on PATH)
 
 [OUTPUT]
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import AuthProfile
+from myrm_agent_harness.toolkits.acp.drivers import DriverSpec
 from myrm_agent_harness.toolkits.acp.toolchains import toolchain_node_bin
 
 Shell = Literal["posix", "powershell", "cmd"]
@@ -102,7 +102,7 @@ class TerminalLogin:
         return " && ".join(statements)
 
 
-def terminal_login(profile: AuthProfile, executable: str, *, account_home: Path | None = None) -> TerminalLogin:
+def terminal_login(profile: DriverSpec, executable: str, *, account_home: Path | None = None) -> TerminalLogin:
     """The login of ``profile`` as typed to start the installed CLI at ``executable``.
 
     ``account_home``: the home of the account to log in to. Without one the CLI logs in to its own home.

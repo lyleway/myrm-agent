@@ -19,16 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import (
-    AuthStatus,
-    CredentialStore,
-    LoginReport,
-    log_out,
-    probe_login,
-    profile_for,
-)
-from myrm_agent_harness.toolkits.acp.auth._profiles import all_profiles
+from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialStore, LoginReport, log_out, probe_login
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
+from myrm_agent_harness.toolkits.acp.drivers import all_drivers, driver_for
 from tests.toolkits.acp.cli_contract import (
     CLAUDE_OAUTH,
     CODEX_API_KEY,
@@ -50,7 +43,7 @@ def _login_commands() -> list[object]:
     """Every command a profile of ``_BACKENDS`` runs about the login, by purpose."""
     commands: list[object] = []
     for backend in _BACKENDS:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         for purpose, args in (
             ("login", profile.login_args),
@@ -74,7 +67,7 @@ def probe_home(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_every_profile_with_a_login_command_is_judged_by_this_contract() -> None:
-    with_commands = {p.backend for p in all_profiles() if p.login_args or p.logout_args or p.login_probe}
+    with_commands = {p.backend for p in all_drivers() if p.login_args or p.logout_args or p.login_probe}
 
     assert with_commands == set(_BACKENDS)
 
@@ -100,7 +93,7 @@ def test_a_login_command_the_cli_does_not_have_is_refused_by_the_live_judge(prob
 @pytest.mark.parametrize("backend", _BACKENDS)
 async def test_the_cli_logs_itself_out_of_the_login_a_home_holds(backend: str, tmp_path: Path) -> None:
     binary = cli_binary(backend)
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     assert profile is not None and profile.logout_args
     env = probe_env(tmp_path)
     write_credential_file(tmp_path, backend, _LOGIN_CONTENT[backend])

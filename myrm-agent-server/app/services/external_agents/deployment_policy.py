@@ -7,7 +7,7 @@ server cannot tell what an arbitrary program runs.
 
 [INPUT]
 - app.platform_utils.deployment_capabilities::get_deployment_capabilities (POS: 部署能力语义注册表。启动时一次性计算并缓存当前部署环境支持的语义能力位。)
-- myrm_agent_harness.toolkits.acp.auth::profile_for (POS: Resolve an AuthProfile from a backend name or command) [lazy]
+- myrm_agent_harness.toolkits.acp.drivers::driver_for (POS: Resolve a DriverSpec from a backend name or command) [lazy]
 
 [OUTPUT]
 - blocked_backend: The known agent a command names when this deployment does not run it.
@@ -28,7 +28,7 @@ def blocked_backend(command_or_backend: str | None) -> str | None:
     if not blocked or not command_or_backend:
         return None
 
-    from myrm_agent_harness.toolkits.acp.auth import profile_for
+    from myrm_agent_harness.toolkits.acp.drivers import driver_for
 
-    profile = profile_for(command_or_backend)
+    profile = driver_for(command_or_backend)
     return profile.backend if profile is not None and profile.backend in blocked else None

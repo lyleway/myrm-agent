@@ -6,7 +6,7 @@ the host (``--permission-prompt-tool``). The runtime applies these to a command 
 other command as configured.
 
 [INPUT]
-- toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry; resolves a command to its backend)
+- toolkits.acp.drivers::driver_for (POS: The contract of every known agent: its login, launch, transport and permission facts)
 - toolkits.acp.mcp_servers::HttpMcpServer, McpServerConfig, StdioMcpServer (POS: The MCP servers a host hands a delegated agent)
 - toolkits.acp.runtime.image_blocks::ImageBlock (POS: Image input shared by CliRuntime and AcpRuntime)
 
@@ -36,7 +36,7 @@ import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from types import MappingProxyType
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock
 
@@ -52,7 +52,7 @@ _SESSION_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA
 
 def is_claude(command: str | None) -> bool:
     """Whether ``command`` is Claude Code (resolved like its auth profile)."""
-    profile = profile_for(command) if command else None
+    profile = driver_for(command) if command else None
     return profile is not None and profile.backend == "claude"
 
 

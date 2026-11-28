@@ -10,13 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import (
-    AuthStatus,
-    CredentialStore,
-    LoginStrategy,
-    known_backends,
-    profile_for,
-)
+from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialStore
+from myrm_agent_harness.toolkits.acp.drivers import LoginStrategy, driver_for, known_backends
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 from tests.toolkits.acp._logins import plant_login
@@ -31,7 +26,7 @@ class TestProfiles:
 
         The app-server agent (codex) has neither: its approval policy and sandbox are set with every turn.
         """
-        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+        from myrm_agent_harness.toolkits.acp.drivers import launch as _launch_args
 
         _launch_args._check_tables()
         assert set(_launch_args._PERMISSION_FLAGS_BY_BACKEND) == set(known_backends()) - {"codex"}
@@ -39,7 +34,7 @@ class TestProfiles:
 
     def test_permission_table_drift_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A half-configured backend must raise with diagnostics instead of mis-resolving."""
-        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+        from myrm_agent_harness.toolkits.acp.drivers import launch as _launch_args
 
         monkeypatch.delitem(_launch_args._PERMISSION_FLAGS_BY_BACKEND, "qwen")
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
@@ -47,7 +42,7 @@ class TestProfiles:
 
     def test_resolve_rejects_a_half_configured_backend(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """resolve_cli_args must fail loudly, never merge against missing permissions."""
-        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+        from myrm_agent_harness.toolkits.acp.drivers import launch as _launch_args
 
         monkeypatch.setattr(
             _launch_args,
@@ -59,14 +54,14 @@ class TestProfiles:
 
     def test_a_mode_mapping_on_an_acp_agent_is_rejected_loudly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An ACP agent asks the host; a mode mapping for it would never be read, so it is a mistake."""
-        from myrm_agent_harness.toolkits.acp.auth import _launch_args
+        from myrm_agent_harness.toolkits.acp.drivers import launch as _launch_args
 
         monkeypatch.setitem(_launch_args._PERMISSION_MODE_ARGS, "qwen", {"safe": ("--approval-mode", "plan")})
         with pytest.raises(ValueError, match="out of sync with _PROFILES"):
             _launch_args.resolve_acp_args("qwen", [])
 
     def test_cli_launch_args_only_exist_for_an_agent_driven_as_a_cli_process(self) -> None:
-        from myrm_agent_harness.toolkits.acp.auth._profiles import cli_launch_args
+        from myrm_agent_harness.toolkits.acp.drivers import cli_launch_args
 
         assert cli_launch_args("no-such-cli") == []
         assert cli_launch_args("claude") == ["-p", "--output-format", "stream-json", "--verbose"]
@@ -75,19 +70,19 @@ class TestProfiles:
 
     @pytest.mark.parametrize("mode", ["safe", "allow_all"])
     def test_the_cli_backend_resolves_arguments_in_every_mode(self, mode: str) -> None:
-        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
+        from myrm_agent_harness.toolkits.acp.drivers import resolve_cli_args
 
         assert resolve_cli_args("claude", [], mode), f"claude/{mode} resolved to no arguments"
 
     @pytest.mark.parametrize("backend", ["gemini", "qwen"])
     def test_every_acp_backend_resolves_arguments(self, backend: str) -> None:
-        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_acp_args
+        from myrm_agent_harness.toolkits.acp.drivers import resolve_acp_args
 
         assert resolve_acp_args(backend, []).args, f"{backend} resolved to no arguments"
 
     def test_mode_owned_flags_replace_stale_config_flags(self) -> None:
         """Stored configs carrying an old permission flag must not override the mode."""
-        from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_cli_args
+        from myrm_agent_harness.toolkits.acp.drivers import resolve_cli_args
 
         # A stored bypass flag must be replaced by the selected mode's own permission choice.
         stale_bypass = resolve_cli_args("claude", ["--dangerously-skip-permissions"], "safe")
@@ -113,13 +108,13 @@ class TestProfiles:
         ],
     )
     def test_profile_for_resolves(self, token: str, expected: str) -> None:
-        profile = profile_for(token)
+        profile = driver_for(token)
         assert profile is not None
         assert profile.backend == expected
 
     def test_profile_for_unknown(self) -> None:
-        assert profile_for("totally-unknown-agent") is None
-        assert profile_for("") is None
+        assert driver_for("totally-unknown-agent") is None
+        assert driver_for("") is None
 
     @pytest.mark.parametrize(
         ("backend", "strategy"),
@@ -131,25 +126,25 @@ class TestProfiles:
         ],
     )
     def test_who_runs_the_login(self, backend: str, strategy: LoginStrategy) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         assert profile.login_strategy is strategy
 
     @pytest.mark.parametrize("backend", sorted(known_backends()))
     def test_a_login_the_host_runs_has_a_command_to_run(self, backend: str) -> None:
-        profile = profile_for(backend)
+        profile = driver_for(backend)
         assert profile is not None
         if profile.login_strategy is LoginStrategy.BROWSER_OAUTH:
             assert profile.login_args
 
     def test_resolve_home_default(self) -> None:
-        profile = profile_for("codex")
+        profile = driver_for("codex")
         assert profile is not None
         home = profile.resolve_home({"HOME": "/home/u"})
         assert str(home) == "/home/u/.codex"
 
     def test_resolve_home_env_override(self) -> None:
-        profile = profile_for("codex")
+        profile = driver_for("codex")
         assert profile is not None
         home = profile.resolve_home({"HOME": "/home/u", "CODEX_HOME": "/persistent/.codex"})
         assert str(home) == "/persistent/.codex"

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialState, CredentialStore, log_out, profile_for
+from myrm_agent_harness.toolkits.acp.auth import AuthStatus, CredentialState, CredentialStore, log_out
+from myrm_agent_harness.toolkits.acp.drivers import driver_for
 from tests.toolkits.acp._fake_claude_login import FakeClaude, install_fake_claude
 
 pytestmark = pytest.mark.skipif(os.name != "posix", reason="the stand-in CLI is a shell script")
@@ -74,7 +75,7 @@ async def test_without_the_cli_only_the_files_go(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("backend", ["gemini", "qwen"])
 async def test_a_cli_without_a_logout_command_is_never_run(tmp_path: Path, backend: str) -> None:
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     assert profile is not None and profile.logout_args is None
     env = {**os.environ, profile.home_env: str(tmp_path)}
     credential = profile.resolve_credential_paths(env)[0]
@@ -94,7 +95,7 @@ async def test_an_unknown_backend_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("backend", "args"), [("claude", ("auth", "logout")), ("codex", ("logout",))])
 def test_the_agents_that_keep_a_login_the_cli_can_remove_say_how(backend: str, args: tuple[str, ...]) -> None:
-    profile = profile_for(backend)
+    profile = driver_for(backend)
     assert profile is not None
 
     assert profile.logout_args == args
