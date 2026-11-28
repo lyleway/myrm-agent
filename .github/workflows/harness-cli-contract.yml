@@ -127,6 +127,7 @@ jobs:
           tests/toolkits/acp/runtime/codex/test_real_codex_protocol_contract.py
           tests/toolkits/acp/runtime/codex/test_real_codex_app_server.py
           tests/toolkits/acp/runtime/codex/test_real_codex_threads.py
+          tests/toolkits/acp/test_real_http_mcp.py
 
   real-turns:
     name: Real turns (provider credentials)

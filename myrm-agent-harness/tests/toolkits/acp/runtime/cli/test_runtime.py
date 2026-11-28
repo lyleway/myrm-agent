@@ -12,7 +12,6 @@ from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     CliSessionRecord,
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEventType,
     StopReason,
@@ -40,9 +39,10 @@ class TestProperties:
         caps = capabilities("claude")
         assert caps.supports_resume is True
         assert caps.supports_streaming is True
-        assert caps.supports_mcp is False
+        assert caps.supports_mcp is True
         assert caps.supports_tools is False
         assert capabilities("my-agent").supports_resume is False
+        assert capabilities("my-agent").supports_mcp is False
         assert capabilities("/opt/custom/agent").supports_resume is False
 
     def test_is_alive_without_a_process_and_name(self) -> None:
@@ -370,30 +370,3 @@ class TestStopping:
         assert [e.data["error"].code for e in errors] == [AcpErrorCode.TIMEOUT]
         assert runtime._process is not None
         assert runtime._process.returncode is not None
-
-
-class TestMcpIgnored:
-    @pytest.mark.asyncio
-    async def test_session_mcp_servers_are_ignored_with_a_warning(
-        self, fake_cli: FakeCli, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        runtime = make_runtime(fake_cli)
-        servers = [
-            McpServerConfig(name="fs", command="mcp-fs", args=["--ro"]),
-            McpServerConfig(name="git", command="mcp-git"),
-        ]
-
-        with caplog.at_level("WARNING", logger="myrm_agent_harness.toolkits.acp.runtime.cli.runtime"):
-            events = [e async for e in runtime._do_run_turn("hello", "s1", mcp_servers=servers)]
-
-        assert RuntimeEventType.DONE in types_of(events)
-        assert any("cli_runtime_mcp_ignored" in r.message and "mcp_servers=2" in r.message for r in caplog.records)
-
-    @pytest.mark.asyncio
-    async def test_a_turn_without_mcp_servers_does_not_warn(
-        self, fake_cli: FakeCli, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        with caplog.at_level("WARNING", logger="myrm_agent_harness.toolkits.acp.runtime.cli.runtime"):
-            await run_turn(make_runtime(fake_cli))
-
-        assert not any("cli_runtime_mcp_ignored" in r.message for r in caplog.records)

@@ -9,7 +9,7 @@ interface via the unified RuntimePool.
 - myrm_agent_harness.toolkits.acp.delegate_report::STOP_NOTES, DelegateMeta, DelegateUsage, as_int, notice_step (POS: What a delegated turn reports)
 - myrm_agent_harness.toolkits.acp.runtime._base::truncate_response (POS: Base class for RuntimeBackend implementations.)
 - myrm_agent_harness.toolkits.acp.runtime.cli.claude::is_claude (POS: Launch knowledge of CliRuntime about the one CLI it knows)
-- myrm_agent_harness.toolkits.acp.types::AcpErrorCode, ContinuityStatus, RuntimeEventType, StopReason, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
+- myrm_agent_harness.toolkits.acp.types::MCP_NOT_ATTACHED_STATUS, AcpErrorCode, ContinuityStatus, RuntimeEventType, StopReason, delegation_session_id, normalize_workspace (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module)
 - myrm_agent_harness.toolkits.acp.types::DelegationPool, PermissionBroker (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module) [TYPE_CHECKING]
 - myrm_agent_harness.utils.runtime.cancellation::get_cancel_token (POS: Cancellation token mechanism. Provides request-level cancellation state management with graceful async cancellation support)
 - myrm_agent_harness.utils.runtime.cancel_hook::on_token_cancelled (POS: Cancellation bridge for streams that must be stopped from outside)
@@ -44,6 +44,7 @@ from myrm_agent_harness.toolkits.acp.delegate_report import (
 from myrm_agent_harness.toolkits.acp.runtime._base import truncate_response
 from myrm_agent_harness.toolkits.acp.runtime.cli.claude import is_claude
 from myrm_agent_harness.toolkits.acp.types import (
+    MCP_NOT_ATTACHED_STATUS,
     AcpErrorCode,
     ContinuityStatus,
     RuntimeEventType,
@@ -353,6 +354,8 @@ async def _run_turn_and_collect(
                     continuity = ContinuityStatus.of(status)
                     if continuity is not None:
                         await sink.emit(notice_step(agent_name, continuity))
+                    elif status == MCP_NOT_ATTACHED_STATUS:
+                        await sink.emit(notice_step(agent_name, status))
                     else:
                         await sink.emit(
                             {

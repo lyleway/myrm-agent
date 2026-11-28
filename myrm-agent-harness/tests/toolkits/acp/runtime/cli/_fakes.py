@@ -27,6 +27,7 @@ from myrm_agent_harness.toolkits.acp.types import (
 # ``stall_before_stdin`` makes it start reading its stdin only after that many seconds, like a CLI still running its start hooks.
 # ``asks`` (Claude only) is a list of ``{"tool_name", "input"}``: given ``--permission-prompt-tool``, the stand-in puts each
 # to the MCP tool named by ``--mcp-config`` over HTTP, as Claude Code does, and reports the answers in its text.
+# Like Claude Code, it takes any number of ``--mcp-config`` files and logs what each held while the turn ran.
 _SCRIPT = """\
 #!__PYTHON__
 import json, os, signal, sys, time, uuid
@@ -41,6 +42,7 @@ def read_json(path, default):
     return json.load(open(path)) if os.path.exists(path) else default
 
 
+mcp_config_paths = [argv[i + 1] for i, arg in enumerate(argv) if arg == "--mcp-config"]
 calls_path = os.path.join(here, "calls.jsonl")
 index = len(open(calls_path).readlines()) if os.path.exists(calls_path) else 0
 scenario = read_json(os.path.join(here, "scenario.json"), {})
@@ -50,7 +52,9 @@ if isinstance(scenario, list):
 time.sleep(scenario.get("stall_before_stdin", 0))
 prompt = sys.stdin.read() if "-p" in argv else (argv[-1] if argv else "")
 with open(calls_path, "a") as handle:
-    handle.write(json.dumps({"name": name, "argv": argv, "cwd": cwd, "prompt": prompt, "env": dict(os.environ)}) + "\\n")
+    mcp_configs = [read_json(path, None) for path in mcp_config_paths]
+    handle.write(json.dumps({"name": name, "argv": argv, "cwd": cwd, "prompt": prompt, "env": dict(os.environ),
+                             "mcp_configs": mcp_configs}) + "\\n")
 
 if scenario.get("ignore_sigterm"):
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -74,11 +78,11 @@ def hang_if(key):
         time.sleep(120)
 
 
-def ask_host(config_path, tool_name, tool_input):
+def ask_host(tool_name, tool_input):
     # Claude Code's permission prompt: initialize the MCP endpoint of --mcp-config, then call its tool.
     import urllib.request
 
-    server = json.load(open(config_path))["mcpServers"]["myrm_permissions"]
+    server = next(c["mcpServers"]["myrm_permissions"] for c in mcp_configs if "myrm_permissions" in c["mcpServers"])
     headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json", **server["headers"]}
 
     def post(request_id, method, params):
@@ -124,9 +128,8 @@ if name == "claude":
     time.sleep(scenario.get("silent_seconds", 0))
     answers = []
     if "--permission-prompt-tool" in argv and scenario.get("asks"):
-        config_path = argv[argv.index("--mcp-config") + 1]
         for ask in scenario["asks"]:
-            answers.append(ask_host(config_path, ask["tool_name"], ask["input"]))
+            answers.append(ask_host(ask["tool_name"], ask["input"]))
         json.dump(answers, open(os.path.join(here, "answers.json"), "w"))
     for number, status in enumerate(scenario.get("retry_statuses", [])):
         # Claude reports every retry of a failed request with the status the API answered; the turn can go on after.
@@ -218,6 +221,12 @@ class FakeCli:
             return []
         calls = [json.loads(line) for line in path.read_text().splitlines()]
         return [call for call in calls if name is None or call["name"] == name]
+
+    def mcp_configs(self, name: str = "claude") -> list[dict[str, dict[str, dict[str, object]]]]:
+        """What each ``--mcp-config`` file of the first call held while its turn ran, in command-line order."""
+        configs = self.calls(name)[0]["mcp_configs"]
+        assert isinstance(configs, list)
+        return configs
 
     def resume_args(self, name: str = "claude") -> list[str | None]:
         """The CLI session id each call asked to resume (None for a fresh session)."""

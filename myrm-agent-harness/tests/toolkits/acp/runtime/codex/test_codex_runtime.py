@@ -14,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
     CliSessionRecord,
-    McpServerConfig,
     RuntimeEvent,
     RuntimeEventType,
 )
@@ -147,18 +147,16 @@ async def test_images_travel_as_local_files_and_never_as_arguments(tmp_path: Pat
     assert server.starts()[0]["argv"] == ["app-server"]
 
 
-async def test_the_mcp_servers_of_the_host_are_offered_to_the_thread_under_valid_names(
-    tmp_path: Path, workspace: Path
-) -> None:
+async def test_the_mcp_servers_of_the_host_are_offered_to_the_thread(tmp_path: Path, workspace: Path) -> None:
     server = ScriptedServer(tmp_path / "s", {"turns": [[complete()]]})
-    pool = server.pool(mcp_servers=[McpServerConfig(name="my server.1", command="mcp", args=["--x"], env={"A": "b"})])
+    pool = server.pool(mcp_servers=[StdioMcpServer(name="my-server_1", command="mcp", args=["--x"], env={"A": "b"})])
     try:
         await run_turn(pool, workspace)
     finally:
         await pool.close_all()
 
     (thread,) = server.received("thread/start")
-    assert thread["config"] == {"mcp_servers": {"my_server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}}}}
+    assert thread["config"] == {"mcp_servers": {"my-server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}}}}
 
 
 async def test_the_notifications_of_another_turn_are_not_this_turns(tmp_path: Path, workspace: Path) -> None:

@@ -43,6 +43,7 @@ from dataclasses import dataclass, field
 
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_app_server_args
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime._base import (
     KEEPALIVE_SECONDS,
     BaseRuntime,
@@ -76,7 +77,6 @@ from myrm_agent_harness.toolkits.acp.types import (
     BackendCapabilities,
     BackendStatus,
     CliSessionStore,
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -160,7 +160,7 @@ class CodexRuntime(BaseRuntime):
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:

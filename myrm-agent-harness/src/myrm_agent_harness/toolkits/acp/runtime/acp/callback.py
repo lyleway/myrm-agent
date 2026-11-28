@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -145,8 +145,12 @@ class AcpCallbackHandler:
     def event_queue(self) -> asyncio.Queue[RuntimeEvent | None]:
         return self._event_queue
 
-    def begin_turn(self, permissions: PermissionBroker | None, session_id: str) -> None:
+    def begin_turn(
+        self, permissions: PermissionBroker | None, session_id: str, read_only_servers: Collection[str] = ()
+    ) -> None:
         """Start the turn ``session_id`` (the host's id for it): ``permissions`` is who is asked while it runs.
+
+        The tools of ``read_only_servers`` (MCP servers the host declared ``read_only``) run without asking.
 
         What the agent sent before is not the turn's output and is dropped: the history of a session it was given
         back with ``session/load``, which the SDK has handed over in full by the time that call returns.
@@ -159,7 +163,7 @@ class AcpCallbackHandler:
                 self._event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        self._policy.begin_turn(permissions, session_id)
+        self._policy.begin_turn(permissions, session_id, read_only_servers)
 
     def end_turn(self) -> None:
         """End the turn: nobody is asked for what the agent still does after it, and a request that waits is cancelled."""

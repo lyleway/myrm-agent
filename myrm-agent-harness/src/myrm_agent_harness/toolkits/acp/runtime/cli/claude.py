@@ -1,11 +1,13 @@
-"""Claude Code's command line — how a turn is resumed, limited, streamed, given images and made to ask the host.
+"""Claude Code's command line — how a turn is resumed, limited, streamed, given images, MCP servers and made to ask the host.
 
 Claude resumes with a ``--resume <id>`` flag, has a native turn limit, takes an attached image as a base64 block in
-its stream-json input and hands its permission prompts to the host (``--permission-prompt-tool``). The runtime
-applies these to a command that is Claude Code and spawns any other command as configured.
+its stream-json input, reads the MCP servers of a host from a ``--mcp-config`` file and hands its permission prompts to
+the host (``--permission-prompt-tool``). The runtime applies these to a command that is Claude Code and spawns any
+other command as configured.
 
 [INPUT]
 - toolkits.acp.auth._profiles::profile_for (POS: Authentication profile registry; resolves a command to its backend)
+- toolkits.acp.mcp_servers::HttpMcpServer, McpServerConfig, StdioMcpServer (POS: The MCP servers a host hands a delegated agent)
 - toolkits.acp.runtime.image_blocks::ImageBlock (POS: Image input shared by CliRuntime and AcpRuntime)
 
 [OUTPUT]
@@ -15,6 +17,7 @@ applies these to a command that is Claude Code and spawns any other command as c
 - is_resuming / with_resume: the configured args already resume / the args continuing a session
 - with_max_turns / with_partial_messages: Claude's own turn limit and text-as-written streaming
 - with_image_blocks: the args and stdin prompt carrying a turn's images
+- mcp_config_file / with_mcp_servers: the ``--mcp-config`` file of a turn's MCP servers, and the args that name it
 - with_permission_bridge: the args sending Claude's permission prompts to the host
 
 [POS]
@@ -25,12 +28,16 @@ is a plain CLI.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
-from collections.abc import Mapping, Sequence
+import tempfile
+from collections.abc import Iterator, Mapping, Sequence
 from types import MappingProxyType
 
 from myrm_agent_harness.toolkits.acp.auth._profiles import profile_for
+from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.image_blocks import ImageBlock
 
 # Without it a turn stays open until every background task the model started has ended, so a task that never ends
@@ -101,3 +108,43 @@ def with_image_blocks(args: list[str], prompt: str, blocks: Sequence[ImageBlock]
 def with_permission_bridge(args: list[str], tool: str, config_path: str) -> list[str]:
     """``--permission-prompt-tool`` names the MCP tool to ask; ``--mcp-config`` connects Claude to it."""
     return [*args, "--permission-prompt-tool", tool, "--mcp-config", config_path]
+
+
+def _mcp_entry(server: McpServerConfig) -> dict[str, object]:
+    match server:
+        case StdioMcpServer():
+            entry: dict[str, object] = {"command": server.command, "args": list(server.args)}
+            if server.env:
+                entry["env"] = dict(server.env)
+        case HttpMcpServer():
+            entry = {"type": "http", "url": server.url}
+            if server.headers:
+                entry["headers"] = dict(server.headers)
+    return entry
+
+
+@contextlib.contextmanager
+def mcp_config_file(servers: Sequence[McpServerConfig]) -> Iterator[str]:
+    """The ``--mcp-config`` file of ``servers``, for as long as the turn runs.
+
+    A file and not an inline argument: a header or an environment value may be a credential, and argv is readable by
+    every process of the machine. ``mkstemp`` creates the file readable by this user only.
+    """
+    descriptor, path = tempfile.mkstemp(prefix="myrm-mcp-", suffix=".json")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as config_file:
+            json.dump({"mcpServers": {server.name: _mcp_entry(server) for server in servers}}, config_file)
+        yield path
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(path)
+
+
+def with_mcp_servers(args: list[str], config_path: str, servers: Sequence[McpServerConfig]) -> list[str]:
+    """``--mcp-config`` connects Claude to ``servers``; the tools of a read-only one run without asking.
+
+    ``--allowedTools mcp__<name>`` is Claude's own way to say that: it covers every tool of the server, which only
+    reads, so the permission prompt that would reach the host for each call never does.
+    """
+    allowed = [f"mcp__{server.name}" for server in servers if server.read_only]
+    return [*args, "--mcp-config", config_path, *(["--allowedTools", ",".join(allowed)] if allowed else [])]

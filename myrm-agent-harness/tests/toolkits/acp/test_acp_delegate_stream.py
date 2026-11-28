@@ -10,6 +10,7 @@ import pytest
 from myrm_agent_harness.toolkits.acp.acp_agent_tools import _run_turn_and_collect
 from myrm_agent_harness.toolkits.acp.delegate_report import STOP_NOTES
 from myrm_agent_harness.toolkits.acp.types import (
+    MCP_NOT_ATTACHED_STATUS,
     AcpError,
     AcpErrorCode,
     ContinuityStatus,
@@ -17,6 +18,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     StopReason,
     create_event,
+    mcp_not_attached_event,
 )
 
 _TOOLS = "myrm_agent_harness.toolkits.acp.acp_agent_tools"
@@ -267,6 +269,30 @@ class TestProgressSteps:
             {
                 "type": "tasks_steps",
                 "step_key": f"delegation_agent_{status.value}",
+                "tool_name": "delegate:agent",
+                "status": "completed",
+                "data": [],
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_servers_an_agent_was_not_given_are_a_finished_step_without_text(self) -> None:
+        """The host's servers are not named to the user: which ones are left out is the host's to word."""
+        pool = _pool("claude")
+        sink = AsyncMock()
+
+        async def stream(name, task, session_id, *, workspace, mode="persistent", permissions=None):
+            yield mcp_not_attached_event(session_id, ["memory"])
+            yield create_event(RuntimeEventType.DONE, session_id, stop_reason="end_turn")
+
+        pool.run_turn = stream
+        with patch(f"{_TOOLS}.get_tool_progress_sink", return_value=sink):
+            await _run_turn_and_collect(pool, "agent", "task", workspace=_WORKSPACE, mode="persistent")
+
+        assert self._emitted(sink) == [
+            {
+                "type": "tasks_steps",
+                "step_key": f"delegation_agent_{MCP_NOT_ATTACHED_STATUS}",
                 "tool_name": "delegate:agent",
                 "status": "completed",
                 "data": [],

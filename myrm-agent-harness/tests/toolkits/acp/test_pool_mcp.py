@@ -3,21 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from unittest.mock import MagicMock
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.cli.runtime import CliRuntime
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
+    MCP_NOT_ATTACHED_STATUS,
     BackendCapabilities,
-    McpServerConfig,
     RuntimeConfig,
+    RuntimeEvent,
     RuntimeEventType,
     create_event,
 )
 
 _WORKSPACE = "/tmp/ws"
+
+
+def _withheld(events: list[RuntimeEvent]) -> list[object]:
+    """The server names of every ``mcp_not_attached`` status update in a turn."""
+    return [
+        event.data["servers"]
+        for event in events
+        if event.type == RuntimeEventType.STATUS_UPDATE and event.data.get("status") == MCP_NOT_ATTACHED_STATUS
+    ]
 
 
 @pytest.mark.asyncio
@@ -28,7 +40,7 @@ async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
         RuntimeConfig(
             backend_type="cli",
             command="my-agent",
-            mcp_servers=[McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])],
+            mcp_servers=[StdioMcpServer(name="fs", command="mcp-fs", args=["--ro"])],
         ),
     )
 
@@ -39,7 +51,7 @@ async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):
@@ -55,6 +67,7 @@ async def test_run_turn_forwards_config_mcp_servers_to_backend() -> None:
         event async for event in pool.run_turn("my-agent", "hello", session_id="my-agent-default", workspace=_WORKSPACE)
     ]
     assert events[-1].type == RuntimeEventType.DONE
+    assert _withheld(events) == [], "a backend that takes servers has nothing to disclose"
 
 
 @pytest.mark.asyncio
@@ -64,13 +77,13 @@ async def test_run_turn_explicit_mcp_overrides_config() -> None:
 
     backend = MagicMock()
     backend.capabilities = BackendCapabilities(supports_mcp=True)
-    captured: list[list[McpServerConfig] | None] = []
+    captured: list[Sequence[McpServerConfig] | None] = []
 
     async def fake_run_turn(
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):
@@ -80,7 +93,7 @@ async def test_run_turn_explicit_mcp_overrides_config() -> None:
     backend.run_turn = fake_run_turn
     pool.get = MagicMock(return_value=backend)
 
-    override = [McpServerConfig(name="x", command="cmd", args=[])]
+    override = [StdioMcpServer(name="x", command="cmd", args=[])]
     async for _ in pool.run_turn(
         "claude",
         "hi",
@@ -113,7 +126,7 @@ async def test_run_turn_serializes_same_backend_concurrent_turns() -> None:
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):
@@ -156,7 +169,7 @@ async def test_run_turn_allows_parallel_different_backends() -> None:
             prompt: str,
             session_id: str,
             *,
-            mcp_servers: list[McpServerConfig] | None = None,
+            mcp_servers: Sequence[McpServerConfig] | None = None,
             images: list[str] | None = None,
             permissions: object | None = None,
         ):
@@ -192,13 +205,13 @@ async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
     assert config is not None
 
     rt = CliRuntime("my-agent", config, workspace=_WORKSPACE)
-    captured: list[list[McpServerConfig] | None] = []
+    captured: list[Sequence[McpServerConfig] | None] = []
 
     async def fake_run_turn(
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):
@@ -208,17 +221,20 @@ async def test_run_turn_skips_mcp_for_unsupported_backend() -> None:
     rt.run_turn = fake_run_turn  # type: ignore[method-assign]
     pool.get = MagicMock(return_value=rt)
 
-    override = [McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])]
-    async for _ in pool.run_turn(
-        "my-agent",
-        "hello",
-        session_id="my-agent-default",
-        mcp_servers=override,
-        workspace=_WORKSPACE,
-    ):
-        pass
+    override = [StdioMcpServer(name="fs", command="mcp-fs", args=["--ro"])]
+    events = [
+        event
+        async for event in pool.run_turn(
+            "my-agent",
+            "hello",
+            session_id="my-agent-default",
+            mcp_servers=override,
+            workspace=_WORKSPACE,
+        )
+    ]
 
     assert captured == [None], "unsupported backend must receive no mcp_servers"
+    assert _withheld(events) == [["fs"]], "the turn must say which servers the backend did not take"
 
 
 @pytest.mark.asyncio
@@ -230,20 +246,20 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
         RuntimeConfig(
             backend_type="cli",
             command="my-agent",
-            mcp_servers=[McpServerConfig(name="fs", command="mcp-fs", args=["--ro"])],
+            mcp_servers=[StdioMcpServer(name="fs", command="mcp-fs", args=["--ro"])],
         ),
     )
     config = pool.get_config("my-agent")
     assert config is not None
 
     rt = CliRuntime("my-agent", config, workspace=_WORKSPACE)
-    captured: list[list[McpServerConfig] | None] = []
+    captured: list[Sequence[McpServerConfig] | None] = []
 
     async def fake_run_turn(
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):
@@ -253,7 +269,9 @@ async def test_run_turn_skips_config_mcp_for_unsupported_backend() -> None:
     rt.run_turn = fake_run_turn  # type: ignore[method-assign]
     pool.get = MagicMock(return_value=rt)
 
-    async for _ in pool.run_turn("my-agent", "hello", session_id="my-agent-default", workspace=_WORKSPACE):
-        pass
+    events = [
+        event async for event in pool.run_turn("my-agent", "hello", session_id="my-agent-default", workspace=_WORKSPACE)
+    ]
 
     assert captured == [None], "unsupported backend must not receive config mcp_servers"
+    assert _withheld(events) == [["fs"]], "the turn must say which servers the backend did not take"

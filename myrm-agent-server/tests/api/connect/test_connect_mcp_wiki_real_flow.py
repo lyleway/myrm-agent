@@ -33,8 +33,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.connect.router import router as connect_router
+from app.api.mcp.desktop_scope import clear_mcp_desktop_sessions
 from app.api.mcp.endpoint import (
-    clear_mcp_desktop_sessions,
     setup_mcp_endpoint,
     shutdown_mcp_endpoint,
 )

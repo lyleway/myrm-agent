@@ -19,6 +19,7 @@ import {
   PERMISSION_MODE_OPTIONS,
   accountBackend,
   effectiveAuthMode,
+  memoryNeedsTrustedFolder,
   normalizePermissionMode,
   permissionHintKey,
   toDraft,
@@ -211,6 +212,23 @@ const ExternalAgentForm = memo(
           authMode={authMode}
           onChange={(envRows) => onChange({ ...draft, envRows })}
         />
+
+        <div className="space-y-1.5" data-testid="external-agent-share-memory">
+          <div className="flex items-center gap-2">
+            <Switch
+              id="external-agent-share-memory"
+              checked={draft.shareMemory === true}
+              onCheckedChange={(checked) => onChange({ ...draft, shareMemory: checked })}
+            />
+            <label htmlFor="external-agent-share-memory" className="text-sm">
+              {t('shareMemory')}
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">{t('shareMemoryHint')}</p>
+          {memoryNeedsTrustedFolder(draft.command) && (
+            <p className="text-xs text-muted-foreground">{t('shareMemoryTrustedFolderHint')}</p>
+          )}
+        </div>
 
         <div className="flex items-center gap-2">
           <Switch checked={draft.enabled} onCheckedChange={(checked) => onChange({ ...draft, enabled: checked })} />

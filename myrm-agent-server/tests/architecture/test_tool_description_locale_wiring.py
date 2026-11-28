@@ -40,7 +40,7 @@ _EXEMPT = {
         "fallback tool that the registry priority hides unless the built-in tools are switched off"
     ),
     "server:api/background_tasks/test_fixtures.py::create_bash_code_execute_tool": "developer fixture, English by design",
-    "server:api/mcp/endpoint.py::create_wiki_agent_tools": "an MCP client has no session language",
+    "server:api/mcp/wiki_scope.py::create_wiki_agent_tools": "an MCP client has no session language",
 }
 # Calls that still leave it out and are to be fixed. An entry fails as stale as soon as its call passes the locale.
 _KNOWN_GAPS = {

@@ -65,8 +65,8 @@ async def test_request_binds_the_token_agents_manager(
     with (
         patch("app.services.connect.get_connect_service", return_value=service),
         patch("app.api.mcp.endpoint._memory_manager_for_agent", agent_manager),
-        patch("app.api.mcp.endpoint._wiki_boundary_enabled_for_agent", AsyncMock(return_value=False)),
-        patch("app.api.mcp.endpoint._is_desktop_control_enabled_for_agent", AsyncMock(return_value=False)),
+        patch("app.api.mcp.endpoint.wiki_boundary_enabled_for_agent", AsyncMock(return_value=False)),
+        patch("app.api.mcp.endpoint.is_desktop_control_enabled_for_agent", AsyncMock(return_value=False)),
     ):
         try:
             await setup_mcp_endpoint(app)

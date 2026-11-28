@@ -34,8 +34,8 @@ from fastapi.testclient import TestClient
 from myrm_agent_harness.toolkits.wiki import WikiPendingEditsManager
 
 from app.api.connect.router import router as connect_router
+from app.api.mcp.desktop_scope import clear_mcp_desktop_sessions
 from app.api.mcp.endpoint import (
-    clear_mcp_desktop_sessions,
     setup_mcp_endpoint,
     shutdown_mcp_endpoint,
 )

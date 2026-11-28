@@ -1,6 +1,6 @@
 """Tests for archiving wiki_query answers back into raw/ without blocking the result."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -9,8 +9,10 @@ from myrm_agent_harness.toolkits.wiki import (
     WikiConfig,
     WikiQueryEngine,
     WikiStructure,
+    create_wiki_agent_tools,
     create_wiki_tools,
 )
+from myrm_agent_harness.toolkits.wiki.core.types import QueryResult, SourceSnippet
 
 
 @pytest.mark.asyncio
@@ -109,3 +111,45 @@ class TestQueryArchiveNonBlocking:
         assert isinstance(result, dict)
         assert "content" in result
         assert "metadata" in result
+
+
+class TestReadOnlyQuery:
+    """Tools built with ``archive_queries=False`` answer without writing anything into the wiki."""
+
+    @staticmethod
+    def _archivable_answer() -> QueryResult:
+        return QueryResult(
+            question="What is Python?",
+            answer="Python is a programming language.",
+            related_articles=["/concepts/python.md"],
+            should_archive=True,
+            confidence_score=0.95,
+            source_snippets=[
+                SourceSnippet(article_path="/concepts/python.md", article_name="python", snippet="Python is…")
+            ],
+        )
+
+    async def _ask(self, wiki_structure: WikiStructure, mock_llm: MagicMock, *, archive_queries: bool) -> object:
+        config = WikiConfig()
+        compiler = WikiCompiler(mock_llm, wiki_structure, config)
+        query_engine = WikiQueryEngine(mock_llm, wiki_structure, config)
+        tools = create_wiki_agent_tools(compiler, query_engine, wiki_structure, archive_queries=archive_queries)
+        query_tool = next(t for t in tools if t.name == "wiki_query_tool")
+        with patch.object(query_engine, "query", new=AsyncMock(return_value=self._archivable_answer())):
+            return await query_tool.ainvoke({"question": "What is Python?"})
+
+    async def test_a_confident_answer_is_filed_back_by_default(
+        self, wiki_structure: WikiStructure, mock_llm: MagicMock
+    ) -> None:
+        await self._ask(wiki_structure, mock_llm, archive_queries=True)
+
+        assert len(list(wiki_structure.raw_dir.glob("query_archive_*.md"))) == 1
+
+    async def test_a_read_only_query_files_nothing_back_and_still_answers(
+        self, wiki_structure: WikiStructure, mock_llm: MagicMock
+    ) -> None:
+        result = await self._ask(wiki_structure, mock_llm, archive_queries=False)
+
+        assert list(wiki_structure.raw_dir.glob("query_archive_*.md")) == []
+        assert isinstance(result, dict)
+        assert "Python is a programming language." in str(result["content"])

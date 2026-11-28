@@ -128,13 +128,14 @@ class ExternalAgentsMixin:
 
         from app.services.external_agents.cli_session_store import ChatCliSessionStore
 
-        fingerprint = _config_fingerprint(agent_cfgs)
+        memory_agent_id = getattr(self, "agent_id", None) or "default"
+        fingerprint = _config_fingerprint(agent_cfgs, memory_agent_id=memory_agent_id)
         chat_scope_id = _runtime_pool_scope_id(self)
 
         async def _build_pool() -> RuntimePool:
             session_store = ChatCliSessionStore(chat_scope_id) if chat_scope_id else None
             pool = RuntimePool(max_concurrent=4, cli_session_store=session_store)
-            _register_backends_on_pool(pool, agent_cfgs)
+            _register_backends_on_pool(pool, agent_cfgs, memory_agent_id=memory_agent_id)
             return pool
 
         pool: DelegationPool

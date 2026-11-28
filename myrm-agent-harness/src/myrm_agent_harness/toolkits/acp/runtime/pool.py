@@ -12,8 +12,9 @@ resident processes of an idle pool while CLI backends keep their resume state. A
 
 
 [INPUT]
-- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, normalize_workspace (POS: ACP runtime type definitions layer.)
+- myrm_agent_harness.toolkits.acp.types::RuntimeBackend, RuntimeConfig, RuntimeEvent, CliSessionStore, PermissionBroker, delegation_session_id, images_not_sent_event, mcp_not_attached_event, normalize_workspace (POS: ACP runtime type definitions layer.)
 - myrm_agent_harness.toolkits.acp.runtime.*::AcpRuntime, CliRuntime, CodexRuntime (POS: runtime backend implementations)
+- myrm_agent_harness.toolkits.acp.mcp_servers::McpServerConfig (POS: the MCP servers a host hands a delegated agent)
 - myrm_agent_harness.toolkits.acp.auth._profiles::effective_transport (POS: Authentication profile registry; the transport a known agent's contract names)
 - myrm_agent_harness.core.security.redact::command_preview (POS: masked, cut command for a log line)
 
@@ -30,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
 from dataclasses import replace
 from uuid import uuid4
@@ -38,10 +39,10 @@ from uuid import uuid4
 from myrm_agent_harness.core.security.redact import command_preview
 from myrm_agent_harness.toolkits.acp.auth._profiles import effective_transport
 from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.types import (
     RESIDENT_BACKEND_TYPES,
     CliSessionStore,
-    McpServerConfig,
     PermissionBroker,
     RuntimeBackend,
     RuntimeConfig,
@@ -49,6 +50,7 @@ from myrm_agent_harness.toolkits.acp.types import (
     RuntimeEventType,
     delegation_session_id,
     images_not_sent_event,
+    mcp_not_attached_event,
     normalize_workspace,
 )
 
@@ -211,7 +213,7 @@ class RuntimePool:
         *,
         workspace: str,
         mode: str = "persistent",
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
@@ -238,15 +240,16 @@ class RuntimePool:
         workspace = normalize_workspace(workspace)
 
         config = self._configs.get(name)
-        effective_mcp: list[McpServerConfig] | None = (
+        effective_mcp: Sequence[McpServerConfig] | None = (
             mcp_servers if mcp_servers is not None else (list(config.mcp_servers) if config is not None else [])
         )
 
         oneshot = mode == "oneshot"
         async with self._semaphore:
             backend = self._new_backend(name, workspace) if oneshot else self.get(name, workspace)
-            # MCP 注入前能力断言：仅向声明支持的后端注入。静默忽略会让调用方
-            # 误以为 MCP 已生效，必须显式告警。
+            # MCP servers go only to a backend that declares it takes them; the turn says which were withheld, so a
+            # host does not mistake the answer for one that had them.
+            mcp_withheld: list[str] = []
             if effective_mcp and not backend.capabilities.supports_mcp:
                 logger.warning(
                     "pool_mcp_skipped backend=%s type=%s mcp_servers=%d reason=unsupported",
@@ -254,6 +257,7 @@ class RuntimePool:
                     type(backend).__name__,
                     len(effective_mcp),
                 )
+                mcp_withheld = [server.name for server in effective_mcp]
                 effective_mcp = None
             images_withheld = 0
             if images and not backend.capabilities.supports_images:
@@ -281,6 +285,8 @@ class RuntimePool:
                             permissions=permissions,
                         )
                     ) as events:
+                        if mcp_withheld:
+                            yield mcp_not_attached_event(session_id, mcp_withheld)
                         if images_withheld:
                             yield images_not_sent_event(session_id, images_withheld)
                         async for event in events:

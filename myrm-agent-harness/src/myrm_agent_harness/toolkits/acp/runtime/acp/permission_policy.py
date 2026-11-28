@@ -2,6 +2,7 @@
 
 [INPUT]
 - toolkits.acp.types::PermissionBroker, PermissionMode, PermissionRequest, PermissionVerdict (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
+- toolkits.acp.runtime.acp.mcp_origin::mcp_server_of (POS: Which MCP server a tool call of an ACP agent belongs to, as the agent says it in the request for permission)
 - acp.schema::PermissionOption, ToolCallUpdate, RequestPermissionResponse (POS: ACP SDK wire types; imported lazily because the SDK is an optional extra)
 
 [OUTPUT]
@@ -9,8 +10,9 @@
 
 [POS]
 Permission policy of the ACP runtime backend. ``allow_all`` answers every request with the agent's own allow option.
-``safe`` allows what only reads, and puts everything else to the turn's ``PermissionBroker``; with no broker nobody
-can say yes, so the answer is a refusal (the runtime's ``TurnPermissions`` already turns a failing broker into one).
+``safe`` allows what only reads, and what the agent says is a tool of an MCP server the host declared ``read_only``
+for the turn, and puts everything else to the turn's ``PermissionBroker``; with no broker nobody can say yes, so the
+answer is a refusal (the runtime's ``TurnPermissions`` already turns a failing broker into one).
 An edit a person allowed is remembered by the files it names, so the agent's following ``fs/write_text_file`` of
 those files is not asked a second time. A request still waiting for a person when the turn ends or is cancelled is
 answered as cancelled, the outcome ACP gives a cancelled turn: an agent waiting for the answer does not end its
@@ -22,9 +24,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
+from myrm_agent_harness.toolkits.acp.runtime.acp.mcp_origin import mcp_server_of
 from myrm_agent_harness.toolkits.acp.types import (
     PermissionBroker,
     PermissionMode,
@@ -54,13 +57,21 @@ class AcpPermissionPolicy:
         self._workspace = workspace
         self._broker: PermissionBroker | None = None
         self._session_id = ""
+        self._read_only_servers: Collection[str] = ()
         self._allowed_files: set[str] = set()
         self._asking: set[asyncio.Future[PermissionVerdict]] = set()
 
-    def begin_turn(self, broker: PermissionBroker | None, session_id: str) -> None:
-        """Start the turn ``session_id`` (the host's id for it): its broker replaces the last turn's, no file is allowed yet."""
+    def begin_turn(
+        self, broker: PermissionBroker | None, session_id: str, read_only_servers: Collection[str] = ()
+    ) -> None:
+        """Start the turn ``session_id`` (the host's id for it): its broker and read-only servers replace the last turn's.
+
+        No file is allowed yet. The tools of ``read_only_servers`` (the MCP servers the host declared ``read_only``
+        for this turn) run without asking.
+        """
         self._broker = broker
         self._session_id = session_id
+        self._read_only_servers = read_only_servers
         self._allowed_files.clear()
 
     def end_turn(self) -> None:
@@ -72,7 +83,7 @@ class AcpPermissionPolicy:
     async def answer(self, tool_call: ToolCallUpdate, options: Sequence[PermissionOption]) -> RequestPermissionResponse:
         """The answer to one ``session/request_permission``: one of the agent's own options, or a cancel."""
         kind = tool_call.kind or "other"
-        if self._mode == "allow_all" or kind in _READ_KINDS:
+        if self._mode == "allow_all" or kind in _READ_KINDS or mcp_server_of(tool_call, self._read_only_servers):
             return _choose(options, _ALLOW_OPTIONS)
         request = self._request(tool_call, kind)
         verdict = await self._ask(request)

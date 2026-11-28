@@ -23,6 +23,8 @@ describe('getStepTitle delegation steps', () => {
     ['delegation_claude_session_expired', 'delegation_session_expired|claude'],
     ['delegation_claude_session_workspace_changed', 'delegation_session_workspace_changed|claude'],
     ['delegation_claude_images_not_sent', 'delegation_images_not_sent|claude'],
+    ['delegation_claude_mcp_not_attached', 'delegation_mcp_not_attached|claude'],
+    ['delegation_claude_mcp_not_connected', 'delegation_mcp_not_connected|claude'],
     ['delegation_claude_turn_limit', 'delegation_turn_limit|claude'],
     ['delegation_claude_max_tokens', 'delegation_max_tokens|claude'],
     ['delegation_claude_refusal', 'delegation_refusal|claude'],
@@ -44,6 +46,9 @@ describe('getStepTitle delegation steps', () => {
     );
     expect(getStepTitle(delegationStep('delegation_code_review_max_tokens'), t)).toBe(
       'delegation_max_tokens|code_review',
+    );
+    expect(getStepTitle(delegationStep('delegation_my_mcp_mcp_not_connected'), t)).toBe(
+      'delegation_mcp_not_connected|my_mcp',
     );
   });
 

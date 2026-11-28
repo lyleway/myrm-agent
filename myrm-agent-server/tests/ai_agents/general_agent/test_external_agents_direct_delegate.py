@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
 
 from app.ai_agents.general_agent.external_agents import ExternalAgentsMixin
 
@@ -26,7 +27,7 @@ async def test_direct_delegate_stream_maps_runtime_events() -> None:
     from myrm_agent_harness.toolkits.acp.types import RuntimeEventType
 
     mock_pool = MagicMock()
-    mock_pool.get_config.return_value = SimpleNamespace(auth_mode="api_key", command="claude")
+    mock_pool.get_config.return_value = RuntimeConfig(backend_type="cli", command="claude", auth_mode="api_key")
 
     async def _fake_run_turn(*_args: object, **_kwargs: object):
         yield SimpleNamespace(type=RuntimeEventType.TEXT_DELTA, data={"content": "hello"})
@@ -64,7 +65,7 @@ async def test_direct_delegate_stream_cancels_when_token_set() -> None:
     from myrm_agent_harness.utils import CancellationToken
 
     mock_pool = MagicMock()
-    mock_pool.get_config.return_value = SimpleNamespace(auth_mode="subscription", command="claude")
+    mock_pool.get_config.return_value = RuntimeConfig(backend_type="cli", command="claude", auth_mode="subscription")
     cancel_token = CancellationToken()
 
     async def _fake_run_turn(*_args: object, **_kwargs: object):
@@ -93,7 +94,7 @@ async def test_direct_delegate_stream_words_a_failure_in_the_session_language() 
     from myrm_agent_harness.toolkits.acp.types import AcpError, AcpErrorCode, RuntimeEventType
 
     mock_pool = MagicMock()
-    mock_pool.get_config.return_value = SimpleNamespace(auth_mode="subscription", command="claude")
+    mock_pool.get_config.return_value = RuntimeConfig(backend_type="cli", command="claude", auth_mode="subscription")
 
     async def _fake_run_turn(*_args: object, **_kwargs: object):
         yield SimpleNamespace(

@@ -23,12 +23,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import TurnPolicy, resume_params, thread_params
 from myrm_agent_harness.toolkits.acp.runtime.codex.rpc import JsonRpcPeer, RpcError
 from myrm_agent_harness.toolkits.acp.runtime.codex.usage import UsageMeter
 from myrm_agent_harness.toolkits.acp.runtime.codex.wire import as_obj, as_str
 from myrm_agent_harness.toolkits.acp.runtime.session_book import CliSessionBook
-from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, CliSessionStore, ContinuityStatus, McpServerConfig
+from myrm_agent_harness.toolkits.acp.types import CliSessionRecord, CliSessionStore, ContinuityStatus
 
 logger = logging.getLogger(__name__)
 

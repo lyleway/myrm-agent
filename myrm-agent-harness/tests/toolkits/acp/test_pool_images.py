@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from unittest.mock import MagicMock
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     IMAGES_NOT_SENT_STATUS,
     BackendCapabilities,
-    McpServerConfig,
     RuntimeConfig,
     RuntimeEvent,
     RuntimeEventType,
@@ -30,7 +31,7 @@ def _pool_with_backend(supports_images: bool, captured: list[list[str] | None]) 
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: object | None = None,
     ):

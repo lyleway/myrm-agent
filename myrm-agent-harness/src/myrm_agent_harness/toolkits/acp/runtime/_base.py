@@ -25,11 +25,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import aclosing
 
 from myrm_agent_harness.infra.tls_compat import with_node_system_ca
 from myrm_agent_harness.toolkits.acp.auth.launch_env import account_env, cli_base_env
+from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime.turn_permissions import TurnPermissions
 from myrm_agent_harness.toolkits.acp.types import (
     AcpError,
@@ -38,7 +39,6 @@ from myrm_agent_harness.toolkits.acp.types import (
     BackendInfo,
     BackendStatus,
     BackendType,
-    McpServerConfig,
     PermissionBroker,
     RuntimeConfig,
     RuntimeEvent,
@@ -192,7 +192,7 @@ class BaseRuntime:
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: PermissionBroker | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
@@ -311,7 +311,7 @@ class BaseRuntime:
         prompt: str,
         session_id: str,
         *,
-        mcp_servers: list[McpServerConfig] | None = None,
+        mcp_servers: Sequence[McpServerConfig] | None = None,
         images: list[str] | None = None,
         permissions: TurnPermissions | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
