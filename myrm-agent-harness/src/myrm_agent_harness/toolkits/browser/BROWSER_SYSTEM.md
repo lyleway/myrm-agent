@@ -1216,7 +1216,7 @@ browser/
 │   └── page_health.py — 浏览器/页面健康原语（abort_pending_navigation / probe_alive / probe_browser_alive / is_driver_closed_error（含原因链）/ close_page_bounded / detach_cdp_bounded / PageUnresponsiveError / DriverClosedError）
 ├── domain_filter/ — 四层域名过滤（CSP + HTTP + 主线程硬化 + CDP）；支持 allowlist + 用户 blocklist
 ├── session_vault/ — 加密 Session 存储（O(1) LRU + 内存限制 + 并发锁 + Metrics + 批量 API）
-├── navigation/ — Navigator（节流 + 熔断 + 智能等待 + 同意弹窗处理）与文档级 SSRF 守卫，供 BrowserSession 使用
+├── navigation/ — Navigator（节流 + 熔断 + 智能等待 + 可选的同意弹窗处理）与文档级 SSRF 守卫，供 BrowserSession 使用
 ├── enhancers/ — DOM 增强脚本：池建的每个上下文把它注册为 init script（React fiber 钩子、可交互元素注册表、SPA 追踪器）
 ├── action_capture/ — 与智能体无关的 DOM 动作录制器：把点击、输入、选择、按键、导航记成结构化的 ActionStep 序列，供服务端的浏览器技能录制向导使用
 ├── domain_skills/ — 域名可执行技能：manifest 驱动的 Python 工具注册表，脚本经 `browser_manage_tool` 的 `run_site_tool` 按需加载
