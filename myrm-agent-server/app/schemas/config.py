@@ -271,6 +271,12 @@ class PersonalSettingsConfigValue(BaseModel):
         group="advanced",
     )
     publicIngressBaseUrl: str = _personal_settings_field("system", default="", description="公网 Ingress 地址")
+    imageGeneration: dict[str, object] | None = _personal_settings_field(
+        "media", default=None, description="图像生成工具的选择（模型、回退模型、默认尺寸、超时、重试）"
+    )
+    videoGeneration: dict[str, object] | None = _personal_settings_field(
+        "media", default=None, description="视频生成工具的选择（提供商、模型、回退提供商、超时）"
+    )
 
 
 class SecurityDashboardSettingsConfigValue(BaseModel):

@@ -7,7 +7,7 @@
 | 文件 | 职责 |
 |------|------|
 | `streaming.py` | SSE envelope 与标准响应头（`Cache-Control: no-cache, no-transform`：转发 `/api/v1` 的 Next.js 服务器会 gzip 它能压的响应，安静的 attach 流会被缓冲到空闲超时才出数据，`no-transform` 让它不压） |
-| `config.py` | 配置同步 API 模型（含 `personalSettings.reasoningDisplayMode`：off/collapsed/inline、`personalSettings.autoContinueInterruptedTurns`：崩溃自动续跑开关、`personalSettings.themeProfiles` Theme Recipe 校验） |
+| `config.py` | 配置同步 API 模型（含 `personalSettings.reasoningDisplayMode`：off/collapsed/inline、`personalSettings.autoContinueInterruptedTurns`：崩溃自动续跑开关、`personalSettings.themeProfiles` Theme Recipe 校验、`personalSettings.imageGeneration` / `videoGeneration`：用户在设置页选的图像、视频工具（缺省为空，不补默认模型；值不在 schema 里的键会在保存时被丢掉，选择就到不了 agent）） |
 | `theme_profile.py` | Theme Engine Recipe Pydantic 模型（`file:` assetRef、`themeProfiles` 校验） |
 | `control_plane/` | 子包 | Server↔CP 遥测契约，按数据族分 4 个模块（context_events / context_snapshot / coercion / telemetry）：上下文压缩/重取/归档恢复快照、Memory Brief 与 Guardian 遥测信封。见 [control_plane/_ARCH.md](control_plane/_ARCH.md) | ✅ |
 | `memory/command_center/` | Memory Command Center 响应模型 |

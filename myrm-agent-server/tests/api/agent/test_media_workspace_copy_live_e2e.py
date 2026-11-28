@@ -18,18 +18,12 @@ shows up in the file the model measures.
 
 from __future__ import annotations
 
-import base64
-import io
 import json
 import os
 import re
-import threading
 import time
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import asdict, dataclass, field
-from email import policy
-from email.parser import BytesParser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from dataclasses import asdict
 from importlib import import_module
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -45,6 +39,7 @@ from app.api.dependencies import get_db_session
 from app.config.settings import get_settings
 from app.lifecycle.task_worker import ensure_task_store, start_task_worker, stop_task_worker
 from tests.api.agent.utils import check_e2e_errors
+from tests.support.media_gateway_stub import MediaGatewayStub, png_bytes, serve_media_gateway
 from tests.support.media_library_env import media_library_env
 from tests.support.real_model_workspace_turns import harness_workspace, new_chat, perform_agent_stream
 from tests.support.test_secrets import resolve_test_env
@@ -65,121 +60,19 @@ _EDIT_PROMPT = (
     "the tool's answer, do not guess a path), quote what `file` printed, and do nothing else."
 )
 _SOURCE_SIZE = (3000, 2000)  # above the 2048 px that the clamp gives every other image input
-_EDITS_PATH = "/images/edits"
-
-
-def _png(size: tuple[int, int], mode: str = "RGB", color: tuple[int, ...] = (255, 0, 0)) -> bytes:
-    buffer = io.BytesIO()
-    Image.new(mode, size, color).save(buffer, "PNG")
-    return buffer.getvalue()
-
-
-@dataclass(frozen=True)
-class UploadedPart:
-    """A file part of an edit request: its name, its byte count and, when it is an image, its pixel size."""
-
-    filename: str
-    size: int
-    pixels: tuple[int, int] | None
-
-
-@dataclass(frozen=True)
-class ProviderRequest:
-    """One request the provider received: the JSON body of a generation or the text fields of an edit, and the file parts of an edit."""
-
-    path: str
-    authorization: str
-    fields: dict[str, object]
-    parts: dict[str, UploadedPart]
-
-    @property
-    def is_edit(self) -> bool:
-        return self.path.endswith(_EDITS_PATH)
-
-
-@dataclass
-class ImageProviderStub:
-    """What the stand-in provider saw and the bytes it answered with."""
-
-    requests: list[ProviderRequest] = field(default_factory=list)
-    responses: list[bytes] = field(default_factory=list)
-    url: str = ""
-
-    @property
-    def edits(self) -> list[ProviderRequest]:
-        return [seen for seen in self.requests if seen.is_edit]
-
-
-def _requested_size(raw: object) -> tuple[int, int]:
-    width, _, height = str(raw).lower().partition("x")
-    return (int(width), int(height)) if width.isdigit() and height.isdigit() else (64, 64)
-
-
-def _multipart(content_type: str, body: bytes) -> tuple[dict[str, object], dict[str, UploadedPart]]:
-    """The text fields of an edit request and its file parts."""
-    message = BytesParser(policy=policy.default).parsebytes(f"Content-Type: {content_type}\r\n\r\n".encode() + body)
-    fields: dict[str, object] = {}
-    parts: dict[str, UploadedPart] = {}
-    for part in message.iter_parts():
-        name = str(part.get_param("name", header="content-disposition"))
-        raw = part.get_payload(decode=True)
-        payload = raw if isinstance(raw, bytes) else b""
-        filename = part.get_filename()
-        if filename is None:
-            fields[name] = payload.decode("utf-8")
-            continue
-        try:
-            pixels: tuple[int, int] | None = Image.open(io.BytesIO(payload)).size
-        except OSError:
-            pixels = None
-        parts[name] = UploadedPart(filename, len(payload), pixels)
-    return fields, parts
 
 
 @pytest.fixture
-def provider() -> Iterator[ImageProviderStub]:
-    stub = ImageProviderStub()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:  # noqa: N802  (the name http.server dispatches on)
-            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-            is_edit = self.path.endswith(_EDITS_PATH)
-            fields: dict[str, object]
-            parts: dict[str, UploadedPart]
-            if is_edit:
-                fields, parts = _multipart(self.headers.get("Content-Type", ""), body)
-            else:
-                fields, parts = json.loads(body or b"{}"), {}
-            stub.requests.append(ProviderRequest(self.path, self.headers.get("Authorization", ""), fields, parts))
-            png = _png(_requested_size(fields.get("size")), color=(0, 0, 255) if is_edit else (255, 0, 0))
-            stub.responses.append(png)
-            payload = json.dumps({"data": [{"b64_json": base64.b64encode(png).decode("ascii")}]}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002  (signature of the base class)
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    stub.url = f"http://127.0.0.1:{server.server_address[1]}"
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+def provider() -> Iterator[MediaGatewayStub]:
+    with serve_media_gateway() as stub:
         yield stub
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 @pytest.fixture
 def image_world(
     app: FastAPI,
     client: TestClient,
-    provider: ImageProviderStub,
+    provider: MediaGatewayStub,
     mock_load_user_configs: MagicMock,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -231,7 +124,7 @@ def _workspace(client: TestClient, chat_id: str) -> Path:
     return client.portal.call(harness_workspace, chat_id)
 
 
-def _report(collected: list[dict[str, object]], answer: str, provider: ImageProviderStub) -> None:
+def _report(collected: list[dict[str, object]], answer: str, provider: MediaGatewayStub) -> None:
     """What a failing run needs to be read: the tool calls the model made, what the provider received, what the model answered."""
     for event in collected:
         if event.get("type") == "tasks_steps" and event.get("tool_name") is not None:
@@ -279,7 +172,7 @@ def _card_images(client: TestClient, chat_id: str) -> list[bytes]:
     return loaded
 
 
-def test_generated_image_is_a_file_bash_can_read(client: TestClient, image_world: None, provider: ImageProviderStub) -> None:
+def test_generated_image_is_a_file_bash_can_read(client: TestClient, image_world: None, provider: MediaGatewayStub) -> None:
     agent_id, chat_id = _agent_and_chat(client)
 
     answer, collected, _ = perform_agent_stream(client, _GENERATE_PROMPT, chat_id, agent_id=agent_id)
@@ -299,12 +192,12 @@ def test_generated_image_is_a_file_bash_can_read(client: TestClient, image_world
 
 
 def test_masked_edit_inputs_arrive_undownsized_and_the_result_lands_in_the_workspace(
-    client: TestClient, image_world: None, provider: ImageProviderStub
+    client: TestClient, image_world: None, provider: MediaGatewayStub
 ) -> None:
     agent_id, chat_id = _agent_and_chat(client)
     workspace = _workspace(client, chat_id)
-    (workspace / "photo.png").write_bytes(_png(_SOURCE_SIZE, color=(10, 200, 30)))
-    (workspace / "mask.png").write_bytes(_png(_SOURCE_SIZE, mode="RGBA", color=(0, 0, 0, 0)))
+    (workspace / "photo.png").write_bytes(png_bytes(_SOURCE_SIZE, color=(10, 200, 30)))
+    (workspace / "mask.png").write_bytes(png_bytes(_SOURCE_SIZE, mode="RGBA", color=(0, 0, 0, 0)))
 
     answer, collected, _ = perform_agent_stream(client, _EDIT_PROMPT, chat_id, agent_id=agent_id)
 
