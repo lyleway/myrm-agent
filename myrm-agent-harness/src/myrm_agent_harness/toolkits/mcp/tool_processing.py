@@ -6,7 +6,7 @@ sanitization, safety annotations, name prefixing) live here as stateless
 module-level functions.
 
 [INPUT]
-- config::mcp_tool_name, mcp_tool_prefix, parse_mcp_tool_name, should_register_mcp_tool (POS: MCP configuration, the model-visible tool name, tool name parsing, and per-server tool filter function)
+- config::mcp_tool_name, mcp_tool_prefix, should_register_mcp_tool (POS: MCP configuration, the model-visible tool name, and per-server tool filter function)
 - errors::MCPToolFailure (POS: MCP-specific error types; the marked ``str`` a failed call is rendered as)
 - schema::FlattenMeta, canonicalize_schema_for_cache, flatten_deep_schema, flatten_json_schema, has_dot_keys, nest_flat_arguments, coerce_arguments_by_schema, prepare_mcp_call_arguments (POS: MCP inbound tool schema normalization)
 - annotations::judge, recorded_annotations (POS: the only place a server's self-reported hints turn into host behavior)
@@ -46,7 +46,6 @@ from .annotations import judge, recorded_annotations
 from .config import (
     mcp_tool_name,
     mcp_tool_prefix,
-    parse_mcp_tool_name,
     should_register_mcp_tool,
 )
 from .errors import MCPToolFailure
@@ -261,6 +260,7 @@ def _emit_auth_expired_for_tool(server_name: str, error_detail: str) -> None:
 
 def wrap_tools_with_timeout(
     tools: list[BaseTool],
+    server_name: str,
     timeout: float,
     max_output_chars: int = 100_000,
     oversized_result_handler: OversizedResultHandler | None = None,
@@ -276,6 +276,9 @@ def wrap_tools_with_timeout(
     Timeouts, unsupported content and lost authorization come back as
     ``MCPToolFailure`` text: identical to a plain string for the model, and
     recognizable to a script caller that needs an error rather than a result.
+    A lost authorization names the server by *server_name*, the name its owner
+    gave it, not by the identity inside the tool name: the text is relayed to
+    the user, and the notice carries the same name as the session's own.
     """
     from myrm_agent_harness.core.security.detection.content_boundary import (
         wrap_untrusted,
@@ -293,6 +296,7 @@ def wrap_tools_with_timeout(
             *args: object,
             _orig: Any = original_coroutine,
             _name: str = tool_name,
+            _server: str = server_name,
             _timeout: float = timeout,
             _max_chars: int = max_output_chars,
             _handler: OversizedResultHandler | None = oversized_result_handler,
@@ -330,12 +334,10 @@ def wrap_tools_with_timeout(
                 return MCPToolFailure(redact_sensitive_text(error_msg))
             except Exception as exc:
                 if _is_mcp_auth_error(exc):
-                    server = parse_mcp_tool_name(_name)
-                    srv_label = server[0] if server else _name
                     logger.warning("MCP tool '%s' failed with auth error (401)", _name)
-                    _emit_auth_expired_for_tool(srv_label, str(exc))
+                    _emit_auth_expired_for_tool(_server, str(exc))
                     return MCPToolFailure(
-                        f"MCP server '{srv_label}' requires re-authorization. "
+                        f"MCP server '{_server}' requires re-authorization. "
                         f"Ask the user to re-authorize the connection, then ask me to retry."
                     )
                 raise

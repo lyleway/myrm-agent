@@ -21,7 +21,8 @@ vi.mock('next-intl', () => ({
 vi.mock('@/services/config', () => ({
   getConfigSyncManager: () => ({ get: () => mocks.saved, set: mocks.set }),
 }));
-vi.mock('@/services/external-agents', () => ({
+vi.mock('@/services/external-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => mocks.statuses,
   listExternalAgentAccounts: async () => [],
 }));
@@ -170,9 +171,8 @@ describe('ExternalAgentsConfig auth mode', () => {
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed,
+    availableInDeployment: true,
   });
 
   beforeEach(() => {
@@ -225,9 +225,8 @@ describe('ExternalAgentsConfig transport', () => {
     authenticated: false,
     authStatus: 'not_authenticated',
     loginStrategy: 'browser_oauth',
-    scriptableLogin: true,
-    needsCodeInput: false,
     subscriptionLoginAllowed: true,
+    availableInDeployment: true,
   });
 
   const typeSelect = () => within(screen.getByTestId('external-agent-type')).getByRole('combobox');
@@ -296,5 +295,100 @@ describe('ExternalAgentsConfig transport', () => {
     await userEvent.click(screen.getByRole('button', { name: 'save' }));
 
     expect(savedAgent().type).toBe('cli');
+  });
+});
+
+describe('ExternalAgentsConfig in a deployment that does not run every agent', () => {
+  const row = (backend: string, availableInDeployment: boolean) => ({
+    backend,
+    installed: availableInDeployment,
+    path: availableInDeployment ? `/usr/bin/${backend}` : null,
+    version: availableInDeployment ? '1.0.0' : null,
+    transport: backend === 'claude' ? 'cli' : backend === 'codex' ? 'app_server' : 'acp',
+    authenticated: false,
+    authStatus: 'not_authenticated',
+    loginStrategy: 'browser_oauth',
+    subscriptionLoginAllowed: false,
+    availableInDeployment,
+  });
+  const hosted = [row('claude', false), row('codex', false), row('gemini', true), row('qwen', true)];
+
+  beforeEach(() => {
+    mocks.set.mockClear();
+    mocks.toast.error.mockClear();
+    mocks.statuses = hosted;
+  });
+
+  it('says that some agents are unavailable', async () => {
+    mocks.saved = { agents: [] };
+    render(<ExternalAgentsConfig />);
+
+    expect(await screen.findByText('blockedInDeploymentHint')).toBeInTheDocument();
+  });
+
+  it('says nothing about it where every agent is available', async () => {
+    mocks.statuses = hosted.map((status) => ({ ...status, availableInDeployment: true }));
+    mocks.saved = { agents: [agent({ name: 'gemini-cli', command: 'gemini' })] };
+    render(<ExternalAgentsConfig />);
+    await screen.findByText('gemini-cli');
+
+    await vi.waitFor(() => expect(screen.getByRole('switch')).toBeEnabled());
+    expect(screen.queryByText('blockedInDeploymentHint')).not.toBeInTheDocument();
+  });
+
+  it('does not let an agent the deployment does not run be switched on', async () => {
+    mocks.saved = {
+      agents: [
+        agent({ name: 'claude-code', command: 'claude', enabled: false }),
+        agent({ name: 'gem', command: 'gemini', enabled: false }),
+      ],
+    };
+    render(<ExternalAgentsConfig />);
+    await screen.findByText('gem');
+
+    await vi.waitFor(() => expect(screen.getAllByRole('switch')[0]).toBeDisabled());
+    const [blocked, allowed] = screen.getAllByRole('switch');
+    await userEvent.click(blocked);
+    expect(mocks.set).not.toHaveBeenCalled();
+
+    expect(allowed).toBeEnabled();
+    await userEvent.click(allowed);
+    expect(mocks.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers only the presets of the agents it runs', async () => {
+    mocks.saved = { agents: [] };
+    render(<ExternalAgentsConfig />);
+    await userEvent.click(await screen.findByRole('button', { name: 'add' }));
+
+    await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'preset_claude' })).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'preset_codex' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'preset_gemini' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'preset_qwen' })).toBeInTheDocument();
+  });
+
+  it.each(['claude', '/usr/local/bin/codex', 'claude-code'])(
+    'refuses to save an agent whose command is %s',
+    async (command) => {
+      mocks.saved = { agents: [agent({ name: 'mine', command })] };
+      await openEditor();
+      await vi.waitFor(() => expect(screen.getByText('blockedInDeploymentHint')).toBeTruthy());
+
+      await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+      expect(mocks.set).not.toHaveBeenCalled();
+      expect(mocks.toast.error).toHaveBeenCalledWith('blockedInDeploymentSave');
+    },
+  );
+
+  it('saves an agent it runs', async () => {
+    mocks.saved = { agents: [agent({ name: 'gemini-cli', command: 'gemini', args: [] })] };
+    await openEditor();
+    await vi.waitFor(() => expect(screen.getByText('blockedInDeploymentHint')).toBeTruthy());
+
+    await userEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    expect(savedAgent()).toMatchObject({ name: 'gemini-cli', command: 'gemini' });
+    expect(mocks.toast.error).not.toHaveBeenCalled();
   });
 });

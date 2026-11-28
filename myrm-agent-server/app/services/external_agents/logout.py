@@ -1,8 +1,8 @@
 """Logging an external agent's CLI out of the login in one home.
 
 [INPUT]
-- myrm_agent_harness.toolkits.acp.auth::CredentialState, CredentialStore, log_out, profile_for (POS: The ACP subscription auth subsystem)
-- myrm_agent_harness.toolkits.acp.core.backend_detector::BackendDetector (POS: CLI backend detection)
+- myrm_agent_harness.toolkits.acp.auth::CredentialState, CredentialStore, log_out (POS: The ACP subscription auth subsystem)
+- app.services.external_agents.login_state::detected_executable (POS: The CLI of an agent as detected on this machine)
 
 [OUTPUT]
 - log_out_of_home: Log a backend out of the home an environment reaches, and return the state its CLI reports.
@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from app.services.external_agents.login_state import detected_executable
+
 if TYPE_CHECKING:
     from myrm_agent_harness.toolkits.acp.auth import CredentialState
 
@@ -30,11 +32,7 @@ async def log_out_of_home(backend: str, env: Mapping[str, str]) -> CredentialSta
     Raises:
         ValueError: ``backend`` is not a known agent.
     """
-    from myrm_agent_harness.toolkits.acp.auth import CredentialStore, log_out, profile_for
-    from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
+    from myrm_agent_harness.toolkits.acp.auth import CredentialStore, log_out
 
-    profile = profile_for(backend)
-    detected = await BackendDetector().detect(include_version=False)
-    name = profile.backend if profile is not None else backend
-    executable = next((found.path for found in detected if found.name == name), None)
+    executable = await detected_executable(backend)
     return await log_out(CredentialStore(env), backend, executable=executable, env=env)

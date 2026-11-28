@@ -6,6 +6,7 @@ depend on this module.
 
 
 [INPUT]
+- toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.mcp_servers::McpServerConfig (POS: The MCP servers a host hands a delegated agent)
 
 [OUTPUT]
@@ -18,7 +19,7 @@ depend on this module.
 - IMAGES_NOT_SENT_STATUS, images_not_sent_event: the status_update telling that a turn's images were not handed to the agent
 - MCP_NOT_ATTACHED_STATUS, mcp_not_attached_event: the status_update naming the MCP servers a host offered a turn that the agent was not given
 - BackendType, RESIDENT_BACKEND_TYPES: how a backend is run (ACP, a CLI process per turn, Codex's app server) and which of those keep one resident process
-- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace; the home of a named account is)
+- RuntimeConfig: Runtime configuration (the working directory is not part of it: a delegated turn names its workspace; the home of a named account and the identity the host announces to the agent are)
 - normalize_workspace: the one check a workspace goes through before a turn, runtime or pool uses it
 - delegation_session_id: the one name of an agent's persistent conversation in a scope, whichever entry the turn comes through
 - CliSessionRecord: an agent-native session id bound to the working directory that created it
@@ -40,6 +41,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, Protocol, runtime_checkable
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 
 # ---------------------------------------------------------------------------
@@ -230,6 +232,8 @@ class RuntimeConfig:
     # absolute, for a known agent only. The CLI is relocated into it whatever ``env`` says; ``None``: the CLI's
     # own default home.
     account_home: str | None = None
+    # Who the agent is told it is talking to; a host that embeds the harness names itself here.
+    client: ClientIdentity = field(default_factory=ClientIdentity)
 
 
 @dataclass(frozen=True, slots=True)

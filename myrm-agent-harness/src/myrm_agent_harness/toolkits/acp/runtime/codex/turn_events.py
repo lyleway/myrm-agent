@@ -255,7 +255,11 @@ class TurnTranslator:
         return self._warning_event(as_str(params.get("message")))
 
     def _mcp_startup(self, params: Json) -> list[RuntimeEvent]:
-        """An MCP server the host injected that did not start: the agent runs without its tools, so say so."""
+        """An MCP server that did not start while the turn ran: the agent goes on without its tools, so say so.
+
+        The servers the host hands over are required, so one of those that cannot start fails the thread at its
+        opening instead; this is for the servers of the user's own Codex configuration.
+        """
         if as_str(params.get("status")) != "failed":
             return []
         reason = as_str(params.get("error"))

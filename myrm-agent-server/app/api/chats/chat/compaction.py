@@ -13,6 +13,7 @@ from app.database.dto import (
 )
 from app.schemas.responses import StandardSuccessResponse
 from app.services.chat.chat_service import ChatService
+from app.services.chat.compact.run import CompactRun, get_compact_run, start_compact_run
 
 router = APIRouter()
 
@@ -21,41 +22,48 @@ class CompactRequest(BaseModel):
     focus_topic: str = Field(default="", max_length=200)
 
 
-@router.post("/{chat_id}/compact", response_model=StandardSuccessResponse)
-async def compact_chat(
-    chat_id: str,
-    body: CompactRequest | None = None,
-    db: AsyncSession = Depends(get_db),
-) -> JSONResponse:
-    """Compact chat context by generating a persistent summary.
+def _run_data(run: CompactRun) -> dict[str, object]:
+    """What the page reads of a run: its state, and the result or the failure once the run has ended."""
+    data: dict[str, object] = {"status": run.state.value}
+    if run.result is not None:
+        data["result"] = {
+            "compacted": run.result.compacted,
+            "original_tokens": run.result.original_tokens,
+            "summary_tokens": run.result.summary_tokens,
+            "tokens_saved": run.result.tokens_saved,
+            "message_count": run.result.message_count,
+            "backup_path": run.result.backup_path,
+            "reason": run.result.reason,
+            "focus_topic": run.focus_topic,
+        }
+    if run.failure is not None:
+        data["error"] = {"http_status": run.failure.status_code, "code": run.failure.code, "message": run.failure.message}
+    return data
 
-    Original messages are preserved — the summary is used by the Agent
-    layer to reduce token cost on subsequent interactions. The caller asked
-    for this compaction, so the anti-thrash guard that holds back automatic
-    attempts does not apply.
+
+@router.post("/{chat_id}/compact", response_model=StandardSuccessResponse, status_code=202)
+async def start_compaction(chat_id: str, body: CompactRequest | None = None) -> JSONResponse:
+    """Start compacting the chat context in the background and answer at once; read the outcome from ``/compact/run``.
+
+    The compaction has a model summarise the history and outlasts what a proxy lets one request wait. Original messages
+    are preserved: the summary is used by the Agent layer to reduce token cost on subsequent interactions. The caller
+    asked for this compaction, so the anti-thrash guard that holds back automatic attempts does not apply. A chat whose
+    run is still going is not compacted twice: the request joins that run.
     """
-    from app.services.chat.compact_service import compact_chat as do_compact
-
     focus_topic = body.focus_topic.strip() if body and body.focus_topic else ""
+    return success_response(data=_run_data(start_compact_run(chat_id, focus_topic)), status_code=202)
 
-    try:
-        result = await do_compact(db, chat_id, focus_topic=focus_topic, explicit_request=True)
-        return success_response(
-            data={
-                "compacted": result.compacted,
-                "original_tokens": result.original_tokens,
-                "summary_tokens": result.summary_tokens,
-                "tokens_saved": result.tokens_saved,
-                "message_count": result.message_count,
-                "backup_path": result.backup_path,
-                "reason": result.reason,
-                "focus_topic": focus_topic,
-            }
-        )
-    except ValueError as e:
-        raise validation_error(str(e)) from e
-    except Exception as e:
-        raise internal_error(operation="Compact chat context", exception=e) from e
+
+@router.get("/{chat_id}/compact/run", response_model=StandardSuccessResponse)
+async def get_compaction_run(chat_id: str) -> JSONResponse:
+    """The latest manual compaction of the chat: running, or ended with its result or its failure.
+
+    The server remembers only the latest run per chat and only until it restarts, so a chat with none is a 404.
+    """
+    run = get_compact_run(chat_id)
+    if run is None:
+        raise not_found_error("Compaction run")
+    return success_response(data=_run_data(run))
 
 
 @router.put("/{chat_id}/compaction/summary", response_model=StandardSuccessResponse)

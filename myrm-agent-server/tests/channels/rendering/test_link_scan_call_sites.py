@@ -1,6 +1,6 @@
-"""Each converter writes Markdown links as the pattern it used to call did, and takes linear time on hostile brackets.
+"""Each converter writes Markdown links exactly as the reference pattern does, and takes linear time on hostile brackets.
 
-The reference below is that pattern: ``\\[([^\\]]+)\\]\\(([^)]+)\\)`` (Telegram and Matrix: a target that holds NUL is no
+The reference pattern is ``\\[([^\\]]+)\\]\\(([^)]+)\\)`` (Telegram and Matrix: a target that holds NUL is no
 link). A converter is compared with itself, run once with the shared scan and once with the reference put in its place,
 so a call that passes the wrong shape or builds the wrong replacement shows as a different text. The pattern costs the
 square of the text on a run of ``[`` with no ``]``; the converters must take time in proportion to it.
@@ -107,7 +107,7 @@ def _convert_in(convert: Callable[[str], str], text: str) -> float:
 
 
 class TestLinearTime:
-    # The pattern took 0.9 s on 20,000 characters of these. The text grows eightfold: linear time grows about eightfold,
+    # The pattern takes 0.9 s on 20,000 characters of these. The text grows eightfold: linear time grows about eightfold,
     # quadratic time about sixty-four-fold, which a fixed limit on a few thousand characters would not tell apart.
     @pytest.mark.parametrize("family", sorted(_HOSTILE))
     @pytest.mark.parametrize("name", sorted(_CONVERTERS))

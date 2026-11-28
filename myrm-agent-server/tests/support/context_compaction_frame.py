@@ -8,7 +8,7 @@
 - open_app_frame() / close_app_frame(): a same-origin frame of a fixed size loads a route of the app, ready once the chat composer there is hydrated; closing it drops that page
 - attach_chat_in_frame(): loads a chat into the store of the app in the frame, through its E2E bridge
 - in_frame(): a page probe as the app in the frame would run it, so the helpers that probe a page work on it unchanged
-- answer_compact_with_js(): the app in the frame gets a reply the test chose to every compact request, for the lines a healthy server cannot be made to produce
+- answer_compact_with_js(): every compaction the app in the frame starts ends with a run the test chose, for the lines a healthy server cannot be made to produce
 - panel_layout_js(): where the open strategy panel sits and whether the fields of its compress control can be reached
 - outcome_look_js(): the contrast and the room of the line under the compress button, in a given theme
 
@@ -136,9 +136,17 @@ _ANSWER_COMPACT_JS = r"""((answer) => {
     window.__e2eRealFetch = window.fetch.bind(window);
     window.fetch = (input, init) => {
       const target = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
-      if (/\/chats\/[^/]+\/compact$/.test(new URL(target, location.href).pathname)) {
-        const headers = { 'Content-Type': 'application/json' };
-        return Promise.resolve(new Response(JSON.stringify(window.__e2eCompactAnswer), { status: 200, headers }));
+      const path = new URL(target, location.href).pathname;
+      const reply = (body, status) =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
+        );
+      // The request that starts the run is accepted at once; the run it asks about next ends with the chosen answer.
+      if (/\/chats\/[^/]+\/compact$/.test(path)) {
+        return reply({ success: true, code: 0, data: { status: 'running' } }, 202);
+      }
+      if (/\/chats\/[^/]+\/compact\/run$/.test(path)) {
+        return reply(window.__e2eCompactAnswer, 200);
       }
       return window.__e2eRealFetch(input, init);
     };
@@ -184,7 +192,7 @@ def attach_chat_in_frame(client: ChromeMcpClient, page: McpPage, chat_id: str) -
 
 
 def answer_compact_with_js(answer: dict[str, object]) -> str:
-    """Make the app in the frame get ``answer`` (a whole response body) from every compact request it sends from now on."""
+    """Make every compaction the app in the frame starts from now on end with ``answer`` (a whole ``GET /compact/run`` body)."""
     return in_frame(f"({_ANSWER_COMPACT_JS})({json.dumps(answer)})")
 
 

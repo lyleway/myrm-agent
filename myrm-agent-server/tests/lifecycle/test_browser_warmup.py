@@ -1,8 +1,8 @@
 """The application's browser pool is warmed up by the one builder and never replaced under the sessions using it.
 
-Warmup used to close the pool that already existed and build another. A request that arrived during startup had built
-the pool it was using, so that closed the browsers under it (its pages died), left the old pool's browser running, and
-built the replacement with a recipe that could differ from the first. The real singleton and the real builder run here;
+A warmup that closed the pool that already exists and built another would close the browsers under a request that
+arrived during startup and built the pool it is using (its pages die), leave the first pool's browser running, and
+build the second with a recipe that can differ from the first. The real singleton and the real builder run here;
 only the pool class is a double.
 """
 

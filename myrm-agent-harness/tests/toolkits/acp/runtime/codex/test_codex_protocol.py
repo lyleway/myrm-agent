@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth._launch_args import resolve_app_server_args
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
 from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     OPT_OUT_NOTIFICATIONS,
@@ -13,6 +14,7 @@ from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
     initialize_params,
     login_params,
     resume_params,
+    server_version,
     thread_params,
     turn_params,
     turn_policy,
@@ -20,6 +22,7 @@ from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
 from myrm_agent_harness.toolkits.acp.runtime.codex.turn_events import READ_NOTIFICATIONS
 
 _READ_ONLY = {"type": "readOnly", "networkAccess": False}
+_CLIENT = ClientIdentity()
 _ASKING = turn_policy("safe", can_ask=True, workspace_write=WorkspaceWriteSettings())
 
 
@@ -72,15 +75,57 @@ def test_the_sandbox_settings_of_the_users_config_are_read_defensively() -> None
 
 
 def test_the_handshake_names_the_client_and_leaves_out_the_notifications_nobody_reads() -> None:
-    params = initialize_params()
+    params = initialize_params(_CLIENT)
 
-    assert params["clientInfo"]["name"] == "myrm_agent_harness"  # type: ignore[index]
+    assert params["clientInfo"] == {"name": "myrm_agent_harness", "title": "Myrm Agent", "version": _CLIENT.version}
     assert params["capabilities"] == {"optOutNotificationMethods": list(OPT_OUT_NOTIFICATIONS)}
+
+
+def test_a_host_names_itself_in_the_handshake_and_reads_the_server_version_after_that_name() -> None:
+    host = ClientIdentity(name="acme.runner-2", title="Acme Runner", version="4.5.6")
+
+    assert initialize_params(host)["clientInfo"] == {
+        "name": "acme.runner-2",
+        "title": "Acme Runner",
+        "version": "4.5.6",
+    }
+    assert server_version({"userAgent": "acme.runner-2/0.172.0 (Linux; x86_64) (acme.runner-2; 4.5.6)"}, host) == (
+        0,
+        172,
+        0,
+    )
+    # The default name is not this host's: a greeting that repeats it is not one this host was answered with.
+    assert server_version({"userAgent": "myrm_agent_harness/0.172.0 (Linux; x86_64)"}, host) is None
 
 
 def test_no_notification_the_host_reads_is_opted_out_of() -> None:
     assert len(set(OPT_OUT_NOTIFICATIONS)) == len(OPT_OUT_NOTIFICATIONS)
     assert not set(OPT_OUT_NOTIFICATIONS) & READ_NOTIFICATIONS
+
+
+def test_the_version_of_a_server_is_read_from_its_user_agent() -> None:
+    greeting = {"userAgent": "myrm_agent_harness/0.172.0 (Mac OS 26.5.2; arm64) unknown (myrm_agent_harness; 1.0.0)"}
+
+    assert server_version(greeting, _CLIENT) == (0, 172, 0)
+
+
+def test_a_prerelease_server_is_read_as_the_release_it_leads_to() -> None:
+    assert server_version({"userAgent": "myrm_agent_harness/0.173.0-alpha.2 (Linux; x86_64)"}, _CLIENT) == (0, 173, 0)
+
+
+@pytest.mark.parametrize(
+    "greeting",
+    [
+        {},
+        {"userAgent": None},
+        {"userAgent": "mock"},
+        {"userAgent": "other_client/0.172.0 (Linux; x86_64)"},
+        {"userAgent": "myrm_agent_harness/dev (Linux; x86_64)"},
+        {"userAgent": "myrm_agent_harness/0.172 (Linux; x86_64)"},
+    ],
+)
+def test_a_server_that_does_not_say_its_version_has_none(greeting: dict[str, object]) -> None:
+    assert server_version(greeting, _CLIENT) is None
 
 
 def test_the_login_and_the_config_read_requests() -> None:
@@ -108,8 +153,8 @@ def test_a_stdio_server_has_an_environment_only_when_it_has_one() -> None:
 
     assert config == {
         "mcp_servers": {
-            "my-server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}},
-            "plain": {"command": "other", "args": []},
+            "my-server_1": {"command": "mcp", "args": ["--x"], "required": True, "env": {"A": "b"}},
+            "plain": {"command": "other", "args": [], "required": True},
         }
     }
 
@@ -124,8 +169,12 @@ def test_an_http_server_is_a_url_with_its_headers() -> None:
 
     assert config == {
         "mcp_servers": {
-            "memory": {"url": "http://127.0.0.1:9/mcp", "http_headers": {"Authorization": "Bearer t"}},
-            "open": {"url": "https://example.test/mcp"},
+            "memory": {
+                "url": "http://127.0.0.1:9/mcp",
+                "required": True,
+                "http_headers": {"Authorization": "Bearer t"},
+            },
+            "open": {"url": "https://example.test/mcp", "required": True},
         }
     }
 
@@ -152,7 +201,7 @@ def test_a_resumed_thread_is_given_the_servers_again() -> None:
 
     config = resume_params("t-1", "/w", _ASKING, mcp_servers=servers)["config"]
 
-    assert config == {"mcp_servers": {"memory": {"url": "http://127.0.0.1:9/mcp"}}}
+    assert config == {"mcp_servers": {"memory": {"url": "http://127.0.0.1:9/mcp", "required": True}}}
 
 
 def test_a_resumed_thread_is_asked_for_without_its_history() -> None:

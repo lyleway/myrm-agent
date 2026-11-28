@@ -1,13 +1,15 @@
-"""A failed summary model behind the compact-chat endpoint is reported by what the provider answered.
+"""A failed summary model behind a compaction run is reported by what the provider answered.
 
-The endpoint turns a ``ValueError`` into "invalid request" (400) and everything else into its catch-all (500). A
-provider's failure is not the caller's invalid input, so an unreadable provider answer takes the catch-all too.
+The run turns a ``ValueError`` into "invalid request" (400) and everything else into its catch-all (500). A provider's
+failure is not the caller's invalid input, so an unreadable provider answer takes the catch-all too. The request that
+started the run was accepted and is long gone, so the failure is what the run endpoint reports, with the status the
+failure would have had as a response.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -16,8 +18,8 @@ from fastapi.testclient import TestClient
 from myrm_agent_harness.toolkits.llms.transport.errors import LLMResponseError
 
 from app.api.chats.chat.compaction import router
-from app.database.connection import get_db
 from app.schemas.responses import BusinessCode
+from tests.support.compact_run_stub import compaction_answering, wait_for_run
 from tests.support.provider_failures import provider_failure
 
 _SECRET = "sk-live-0123456789abcdef"
@@ -29,17 +31,8 @@ _ROUTE = "/chat-1/compact"
 def client() -> Iterator[TestClient]:
     app = FastAPI()
     app.include_router(router)
-
-    async def _no_db() -> None:
-        return None
-
-    app.dependency_overrides[get_db] = _no_db
     with TestClient(app) as test_client:
         yield test_client
-
-
-def _compaction_raising(error: Exception):
-    return patch("app.services.chat.compact_service.compact_chat", new=AsyncMock(side_effect=error))
 
 
 @pytest.mark.parametrize(
@@ -55,18 +48,27 @@ def _compaction_raising(error: Exception):
 def test_a_failed_summary_model_is_a_500_named_by_what_the_provider_answered(
     client: TestClient, failure: Exception, code: BusinessCode
 ) -> None:
-    with _compaction_raising(failure):
-        response = client.post(_ROUTE)
+    with compaction_answering(AsyncMock(side_effect=failure)):
+        started = client.post(_ROUTE)
+        data = wait_for_run(client)
+        reported = client.get("/chat-1/compact/run")
 
-    assert response.status_code == 500
-    assert response.json()["detail"]["code"] == code.value
-    assert response.json()["detail"]["message"].startswith("Compact chat context failed: AI ")
-    assert _SECRET not in response.text
+    assert started.status_code == 202
+    error = data["error"]
+    assert isinstance(error, dict)
+    assert data["status"] == "failed"
+    assert (error["http_status"], error["code"]) == (500, code.value)
+    assert str(error["message"]).startswith("Compact chat context failed: AI ")
+    assert _SECRET not in started.text
+    assert _SECRET not in reported.text
 
 
 def test_an_invalid_request_is_still_a_400(client: TestClient) -> None:
-    with _compaction_raising(ValueError("Cannot resolve before_message_id for chat_id=chat-1")):
-        response = client.post(_ROUTE)
+    with compaction_answering(AsyncMock(side_effect=ValueError("Cannot resolve before_message_id for chat_id=chat-1"))):
+        client.post(_ROUTE)
+        data = wait_for_run(client)
 
-    assert response.status_code == 400
-    assert response.json()["detail"]["code"] == BusinessCode.VALIDATION_ERROR.value
+    error = data["error"]
+    assert isinstance(error, dict)
+    assert data["status"] == "failed"
+    assert (error["http_status"], error["code"]) == (400, BusinessCode.VALIDATION_ERROR.value)

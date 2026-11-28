@@ -250,6 +250,12 @@ function ExternalCliConfigSection({
           {tPanel('externalCliUnavailableHint')}
         </p>
       )}
+      {readiness === 'blocked' && (
+        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          {tPanel('externalCliBlockedHint')}
+        </p>
+      )}
       {readiness === 'ready' && localOnly && (
         <p className="text-xs text-muted-foreground leading-relaxed">{tPanel('externalCliPermissionHint')}</p>
       )}

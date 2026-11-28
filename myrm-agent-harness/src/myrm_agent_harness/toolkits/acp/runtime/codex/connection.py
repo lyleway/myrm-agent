@@ -2,22 +2,25 @@
 
 [INPUT]
 - toolkits.acp.auth._profiles::command_profile (POS: Single source of truth for per-backend CLI auth and launch behaviour)
+- toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.runtime._base::build_safe_env (POS: Base class for RuntimeBackend implementations)
-- toolkits.acp.runtime.codex.protocol::initialize_params, login_params (POS: What the host says to Codex's app server)
+- toolkits.acp.runtime.codex.protocol::MINIMUM_SERVER_VERSION, initialize_params, login_params, server_version (POS: What the host says to Codex's app server)
 - toolkits.acp.runtime.codex.rpc::JsonRpcPeer, NotificationObserver, RpcClosedError, RpcError, RpcTimeoutError, ServerRequestHandler (POS: A JSON-RPC peer over the stdio of Codex's app server)
 - toolkits.acp.runtime.event_text::condense_failure_text (POS: Text shaping of the events every runtime emits)
+- toolkits.acp.runtime.codex.wire::Json, as_str (POS: Typed reads of the decoded JSON that Codex's app server sends)
 - toolkits.acp.runtime.process::ManagedProcess, spawn_managed_process (POS: Process ownership of every runtime that starts an agent)
 - toolkits.acp.types::RuntimeConfig (POS: ACP runtime type definitions layer.)
 
 [OUTPUT]
-- AppServerConnection: the process with its peer, ``open`` it, ``close`` it, ask whether it is ``alive``
-- AppServerStartError: the process could not be started or did not complete the handshake
+- AppServerConnection: the process with its peer and the ``version`` it said it is, ``open`` it, ``close`` it, ask whether it is ``alive``
+- AppServerStartError: the process could not be started, did not complete the handshake, or is older than the host speaks to
 - server_environment: the environment a server is started with, and the API key it is logged in with
 
 [POS]
 The lifecycle half of CodexRuntime: the environment of the process, spawning, the handshake (``initialize`` then
-``initialized``), the in-memory login of an API key, and stopping. A connection is ready for requests once ``open`` returns and is never reused after it ended:
-the runtime opens a new one for the next turn. Nothing here knows about threads or turns.
+``initialized``, with the check that the server is not older than the host speaks to), the in-memory login of an
+API key, and stopping. A connection is ready for requests once ``open`` returns and is never reused after it
+ended: the runtime opens a new one for the next turn. Nothing here knows about threads or turns.
 """
 
 from __future__ import annotations
@@ -29,8 +32,14 @@ from collections.abc import Mapping
 from contextlib import AsyncExitStack
 
 from myrm_agent_harness.toolkits.acp.auth._profiles import command_profile
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
-from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import initialize_params, login_params
+from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import (
+    MINIMUM_SERVER_VERSION,
+    initialize_params,
+    login_params,
+    server_version,
+)
 from myrm_agent_harness.toolkits.acp.runtime.codex.rpc import (
     JsonRpcPeer,
     NotificationObserver,
@@ -39,6 +48,7 @@ from myrm_agent_harness.toolkits.acp.runtime.codex.rpc import (
     RpcTimeoutError,
     ServerRequestHandler,
 )
+from myrm_agent_harness.toolkits.acp.runtime.codex.wire import Json, as_str
 from myrm_agent_harness.toolkits.acp.runtime.event_text import condense_failure_text
 from myrm_agent_harness.toolkits.acp.runtime.process import ManagedProcess, spawn_managed_process
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
@@ -75,15 +85,30 @@ def server_environment(name: str, config: RuntimeConfig, command: str) -> tuple[
 
 
 class AppServerStartError(Exception):
-    """The app server could not be started or did not complete the handshake; the message says why."""
+    """The app server could not be started or did not complete the handshake; the message says why.
+
+    ``retryable`` is False when starting it again cannot help (an installed server that is too old).
+    """
+
+    def __init__(self, message: str, *, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class AppServerConnection:
     """A greeted app-server process and the peer that speaks to it."""
 
-    def __init__(self, process: ManagedProcess, peer: JsonRpcPeer, stack: AsyncExitStack) -> None:
+    def __init__(
+        self,
+        process: ManagedProcess,
+        peer: JsonRpcPeer,
+        stack: AsyncExitStack,
+        version: tuple[int, int, int] | None,
+    ) -> None:
         self.process = process
         self.peer = peer
+        # The version the server said it is, None when it did not say.
+        self.version = version
         self._stack = stack
 
     @property
@@ -100,8 +125,9 @@ class AppServerConnection:
         on_server_request: ServerRequestHandler,
         observe: NotificationObserver,
         api_key: str | None,
+        client: ClientIdentity,
     ) -> AppServerConnection:
-        """Start the server, shake hands and log in with ``api_key`` (when given).
+        """Start the server, shake hands as ``client`` and log in with ``api_key`` (when given).
 
         Raises:
             ProcessLaunchError: the executable does not exist.
@@ -115,7 +141,8 @@ class AppServerConnection:
             peer = JsonRpcPeer(process, on_server_request=on_server_request, observe=observe)
             stack.push_async_callback(peer.aclose)
             try:
-                await peer.request("initialize", initialize_params(), timeout=_HANDSHAKE_SECONDS)
+                greeting = await peer.request("initialize", initialize_params(client), timeout=_HANDSHAKE_SECONDS)
+                version = _supported_version(greeting, client)
                 await peer.notify("initialized")
                 if api_key is not None:
                     await peer.request("account/login/start", login_params(api_key), timeout=_HANDSHAKE_SECONDS)
@@ -130,7 +157,7 @@ class AppServerConnection:
         except BaseException:
             await stack.aclose()
             raise
-        return cls(process, peer, stack)
+        return cls(process, peer, stack, version)
 
     async def close(self, *, graceful: bool) -> None:
         """Stop the server: ``graceful`` lets it finish on its own after its input ends, otherwise it is stopped at once."""
@@ -144,6 +171,21 @@ class AppServerConnection:
     async def exit_reason(self) -> str:
         """What the process left behind (its exit code and the tail of what it wrote to stderr), for a failure message."""
         return await _exit_reason(self.process, "The Codex app server exited")
+
+
+def _supported_version(greeting: Json, client: ClientIdentity) -> tuple[int, int, int] | None:
+    """The version the server says it is, or None when it does not say.
+
+    A server older than the host speaks to is refused; one that does not say its version is let through and noted.
+    """
+    version = server_version(greeting, client)
+    if version is None:
+        logger.warning("codex_server_version_unreadable user_agent=%r", as_str(greeting.get("userAgent"))[:120])
+    elif version < MINIMUM_SERVER_VERSION:
+        installed, needed = (".".join(map(str, parts)) for parts in (version, MINIMUM_SERVER_VERSION))
+        msg = f"The installed Codex ({installed}) is too old: {needed} or newer is needed. Update Codex and try again."
+        raise AppServerStartError(msg, retryable=False)
+    return version
 
 
 async def _exit_reason(process: ManagedProcess, prefix: str) -> str:

@@ -3,7 +3,9 @@
 import React, { memo, useRef, useEffect, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils/classnameUtils';
 import { safeBase64DecodeUtf8 } from '@/lib/utils/encodingUtils';
+import { readableMcpServerName } from '@/lib/humanize';
 import { requestUntrustedLink } from '@/lib/untrusted-link';
+import { useMcpServerNameResolver } from '@/hooks/shared/useMcpServerNameResolver';
 import { subscribeHostThemeVars } from '@/lib/widget-theme-bridge';
 import { fetchWithTimeout } from '@/lib/api';
 import { toast } from 'sonner';
@@ -30,6 +32,9 @@ interface McpAppViewerProps {
  */
 export const McpAppViewer: React.FC<McpAppViewerProps> = memo(({ view, className }) => {
   const t = useTranslations('chat.mcpApp');
+  const serverNameOf = useMcpServerNameResolver();
+  // The view carries the identity from the tool name; the user knows the server by the name they gave it.
+  const serverLabel = readableMcpServerName(view.serverName, serverNameOf);
   const [htmlContent, setHtmlContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +139,7 @@ export const McpAppViewer: React.FC<McpAppViewerProps> = memo(({ view, className
       if (type === 'openLink' || type === 'app:openLink' || type === 'widget-navigate') {
         const url = typeof e.data.url === 'string' ? e.data.url : '';
         if (url) {
-          requestUntrustedLink(url, view.serverName);
+          requestUntrustedLink(url, serverLabel ?? null);
         }
       }
 
@@ -144,7 +149,7 @@ export const McpAppViewer: React.FC<McpAppViewerProps> = memo(({ view, className
         setIframeHeight(h);
       }
     },
-    [view.serverName],
+    [serverLabel],
   );
 
   useEffect(() => {
@@ -181,7 +186,7 @@ export const McpAppViewer: React.FC<McpAppViewerProps> = memo(({ view, className
         srcDoc={htmlContent}
         className="w-full h-full border-0 bg-background"
         sandbox={SANDBOX_POLICY}
-        title={t('title', { server: view.serverName })}
+        title={serverLabel ? t('title', { server: serverLabel }) : t('titleAnonymous')}
         onLoad={handleIframeLoad}
       />
     </div>

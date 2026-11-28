@@ -6,8 +6,8 @@ URLs and device codes surface as actionable PROMPT events, progress lines as STA
 and the terminal outcome as SUCCESS or ERROR. A login succeeded when the CLI exited
 cleanly and says it is logged in (its own report, the credential file only for a CLI
 that has no status command); one that failed ends with the CLI's own last words.
-Backends whose login is not scriptable on this host yield a single PROMPT directing
-the user to credential import.
+A backend whose login the user runs in a terminal (``LoginStrategy.TERMINAL``) is not
+started: its one event says so.
 
 [INPUT]
 - toolkits.acp.auth._profiles::AuthProfile (POS: Authentication profile registry.)
@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import os
 import re
 import signal
@@ -37,12 +36,10 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from myrm_agent_harness.toolkits.acp.auth._profiles import AuthProfile
+from myrm_agent_harness.toolkits.acp.auth._profiles import AuthProfile, LoginStrategy
 from myrm_agent_harness.toolkits.acp.auth.credential_store import CredentialStore
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
 from myrm_agent_harness.toolkits.acp.auth.login_state import resolve_login_state
-
-logger = logging.getLogger(__name__)
 
 # A CLI colours its output even when it writes to a pipe (Codex ignores NO_COLOR), and the escape sequences would end up
 # inside the URL and the code it prints.
@@ -81,9 +78,8 @@ class AuthEvent:
 class CliLoginSession:
     """Drives an interactive CLI login and observes it to completion.
 
-    Lifecycle: iterate :meth:`run` to receive the event stream; call :meth:`feed`
-    to forward a user-supplied code to the CLI's stdin (for ``paste_code`` flows);
-    call :meth:`cancel` to abort. A session instance drives a single login attempt.
+    Lifecycle: iterate :meth:`run` to receive the event stream; call :meth:`cancel`
+    to abort. A session instance drives a single login attempt.
 
     ``remote``: the browser that signs in is on another machine than the CLI, so the CLI is asked for the login that
     works from there (see ``AuthProfile.remote_login_args``).
@@ -110,13 +106,10 @@ class CliLoginSession:
 
     async def run(self) -> AsyncIterator[AuthEvent]:
         """Spawn the login command and stream login events to completion."""
-        if not self._profile.scriptable_login:
+        if self._profile.login_strategy is not LoginStrategy.BROWSER_OAUTH:
             yield AuthEvent(
-                AuthEventType.PROMPT,
-                message=(
-                    f"{self._profile.backend} login is not scriptable here. Sign in on a machine "
-                    "with a browser, then import the credential file to finish."
-                ),
+                AuthEventType.ERROR,
+                message=f"{self._profile.backend} login runs in a terminal; it is not started from here.",
             )
             return
 
@@ -126,7 +119,7 @@ class CliLoginSession:
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *args,
-                stdin=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self._base_env,
@@ -156,8 +149,7 @@ class CliLoginSession:
                         continue
                     event = _classify(line)
                     if event is not None:
-                        if not self._is_code_prompt(event.message):
-                            last_words = event.message
+                        last_words = event.message
                         yield event
                 return_code = await self._process.wait()
         except TimeoutError:
@@ -179,27 +171,12 @@ class CliLoginSession:
         else:
             yield AuthEvent(
                 AuthEventType.ERROR,
-                message=f"Login finished but {self._profile.backend} reports no login; try credential import.",
+                message=f"Login finished but {self._profile.backend} reports no login; try again.",
             )
-
-    async def feed(self, text: str) -> None:
-        """Forward a user-supplied line (e.g. a pasted auth code) to the CLI's stdin."""
-        proc = self._process
-        if proc is None or proc.stdin is None or proc.stdin.is_closing():
-            return
-        try:
-            proc.stdin.write((text.rstrip("\n") + "\n").encode("utf-8"))
-            await proc.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError):
-            logger.debug("login_feed_failed backend=%s", self._profile.backend, exc_info=True)
 
     async def cancel(self) -> None:
         """Abort an in-progress login."""
         await self._terminate()
-
-    def _is_code_prompt(self, message: str) -> bool:
-        """Whether ``message`` is the CLI asking for the pasted code, which it also does after refusing one."""
-        return bool(self._profile.code_prompt) and self._profile.code_prompt in message
 
     async def _logged_in(self) -> bool:
         """Whether the CLI says it is logged in now, asked the way a delegated turn would see it."""

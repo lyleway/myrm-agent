@@ -100,11 +100,19 @@ describe('ContextUsageIndicator after a compaction', () => {
 
   it('keeps the typed focus topic and the outcome line through the health read a compression triggers', async () => {
     const healths = [healthAfter(3, 8200), healthAfter(4, 14200)];
-    mockApiRequest.mockImplementation(async (url: string) =>
-      url === `/chats/${chatId}/compact`
-        ? { compacted: true, message_count: 6, tokens_saved: 6000, reason: null }
-        : { context_health: healths.shift() },
-    );
+    // The server accepts the compaction at once and the page asks for its run; here the run has already succeeded.
+    mockApiRequest.mockImplementation(async (url: string) => {
+      if (url === `/chats/${chatId}/compact`) {
+        return { status: 'running' };
+      }
+      if (url === `/chats/${chatId}/compact/run`) {
+        return {
+          status: 'succeeded',
+          result: { compacted: true, message_count: 6, tokens_saved: 6000, reason: null },
+        };
+      }
+      return { context_health: healths.shift() };
+    });
     const user = userEvent.setup();
     render(<ContextUsageIndicator />);
     await user.click(screen.getByTestId('context-usage-indicator'));
@@ -114,7 +122,8 @@ describe('ContextUsageIndicator after a compaction', () => {
     await user.type(topicInput, 'billing');
     await user.click(screen.getByRole('button', { name: 'Compress context' }));
 
-    expect(await screen.findByText('4× compressed, 14.2K saved')).toBeInTheDocument();
+    // The first look at the run comes after its first poll interval, so the default one second is cut close.
+    expect(await screen.findByText('4× compressed, 14.2K saved', undefined, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Saved 6.0K tokens')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Focus topic (optional, e.g. auth module)')).toBe(topicInput);
     expect(topicInput).toHaveValue('billing');

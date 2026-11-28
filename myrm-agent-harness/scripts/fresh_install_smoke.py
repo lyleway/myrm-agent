@@ -3,9 +3,11 @@
 
 The unit suite runs against the source tree with every extra installed, so it cannot see a dependency declared under
 the wrong extra, a module the wheel leaves out, or an import that works only because the repository is on the path.
-This installs the wheel the way a user of the framework does and drives the delegation toolkit twice: without extras
-(the toolkit imports and a turn to an ACP agent says which extra to install), then with the ``acp`` extra (the stub
-agent's answer streams and the turn ends).
+This installs the wheel the way a user of the framework does and delegates through its public surface
+(``myrm_agent_harness.api.delegation``) twice. Without extras: the surface imports, a turn to a CLI agent streams its
+answer, and a turn to an ACP agent says which extra to install. With the ``acp`` extra: the stub agent's answer
+streams and the turn ends, the agent is told which host is talking to it, and the host's own permission broker decides
+whether the agent's edit happens.
 
 Usage:
     uv build --wheel --out-dir dist-smoke && python scripts/fresh_install_smoke.py dist-smoke/*.whl

@@ -149,9 +149,11 @@ async def test_a_resume_without_the_toggle_or_the_plan_grants_nothing(tmp_path) 
     for directory in (workspace, extra):
         directory.mkdir()
     folders = [{"path": str(extra), "writable": False}]
-    toggle_off = {"decisions": [{"type": "approve", "extensions": {"grantDirectories": folders}}]}
-    no_plan = {"decisions": [{"type": "approve", "extensions": {"grantDirectory": True}}]}
-    rejected = {"decisions": [{"type": "reject", "extensions": {"grantDirectory": True, "grantDirectories": folders}}]}
+    toggle_off: dict[str, object] = {"decisions": [{"type": "approve", "extensions": {"grantDirectories": folders}}]}
+    no_plan: dict[str, object] = {"decisions": [{"type": "approve", "extensions": {"grantDirectory": True}}]}
+    rejected: dict[str, object] = {
+        "decisions": [{"type": "reject", "extensions": {"grantDirectory": True, "grantDirectories": folders}}]
+    }
 
     for payload in (toggle_off, no_plan, rejected):
         await apply_directory_resume_grant(None, payload, workspace_dir=str(workspace))
@@ -205,7 +207,7 @@ async def test_a_resume_that_grants_nothing_does_not_read_the_chat(monkeypatch: 
         raise AssertionError("a resume without a folder grant has no use for the chat's roots")
 
     monkeypatch.setattr("app.services.chat.chat_service.ChatService.get_chat_metadata", _no_read)
-    plain_approval = {"decisions": [{"type": "approve", "extensions": {}}]}
+    plain_approval: dict[str, object] = {"decisions": [{"type": "approve", "extensions": {}}]}
 
     await apply_directory_resume_grant("chat-plain-approval", plain_approval, workspace_dir=str(tmp_path))
 
@@ -451,7 +453,9 @@ async def test_grant_chat_session_access_root_direct(monkeypatch: pytest.MonkeyP
     assert updated[0].path == os.path.realpath(str(target))
     assert updated[0].writable is True
     assert captured["chat_id"] == "chat-drag-drop"
-    persisted = captured["updates"]["session_access_roots"]
+    updates = captured["updates"]
+    assert isinstance(updates, dict)
+    persisted = updates["session_access_roots"]
     assert isinstance(persisted, list)
     assert len(persisted) == 1
     assert persisted[0]["path"] == os.path.realpath(str(target))
@@ -486,7 +490,9 @@ async def test_orchestrator_resume_grant_path_persists_via_service(
     )
 
     assert captured["chat_id"] == "chat-orchestrator-resume"
-    roots_json = captured["updates"]["session_access_roots"]
+    updates = captured["updates"]
+    assert isinstance(updates, dict)
+    roots_json = updates["session_access_roots"]
     assert isinstance(roots_json, list)
     assert roots_json[0]["path"] == os.path.realpath(str(target))
     assert get_session_access_roots()[0].path == os.path.realpath(str(target))

@@ -44,8 +44,8 @@ def resolve_send_mode(
 # ── Post (rich text) format builders ─────────────────────────────
 
 # Bold, strikethrough and code spans cost time in proportion to the line however broken their delimiters are. Links
-# (lazy label and target, cubic: 1,000 repeats of ``[a](`` took 4.6 s) and ``_italic_`` (quadratic: 8,000 characters
-# of `` _a`` took 0.1 s) do not, so each has its own scan below.
+# (lazy label and target, cubic: 1,000 repeats of ``[a](`` take 4.6 s) and ``_italic_`` (quadratic: 8,000 characters
+# of `` _a`` take 0.1 s) do not, so each has its own scan below.
 _PLAIN_EMPHASIS_RE = re.compile(r"\*\*.+?\*\*" r"|~~.+?~~" r"|`[^`]+`")
 _HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _POST_INLINE_RE = re.compile(

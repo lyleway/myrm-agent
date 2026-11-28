@@ -1,7 +1,7 @@
 """Real-Chromium proof that a pool that was shut down stays shut down for a caller that still holds it.
 
-Before the closed state, the acquisition of a session that outlived the shutdown launched a new Chromium and restarted
-the lifecycle loop, and nothing closed them again. The browsers here are real and are counted in the process table.
+Without the closed state, the acquisition of a session that outlives the shutdown launches a new Chromium and restarts
+the lifecycle loop, and nothing closes them again. The browsers here are real and are counted in the process table.
 Run with: `pytest -m integration tests/toolkits/browser/pool/test_closed_pool_real_browser.py`.
 """
 

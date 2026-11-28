@@ -1,15 +1,15 @@
 """Agent Execution Gateway — concurrency, timeout, memory pressure, drain, and observability.
 
-Unified entry point for all Agent executions.
-Provides global + per-user concurrency control, memory pressure circuit breaker,
-execution watchdog (idle-silence threshold with a hard wall-clock ceiling),
-graceful drain on shutdown, and structured logging.
+Unified entry point for all Agent executions. Provides global + per-user concurrency control, memory pressure
+circuit breaker, execution watchdog (idle-silence threshold with a hard wall-clock ceiling), graceful drain on
+shutdown, and structured logging.
 
 [INPUT]
 - AsyncGenerator[dict, None]: bound agent stream from any Agent type
+- app.services.agent.streaming_support.outbound_scrub::scrub_outbound_event (POS: the last text filter before an agent event leaves the server)
 
 [OUTPUT]
-- AsyncGenerator[dict, None]: same events, wrapped with lifecycle management
+- AsyncGenerator[dict, None]: same events, wrapped with lifecycle management; host paths and credentials in their strings are masked, except the folder plan of an approval card
 - AgentDrainingError: raised when gateway is draining (graceful shutdown)
 - AgentQueueTimeout: raised when queue wait exceeds limit
 - AgentExecutionTimeout: raised when execution exceeds limit

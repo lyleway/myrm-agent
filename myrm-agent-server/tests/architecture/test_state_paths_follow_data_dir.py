@@ -33,7 +33,8 @@ _HOME_MARKERS = ("home(", "~", "HOME", "USERPROFILE")
 _ALLOWED: dict[str, str] = {
     "myrm_agent_harness/toolkits/acp/toolchains/manager.py": (
         "version-keyed third-party CLI installs (node-<version>, an npm prefix) shared by every Myrm process on the "
-        "machine like a package-manager cache; the install endpoint is the only writer and no test calls it"
+        "machine like a package-manager cache; a host or a test moves it with MYRM_TOOLCHAIN_DIR, read on every "
+        "call, and the install endpoint is the only writer"
     ),
     "app/config/settings/infra.py": (
         "the settings field that reads MYRM_DATA_DIR through its alias: the literal is its documented default, "

@@ -1,8 +1,8 @@
-"""The voice handler reads the TTS markers its patterns read, in time proportional to the reply.
+"""The voice handler reads exactly the TTS markers its reference patterns read, in time proportional to the reply.
 
-The old patterns are the reference here, not the code under test. A directive body holds no ``]`` and a text block
-ends at the first closing marker, and each pattern was tried again from every ``[[tts:`` that had not closed: a reply
-of 100,000 characters made of nothing else took seven to nine seconds.
+The reference patterns are the specification here, not the code under test. A directive body holds no ``]`` and a text
+block ends at the first closing marker, and each pattern is tried again from every ``[[tts:`` that has not closed: a
+reply of 100,000 characters made of nothing else takes seven to nine seconds.
 """
 
 from __future__ import annotations
@@ -17,21 +17,21 @@ import pytest
 
 from app.channels.voice.handler import _tts_directives, _tts_text_blocks, parse_tts_directives, strip_tts_tags
 
-_OLD_DIRECTIVE_RE = re.compile(r"\[\[tts:([^\]]+)\]\]")
-_OLD_TEXT_RE = re.compile(r"\[\[tts:text\]\](.*?)\[\[/tts:text\]\]", re.DOTALL)
+_REFERENCE_DIRECTIVE_RE = re.compile(r"\[\[tts:([^\]]+)\]\]")
+_REFERENCE_TEXT_RE = re.compile(r"\[\[tts:text\]\](.*?)\[\[/tts:text\]\]", re.DOTALL)
 
 
-def _old_directives(text: str) -> list[tuple[int, int, str]]:
-    return [(m.start(), m.end(), m.group(1)) for m in _OLD_DIRECTIVE_RE.finditer(text)]
+def _reference_directives(text: str) -> list[tuple[int, int, str]]:
+    return [(m.start(), m.end(), m.group(1)) for m in _REFERENCE_DIRECTIVE_RE.finditer(text)]
 
 
-def _old_text_blocks(text: str) -> list[tuple[int, int, str]]:
-    return [(m.start(), m.end(), m.group(1)) for m in _OLD_TEXT_RE.finditer(text)]
+def _reference_text_blocks(text: str) -> list[tuple[int, int, str]]:
+    return [(m.start(), m.end(), m.group(1)) for m in _REFERENCE_TEXT_RE.finditer(text)]
 
 
-def _old_parse(text: str) -> tuple[dict[str, str], str | None]:
+def _reference_parse(text: str) -> tuple[dict[str, str], str | None]:
     directives: dict[str, str] = {}
-    for match in _OLD_DIRECTIVE_RE.finditer(text):
+    for match in _REFERENCE_DIRECTIVE_RE.finditer(text):
         raw = match.group(1).strip()
         if raw == "off":
             directives["off"] = "true"
@@ -42,13 +42,13 @@ def _old_parse(text: str) -> tuple[dict[str, str], str | None]:
             if "=" in part:
                 key, _, val = part.partition("=")
                 directives[key.strip()] = val.strip()
-    found = _OLD_TEXT_RE.search(text)
+    found = _REFERENCE_TEXT_RE.search(text)
     return directives, found.group(1).strip() if found else None
 
 
-def _old_strip(text: str) -> str:
-    text = _OLD_TEXT_RE.sub("", text)
-    text = _OLD_DIRECTIVE_RE.sub("", text)
+def _reference_strip(text: str) -> str:
+    text = _REFERENCE_TEXT_RE.sub("", text)
+    text = _REFERENCE_DIRECTIVE_RE.sub("", text)
     return text.strip()
 
 
@@ -68,13 +68,13 @@ class TestFindsWhatThePatternsFound:
     def test_every_text_of_that_length(self, length: int) -> None:
         for pieces in itertools.product(_PIECES, repeat=length):
             text = "".join(pieces)
-            assert list(_tts_directives(text)) == _old_directives(text), text
-            assert list(_tts_text_blocks(text)) == _old_text_blocks(text), text
+            assert list(_tts_directives(text)) == _reference_directives(text), text
+            assert list(_tts_text_blocks(text)) == _reference_text_blocks(text), text
 
     def test_random_text(self) -> None:
         for text in _random_strings(40_000, 14, seed=73):
-            assert list(_tts_directives(text)) == _old_directives(text), repr(text)
-            assert list(_tts_text_blocks(text)) == _old_text_blocks(text), repr(text)
+            assert list(_tts_directives(text)) == _reference_directives(text), repr(text)
+            assert list(_tts_text_blocks(text)) == _reference_text_blocks(text), repr(text)
 
     @pytest.mark.parametrize(
         ("text", "directives"),
@@ -91,7 +91,7 @@ class TestFindsWhatThePatternsFound:
         ],
     )
     def test_directive_examples(self, text: str, directives: list[tuple[int, int, str]]) -> None:
-        assert list(_tts_directives(text)) == directives == _old_directives(text)
+        assert list(_tts_directives(text)) == directives == _reference_directives(text)
 
     @pytest.mark.parametrize(
         ("text", "blocks"),
@@ -106,7 +106,7 @@ class TestFindsWhatThePatternsFound:
         ],
     )
     def test_text_block_examples(self, text: str, blocks: list[tuple[int, int, str]]) -> None:
-        assert list(_tts_text_blocks(text)) == blocks == _old_text_blocks(text)
+        assert list(_tts_text_blocks(text)) == blocks == _reference_text_blocks(text)
 
 
 class TestPublicFunctions:
@@ -114,13 +114,13 @@ class TestPublicFunctions:
     def test_every_text_of_that_length(self, length: int) -> None:
         for pieces in itertools.product(_PIECES, repeat=length):
             text = "".join(pieces)
-            assert parse_tts_directives(text) == _old_parse(text), text
-            assert strip_tts_tags(text) == _old_strip(text), text
+            assert parse_tts_directives(text) == _reference_parse(text), text
+            assert strip_tts_tags(text) == _reference_strip(text), text
 
     def test_random_text(self) -> None:
         for text in _random_strings(20_000, 14, seed=79):
-            assert parse_tts_directives(text) == _old_parse(text), repr(text)
-            assert strip_tts_tags(text) == _old_strip(text), repr(text)
+            assert parse_tts_directives(text) == _reference_parse(text), repr(text)
+            assert strip_tts_tags(text) == _reference_strip(text), repr(text)
 
     def test_the_first_block_is_the_speech(self) -> None:
         text = "x [[tts:text]] one [[/tts:text]] y [[tts:text]]two[[/tts:text]]"

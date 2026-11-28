@@ -85,7 +85,7 @@ class TestWrapToolsWithTimeout:
             return "result"
 
         tool = self._make_tool("fast", fast_fn)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
         result = await tool.coroutine()
         assert "result" in result
         assert "UNTRUSTED_DATA" in result
@@ -97,7 +97,7 @@ class TestWrapToolsWithTimeout:
             return "never"
 
         tool = self._make_tool("slow", slow_fn)
-        wrap_tools_with_timeout([tool], timeout=0.1)
+        wrap_tools_with_timeout([tool], "srv", timeout=0.1)
         result = await tool.coroutine()
         assert isinstance(result, str)
         assert "timed out" in result
@@ -105,7 +105,7 @@ class TestWrapToolsWithTimeout:
 
     def test_sync_tool_skipped(self) -> None:
         tool = self._make_tool("sync", None)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
         assert tool.coroutine is None
 
     @pytest.mark.asyncio
@@ -115,7 +115,7 @@ class TestWrapToolsWithTimeout:
             return "unreachable"
 
         tool = self._make_tool("hang_tool", hang)
-        wrap_tools_with_timeout([tool], timeout=0.05)
+        wrap_tools_with_timeout([tool], "srv", timeout=0.05)
         result = await tool.coroutine()
         assert isinstance(result, str)
         assert "hang_tool" in result
@@ -132,7 +132,7 @@ class TestWrapToolsWithTimeout:
 
         tool_a = self._make_tool("tool_a", fn_a)
         tool_b = self._make_tool("tool_b", fn_b)
-        wrap_tools_with_timeout([tool_a, tool_b], timeout=0.1)
+        wrap_tools_with_timeout([tool_a, tool_b], "srv", timeout=0.1)
 
         result_a = await tool_a.coroutine()
         assert "a" in result_a
@@ -151,7 +151,7 @@ class TestWrapToolsWithTimeout:
             return "never"
 
         tool = self._make_tool("slow_svc", slow)
-        wrap_tools_with_timeout([tool], timeout=0.05)
+        wrap_tools_with_timeout([tool], "srv", timeout=0.05)
         result = await tool.coroutine()
         assert "timed out" in result
         assert "UNTRUSTED_DATA" not in result
@@ -175,7 +175,7 @@ class TestWrapToolsWithTimeout:
             )
 
         tool = self._make_tool("vision_tool", multimodal_fn)
-        wrap_tools_with_timeout([tool], timeout=5.0)
+        wrap_tools_with_timeout([tool], "srv", timeout=5.0)
         result = await tool.coroutine()
         assert isinstance(result, list)
         image_blocks = [b for b in result if b.get("type") == "image"]

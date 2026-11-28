@@ -6,7 +6,7 @@
 
 [OUTPUT]
 - POST /{chat_id}/session-access-roots: grant one root; a grant the server refuses answers 403
-- PATCH /{chat_id}/session-access-roots: revoke one root
+- PATCH /{chat_id}/session-access-roots: revoke the root the path names (a deleted folder's own root included, never the folder above it)
 - Both take the folder path as its exact text, never trimmed; a blank path answers 422
 
 [POS]

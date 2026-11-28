@@ -10,6 +10,7 @@ reply to a short chat, carrying that reason.
 
 from __future__ import annotations
 
+import time
 import uuid
 
 import pytest
@@ -38,6 +39,7 @@ from tests.support.context_compaction_ui import outcome_js, panel_ready_js, pres
 # Usage the last reply recorded; the panel offers "compress" from 30 %.
 _RECORDED_USAGE_PERCENT = 55.0
 _COMPACTION_TIMEOUT_SEC = 240.0
+_DECLINE_TIMEOUT_SEC = 30.0
 _TOKENS_PLACEHOLDER = "{tokens}"
 _THEMES = ("light", "dark")
 # A phone held upright, and a laptop screen: the app lays out for both from 1024px up and below it.
@@ -45,6 +47,22 @@ _LAYOUTS = [
     pytest.param((390, 844), "zh", id="phone-zh"),
     pytest.param((1280, 900), "en", id="desktop-en"),
 ]
+
+
+def _ended_run(api_url: str, chat_id: str) -> dict[str, object]:
+    """Ask the server to compact a short chat and return its whole ``GET /compact/run`` body once the run has ended.
+
+    The server only accepts the request (202) and declines a chat this short within a moment.
+    """
+    http_json("POST", f"{api_url}/api/v1/chats/{chat_id}/compact", expected_statuses=frozenset({202}))
+    deadline = time.monotonic() + _DECLINE_TIMEOUT_SEC
+    while time.monotonic() < deadline:
+        body = http_json("GET", f"{api_url}/api/v1/chats/{chat_id}/compact/run")
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(body, dict) and isinstance(data, dict) and data.get("status") != "running":
+            return body
+        time.sleep(0.2)
+    raise AssertionError(f"the compaction of the short chat {chat_id} did not end within {_DECLINE_TIMEOUT_SEC:.0f} s")
 
 
 def _open_panel(client: ChromeMcpClient, page: McpPage, chat_id: str, viewport: tuple[int, int], locale: str) -> None:
@@ -150,12 +168,14 @@ def test_a_paused_or_failed_compaction_reads_in_both_themes(viewport: tuple[int,
     # The server's own answer to a compression it declines, with the reason a paused or a failed summary carries.
     short_chat_id = f"e2elayoutdeclined{uuid.uuid4().hex[:8]}"
     create_dormant_chat(api_url, short_chat_id, rounds=1)
-    declined = http_json("POST", f"{api_url}/api/v1/chats/{short_chat_id}/compact")
-    data = declined.get("data") if isinstance(declined, dict) else None
-    assert isinstance(declined, dict) and isinstance(data, dict) and data.get("compacted") is False, declined
+    declined = _ended_run(api_url, short_chat_id)
+    data = declined["data"]
+    assert isinstance(data, dict) and isinstance(data.get("result"), dict), declined
+    result = data["result"]
+    assert isinstance(result, dict) and result.get("compacted") is False, declined
     answers: dict[str, dict[str, object]] = {}
     for reason, key in (("summarize_circuit_open", ("compact", "skip", "paused")), ("timeout", ("compact", "failed"))):
-        answers[locale_text(locale, "chat", *key)] = {**declined, "data": {**data, "reason": reason}}
+        answers[locale_text(locale, "chat", *key)] = {**declined, "data": {**data, "result": {**result, "reason": reason}}}
 
     chat_id = f"e2elayoutpaused{uuid.uuid4().hex[:8]}"
     create_dormant_chat(api_url, chat_id, context_usage_percent=_RECORDED_USAGE_PERCENT)

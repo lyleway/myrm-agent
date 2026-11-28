@@ -48,7 +48,7 @@ Design notes:
 | `readiness/` | ✅ 核心 | Per-agent 配置就绪预检（6 维度 ready/warning/blocked + Settings deep link） | [_ARCH.md](readiness/_ARCH.md) |
 | `stream_session/` | ✅ 核心 | General Agent SSE 流式会话编排 | [_ARCH.md](stream_session/_ARCH.md) |
 | `turn_lease/` | ✅ 核心 | 服务端自启回合（目标续跑、审批超时恢复、崩溃重放）的会话占用 + 取消令牌租约，被取消时结束后台任务 | [_ARCH.md](turn_lease/_ARCH.md) |
-| `streaming_support/` | ✅ 核心 | SSE 格式化、Failover、内容收集、Multiplexer、takeover 链接注入、出站事件洗刷 | [_ARCH.md](streaming_support/_ARCH.md) |
+| `streaming_support/` | ✅ 核心 | SSE 格式化、Failover、内容收集、Multiplexer、takeover 链接注入、出站事件脱敏 | [_ARCH.md](streaming_support/_ARCH.md) |
 | `adaptive_wakeup/` | ✅ 核心 | 后台任务与子智能体完成后的自适应唤醒：有界预算决定每次完成的去向、每次完成都留一条通知行、唤醒回合在会话空闲且用户没有叫停时于 `server_turn_lease` 下运行，详见 [adaptive_wakeup/_ARCH.md](adaptive_wakeup/_ARCH.md) | - |
 
 > **API 边界**：预置智能体模板实例化（`instantiate-template`）在 `app/api/agents/templates.py`，不在本 services 层。
@@ -59,7 +59,7 @@ Design notes:
 
 | 文件 | 地位 | 职责 | I/O/P |
 |------|------|------|-------|
-| `gateway.py` | ✅ 核心 | Agent 执行网关 — 并发/内存压力熔断/排队与执行超时/优雅排空/活跃会话元数据；**`reserve_session` / `release_session`**（persist 前预占，`reserved_only`→`execute_stream`）；**`release_if_reserved_only`**（turn 在 `execute_stream` 接管前退出时清理残留预占，避免 chat 永久 busy；返回是否确实释放了残留预占）；互斥 busy 经 SSE **`error_type:AgentBusyError`**（HTTP 200，非 HTTP 409）；`interrupt()` / `interrupt_session`；**`get_session_id_by_message`**（由回合消息 id 反查会话：按消息 id 的 Stop 端点据此知道该给哪个会话挂「停止后不自行唤醒」）；**`is_session_interrupted`**（该会话的回合已被要求停止、尚未收尾：中断信号存活期等于回合的流，空闲会话恒为 False；无消息 id 也无取消令牌的服务端自启回合只靠它识别「正在停止」）；`ActiveSessionInfo` 弱引用 + `current_message_id`；**`is_session_active` / `active_session_ids`**（执行中会话的单点只读视图，Catchup 与 session map 据此判定 running/working）；**出站洗刷**：`execute_stream` 放出的每个事件先过 `streaming_support/outbound_scrub.py` 的 `scrub_outbound_event`，字符串里的主机路径与凭据被洗掉，审批请求里每个动作请求的授权文件夹 `grantDirectories` 是客户端会原样回传、服务端照它打开的数据，原样放行（只此一个位置） |
+| `gateway.py` | ✅ 核心 | Agent 执行网关 — 并发/内存压力熔断/排队与执行超时/优雅排空/活跃会话元数据；**`reserve_session` / `release_session`**（persist 前预占，`reserved_only`→`execute_stream`）；**`release_if_reserved_only`**（turn 在 `execute_stream` 接管前退出时清理残留预占，避免 chat 永久 busy；返回是否确实释放了残留预占）；互斥 busy 经 SSE **`error_type:AgentBusyError`**（HTTP 200，非 HTTP 409）；`interrupt()` / `interrupt_session`；**`get_session_id_by_message`**（由回合消息 id 反查会话：按消息 id 的 Stop 端点据此知道该给哪个会话挂「停止后不自行唤醒」）；**`is_session_interrupted`**（该会话的回合已被要求停止、尚未收尾：中断信号存活期等于回合的流，空闲会话恒为 False；无消息 id 也无取消令牌的服务端自启回合只靠它识别「正在停止」）；`ActiveSessionInfo` 弱引用 + `current_message_id`；**`is_session_active` / `active_session_ids`**（执行中会话的单点只读视图，Catchup 与 session map 据此判定 running/working）；**出站脱敏**：`execute_stream` 放出的每个事件先过 `streaming_support/outbound_scrub.py` 的 `scrub_outbound_event`，字符串里的主机路径与凭据被遮蔽，审批请求里每个动作请求的授权文件夹 `grantDirectories` 是客户端会原样回传、服务端照它打开的数据，原样放行（只此一个位置） |
 | `confidence_approval_flow.py` | ✅ 核心 | 多信号风控审批流 — 基于置信度 + 2 个客观确定性信号（diff 变化范围、历史成功率）的智能审批。高分且全部风控信号绿灯时静默自动合并，任何红灯或 runtime failure 修复即降级人工 Diff Review；引擎运行期间 SKILL.md 又被改动、因而基于已过期文本生成的提案直接丢弃。`ApprovalResult.risk_signals` 记录降级原因；risk_signals / runtime evidence 持久化为 `reason_code`、`remediation` 和审核证据供前端展示 |
 | `agent_service.py` | ✅ 核心 | Agent CRUD；分页列表排除产品面隐藏的内置智能体。WebUI mutable 变更前委托 `ProfileSnapshotService`；`update_agent` 返回 `AgentUpdateOutcome`（含 `snapshot_saved`）。MCP 变更后 POOLED 单元由 `compute_execution_fingerprint` 在下一 turn 重建。创建/更新/删除/回滚后失效 `AgentProfileResolver` 缓存并热重载 CommandRegistry。 |
 | `mcp_runtime_prepare.py` | ✅ 核心 | MCP 配置 secret/OAuth 注入 SSOT；factory build 共用 | ✅ |

@@ -1,8 +1,8 @@
-"""The workspace wikilink rewrite reads the links its pattern read, in time proportional to the note.
+"""The workspace wikilink rewrite reads exactly the links its reference pattern reads, in time proportional to the note.
 
-The old pattern is the reference here, not the code under test. A target, an anchor and an alias each stop at a ``]``,
-and the pattern reads up to it from every ``[[`` that does not close there: a note of 4,000 ``[`` took half a second
-and one of 8,000 over two.
+The reference pattern is the specification here, not the code under test. A target, an anchor and an alias each stop at
+a ``]``, and the pattern reads up to it from every ``[[`` that does not close there: a note of 4,000 ``[`` takes half a
+second and one of 8,000 over two.
 """
 
 from __future__ import annotations
@@ -18,18 +18,18 @@ import pytest
 
 from app.services.files.organize.wikilink import _rewrite_text, _wikilinks, rewrite_wikilinks_in_tree
 
-_OLD_RE = re.compile(r"\[\[([^\]|#]+)(#[^\]|]+)?(\|[^\]]+)?\]\]")
+_REFERENCE_RE = re.compile(r"\[\[([^\]|#]+)(#[^\]|]+)?(\|[^\]]+)?\]\]")
 
 
-def _old_links(text: str) -> list[tuple[int, int, str, str]]:
-    return [(m.start(), m.end(), m.group(1), (m.group(2) or "") + (m.group(3) or "")) for m in _OLD_RE.finditer(text)]
+def _reference_links(text: str) -> list[tuple[int, int, str, str]]:
+    return [(m.start(), m.end(), m.group(1), (m.group(2) or "") + (m.group(3) or "")) for m in _REFERENCE_RE.finditer(text)]
 
 
 def _links(text: str) -> list[tuple[int, int, str, str]]:
     return [(start, end, text[start + 2 : target_end], text[target_end : end - 2]) for start, target_end, end in _wikilinks(text)]
 
 
-def _old_rewrite_text(text: str, path_map: dict[str, str]) -> str:
+def _reference_rewrite_text(text: str, path_map: dict[str, str]) -> str:
     def repl(match: re.Match[str]) -> str:
         target = match.group(1).strip()
         mapped = path_map.get(target)
@@ -41,7 +41,7 @@ def _old_rewrite_text(text: str, path_map: dict[str, str]) -> str:
         display = Path(mapped).stem if "/" not in mapped and "\\" not in mapped else mapped
         return f"[[{display}{suffix}]]"
 
-    return _OLD_RE.sub(repl, text)
+    return _REFERENCE_RE.sub(repl, text)
 
 
 _PIECES = (
@@ -61,11 +61,11 @@ class TestFindsWhatThePatternFound:
     def test_every_text_of_that_length(self, length: int) -> None:
         for letters in itertools.product("[]|#a", repeat=length):
             text = "".join(letters)
-            assert _links(text) == _old_links(text), text
+            assert _links(text) == _reference_links(text), text
 
     def test_random_text(self) -> None:
         for text in _random_strings(40_000, 16, seed=51):
-            assert _links(text) == _old_links(text), repr(text)
+            assert _links(text) == _reference_links(text), repr(text)
 
     @pytest.mark.parametrize(
         ("text", "links"),
@@ -92,9 +92,9 @@ class TestFindsWhatThePatternFound:
 
 
 class TestRewrite:
-    def test_rewrites_what_the_pattern_rewrote(self) -> None:
+    def test_rewrites_what_the_reference_pattern_rewrites(self) -> None:
         for text in _random_strings(30_000, 14, seed=52):
-            assert _rewrite_text(text, _MAP) == _old_rewrite_text(text, _MAP), repr(text)
+            assert _rewrite_text(text, _MAP) == _reference_rewrite_text(text, _MAP), repr(text)
 
     @pytest.mark.parametrize(
         ("text", "rewritten"),

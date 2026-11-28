@@ -1,7 +1,7 @@
 """Saving the cloud browser or proxy settings reconfigures the running pool and never builds one.
 
-The hot reload used to ask for the pool, which built a pool with part of the recipe when none existed yet (no proxy, no
-extension bridge) and made it the process's pool. A pool that does not exist yet reads the saved settings when it is
+A hot reload that asked for the pool would build one with part of the recipe when none exists yet (no proxy, no
+extension bridge) and make it the process's pool. A pool that does not exist yet reads the saved settings when it is
 built, so there is nothing to reload; a pool that was built before the settings were readable is completed by it, and
 a save that lands while a pool is being built waits for the build and reaches the pool it produced.
 """

@@ -89,7 +89,7 @@ def short_root() -> Iterator[Path]:
     """A short folder under ``/tmp``, a prefix the outbound scrub rewrites.
 
     The model copies the path into its tool call, and a long pytest temp path does not survive that copy on every
-    model (one slipped an underscore into it), so the card would name a folder the test never made.
+    model, so the card would name a folder the test never made.
     """
     root = Path(os.path.realpath(tempfile.mkdtemp(prefix="fg", dir="/tmp")))
     yield root

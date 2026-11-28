@@ -23,6 +23,14 @@ vi.mock('../ExternalAgentLoginDialog', () => ({
   default: ({ open, command, account }: { open: boolean; command: string; account?: string }) =>
     open ? <div>{account ? `login-dialog:${command}:${account}` : `login-dialog:${command}`}</div> : null,
 }));
+vi.mock('../ExternalAgentTerminalLoginDialog', () => ({
+  default: ({ open, status, account }: { open: boolean; status: ExternalAgentAuthStatus; account?: string }) =>
+    open ? (
+      <div>
+        {account ? `terminal-login-dialog:${status.backend}:${account}` : `terminal-login-dialog:${status.backend}`}
+      </div>
+    ) : null,
+}));
 
 import ExternalAgentAuthControls from '../ExternalAgentAuthControls';
 
@@ -35,9 +43,8 @@ const status = (overrides: Partial<ExternalAgentAuthStatus> = {}): ExternalAgent
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'browser_oauth',
-  scriptableLogin: true,
-  needsCodeInput: false,
   subscriptionLoginAllowed: true,
+  availableInDeployment: true,
   ...overrides,
 });
 
@@ -80,6 +87,36 @@ describe('ExternalAgentAuthControls', () => {
     await userEvent.click(screen.getByRole('button', { name: 'login' }));
 
     expect(screen.getByText('login-dialog:codex')).toBeInTheDocument();
+  });
+
+  it('opens the terminal login, not the one the app drives, for an agent whose login the user runs in a terminal', async () => {
+    render(
+      <ExternalAgentAuthControls
+        command="claude"
+        status={status({ backend: 'claude', loginStrategy: 'terminal' })}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'login' }));
+
+    expect(screen.getByText('terminal-login-dialog:claude')).toBeInTheDocument();
+    expect(screen.queryByText('login-dialog:claude')).not.toBeInTheDocument();
+  });
+
+  it('logs in to the named account in the terminal login too', async () => {
+    render(
+      <ExternalAgentAuthControls
+        command="claude"
+        status={status({ backend: 'claude', loginStrategy: 'terminal' })}
+        account="work"
+        onChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'login' }));
+
+    expect(screen.getByText('terminal-login-dialog:claude:work')).toBeInTheDocument();
   });
 
   it('shows the logged-in badge keyed on the CLI-reported login state, with logout', async () => {
@@ -140,21 +177,23 @@ describe('ExternalAgentAuthControls', () => {
 
   describe('in a hosted deployment', () => {
     const hosted = (overrides: Partial<ExternalAgentAuthStatus> = {}) =>
-      status({ subscriptionLoginAllowed: false, ...overrides });
+      status({ backend: 'gemini', subscriptionLoginAllowed: false, ...overrides });
 
     it('offers no login for an installed agent, since agents run on an API key there', () => {
-      const { container } = render(<ExternalAgentAuthControls command="codex" status={hosted()} onChanged={vi.fn()} />);
+      const { container } = render(
+        <ExternalAgentAuthControls command="gemini" status={hosted()} onChanged={vi.fn()} />,
+      );
 
       expect(screen.queryByRole('button', { name: 'login' })).not.toBeInTheDocument();
       expect(screen.queryByText('badgeLoggedOut')).not.toBeInTheDocument();
-      expect(screen.queryByText('login-dialog:codex')).not.toBeInTheDocument();
+      expect(screen.queryByText('login-dialog:gemini')).not.toBeInTheDocument();
       expect(container.querySelector('button')).toBeNull();
     });
 
     it('still offers installation of a missing agent', async () => {
       render(
         <ExternalAgentAuthControls
-          command="codex"
+          command="gemini"
           status={hosted({ installed: false, path: null, version: null })}
           onChanged={vi.fn()}
         />,
@@ -162,15 +201,15 @@ describe('ExternalAgentAuthControls', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'install' }));
 
-      expect(screen.getByText('install-dialog:codex')).toBeInTheDocument();
+      expect(screen.getByText('install-dialog:gemini')).toBeInTheDocument();
     });
 
     it('shows a login left from before with a way to remove it, and no way to log in again', async () => {
       const onChanged = vi.fn();
-      mocks.logout.mockResolvedValue({ backend: 'codex', authenticated: false, authStatus: 'not_authenticated' });
+      mocks.logout.mockResolvedValue({ backend: 'gemini', authenticated: false, authStatus: 'not_authenticated' });
       render(
         <ExternalAgentAuthControls
-          command="codex"
+          command="gemini"
           status={hosted({ authenticated: true, authStatus: 'authenticated' })}
           onChanged={onChanged}
         />,
@@ -181,7 +220,63 @@ describe('ExternalAgentAuthControls', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'logout' }));
 
-      expect(mocks.logout).toHaveBeenCalledWith('codex', undefined);
+      expect(mocks.logout).toHaveBeenCalledWith('gemini', undefined);
+      expect(onChanged).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('for an agent the deployment does not run', () => {
+    const blocked = (overrides: Partial<ExternalAgentAuthStatus> = {}) =>
+      status({
+        backend: 'claude',
+        installed: false,
+        path: null,
+        version: null,
+        subscriptionLoginAllowed: false,
+        availableInDeployment: false,
+        ...overrides,
+      });
+
+    it('says it is not available, and offers neither installation nor login', () => {
+      const { container } = render(
+        <ExternalAgentAuthControls command="claude" status={blocked()} onChanged={vi.fn()} />,
+      );
+
+      expect(screen.getByText('blockedInDeployment')).toBeInTheDocument();
+      expect(container.querySelector('button')).toBeNull();
+      expect(screen.queryByText('badgeLoggedOut')).not.toBeInTheDocument();
+    });
+
+    it('does not offer to log in even when the agent is installed and signed out', () => {
+      render(
+        <ExternalAgentAuthControls
+          command="claude"
+          status={blocked({ installed: true, path: '/bin/claude' })}
+          onChanged={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    it('still lets a login left from before be removed', async () => {
+      const onChanged = vi.fn();
+      mocks.logout.mockResolvedValue({ backend: 'claude', authenticated: false, authStatus: 'not_authenticated' });
+      render(
+        <ExternalAgentAuthControls
+          command="claude"
+          status={blocked({ authenticated: true, authStatus: 'authenticated' })}
+          onChanged={onChanged}
+        />,
+      );
+
+      expect(screen.getByText('blockedInDeployment')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'login' })).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole('button', { name: 'logout' }));
+
+      expect(mocks.logout).toHaveBeenCalledWith('claude', undefined);
+      expect(mocks.toast.success).toHaveBeenCalledWith('logoutSuccess');
       expect(onChanged).toHaveBeenCalledTimes(1);
     });
   });

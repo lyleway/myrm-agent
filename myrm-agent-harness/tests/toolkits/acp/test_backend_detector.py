@@ -189,11 +189,11 @@ class TestFindExecutable:
 import shutil
 shutil.which = lambda *a, **kw: None
 
-from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector, _COMMON_PATHS
+from myrm_agent_harness.toolkits.acp.core.backend_detector import BackendDetector
 import myrm_agent_harness.toolkits.acp.core.backend_detector as _mod
 from pathlib import Path
 
-_mod._COMMON_PATHS = (Path("{tmp_path}"),)
+_mod._common_paths = lambda: (Path("{tmp_path}"),)
 detector = BackendDetector()
 result = detector._find_executable("claude")
 print(result or "NONE")
@@ -213,8 +213,8 @@ print(result or "NONE")
                 side_effect=lambda n: "/usr/bin/npm" if n == "npm" else None,
             ),
             patch(
-                "myrm_agent_harness.toolkits.acp.core.backend_detector._COMMON_PATHS",
-                (),
+                "myrm_agent_harness.toolkits.acp.core.backend_detector._common_paths",
+                return_value=(),
             ),
             patch.object(detector, "_find_npm_global", return_value="/usr/lib/node/claude"),
         ):
@@ -226,8 +226,8 @@ print(result or "NONE")
         with (
             patch("shutil.which", return_value=None),
             patch(
-                "myrm_agent_harness.toolkits.acp.core.backend_detector._COMMON_PATHS",
-                (),
+                "myrm_agent_harness.toolkits.acp.core.backend_detector._common_paths",
+                return_value=(),
             ),
             patch.object(detector, "_find_npm_global", return_value=None),
         ):

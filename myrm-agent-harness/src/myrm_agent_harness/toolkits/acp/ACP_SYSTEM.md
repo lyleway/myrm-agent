@@ -256,12 +256,15 @@ RuntimeConfig (frozen dataclass)
 ├── mcp_servers: Sequence[McpServerConfig] # 交给 agent 的 MCP Server（stdio 或 HTTP）
 ├── max_response_chars: int = 50_000     # 响应截断限制
 ├── max_turns: int = 25                  # 轮次上限：有原生上限的 CLI（Claude）经 --max-turns 自行停止，其余后端由 delegate 按工具调用数兜底
-└── description: str = ""                # Agent 能力描述（注入 tool description）
+├── description: str = ""                # Agent 能力描述（注入 tool description）
+├── account_home: str | None = None      # 已知 Agent 的 CLI 搬进去的命名账号目录（绝对路径，AccountStore 给出）；None：CLI 自己的默认 home
+└── client: ClientIdentity               # 宿主向 Agent 自报的身份（name / title / version），ACP 的 initialize 与 Codex 的握手共用；默认 myrm_agent_harness / Myrm Agent / 本包版本
 ```
 
 **环境变量管理 + 鉴权模式（`auth_mode`）**：
 - 环境基线：`build_safe_env()` 只让子进程继承核心变量（PATH、HOME、语言、代理等，复用 `core/security/process_env/env_isolation.py` 的 `CORE` 策略）加上该 CLI 自己的登录目录变量（`CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `GEMINI_CLI_HOME` / `QWEN_HOME`，取自 auth profile 的 `relocation_vars`）；宿主的 provider 密钥与其余环境一律不带——委托 CLI 会把自己的环境原样交给它执行的每条命令。后端另需的变量（`JAVA_HOME`、`SSH_AUTH_SOCK`、云厂商路由变量等）经 `RuntimeConfig.env` 设置。`CliRuntime`、`AcpRuntime` 与 `CodexRuntime` 启动前统一调用；「企业网络兼容」打开时它还在末尾补上 `NODE_USE_SYSTEM_CA=1`（`infra/tls_compat.py::with_node_system_ca`），让基于 Node 的 CLI 像宿主一样信任操作系统证书库，`RuntimeConfig.env` 自己写了该变量则保留它的值；受管工具链下载的 Node 是认该变量的 `NODE_VERSION`，其 npm 安装子进程同样带它
 - 账号（`RuntimeConfig.account_home`）：宿主把已知 Agent 跑在命名账号的目录里时，`build_safe_env` 在其余一切（含 `RuntimeConfig.env`）之后写入把该 CLI 搬进那个目录的变量（`launch_env.account_env`；各 CLI 怎么被搬由 auth profile 的契约给出）。必须最后写：Gemini、Qwen 的家目录变量（`GEMINI_CLI_HOME`、`QWEN_HOME`）带 provider 前缀，订阅模式会把 `env` 里这类条目当作密钥丢弃。`account_home` 必须是绝对路径且命令必须是已知 Agent，否则 `RuntimePool.register` 当场抛 `ValueError`，不留到首个回合才失败
+- 宿主身份（`RuntimeConfig.client`，`client_identity.py::ClientIdentity`）：宿主在 ACP `initialize` 的 `clientInfo` 与 Codex app-server 握手的 `clientInfo` 里向 Agent 自报的名字、标题与版本，默认是 `myrm_agent_harness`、`Myrm Agent` 与本包版本；嵌入 harness 的宿主在这里报自己，Agent 的日志与 user-agent 里看到的就是它。`name` 只许字母、数字、`.`、`_`、`-` 且以字母或数字开头：Codex 把名字原样放进自己的 `userAgent`（`<名字>/<版本> (…)`），宿主靠名字之后的版本号读出 server 版本，Agent 会改写的字符会让版本读不出来，所以构造 `ClientIdentity` 时就拒绝，不等到握手才发现
 - Claude 默认环境：`claude.ENV_DEFAULTS` 垫在宿主与配置环境之下（后两者可覆盖）；Claude 的 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` 让无头回合不留后台任务（后台任务期间 `claude -p` 不会退出）
 - `subscription`（默认）：剥离所有 provider 密钥 **并丢弃** `env` 中注入的密钥，强制委托 CLI 走自身订阅登录态（用户的 ChatGPT Plus / Claude Max / Gemini 订阅），绝不静默回退按量计费的 API Key
 - `api_key`：业务层经 `env` 注入该后端应计费的单一 provider 密钥，剥离基线后重新应用；Codex app server 不从环境读密钥，所以 `CodexRuntime` 用 `account/login/start` 把密钥交给 server（只在内存里），并让 Codex 以 `-c cli_auth_credentials_store="ephemeral"` 启动，密钥不进子进程环境（它会被 Codex 执行的每条命令继承）、不写进 Codex 的 home，用户自己的登录文件原样不动（`test_an_api_key_logs_in_through_the_server_and_leaves_the_users_own_login_alone`）
@@ -279,29 +282,32 @@ RuntimeConfig (frozen dataclass)
 
 ### 3.10 auth 子系统（订阅鉴权）
 
-**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动 GUI 登录、状态徽章与凭据持久化，并判定当前部署是否允许保存订阅凭据。
+**价值**：让委托的外部 CLI（Codex / Claude Code / Gemini / Qwen）运行在**用户自己的模型订阅**上而非按量计费的 API Key。框架只出**机制**（业务无关），由业务层驱动登录、状态徽章与登出，并判定当前部署是否允许保留订阅登录。宿主从不持有凭据：登录由 CLI 自己完成并保存，这里没有任何接受凭据再存下来的入口。
 
 ```
 auth/
-├── _profiles.py        # AuthProfile：每个 CLI 的凭据路径、登录/登出/查询登录态的命令、本机与远程浏览器各自的登录流程、api_key env
+├── _profiles.py        # AuthProfile：每个 CLI 的凭据路径、登录/登出/查询登录态的命令、谁来跑登录（LoginStrategy）、本机与远程浏览器各自的登录流程、api_key env
 │                       #   环境感知 resolve_home（CODEX_HOME/CLAUDE_CONFIG_DIR → /persistent）
 ├── accounts.py         # AccountStore：同一个 CLI 的多个登录各占一个目录（命名账号 + 按 API Key 计费运行的稳定目录）
-├── credential_store.py # CredentialStore：状态检测 / 通用凭据导入（原子写+0600）/ 清除
-├── login_session.py    # CliLoginSession：驱动 <cli> 登录，流式 AuthEvent（提取链接/设备码），以 CLI 自报的登录态判定成败
+├── credential_store.py # CredentialStore：状态检测 / 清除（从不写入凭据）
+├── login_session.py    # CliLoginSession：驱动 BROWSER_OAUTH 类 CLI（Codex）登录，流式 AuthEvent（提取链接/设备码），以 CLI 自报的登录态判定成败
+├── terminal_login.py   # terminal_login：用户在终端里敲的官方登录命令（账号隔离变量、CLI 的路径与托管 Node），按 POSIX / PowerShell / cmd.exe 各写一份，不启动任何进程
 └── logout.py           # log_out：先让 CLI 自己登出，再清凭据文件，返回 CLI 事后报告的登录态
 ```
 
-**三大机制**：
+**机制**：
 - **登录态检测**（`resolve_login_state`）：该后端是否已登录？有状态命令的 CLI（`claude auth status`、`codex login status`）问 CLI 自己并以它的回答为准，没有的（gemini、qwen）与 CLI 无回应时退回 `CredentialStore.state` 的文件判断；驱动状态徽章；鉴权态从不缓存（用户随时登录/登出）
-- **交互式登录**（`CliLoginSession`）：spawn `<cli> <login_command(remote)>`，并发读 stdout/stderr，去掉色彩转义后把链接/设备码变成可操作 PROMPT 事件（CLI 自己的回调地址不当链接给用户）；进程干净退出且 CLI 自报已登录才算 SUCCESS（登录放在钥匙串里的 CLI 不留凭据文件，文件不能当裁判），失败以 CLI 最后一句话收尾；`needs_code_input` 时经 `feed()` 回填用户粘贴的 code（Claude 走 `claude auth login --claudeai`，Codex 本机浏览器走 `login`、远程浏览器走 `login --device-auth`）
-- **登出**（`log_out`）：删凭据文件够不着放在钥匙串里的登录，所以先让 CLI 自己登出（`claude auth logout`、`codex logout`，带该 home 的环境、不带运营方的 provider 密钥），再清文件，最后返回 CLI 事后自报的登录态；真二进制契约（`test_real_cli_login_flow.py`）盯住各登录命令仍被 CLI 接受、`claude auth login` 经管道给出链接并以 CLI 自己的失败原因收尾、各 CLI 自己的登出让 home 不再有登录
+- **宿主驱动的登录**（`CliLoginSession`，`LoginStrategy.BROWSER_OAUTH`，目前只有 Codex）：spawn `<cli> <login_command(remote)>`，并发读 stdout/stderr，去掉色彩转义后把链接/设备码变成可操作 PROMPT 事件（CLI 自己的回调地址不当链接给用户）；进程干净退出且 CLI 自报已登录才算 SUCCESS（登录放在钥匙串里的 CLI 不留凭据文件，文件不能当裁判），失败以 CLI 最后一句话收尾；Codex 本机浏览器走 `login`、远程浏览器走 `login --device-auth`
+- **终端登录**（`terminal_login`，`LoginStrategy.TERMINAL`：Claude、Gemini、Qwen）：`claude auth login --claudeai` 打印链接并向用户要页面上的验证码，Gemini 与 Qwen 没有登录命令（界面首次启动时才问）；由宿主驱动就得让用户的验证码与登录经过宿主，所以改由用户在终端里跑 CLI 自己的登录，宿主只描述这条命令：CLI 按终端会找到它的方式写（终端按名字能找到的就是这个文件时写名字，否则写路径，由隔离工具链装的 CLI 同时把托管的 Node 放到 `PATH` 前面）、把登录留在账号目录里的变量（`isolated_env`），按 POSIX、PowerShell、cmd.exe 各写一份（cmd.exe 写不出的路径，该写法不给）；之后再问 CLI 自己谁登录了
+- **登出**（`log_out`）：删凭据文件够不着放在钥匙串里的登录，所以先让 CLI 自己登出（`claude auth logout`、`codex logout`，带该 home 的环境、不带运营方的 provider 密钥），再清文件，最后返回 CLI 事后自报的登录态；真二进制契约（`test_real_cli_login_flow.py`）盯住各登录命令（含用户在终端里敲的那条）仍被 CLI 接受、各 CLI 自己的登出让 home 不再有登录
 - **命名账号**（`AccountStore`）：同一个 CLI 的两个订阅登录（工作号、个人号）不能共用 CLI 存登录的那个目录。账号就是宿主在自选根目录下按名字建的目录 `<根>/<后端>/<名字>`，目录树本身是登记表（不存第二份记录，也不跟随符号链接）；CLI 被重定向进去后只看得到该账号的登录、设置与历史，用户自己 home 里的登录不被碰。各 CLI 的搬法是它契约的一部分（`AuthProfile.isolated_env`）：Claude `CLAUDE_CONFIG_DIR`、Codex `CODEX_HOME`、Qwen `QWEN_HOME`、Gemini `GEMINI_CLI_HOME`（状态在 `<根>/.gemini` 下）并加 `GEMINI_FORCE_FILE_STORAGE=true`（否则 Gemini 把凭据放进所有 home 共用的系统钥匙串，账号会悄悄共用一个登录）。`AccountStore.api_key_home` 给按 API Key 计费的运行一个从不被登录、不是账号、不被列出的稳定目录，遗留的订阅登录因此不会被读到。会话与账号的绑定不另存：Agent 换账号后先前的会话 id 在新账号里不存在，走既有的“会话失效”重试开新会话并提示。真二进制契约（`test_real_cli_account_home.py`）逐个 CLI 盯住：作为账号跑一回合，写下的一切都在账号目录里（进程自己的 home 保持为空）、对话只在该账号里续接、一个账号里的登录只是该账号的登录
-- **凭据导入兜底**（`CredentialStore.import_credential`）：登录不可脚本化（gemini/qwen 浏览器流）或不便时的**通用路径**——用户在有浏览器的机器登录后粘贴 `auth.json`，原子安全写入对应路径
-- **拒绝保存凭据**（`CredentialStore(accepts_new_credentials=False)`）：订阅登录会把用户自己的凭据留在宿主上，订阅条款只允许这发生在用户自己控制的机器上；业务层在不属于用户的宿主（托管沙箱）上以该开关构造存储，导入在写任何文件之前抛 `CredentialStorageDisabledError`，而检测与清除照常可用，使开关生效之前留下的凭据仍能被移除。登录会话本身由 CLI 自己落盘，harness 无法拦截，业务层必须在启动 `CliLoginSession` 之前拒绝
+- **不接受凭据**：`CredentialStore` 只检测与清除，没有写入口；订阅登录由 CLI 自己落盘，harness 无法拦截，业务层必须在不属于用户的宿主（托管沙箱）上于启动 `CliLoginSession`、描述终端登录之前拒绝，检测与清除照常可用，使留下的登录仍能被看到并移除
+- **厂商条款**：订阅登录与 API Key 受各 Agent 厂商自己的商业条款约束（含是否允许被第三方应用驱动）；harness 不替任何使用者取得授权。面向多用户托管的宿主，使用者须自备所用 Agent 的厂商条款（自己的订阅或 API Key），哪些 Agent 可以注册与运行由宿主在自己这一层决定
 
 **设计铁律**：
 - 鉴权态**绝不进入** Turn1 工具描述；`create_invoke_acp_agent_tool` 使用**固定 schema**（backend 列表仅在运行时 KeyError 返回值中暴露），不破坏提示词前缀缓存
 - 凭据路径环境感知：宿主通过重定向 home（如 `CODEX_HOME` → 持久卷）即可持久化凭据，harness 不依赖部署形态
+- **不读部署模式**：ACP 工具包既不读取也不命名部署形态（`DEPLOY_MODE`、`deploy_mode`），同一份库在本机、桌面与托管沙箱里行为一致；是否允许某个 Agent 在某个部署上安装或运行由宿主在注册之前决定，独立使用 harness 的人因此没有看不见的模式开关（`tests/architecture/test_acp_names_no_deployment_mode.py` 守着这条线）
 - 登录态以 CLI 自述为准（文件判断看不见 macOS Keychain 里的 Claude 登录，也会把 CLI 已不认的文件当作已登录），但仍**不做运行时硬预检**：CLI 自身的未登录错误以 `AUTH_FAILED`（Claude 的 `authentication_failed`、Codex 的 401）带着 CLI 原话准确透传，状态可见性由徽章承担。两个 CLI 的自述格式由真二进制契约测试（`test_real_cli_login_contract.py`）盯住：claude 在 stdout 打 JSON（`loggedIn`、`authMethod`，未登录时退出码为 1），codex 在 stderr 说话（退出码 0 / 1）
 
 ---
@@ -314,6 +320,7 @@ acp/
 ├── __main__.py             # CLI 入口
 ├── acp_agent_tools.py      # delegate 工具门面（业务层委托入口）
 ├── delegate_report.py      # 一次委托回合的报告：用量与计数、只带标题的通知步骤、Agent 提前结束时给调用模型的注记
+├── client_identity.py      # ClientIdentity：宿主向 Agent 自报的名字、标题与版本（ACP 与 Codex 两种握手共用）
 ├── mcp_servers.py          # 宿主交给 agent 的 MCP Server：StdioMcpServer、HttpMcpServer（名称与 URL 校验，env / headers 不进 repr），read_only 声明只读
 ├── types.py                # RuntimeEvent、Protocol（含 CliSessionStore）、RuntimeConfig、CliSessionRecord、错误码等
 ├── ACP_SYSTEM.md           # 本设计文档
@@ -326,10 +333,11 @@ acp/
 │   ├── __init__.py         # 公共导出
 │   ├── _profiles.py        # AuthProfile：CLI 凭据路径/登录命令/策略/家目录重定位变量
 │   ├── accounts.py         # AccountStore：命名账号（每个登录一个目录）与按 API Key 计费运行的稳定目录
-│   ├── credential_store.py # 状态检测 + 凭据导入兜底 + 清除
+│   ├── credential_store.py # 状态检测 + 清除
 │   ├── launch_env.py       # cli_base_env：每次启动 CLI 的基线环境（回合与探测共用）；account_env：把 CLI 搬进账号目录的变量
 │   ├── login_state.py      # probe_login / resolve_login_state：CLI 自述的登录态，文件判断作兜底
-│   └── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
+│   ├── login_session.py    # CliLoginSession：驱动 <cli> login，流式 AuthEvent
+│   └── terminal_login.py   # terminal_login：用户在终端里敲的登录命令，三种 shell 的写法
 ├── server/                 # ACP Server 方向（IDE → Agent）
 │   ├── __init__.py
 │   ├── server.py           # ACP Server（acp.Agent，支持动态绑定宿主 MCP 工具）
@@ -357,9 +365,9 @@ acp/
 │   ├── codex/              # Codex app-server 后端子包
 │   │   ├── __init__.py
 │   │   ├── runtime.py      # CodexRuntime：常驻 server、线程与回合、停止与失败收尾、静默心跳、401 快速失败
-│   │   ├── connection.py   # 一个已启动并握过手的 server 进程（环境、握手、API 密钥的内存登录、停止）
+│   │   ├── connection.py   # 一个已启动并握过手的 server 进程（环境、握手与版本下限检查、API 密钥的内存登录、停止）
 │   │   ├── rpc.py          # JSON-RPC 对端：请求、通知与 server 发来的请求（请求参数从不进日志）
-│   │   ├── protocol.py     # 宿主说的话：握手、回合策略（权限模式 → 审批策略与沙箱）、开线程（含宿主 MCP Server）与跑回合的请求
+│   │   ├── protocol.py     # 宿主说的话：握手、版本下限、回合策略（权限模式 → 审批策略与沙箱）、开线程（含必须起得来的宿主 MCP Server）与跑回合的请求
 │   │   ├── turn_events.py  # 一个回合的通知 → RuntimeEvent（纯翻译，无 I/O）
 │   │   ├── approvals.py    # server 的审批请求 → PermissionRequest → 答复
 │   │   ├── threads.py      # 线程簿：会话对应的线程、续接、失效与工作目录变化
@@ -377,7 +385,7 @@ acp/
 │       └── turn_parser.py  # 单回合 NDJSON 解析器（announce / result / 顶层 error 通知 / 连续 401 重试计数 / 增量文本去重）
 └── toolchains/             # 隔离工具链（Node/npm）
     ├── __init__.py
-    └── manager.py          # IsolatedToolchainManager：安装要么产出能启动的 CLI 要么抛 ToolchainError；内核锁、有界下载与 npm、跟随用户 npm 配置
+    └── manager.py          # IsolatedToolchainManager：安装要么产出能启动的 CLI 要么抛 ToolchainError；内核锁、有界下载与 npm、跟随用户 npm 配置；toolchain_base_dir() 给出安装目录（MYRM_TOOLCHAIN_DIR，每次调用时读取）
 ```
 
 `toolkits/acp/acp_agent_tools.py` 通过 `RuntimePool` 发起委托，汇总 `USAGE_UPDATE` 事件的 token 消耗并推送至前端；用户停止时经 `utils/runtime/cancel_hook.on_token_cancelled` 停掉外部进程。`runtime/cli/turn_parser.py` 把一个回合的 NDJSON 行解析为 `RuntimeEvent`：Claude stream-json（content block 里的文本与 tool_use / tool_result，`--include-partial-messages` 的 `stream_event` 增量文本并按 API message id 去重）、一行一个事件的通用格式与纯文本；同时暴露 CLI 最先 announce 的会话 id 与 CLI 自己的 `result` 结论。`runtime/cli/parser.py` 提供各格式共用的事件构造。Codex 不经这条路：`runtime/codex/turn_events.TurnTranslator` 把 app server 的通知（`item/started`、`item/completed`、`item/agentMessage/delta`、`thread/tokenUsage/updated`、`turn/completed` 等）翻成同一套 `RuntimeEvent`，只翻译当前回合的通知；一条新消息接在前文之后时以空行隔开，已经流式发出的条目完成时不重复。
@@ -416,6 +424,8 @@ acp/
 | runtime/acp/permission_policy.py | 实现 | ACP 后端 `safe` 的裁决：读类放行、其余交给 broker |
 | runtime/cli/permission_bridge.py | 实现 | Claude CLI 的权限询问端点 |
 | core/backend_detector.py | 工具 | 后端自动检测 |
+| client_identity.py | 配置 | `ClientIdentity`：宿主向 Agent 自报的身份，`RuntimeConfig.client` 经 ACP 与 Codex 两种握手交给 Agent |
+| api/delegation.py | 公开面 | 独立使用 harness 的宿主只经 `myrm_agent_harness.api.delegation` 导入：运行池、配置、事件、权限、会话存储、MCP Server 与委派工具；订阅登录、凭据状态、CLI 安装与入站 ACP 服务不在其中 |
 
 ### 业务层自定义（通过 Protocol 注入）
 
@@ -424,6 +434,8 @@ acp/
 | 权限交互 UI | `PermissionBroker` Protocol（`run_turn(permissions=…)`） | `decide(request)` 里把请求展示给人，返回 `PermissionVerdict`（myrm-agent-server 的 `ChatPermissionBroker`：每条请求是该聊天里的一条 `external_agent_permission` 审批） |
 | 监控集成 | `run_turn` 的事件流 | 逐事件消费并推送到 Prometheus / DataDog |
 | 自定义后端 | RuntimeBackend Protocol | HTTP API Agent / 自研 Agent |
+| 宿主身份 | `RuntimeConfig.client`（`ClientIdentity`） | 嵌入 harness 的产品在这里报自己的名字与版本，Agent 的日志与 user-agent 里看到的是它而不是 harness |
+| 工具链目录 | 环境变量 `MYRM_TOOLCHAIN_DIR` | 把 CLI 与其专用 Node 装进宿主自己的目录；安装、探测与启动环境每次调用时读取，始终指向同一处 |
 
 ### 业务层接入（myrm-agent-server）
 
@@ -448,10 +460,11 @@ acp/
 - **稳定 Tool Schema**：`invoke_acp_agent_tool` 使用固定 tool description（不含动态 agent 列表），保护 Turn1 Prompt Cache；`agent_name` 无效时错误响应列出 `available_backends`
 - **Deploy 门控（Server）**：`external_cli_deploy.is_external_cli_deploy_supported()` + profile `strip_deploy_incompatible_builtin_tools`；沙箱自动剔除 `external_cli`；BuiltinToolsPanel sandbox 硬禁用 toggle
 - **MCP 会话注入**：`RuntimePool.run_turn` → `AcpRuntime.new_session(mcp_servers=…)`，Codex 经 `thread/start` 的 `config.mcp_servers`（无 MCP 时 Server 不传参数（None）；`RuntimeConfig.mcp_servers` 为配置源；注入前经 `capabilities.supports_mcp` 能力守卫，跳过不支持的 backends 并记录 `pool_mcp_skipped`；Server 的类型与各运行时的交付形态见下一条）
-- **宿主 MCP Server（类型化 API）**：`mcp_servers.py` 的 `StdioMcpServer`（agent 自己启动的程序）与 `HttpMcpServer`（agent 带 header 以 streamable HTTP 连接的端点）。名称只能是字母数字以单个 `-` / `_` 相连的 1–64 个字符（agent 用它拼出 `mcp__<名称>__<工具>`，名称里不能有 `__`，否则名称在哪里结束就说不清），URL 必须是带主机的 http(s) 地址；`env` 与 `headers` 不进 `repr`，URL 不进错误消息，日志里不泄露凭据。`read_only=True` 表示这个 Server 的工具只读，`safe` 模式下不必逐次询问，如同读文件。各运行时按各自 agent 能接受的形态交付：**ACP**（Gemini、Qwen）经 `session/new` 的 `mcpServers`，HTTP Server 只交给声明了 `mcpCapabilities.http` 的 agent，否则不交，并让**每个回合**以 `mcp_not_attached`（`servers`：未交出的 Server 名）开头；**Claude** 把 Server 写进 `0600`、回合结束即删的 `--mcp-config` 临时文件（凭据不进 argv），`read_only` 的追加 `--allowedTools mcp__<名称>`；**Codex** 写进 `thread/start` 的 `config.mcp_servers`（`{url, http_headers}`，`read_only` 的加 `default_tools_approval_mode = "approve"`，否则 `on-request` 下 Codex 每次调用前都问）；其余 CLI 与不声明 `supports_mcp` 的后端不交，同样以 `mcp_not_attached` 告知。ACP agent 没有预先批准的机制，所以 `AcpPermissionPolicy` 在 `safe` 模式下放行 agent自己说属于本回合 `read_only` Server 的请求（`runtime/acp/mcp_origin.py`：Gemini 在 `_meta["gemini-cli"]["mcp"]["server_name"]` 给出 Server 名，Qwen 在 `_meta["toolName"]` 给出 `mcp__<server>__<tool>`；别的 agent、agent 自己的工具与没声明的 Server 一律照旧交给 broker）。真二进制事实（`test_real_http_mcp.py`：脚本化的假模型 + 记录每个请求的真 streamable-HTTP 端点，离线）：Claude 2.1.330、Codex 0.172.0、Gemini 0.71.1、Qwen 0.28.6 都带着 Bearer 连上并调用了工具，只读的不问、否则问；Claude 默认把 MCP 工具的结构延后到 `ToolSearch`（脚本化模型不搜索，测试里设 `ENABLE_TOOL_SEARCH=false`）；Gemini 在无头 ACP 里对未受信任的工作区**一个 MCP Server 也不连**（需 `GEMINI_CLI_TRUST_WORKSPACE=true`；宿主不得自动设置它：仓库自带的设置与钩子会借此绕过宿主的 broker），所以 Server 是否已被连上要以服务端见到的连接为准，不能假设；Qwen 在 `session/new` 返回之后才开始连接（约 0.15 s），给远程 Server 5 秒的发现期限（`discoveryTimeoutMs` 默认值），超时就在本会话里丢弃它（机器忙到连 Qwen 自己的工作都排不上时会发生），并把 MCP 工具藏在 `tool_search` / `tool_call` 之后，所以一个会话的首个回合只用来开会话；opencode 的 `_meta` 形态没有核对，它的请求照旧交给 broker。
+- **宿主 MCP Server（类型化 API）**：`mcp_servers.py` 的 `StdioMcpServer`（agent 自己启动的程序）与 `HttpMcpServer`（agent 带 header 以 streamable HTTP 连接的端点）。名称只能是字母数字以单个 `-` / `_` 相连的 1–64 个字符（agent 用它拼出 `mcp__<名称>__<工具>`，名称里不能有 `__`，否则名称在哪里结束就说不清），URL 必须是带主机的 http(s) 地址；`env` 与 `headers` 不进 `repr`，URL 不进错误消息，日志里不泄露凭据。`read_only=True` 表示这个 Server 的工具只读，`safe` 模式下不必逐次询问，如同读文件。各运行时按各自 agent 能接受的形态交付：**ACP**（Gemini、Qwen）经 `session/new` 的 `mcpServers`，HTTP Server 只交给声明了 `mcpCapabilities.http` 的 agent，否则不交，并让**每个回合**以 `mcp_not_attached`（`servers`：未交出的 Server 名）开头；**Claude** 把 Server 写进 `0600`、回合结束即删的 `--mcp-config` 临时文件（凭据不进 argv），`read_only` 的追加 `--allowedTools mcp__<名称>`；**Codex** 写进 `thread/start` 的 `config.mcp_servers`（`{command, args, env}` 或 `{url, http_headers}`，一律带 `required = true`：Codex 默认在后台启动 MCP Server，回合可能抢在它启动完成之前向模型发出请求，模型这一回合就看不到它的工具，启动失败也没有人被告知；`required` 让线程打开时等它，起不来就不开线程，错误带着 Server 名与它自己的原话，真二进制测试用一个起不来的 Server 守着：回合以一条点名该 Server 的错误结束，模型一个请求也没发；`read_only` 的加 `default_tools_approval_mode = "approve"`，否则 `on-request` 下 Codex 每次调用前都问）；其余 CLI 与不声明 `supports_mcp` 的后端不交，同样以 `mcp_not_attached` 告知。ACP agent 没有预先批准的机制，所以 `AcpPermissionPolicy` 在 `safe` 模式下放行 agent自己说属于本回合 `read_only` Server 的请求（`runtime/acp/mcp_origin.py`：Gemini 在 `_meta["gemini-cli"]["mcp"]["server_name"]` 给出 Server 名，Qwen 在 `_meta["toolName"]` 给出 `mcp__<server>__<tool>`；别的 agent、agent 自己的工具与没声明的 Server 一律照旧交给 broker）。真二进制事实（`test_real_http_mcp.py`：脚本化的假模型 + 记录每个请求的真 streamable-HTTP 端点，离线）：Claude 2.1.330、Codex 0.172.0、Gemini 0.71.1、Qwen 0.28.6 都带着 Bearer 连上并调用了工具，只读的不问、否则问；Claude 默认把 MCP 工具的结构延后到 `ToolSearch`（脚本化模型不搜索，测试里设 `ENABLE_TOOL_SEARCH=false`）；Gemini 在无头 ACP 里对未受信任的工作区**一个 MCP Server 也不连**（需 `GEMINI_CLI_TRUST_WORKSPACE=true`；宿主不得自动设置它：仓库自带的设置与钩子会借此绕过宿主的 broker），所以 Server 是否已被连上要以服务端见到的连接为准，不能假设；Qwen 在 `session/new` 返回之后才开始连接（约 0.15 s），给远程 Server 5 秒的发现期限（`discoveryTimeoutMs` 默认值），超时就在本会话里丢弃它（机器忙到连 Qwen 自己的工作都排不上时会发生），并把 MCP 工具藏在 `tool_search` / `tool_call` 之后，所以一个会话的首个回合只用来开会话；opencode 的 `_meta` 形态没有核对，它的请求照旧交给 broker。
 - **Host 会话级 MCP 绑定**：ACP Server 侧收到 host 传入的 `mcp_servers` 时，经 `mcp_converter.convert_acp_mcp_servers` 转成 `MCPConfig`，随新建的会话绑定进 agent 管线并记 `acp_host_mcp_bound` INFO（`method`、`raw_count`、`bound_count`）。`new_session` / `fork_session` 总会新建会话并绑定；`resume_session` 只在会话不存在时新建并绑定；`load_session` 只在会话已存在时返回，传入的 `mcp_servers` 被转换并记日志，不改变已有会话的 MCP 绑定
 - **失败分类**：`runtime/cli/failure.classify_failure` 按 CLI 自己的话归类——Claude `result` 行的 `error_max_turns` 不是失败（见「Max Turns 双层安全护栏」，回合以 `DONE` 收尾）；`result` 带 `api_error_status` 时只有 401 → `AUTH_FAILED`（403 是地区封锁或组织策略，Claude 把它和没登录归在同一个 `authentication_failed` 类别，但叫用户重新登录会把人指向错误的方向，所以归 `UNKNOWN`），没有状态码时 `assistant` 行的 `error: authentication_failed`（根本没发出 API 请求，即没登录）→ `AUTH_FAILED`；429 → 可重试的 `RATE_LIMITED`、5xx → 可重试的 `UNKNOWN`；没有上述判决时非零退出码才是 `PROCESS_CRASHED`（带最后一条顶层 `error` 通知，没有则取 stderr 摘录）；本运行时自己停掉的进程一律是 `CANCELLED`（唯一的例外是下一条的 401 快速失败）。拉起进程时程序不存在（`CliLaunchError`）→ 单个 `BACKEND_NOT_FOUND` 错误事件，不做续接失效重试。顶层 `error` 行不是失败：CLI 可能每次请求重试都打印一条，它们只作为通知被记住，判决只来自 `result` / 退出码。消息是 CLI 的原话，经 `event_text.condense_failure_text` 整理成一行有界文本——引用的整页 HTML（代理、防火墙、地区封锁页）缩成 `[web page: <标题>]`，空白折叠，超过 `FAILURE_TEXT_CHARS`（500）字符截断，普通单行消息原样通过；不夹带产品设置建议（给用户的处置指引由宿主按 `AcpErrorCode` 另行组织）
 - **Codex 的失败分类**：`runtime/codex/failure.classify_turn_error` 读 app server 附在失败回合上的结构化 `codexErrorInfo`（一个类别，或以类别为唯一键、带 `httpStatusCode` 的对象），不看措辞猜：类别 `unauthorized` 或状态码 401 → `AUTH_FAILED`；403 不是登录问题（地区封锁也这样回答），归 `UNKNOWN`；`rateLimitExceeded` 或 429 → 可重试的 `RATE_LIMITED`；`serverOverloaded`、`internalServerError` 或 5xx → 可重试的 `UNKNOWN`；其余 → 不可重试的 `UNKNOWN`；消息是 Codex 的原话，同样经 `condense_failure_text` 整理。server 进程在回合中途退出 → 可重试的 `PROCESS_CRASHED`，带退出码与 stderr 摘录（下一回合重新拉起 server）；程序不存在 → `BACKEND_NOT_FOUND`。`test_a_failing_model_api_is_reported_as_a_retryable_failure` 与 `test_a_failure_that_is_not_a_refused_login_does_not_send_the_user_to_sign_in` 用真实二进制与只返回错误的假模型 API 守这些分类
+- **Codex 版本下限与续接失效**：握手时 `initialize` 的 `userAgent`（`<客户端名>/<server 版本> (…)`，客户端名就是宿主自报的 `RuntimeConfig.client.name`）给出 server 版本，低于 `protocol.MINIMUM_SERVER_VERSION`（0.167.0）→ 回合以不可重试的 `PROCESS_CRASHED` 结束，消息（英文）说明已安装的版本、需要的版本与「更新 Codex 后重试」，不开线程、server 进程随即收掉；读不出版本的放行并记 `codex_server_version_unreadable` WARNING。下限由真二进制实测定出：0.163.0 – 0.166.0 的审批请求里没有工具名（只有 `mcp__echo__`，缺 `ping`），人会被问「允许这次调用吗」却看不到是哪个工具，0.166.0 上其余 37 项契约测试全绿；0.167.0 与最新的 0.172.0 都让三份真二进制测试文件（38 项）与 HTTP MCP 测试全绿，MCP 测试另在 0.163.0 – 0.172.0 的 13 个稳定版上逐版本跑过。CI 的 `codex-floor` 任务从代码里读出这个常量，装上恰好这一版再跑一遍真二进制测试。续接线程时只有 server 回答 `no rollout found`（磁盘上没有这个线程的 rollout）才算会话失效（`session_expired`，本回合改开新线程）；别的续接错误（鉴权、限流、server 自己的故障）原样作为失败报出，记录保留，下一回合再试，不把一次暂时的失败当成「对话没了」
 - **401 快速失败**：登录被拒时 CLI 会连续重试数分钟才报错。实测（真实二进制、没有登录、本机假 401 服务）：Claude Code 2.1.199 与 2.1.310 都发出 11 次请求（首次加 10 次重试），分别在 183.5 s 与 184.9 s 后才以 `result`（401）结束。`TurnParser` 数连续的 401 重试信号——Claude 的 `system/api_retry`（`error_status == 401`）——满 3 次（`runtime/_base.UNAUTHORIZED_RETRIES_LIMIT`）就置位 `auth_rejection`（CLI 自己的原话）——第 3 个信号在 Claude 里出现在 2.7 s，修复后回合在 3.6 s 内结束；`CliRuntime` 记一条 `cli_auth_rejected` WARNING、终止进程，回合以 `AUTH_FAILED` 结束，这个判决优先于「自己停掉的进程是取消」。重试之间出现任何正常输出，或一次非 401 的重试，计数清零；一次 401 重试（CLI 自己刷新令牌）不会触发。Codex app server 同理：`TurnTranslator` 数连续的 401 重试通知，满同一个上限就 `turn/interrupt`，回合以 `AUTH_FAILED` 结束并记 `codex_auth_rejected` WARNING；`test_a_refused_login_fails_the_turn_within_seconds_instead_of_retrying_for_minutes` 用真实二进制与只回 401 的假模型 API 断言回合在 60 s 内以 `AUTH_FAILED` 结束、API 至多收到 4 个请求。令牌自动刷新场景下是否误判，没有用真实令牌验证
 - **图片传递**：宿主把图片落成本地文件，经 `run_turn(images=[路径…])` 交给能收图的后端：Claude 由 `claude.with_image_blocks` 写成输入里的 base64 块（`CliRuntime` 先在线程里用 `runtime/image_blocks.load_image_blocks` 读文件，再交给它；其他 CLI 不收图），Codex 与 ACP 各按下面的方式。**Claude**：用 stream-json 输入。只有带图的回合才加 `--input-format stream-json`，stdin 写一行用户消息 `{"type":"user","message":{"role":"user","content":[<image 块…>,<text 块>]}}`——图片在前并保持给定顺序，提示词在后（提示词为空白时不写 text 块）；不带图的回合仍是纯文本 stdin。图片字节就在请求里，所以不靠模型去调用 `Read`、与文件位置无关（工作目录之外也行，不需要 `--add-dir`）、与权限模式无关。不用 `@"<路径>"` 文件引用：实测（真实二进制 2.1.199，本机桩 API 记录请求，没有登录、不调用模型）该引用只附 ≤ 256 KiB（262144 字节）的文件，更大的文件不报错、不告诉模型、直接不附，而截图通常比这大。实测 image 块：1×1、200 KiB、300 KiB、4.7 MiB（小于服务端每张 5 MiB 的暂存上限）都进了第一次请求，`default`（`safe`）与 `bypassPermissions`（`allow_all`）两种权限模式下都成立（300 KiB）；两张图相邻进入同一条消息；续接回合（`--input-format` 在 `--resume` 之前）的图片排在历史之后进入请求。CLI 会把大图缩小再发（4.7 MiB 的 PNG 到请求里是约 0.66 MB 的 base64 JPEG）。事件流仍是 system / assistant / result，`TurnParser` 不变。格式按文件头判定（PNG / JPEG / GIF / WebP，与扩展名无关）；读不了或不是图片的文件被略去并记 `image_skipped` WARNING（不含路径），全部被略去时该回合退回纯文本。`tests/toolkits/acp/runtime/cli/test_real_cli_images.py` 用真实二进制守这些行为（每周的 CLI 契约任务运行）。单个回合 8 张 4.7 MiB 的 PNG（共约 37.5 MiB，stdin 约 50 MiB）全部附上、没有卡住（一次手工测量，不在自动测试里）。未验证：Windows；低于 2.1.199 的版本；真实登录下模型对图的回答；真实 API 对一个回合里多张图总大小的限制。**Codex**：app server 的 `turn/start` 输入里每张图是一个 `{"type":"localImage","path":…}` 项，`CodexRuntime` 只交文件路径，由 Codex 自己读文件、解码后发给模型，不经命令行参数；`test_images_reach_the_model_as_files_not_arguments` 用真实二进制与假模型 API 断言请求里带有 `input_image` 与 `data:image/png;base64,`，协议字段由 `test_real_codex_protocol_contract.py` 对着该二进制生成的 schema 核对。**ACP**：`AcpRuntime` 在 `initialize` 之后读 `agentCapabilities.promptCapabilities.image`，为真时把同一批图片（同一个 `load_image_blocks`，同一份文件头判定）写成 `session/prompt` 里文本块之后的 `ImageContentBlock`（`data` 为 base64、`mimeType` 为判定出的类型）；没声明的 agent 只收文本块（该回合记 `acp_runtime_images_skipped` INFO，并以一条 `images_not_sent` status_update 开头；宿主提示词里的图片路径一行仍是兜底）。实测（本机子进程假 ACP agent，走生产的 `spawn_agent_process` 路径）：声明图片提示的 agent 按顺序收到全部图片块，5 MiB 的图片（base64 后约 7 MB 的单行消息）完整到达、摘要一致；未声明的 agent 只收到文本且回合正常结束。实测 OpenCode 2.0.32 与 cursor-agent 的 `initialize` 都声明了 `image: true`。未验证：真实 agent 对图片块的回答，Windows。
 - **启动参数合并**：`auth.resolve_cli_args` 按「选项单元」（标志加其后的值，或开头的子命令）合并预设的基线参数与配置里的参数：配置里复述的基线选项（预设的 `--output-format stream-json`）只出现一次，配置自己重复写的选项全部保留（`--add-dir a --add-dir b` 是两个设置，不是重复）；权限模式的参数仍由映射独占。Codex 经 `auth.resolve_app_server_args` 启动：契约的 `app-server` 子命令之后只跟配置里仍然有意义的部分——`-c/--config` 覆盖、`--enable` / `--disable`、`--strict-config`；按 `codex exec` 写的旧配置里的 `-m/--model`、`-p/--profile` 译成对应的 `-c` 覆盖，其余（`exec`、`--json`、沙箱与审批旗标……）去掉并记 WARNING `codex_launch_args_dropped`，因为审批策略与沙箱是宿主随每个回合给出的；`api_key` 模式再追加 `-c cli_auth_credentials_store="ephemeral"`

@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import StdioMcpServer
+from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import MINIMUM_SERVER_VERSION
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
     AcpErrorCode,
@@ -24,7 +26,14 @@ from myrm_agent_harness.toolkits.acp.types import (
 )
 from tests.toolkits.acp._brokers import AnsweringBroker
 from tests.toolkits.acp._stores import RecordingStore
-from tests.toolkits.acp.runtime.codex._real import ended_cleanly, errors_of, failure_of, run_turn, text_of
+from tests.toolkits.acp.runtime.codex._real import (
+    ended_cleanly,
+    errors_of,
+    failure_of,
+    open_connection,
+    run_turn,
+    text_of,
+)
 from tests.toolkits.acp.runtime.codex._scripted import ScriptedServer, ask, complete, notify, say
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the stand-in server is a POSIX shebang script")
@@ -156,7 +165,9 @@ async def test_the_mcp_servers_of_the_host_are_offered_to_the_thread(tmp_path: P
         await pool.close_all()
 
     (thread,) = server.received("thread/start")
-    assert thread["config"] == {"mcp_servers": {"my-server_1": {"command": "mcp", "args": ["--x"], "env": {"A": "b"}}}}
+    assert thread["config"] == {
+        "mcp_servers": {"my-server_1": {"command": "mcp", "args": ["--x"], "required": True, "env": {"A": "b"}}}
+    }
 
 
 async def test_the_notifications_of_another_turn_are_not_this_turns(tmp_path: Path, workspace: Path) -> None:
@@ -252,6 +263,96 @@ async def test_a_silent_server_fails_the_handshake_and_is_stopped(
     assert failure.code is AcpErrorCode.PROCESS_CRASHED
     assert "did not answer the handshake" in failure.message
     assert await _gone(int(server.starts()[0]["pid"]))  # type: ignore[call-overload]
+
+
+async def test_a_server_older_than_the_host_speaks_to_ends_the_turn_saying_to_update_it_and_is_stopped(
+    tmp_path: Path, workspace: Path
+) -> None:
+    server = ScriptedServer(tmp_path / "s", {"server_version": "0.1.0"})
+    pool = server.pool()
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    (error,) = errors_of(events)
+    failure = failure_of(error)
+    assert failure.code is AcpErrorCode.PROCESS_CRASHED
+    assert not failure.retryable
+    assert "0.1.0" in failure.message
+    assert ".".join(map(str, MINIMUM_SERVER_VERSION)) in failure.message
+    assert "Update Codex" in failure.message
+    assert server.received("thread/start") == []
+    assert await _gone(int(server.starts()[0]["pid"]))  # type: ignore[call-overload]
+
+
+async def test_a_server_of_the_oldest_version_the_host_speaks_to_is_used(tmp_path: Path, workspace: Path) -> None:
+    oldest = ".".join(map(str, MINIMUM_SERVER_VERSION))
+    server = ScriptedServer(tmp_path / "s", {"server_version": oldest, "turns": [[complete()]]})
+    pool = server.pool()
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    assert ended_cleanly(events)
+
+
+async def test_the_host_names_itself_to_the_server_and_the_version_is_read_after_that_name(
+    tmp_path: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    host = ClientIdentity(name="acme.runner", title="Acme Runner", version="2.0.1")
+    server = ScriptedServer(tmp_path / "s", {"turns": [[complete()]]})
+    pool = server.pool(client=host)
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    assert ended_cleanly(events)
+    (handshake,) = server.received("initialize")
+    assert handshake["clientInfo"] == {"name": "acme.runner", "title": "Acme Runner", "version": "2.0.1"}
+    assert "codex_server_version_unreadable" not in caplog.text
+
+
+async def test_a_server_too_old_is_refused_whatever_the_host_names_itself(tmp_path: Path, workspace: Path) -> None:
+    host = ClientIdentity(name="acme.runner")
+    server = ScriptedServer(tmp_path / "s", {"server_version": "0.100.0", "turns": [[complete()]]})
+    pool = server.pool(client=host)
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    (error,) = errors_of(events)
+    message = failure_of(error).message
+    assert "0.100.0" in message
+    assert "Update Codex" in message
+
+
+async def test_the_connection_knows_the_version_the_server_said(tmp_path: Path, workspace: Path) -> None:
+    server = ScriptedServer(tmp_path / "s", {"server_version": "0.200.3"})
+    connection = await open_connection(
+        str(server.command), {"MOCK_APP_SERVER_SCENARIO": str(server.scenario_path)}, workspace
+    )
+    try:
+        assert connection.version == (0, 200, 3)
+    finally:
+        await connection.close(graceful=False)
+
+
+async def test_a_server_that_does_not_say_its_version_is_used_and_noted(
+    tmp_path: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    server = ScriptedServer(tmp_path / "s", {"user_agent": "mock", "turns": [[complete()]]})
+    pool = server.pool()
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    assert ended_cleanly(events)
+    assert "codex_server_version_unreadable" in caplog.text
 
 
 async def test_a_refused_turn_reports_the_servers_words_and_the_server_stays(tmp_path: Path, workspace: Path) -> None:
@@ -373,6 +474,25 @@ async def test_a_thread_the_server_no_longer_knows_is_replaced_and_the_record_fo
     assert "session_expired" in _statuses(events)
     assert [r["threadId"] for r in server.received("thread/resume")] == ["thread-old"]
     assert store.records["chat-1"].cli_session_id == "thread-1"
+
+
+async def test_a_thread_that_fails_to_resume_for_another_reason_is_reported_and_stays_recorded(
+    tmp_path: Path, workspace: Path
+) -> None:
+    store = RecordingStore()
+    store.records["chat-1"] = CliSessionRecord("thread-old", str(workspace.resolve()))
+    server = ScriptedServer(tmp_path / "s", {"resume": "fail", "turns": [[complete()]]})
+    pool = server.pool(store=store)
+    try:
+        events = await run_turn(pool, workspace)
+    finally:
+        await pool.close_all()
+
+    (error,) = errors_of(events)
+    assert "the rollout is corrupt" in failure_of(error).message
+    assert "session_expired" not in _statuses(events)
+    assert server.received("thread/start") == []
+    assert store.records["chat-1"].cli_session_id == "thread-old"
 
 
 async def test_with_a_store_threads_are_kept_in_the_users_codex_history(tmp_path: Path, workspace: Path) -> None:

@@ -14,7 +14,7 @@ tests/architecture/test_browser_pool_single_entry.py - the harness singleton kee
 ignores every later one, so a second place that builds the pool decides the process's configuration whenever it runs
 first (a pool without the proxy pool, the extension bridge or the cloud endpoint). Observers peek with
 ``peek_global_browser_pool``; closing goes through ``shutdown_global_browser_pool``, which also forgets the pool.
-Writing ``_global_pool`` from outside is how a pool used to be dropped without being closed, or closed and left behind.
+Writing ``_global_pool`` from outside drops a pool without closing it, or closes a pool and leaves it behind.
 """
 
 from __future__ import annotations

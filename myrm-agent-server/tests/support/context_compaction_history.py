@@ -4,7 +4,8 @@
 - cdp_chat.support (POS: the messages the runtime under test stored for a chat)
 - tests.support.chrome_mcp_e2e (POS: CDP page helpers, wait_for_state)
 - tests.support.context_compaction_e2e (POS: the dormant long chat, the locale files, the compaction state of the server)
-- tests.support.context_compaction_ui (POS: the compress control of the strategy panel, the composer and command palette, the compact requests the page sends)
+- tests.support.context_compaction_requests (POS: the compactions the page starts, with how each run ended)
+- tests.support.context_compaction_ui (POS: the compress control of the strategy panel, the composer and command palette)
 
 [OUTPUT]
 - compress_in_chat() / compress_open_chat() / compact_open_chat_by_command(): opens a dormant chat (or takes the open one) and compresses it from the strategy panel, or by typing `/compact`, with the real model; returns what the server and the page then hold
@@ -38,17 +39,19 @@ from tests.support.context_compaction_e2e import (
     open_chat,
     read_compaction_state,
 )
+from tests.support.context_compaction_requests import (
+    read_compact_requests,
+    record_compact_requests,
+    wait_for_compact_answers,
+)
 from tests.support.context_compaction_ui import (
     forget_compact_reminder,
     outcome_js,
     panel_ready_js,
     press_compress_js,
     press_enter,
-    read_compact_requests,
     rearm_compress_js,
-    record_compact_requests,
     type_in_composer,
-    wait_for_compact_answers,
     wait_for_composer,
     wait_for_palette_choice,
 )
@@ -118,8 +121,8 @@ class CompactedChat:
 def _press_until_summarized(client: ChromeMcpClient, page: McpPage, page_url: str) -> None:
     """Press "compress" until the server has summarized the chat.
 
-    The server declines with reason ``timeout`` (HTTP 200, nothing stored) when the model gateway sends no token for
-    its inactivity limit, which a loaded gateway causes; the user presses again, so does this.
+    The run ends with reason ``timeout`` (nothing stored) when the model gateway sends no token for its inactivity
+    limit, which a loaded gateway causes; the user presses again, so does this.
     Any other decline is a failure.
     """
     sent_before = len(read_compact_requests(client, page))
@@ -130,7 +133,7 @@ def _press_until_summarized(client: ChromeMcpClient, page: McpPage, page_url: st
         answer = read_compact_requests(client, page)[-1]
         if answer.compacted:
             return
-        assert answer.status == 200 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
+        assert answer.status == 202 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
         wait_for_state(client, page, panel_ready_js("en"), timeout_sec=60.0, page_url=page_url)
     pytest.fail(f"the model stalled on all {_MAX_COMPRESS_ATTEMPTS} compression attempts: {answer}")
 
@@ -184,7 +187,7 @@ def compact_open_chat_by_command(
         answer = read_compact_requests(client, page)[-1]
         if answer.compacted:
             break
-        assert answer.status == 200 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
+        assert answer.status == 202 and answer.reason == "timeout", f"the compaction was declined for another reason: {answer}"
     else:
         pytest.fail(f"the model stalled on all {_MAX_COMPRESS_ATTEMPTS} compression attempts: {answer}")
     return _stored_compaction(client, page, page_url, api_url, chat_id)

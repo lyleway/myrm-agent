@@ -1,8 +1,8 @@
-"""The wiki's Markdown link scans read what the patterns they replaced read, in time proportional to the page.
+"""The wiki's Markdown link scans read exactly what their reference patterns read, in time proportional to the page.
 
-The old patterns are the reference. A page the user clips or imports can hold any run of ``[`` and ``![``; the old
-patterns read the rest of the page from each opener that never closes (20,000 openers: about 0.9 s), so a page of
-100,000 held the process for half a minute.
+The reference patterns are the specification. A page the user clips or imports can hold any run of ``[`` and ``![``; a
+pattern that reads the rest of the page from each opener that never closes takes about 0.9 s for 20,000 openers, so a
+page of 100,000 holds the process for half a minute.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class TestAssetReferenceRewrite:
     _URLS: ClassVar[dict[str, str]] = {"https://a.test/x.png": "f1.png", "b.png": "f2.png"}
 
     @staticmethod
-    def _old(markdown: str, url_to_filename: dict[str, str], raw_relative: str) -> str:
+    def _reference(markdown: str, url_to_filename: dict[str, str], raw_relative: str) -> str:
         image = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
         def replace(match: re.Match[str]) -> str:
@@ -87,9 +87,9 @@ class TestAssetReferenceRewrite:
 
         return image.sub(replace, markdown)
 
-    def test_rewrites_what_the_pattern_rewrote(self) -> None:
+    def test_rewrites_what_the_reference_pattern_rewrites(self) -> None:
         for text in _texts(20_000, 14, seed=31):
-            assert rewrite_markdown_asset_refs(text, self._URLS, raw_relative="clips/a.md") == self._old(
+            assert rewrite_markdown_asset_refs(text, self._URLS, raw_relative="clips/a.md") == self._reference(
                 text, self._URLS, "clips/a.md"
             ), repr(text)
 
@@ -101,7 +101,7 @@ class TestAssetReferenceRewrite:
         )
 
     def test_an_alt_text_over_several_lines_is_kept(self) -> None:
-        # The old code read the alt text with a pattern whose ``.`` stops at a line break and dropped it.
+        # A pattern whose ``.`` stops at a line break would drop an alt text that spans lines.
         text = "![first line\nsecond line](b.png)"
 
         assert rewrite_markdown_asset_refs(text, self._URLS, raw_relative="clips/a.md") == (
@@ -155,7 +155,7 @@ class TestImageDownload:
 
 
 class TestImagePresence:
-    def test_finds_what_the_pattern_found(self) -> None:
+    def test_finds_what_the_reference_pattern_finds(self) -> None:
         pattern = re.compile(r"!\[[^\]]*\]\(")
         for text in _texts(30_000, 14, seed=33, newlines=True):
             assert _has_markdown_image(text) == bool(pattern.search(text)), repr(text)
@@ -165,7 +165,7 @@ class TestImagePresence:
         _assert_linear(_HOSTILE[family], _has_markdown_image)
 
 
-def _old_clean_heading_text(raw_heading: str) -> str:
+def _reference_clean_heading_text(raw_heading: str) -> str:
     text = raw_heading.strip()
     text = re.sub(r"^#{1,6}\s*", "", text)
     text = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", r"\1", text)
@@ -180,17 +180,17 @@ def _old_clean_heading_text(raw_heading: str) -> str:
 
 
 class TestWikilinkStrip:
-    _OLD = re.compile(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]")
+    _REFERENCE = re.compile(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]")
 
-    def test_strips_what_the_pattern_stripped_on_every_short_text(self) -> None:
+    def test_strips_what_the_reference_pattern_strips_on_every_short_text(self) -> None:
         for length in range(8):
             for letters in itertools.product(("[", "]", "|", "a", "\n"), repeat=length):
                 text = "".join(letters)
-                assert _strip_wikilinks(text) == self._OLD.sub(r"\1", text), repr(text)
+                assert _strip_wikilinks(text) == self._REFERENCE.sub(r"\1", text), repr(text)
 
-    def test_strips_what_the_pattern_stripped_on_random_text(self) -> None:
+    def test_strips_what_the_reference_pattern_strips_on_random_text(self) -> None:
         for text in _texts(30_000, 14, seed=39, newlines=True):
-            assert _strip_wikilinks(text) == self._OLD.sub(r"\1", text), repr(text)
+            assert _strip_wikilinks(text) == self._REFERENCE.sub(r"\1", text), repr(text)
 
     @pytest.mark.parametrize(
         ("text", "stripped"),
@@ -216,10 +216,10 @@ class TestWikilinkStrip:
 
 
 class TestHeadingText:
-    def test_cleans_what_the_patterns_cleaned(self) -> None:
+    def test_cleans_what_the_reference_patterns_clean(self) -> None:
         for text in _texts(30_000, 14, seed=35, newlines=True):
             heading = f"## {text}"
-            assert clean_heading_text(heading) == _old_clean_heading_text(heading), repr(heading)
+            assert clean_heading_text(heading) == _reference_clean_heading_text(heading), repr(heading)
 
     def test_examples(self) -> None:
         assert (
@@ -240,13 +240,14 @@ class TestMentionPatterns:
         assert link_pattern.search("see [the flow](https://x.dev/payment flow/doc) here")
         assert link_pattern.search("see [the flow](https://x.dev/other) here") is None
 
-    def test_finds_what_the_dynamic_patterns_found(self) -> None:
+    def test_finds_what_the_reference_pattern_finds_for_each_name(self) -> None:
         for name in ("py", "a.b", "华创", "Payment"):
-            old = re.compile(rf"\[[^\]]+\]\([^)]*{re.escape(name)}[^)]*\)", re.IGNORECASE)
-            new = _mention_patterns((name,))[0]
+            reference = re.compile(rf"\[[^\]]+\]\([^)]*{re.escape(name)}[^)]*\)", re.IGNORECASE)
+            scan = _mention_patterns((name,))[0]
             for text in _texts(10_000, 14, seed=37):
                 line = f"{text} [x]({text}{name}{text}) {text}"
-                assert [m.span() for m in new.finditer(line)] == [m.span() for m in old.finditer(line)], repr(line)
+                found = [m.span() for m in scan.finditer(line)]
+                assert found == [m.span() for m in reference.finditer(line)], repr(line)
 
     @pytest.mark.parametrize("family", sorted(_HOSTILE))
     def test_time_grows_in_proportion_to_the_page(self, family: str) -> None:

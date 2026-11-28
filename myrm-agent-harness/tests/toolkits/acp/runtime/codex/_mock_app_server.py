@@ -9,9 +9,12 @@ Scenario keys (all optional):
   processes      one scenario for each server process that is started, in order (the last repeats); the keys below
                  then go inside each of them
   handshake      "ok" (default), "silent" (never answers ``initialize``) or "exit" (writes ``stderr`` and exits ``exit_code``)
+  server_version the version ``initialize`` says the server is (default "99.0.0", newer than any the host refuses)
+  user_agent     the whole ``userAgent`` ``initialize`` answers with, instead of one built from ``server_version``
   login          "ok" (default) or "refuse" for ``account/login/start``
   config         the ``config`` that ``config/read`` answers with
-  resume         "ok" (default): ``thread/resume`` loads the thread asked for; "unknown": it refuses
+  resume         "ok" (default): ``thread/resume`` loads the thread asked for; "unknown": it says it holds no such
+                 thread; "fail": it fails for another reason
   turn_start_delay  seconds ``turn/start`` takes to be answered
   turns          a list of turns, one per ``turn/start`` (the last one repeats); a turn is a list of steps:
     {"notify": {"method", "params"}}      send a notification
@@ -144,7 +147,13 @@ def handle(message: dict[str, object]) -> None:
                 sys.stderr.flush()
                 sys.exit(cast("int", SCENARIO.get("exit_code", 1)))
             if SCENARIO.get("handshake") != "silent":
-                reply({"userAgent": "mock", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "linux"})
+                client = cast("dict[str, str]", params["clientInfo"])
+                version = SCENARIO.get("server_version", "99.0.0")
+                user_agent = SCENARIO.get(
+                    "user_agent",
+                    f"{client['name']}/{version} (Linux; x86_64) mock ({client['name']}; {client['version']})",
+                )
+                reply({"userAgent": user_agent, "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "linux"})
         case "account/login/start":
             if SCENARIO.get("login") == "refuse":
                 send({"id": message["id"], "error": {"code": -32600, "message": "The key is not valid"}})
@@ -158,6 +167,13 @@ def handle(message: dict[str, object]) -> None:
         case "thread/resume":
             if SCENARIO.get("resume") == "unknown":
                 send({"id": message["id"], "error": {"code": -32600, "message": "no rollout found for thread id"}})
+            elif SCENARIO.get("resume") == "fail":
+                send(
+                    {
+                        "id": message["id"],
+                        "error": {"code": -32603, "message": "failed to resume thread: the rollout is corrupt"},
+                    }
+                )
             else:
                 reply({"thread": {"id": params["threadId"]}})
         case "turn/start":

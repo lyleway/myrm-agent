@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 # Opening a thread reads a rollout from disk and starts the MCP servers' bookkeeping.
 _THREAD_SECONDS = 30.0
+# What the server says of a conversation it does not hold (removed, or never kept); any other refusal is a failure.
+_UNKNOWN_THREAD = "no rollout found"
 
 
 class ThreadBook:
@@ -92,8 +94,9 @@ class ThreadBook:
                     resume_params(record.cli_session_id, self._workspace, policy, mcp_servers=mcp_servers),
                     timeout=_THREAD_SECONDS,
                 )
-            except RpcError:
-                # The server says it no longer knows the conversation (removed, or never kept).
+            except RpcError as exc:
+                if _UNKNOWN_THREAD not in exc.message:
+                    raise
                 logger.warning("codex_resume_stale name=%s session=%s", self._owner, session_id)
                 notice = ContinuityStatus.SESSION_EXPIRED
             else:

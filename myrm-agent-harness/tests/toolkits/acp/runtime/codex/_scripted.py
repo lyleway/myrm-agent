@@ -12,6 +12,7 @@ import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import McpServerConfig
 from myrm_agent_harness.toolkits.acp.runtime.pool import RuntimePool
 from myrm_agent_harness.toolkits.acp.types import (
@@ -50,6 +51,7 @@ class ScriptedServer:
         timeout_seconds: int = 30,
         mcp_servers: Sequence[McpServerConfig] | None = None,
         backend_type: BackendType = "cli",
+        client: ClientIdentity | None = None,
     ) -> RuntimePool:
         pool = RuntimePool(max_concurrent=1, cli_session_store=store)
         pool.register(
@@ -62,6 +64,7 @@ class ScriptedServer:
                 timeout_seconds=timeout_seconds,
                 permission_mode=mode,
                 mcp_servers=mcp_servers or [],
+                client=client or ClientIdentity(),
             ),
         )
         return pool

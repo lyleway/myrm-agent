@@ -25,7 +25,8 @@ vi.mock('next-intl', () => ({
 vi.mock('@/services/config', () => ({
   getConfigSyncManager: () => ({ get: () => mocks.saved, set: mocks.set }),
 }));
-vi.mock('@/services/external-agents', () => ({
+vi.mock('@/services/external-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/external-agents')>()),
   getExternalAgentAuthStatus: async () => mocks.statuses,
   listExternalAgentAccounts: mocks.list,
   createExternalAgentAccount: mocks.create,
@@ -78,9 +79,8 @@ const hostedStatus = {
   authenticated: false,
   authStatus: 'not_authenticated',
   loginStrategy: 'browser_oauth',
-  scriptableLogin: true,
-  needsCodeInput: false,
   subscriptionLoginAllowed: false,
+  availableInDeployment: true,
 };
 
 const editorOf = async (index = 0) => {

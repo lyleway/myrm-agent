@@ -1,28 +1,25 @@
 """Tests for the ACP subscription auth subsystem.
 
-Covers auth profiles, credential detection/import/clear, and auth_mode-aware
+Covers auth profiles, credential detection/clear, and auth_mode-aware
 environment sanitization. The interactive login session is in ``test_login_session``.
 """
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import (
     AuthStatus,
-    CredentialStorageDisabledError,
     CredentialStore,
+    LoginStrategy,
     known_backends,
     profile_for,
 )
 from myrm_agent_harness.toolkits.acp.runtime._base import build_safe_env
 from myrm_agent_harness.toolkits.acp.types import RuntimeConfig
-
-_POSIX = os.name == "posix"
+from tests.toolkits.acp._logins import plant_login
 
 
 class TestProfiles:
@@ -124,9 +121,26 @@ class TestProfiles:
         assert profile_for("totally-unknown-agent") is None
         assert profile_for("") is None
 
-    def test_scriptable_login(self) -> None:
-        assert profile_for("codex").scriptable_login is True  # type: ignore[union-attr]
-        assert profile_for("gemini").scriptable_login is False  # type: ignore[union-attr]
+    @pytest.mark.parametrize(
+        ("backend", "strategy"),
+        [
+            ("codex", LoginStrategy.BROWSER_OAUTH),
+            ("claude", LoginStrategy.TERMINAL),
+            ("gemini", LoginStrategy.TERMINAL),
+            ("qwen", LoginStrategy.TERMINAL),
+        ],
+    )
+    def test_who_runs_the_login(self, backend: str, strategy: LoginStrategy) -> None:
+        profile = profile_for(backend)
+        assert profile is not None
+        assert profile.login_strategy is strategy
+
+    @pytest.mark.parametrize("backend", sorted(known_backends()))
+    def test_a_login_the_host_runs_has_a_command_to_run(self, backend: str) -> None:
+        profile = profile_for(backend)
+        assert profile is not None
+        if profile.login_strategy is LoginStrategy.BROWSER_OAUTH:
+            assert profile.login_args
 
     def test_resolve_home_default(self) -> None:
         profile = profile_for("codex")
@@ -152,62 +166,45 @@ class TestCredentialStore:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.state("mystery").status is AuthStatus.UNKNOWN
 
-    def test_import_then_authenticated(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        state = store.import_credential("codex", '{"tokens": {"access_token": "abc"}}')
+    def test_a_credential_file_in_the_home_means_authenticated(self, tmp_path: Path) -> None:
+        env = {"HOME": str(tmp_path)}
+        plant_login(env, "codex", '{"tokens": {"access_token": "abc"}}')
+        store = CredentialStore(env)
+
+        state = store.state("codex")
+
         assert state.status is AuthStatus.AUTHENTICATED
+        assert state.credential_path == str(tmp_path / ".codex" / "auth.json")
         assert store.is_authenticated("codex") is True
-        written = tmp_path / ".codex" / "auth.json"
-        assert written.is_file()
-        assert json.loads(written.read_text())["tokens"]["access_token"] == "abc"
 
-    @pytest.mark.skipif(not _POSIX, reason="POSIX file permissions")
-    def test_import_sets_owner_only_perms(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        store.import_credential("codex", '{"x": 1}')
-        mode = (tmp_path / ".codex" / "auth.json").stat().st_mode & 0o777
-        assert mode == 0o600
-
-    def test_import_env_override_home(self, tmp_path: Path) -> None:
+    def test_the_relocated_home_is_the_one_looked_in(self, tmp_path: Path) -> None:
         persistent = tmp_path / "persistent" / ".codex"
-        store = CredentialStore({"HOME": str(tmp_path), "CODEX_HOME": str(persistent)})
-        store.import_credential("codex", '{"x": 1}')
+        env = {"HOME": str(tmp_path), "CODEX_HOME": str(persistent)}
+        plant_login(env, "codex")
+
         assert (persistent / "auth.json").is_file()
+        assert CredentialStore(env).is_authenticated("codex") is True
+        assert CredentialStore({"HOME": str(tmp_path)}).is_authenticated("codex") is False
 
-    def test_import_claude_credentials_file(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        store.import_credential("claude", '{"claudeAiOauth": {"accessToken": "t"}}')
+    def test_claude_keeps_its_credentials_in_a_dotfile(self, tmp_path: Path) -> None:
+        env = {"HOME": str(tmp_path)}
+        plant_login(env, "claude", '{"claudeAiOauth": {"accessToken": "t"}}')
+
         assert (tmp_path / ".claude" / ".credentials.json").is_file()
+        assert CredentialStore(env).is_authenticated("claude") is True
 
-    def test_import_empty_raises(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        with pytest.raises(ValueError, match="empty"):
-            store.import_credential("codex", "   ")
-
-    def test_import_invalid_json_raises(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        with pytest.raises(ValueError, match="not valid JSON"):
-            store.import_credential("codex", "not json")
-
-    def test_import_unknown_backend_raises(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        with pytest.raises(ValueError, match="No auth profile"):
-            store.import_credential("mystery", '{"x": 1}')
-
-    @pytest.mark.parametrize("bad", ["../escape.json", "sub/dir.json", ".."])
-    def test_import_bad_filename_raises(self, tmp_path: Path, bad: str) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        with pytest.raises(ValueError, match="Invalid credential filename"):
-            store.import_credential("codex", '{"x": 1}', filename=bad)
-
-    def test_import_empty_filename_uses_default(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        store.import_credential("codex", '{"x": 1}', filename="")
-        assert (tmp_path / ".codex" / "auth.json").is_file()
+    def test_the_store_offers_no_way_to_write_a_credential(self) -> None:
+        """The host holds no login: the CLI makes it, and nothing here accepts one to keep."""
+        assert {name for name in dir(CredentialStore) if not name.startswith("_")} == {
+            "state",
+            "is_authenticated",
+            "clear",
+        }
 
     def test_clear_removes_credentials(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        store.import_credential("codex", '{"x": 1}')
+        env = {"HOME": str(tmp_path)}
+        plant_login(env, "codex")
+        store = CredentialStore(env)
         assert store.is_authenticated("codex") is True
         state = store.clear("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
@@ -224,20 +221,15 @@ class TestCredentialStore:
         store = CredentialStore({"HOME": str(tmp_path)})
         assert store.is_authenticated("codex") is False
 
-    def test_import_oversized_credential_raises(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        oversized = '{"x": "' + "a" * (300 * 1024) + '"}'
-        with pytest.raises(ValueError, match="exceeds"):
-            store.import_credential("codex", oversized)
-
     def test_clear_unknown_backend_raises(self, tmp_path: Path) -> None:
         store = CredentialStore({"HOME": str(tmp_path)})
         with pytest.raises(ValueError, match="No auth profile"):
             store.clear("mystery")
 
     def test_clear_survives_unlink_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-        store.import_credential("codex", '{"x": 1}')
+        env = {"HOME": str(tmp_path)}
+        plant_login(env, "codex")
+        store = CredentialStore(env)
 
         real_unlink = tmp_path.__class__.unlink
 
@@ -250,41 +242,6 @@ class TestCredentialStore:
 
         state = store.clear("codex")
         assert state.status is AuthStatus.NOT_AUTHENTICATED
-
-
-class TestCredentialStoreThatKeepsNothing:
-    """A deployment that must not hold a user's subscription credentials builds a store that refuses them."""
-
-    @pytest.mark.parametrize("backend", ["codex", "claude", "gemini", "qwen"])
-    def test_import_is_refused_before_anything_is_written(self, tmp_path: Path, backend: str) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
-
-        with pytest.raises(CredentialStorageDisabledError):
-            store.import_credential(backend, '{"x": 1}')
-
-        assert list(tmp_path.iterdir()) == []
-        assert store.is_authenticated(backend) is False
-
-    def test_refusal_does_not_depend_on_the_content_being_valid(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
-
-        with pytest.raises(CredentialStorageDisabledError):
-            store.import_credential("codex", "")
-        with pytest.raises(CredentialStorageDisabledError):
-            store.import_credential("mystery", "x")
-
-    def test_a_credential_stored_before_the_policy_applied_can_still_be_seen_and_removed(self, tmp_path: Path) -> None:
-        CredentialStore({"HOME": str(tmp_path)}).import_credential("codex", '{"x": 1}')
-        store = CredentialStore({"HOME": str(tmp_path)}, accepts_new_credentials=False)
-
-        assert store.is_authenticated("codex") is True
-        assert store.clear("codex").status is AuthStatus.NOT_AUTHENTICATED
-        assert store.is_authenticated("codex") is False
-
-    def test_the_default_store_keeps_credentials(self, tmp_path: Path) -> None:
-        store = CredentialStore({"HOME": str(tmp_path)})
-
-        assert store.import_credential("codex", '{"x": 1}').authenticated is True
 
 
 class TestBuildSafeEnvAuthMode:

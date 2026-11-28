@@ -2,9 +2,8 @@
 
 The harness depends on a few facts about the CLIs' own commands, and each is held here against the installed CLI:
 
-- every command a profile runs to log in, log in from afar, log out or ask about the login is one the CLI still has;
-- ``claude auth login`` gives its link and asks for the code through plain pipes, and a code it cannot use ends the
-  login with the CLI's own reason (the server is a dead proxy, so no code ever leaves the machine);
+- every command a profile runs to log in, log in from afar, log out or ask about the login, or hands the user to run in
+  a terminal, is one the CLI still has;
 - a CLI's own logout removes the login a home holds, and ``log_out`` leaves no login anywhere the CLI looks.
 
 The two flows of Codex are not run: ``codex login`` opens a browser and ``codex login --device-auth`` asks OpenAI for a
@@ -15,16 +14,13 @@ Run with ``-m integration``. A CLI that is not installed skips its tests, unless
 
 from __future__ import annotations
 
-import asyncio
 from itertools import takewhile
 from pathlib import Path
 
 import pytest
 
 from myrm_agent_harness.toolkits.acp.auth import (
-    AuthEventType,
     AuthStatus,
-    CliLoginSession,
     CredentialStore,
     LoginReport,
     log_out,
@@ -33,7 +29,6 @@ from myrm_agent_harness.toolkits.acp.auth import (
 )
 from myrm_agent_harness.toolkits.acp.auth._profiles import all_profiles
 from myrm_agent_harness.toolkits.acp.auth.launch_env import cli_base_env
-from tests.toolkits.acp._login_driver import drive_login
 from tests.toolkits.acp.cli_contract import (
     CLAUDE_OAUTH,
     CODEX_API_KEY,
@@ -49,10 +44,6 @@ pytestmark = pytest.mark.integration
 
 _BACKENDS = ("claude", "codex")
 _LOGIN_CONTENT = {"claude": CLAUDE_OAUTH, "codex": CODEX_API_KEY}
-# The discard port refuses a connection at once, so a code the CLI tries to exchange never reaches a server.
-_DEAD_PROXY = "http://127.0.0.1:9"
-_LOGIN_SECONDS = 90
-_CLAUDE_CODE = "not-a-real-code#not-a-real-state"
 
 
 def _login_commands() -> list[object]:
@@ -70,14 +61,6 @@ def _login_commands() -> list[object]:
             if args:
                 commands.append(pytest.param(backend, args, id=f"{backend}-{purpose}"))
     return commands
-
-
-def _offline_login_env(home: Path) -> dict[str, str]:
-    """The environment of a login that can reach no server and opens no browser."""
-    proxies = dict.fromkeys(
-        ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "https_proxy", "http_proxy", "all_proxy"), _DEAD_PROXY
-    )
-    return {**probe_env(home), **proxies, "NO_PROXY": "", "no_proxy": "", "BROWSER": "true"}
 
 
 async def _report(backend: str, env: dict[str, str]) -> LoginReport | None:
@@ -112,41 +95,6 @@ def test_a_login_command_the_cli_does_not_have_is_refused_by_the_live_judge(prob
     problems = check_args(scopes, ("auth", "login", "--not-a-flag-of-claude"), subcommands=frozenset({"auth", "login"}))
 
     assert problems == ["--not-a-flag-of-claude is not an option of auth login"]
-
-
-async def test_claude_login_over_pipes_gives_its_link_and_ends_with_its_own_failure(tmp_path: Path) -> None:
-    binary = cli_binary("claude")
-    profile = profile_for("claude")
-    assert profile is not None
-    env = _offline_login_env(tmp_path)
-
-    events = await drive_login(
-        CliLoginSession(binary, profile, base_env=env, timeout_seconds=_LOGIN_SECONDS), _CLAUDE_CODE
-    )
-
-    links = [event.url for event in events if event.url]
-    assert len(links) == 1 and links[0].startswith("https://claude.ai/oauth/authorize")
-    assert events[-1].type is AuthEventType.ERROR
-    assert events[-1].message.startswith("Couldn't log in")
-    assert profile.code_prompt not in events[-1].message
-    assert await _report("claude", env) == LoginReport(False)
-
-
-async def test_claude_waits_for_another_code_after_one_that_is_not_whole(tmp_path: Path) -> None:
-    binary = cli_binary("claude")
-    profile = profile_for("claude")
-    assert profile is not None
-    session = CliLoginSession(binary, profile, base_env=_offline_login_env(tmp_path), timeout_seconds=_LOGIN_SECONDS)
-    events = session.run()
-
-    async for event in events:
-        if event.url:
-            await session.feed("a-code-without-the-state-part")
-            break
-    after = await asyncio.wait_for(anext(events), timeout=_LOGIN_SECONDS)
-    await session.cancel()
-
-    assert after.type is AuthEventType.STATUS  # the CLI asks again, so the dialog must keep its input open
 
 
 @pytest.mark.parametrize("backend", _BACKENDS)

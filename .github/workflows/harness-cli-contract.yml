@@ -4,7 +4,9 @@ name: Harness CLI contract
 # values it passes, the handshake it sends, the frames it reads. They release on their own schedule, so the checks run
 # against their latest releases: on every pull request and push to main that touches what the runtime sends them,
 # weekly, on demand, and before every harness release (harness-publish.yml calls this workflow; its wheels are not
-# uploaded while it is red). The checks that need no model gate everything. The real turns need provider credentials:
+# uploaded while it is red). Codex is also run at the oldest version the runtime accepts, read from the code that
+# refuses older ones, so what is tested and what is accepted cannot drift apart. The checks that need no model gate
+# everything. The real turns need provider credentials:
 # they run where the repository has CONTRACT_*_API_KEY secrets (dedicated keys with a provider-side spend limit) and
 # say so in the run when it has none, so a green run never passes for one that talked to a model.
 
@@ -128,6 +130,67 @@ jobs:
           tests/toolkits/acp/runtime/codex/test_real_codex_app_server.py
           tests/toolkits/acp/runtime/codex/test_real_codex_threads.py
           tests/toolkits/acp/test_real_http_mcp.py
+
+  codex-floor:
+    name: Codex at the oldest version the runtime accepts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MYRM_CONTRACT_REQUIRE_CLIS: codex
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d8db0a86d3d88f3017a4e6b8a1e2b234e7a0a1b5 # v4.0.0
+        with:
+          version: "0.12.7"
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --python 3.13 --locked --extra all --group dev
+
+      - name: Read the oldest Codex version the runtime accepts
+        id: floor
+        run: |
+          version=$(uv run --no-sync python -c "from myrm_agent_harness.toolkits.acp.runtime.codex.protocol import MINIMUM_SERVER_VERSION as v; print('.'.join(map(str, v)))")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Install that Codex
+        working-directory: ${{ runner.temp }}
+        env:
+          FLOOR: ${{ steps.floor.outputs.version }}
+        run: |
+          retry() { for attempt in 1 2 3; do "$@" && return 0; sleep $((attempt * 15)); done; return 1; }
+          retry npm install --prefix cli "@openai/codex@${FLOOR}"
+          echo "$PWD/cli/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Show the Codex version
+        env:
+          FLOOR: ${{ steps.floor.outputs.version }}
+        run: |
+          installed=$(codex --version 2>&1 | head -n 1)
+          echo "### Codex under test: ${installed} (the oldest the runtime accepts: ${FLOOR})" | tee -a "$GITHUB_STEP_SUMMARY"
+          case "$installed" in *" ${FLOOR}") ;; *) echo "::error::Installed '${installed}', expected ${FLOOR}"; exit 1 ;; esac
+
+      - name: Allow unprivileged user namespaces
+        run: |
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: Run the Codex contract tests
+        run: >-
+          uv run --no-sync pytest -m integration -q --tb=short
+          tests/toolkits/acp/runtime/codex/test_real_codex_protocol_contract.py
+          tests/toolkits/acp/runtime/codex/test_real_codex_app_server.py
+          tests/toolkits/acp/runtime/codex/test_real_codex_threads.py
 
   real-turns:
     name: Real turns (provider credentials)

@@ -1,13 +1,14 @@
 """What the host says to Codex's app server: the handshake, the policy of a turn, and the shape of its requests.
 
 [INPUT]
-- myrm_agent_harness::__version__ (POS: the harness version a client announces)
+- toolkits.acp.client_identity::ClientIdentity (POS: How a host introduces itself to the agents it delegates to)
 - toolkits.acp.runtime.codex.wire::Json, as_bool, as_list, as_obj, as_str (POS: Typed reads of the decoded JSON that Codex's app server sends)
 - toolkits.acp.mcp_servers::HttpMcpServer, McpServerConfig, StdioMcpServer (POS: The MCP servers a host hands a delegated agent)
 - toolkits.acp.types::PermissionMode (POS: ACP runtime type definitions layer. Provides all ACP-related core abstractions and data structures, serving as the foundation for the entire ACP module.)
 
 [OUTPUT]
 - OPT_OUT_NOTIFICATIONS: the notification methods the host never reads, which the server is asked not to send
+- MINIMUM_SERVER_VERSION, server_version: the oldest server the host speaks to, and the version a server says it is
 - initialize_params, login_params, config_read_params: the handshake, the API key login and the read of the user's config
 - WorkspaceWriteSettings: the user's own settings of the workspace-write sandbox
 - TurnPolicy, turn_policy: the approval policy and sandbox a permission mode stands for
@@ -21,15 +22,21 @@ mode means to Codex is small and testable. Every field here is checked against t
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from myrm_agent_harness import __version__
+from myrm_agent_harness.toolkits.acp.client_identity import ClientIdentity
 from myrm_agent_harness.toolkits.acp.mcp_servers import HttpMcpServer, McpServerConfig, StdioMcpServer
-from myrm_agent_harness.toolkits.acp.runtime.codex.wire import Json, as_bool, as_list, as_obj
+from myrm_agent_harness.toolkits.acp.runtime.codex.wire import Json, as_bool, as_list, as_obj, as_str
 from myrm_agent_harness.toolkits.acp.types import PermissionMode
 
-_CLIENT_NAME = "myrm_agent_harness"
+# The oldest app server the host speaks to: the real-binary contract tests run against exactly this one in CI. An older
+# one asks to approve an MCP tool without naming the tool, so a person would be asked to allow a call without being
+# told which one.
+MINIMUM_SERVER_VERSION: tuple[int, int, int] = (0, 167, 0)
+
+_SERVER_VERSION = re.compile(r"(\d+)\.(\d+)\.(\d+)")
 
 # What a turn turns into events is only the stream of items, text and usage; the rest (command output chunks, rate
 # limits, thread bookkeeping) is volume the host would parse and drop, a build log of megabytes included.
@@ -61,15 +68,24 @@ OPT_OUT_NOTIFICATIONS: tuple[str, ...] = (
     "turn/plan/updated",
 )
 
-# Codex accepts an MCP server only under a name made of these characters.
 
-
-def initialize_params() -> dict[str, object]:
+def initialize_params(client: ClientIdentity) -> dict[str, object]:
     """The handshake: who the client is, and the notifications it does not want."""
     return {
-        "clientInfo": {"name": _CLIENT_NAME, "title": "Myrm Agent", "version": __version__},
+        "clientInfo": {"name": client.name, "title": client.title, "version": client.version},
         "capabilities": {"optOutNotificationMethods": list(OPT_OUT_NOTIFICATIONS)},
     }
+
+
+def server_version(greeting: Json, client: ClientIdentity) -> tuple[int, int, int] | None:
+    """The version of the server that answered ``initialize``, or None when it does not say.
+
+    The server reports ``userAgent`` as ``<client name>/<server version> (...)``, with the name the client announced.
+    """
+    user_agent = as_str(greeting.get("userAgent"))
+    head = f"{client.name}/"
+    found = _SERVER_VERSION.match(user_agent, len(head)) if user_agent.startswith(head) else None
+    return (int(found[1]), int(found[2]), int(found[3])) if found else None
 
 
 def login_params(api_key: str) -> dict[str, object]:
@@ -142,14 +158,17 @@ def turn_policy(mode: PermissionMode, *, can_ask: bool, workspace_write: Workspa
 
 def _mcp_server_entry(server: McpServerConfig) -> dict[str, object]:
     """One ``mcp_servers`` entry of a thread's config: a program to start, or a ``url`` to connect to with headers."""
+    # Codex starts a server in the background unless it is ``required``: a turn that began first offered the model none
+    # of its tools, and one that failed to start was never reported. A required one is waited for when the thread
+    # opens, and the thread does not open (with the server's own error) when it cannot start.
     entry: dict[str, object]
     match server:
         case StdioMcpServer():
-            entry = {"command": server.command, "args": list(server.args)}
+            entry = {"command": server.command, "args": list(server.args), "required": True}
             if server.env:
                 entry["env"] = dict(server.env)
         case HttpMcpServer():
-            entry = {"url": server.url}
+            entry = {"url": server.url, "required": True}
             if server.headers:
                 entry["http_headers"] = dict(server.headers)
     if server.read_only:

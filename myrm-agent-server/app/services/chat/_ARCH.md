@@ -123,7 +123,7 @@ ChatService
 - `myrm_agent_harness.toolkits.memory.ephemeral_delta.notify`：删除聊天时清理会话级 ephemeral delta 运行态缓存
 
 ### 被依赖方
-- `app/api/chats/`：聊天 API 路由（含 `/compact`、`/share` 端点）
+- `app/api/chats/`：聊天 API 路由（含 `/compact` 受理与 `/compact/run` 查询、`/share` 端点）
 - `app/api/agents/general_agent/streaming.py`：Web Agent 统一入口（user message 持久化 + 历史加载，支持 fast/agent；legacy `consensus` 由 orchestrator 返回 400）
 - `app/core/channel_bridge/agent_executor/`：频道 Agent 执行器（持久化 + 历史加载 + 流式出站）
 - `app/core/channel_bridge/compact_handler.py`：IM `/compact` 命令业务实现（实现 CompactHandler 协议）
@@ -167,7 +167,8 @@ Chat 表新增多个字段用于支撑高级功能：
 
 | 入口 | 触发条件 | 说明 |
 |------|----------|------|
-| `POST /api/chats/{chat_id}/compact` | 用户手动调用 | Web API 端点 |
+| `POST /api/chats/{chat_id}/compact` | 用户手动调用 | Web API 受理端点：立即返回 202 与运行状态，压缩在后台运行（`compact/run.py`） |
+| `GET /api/chats/{chat_id}/compact/run` | 页面轮询 | 该聊天最近一次手动压缩的状态（`running` / `succeeded` / `failed`）与结果；没压缩过或进程重启后返回 404 |
 | IM `/compact` 命令 | 用户手动调用 | 通过 AgentRouter 处理 |
 | Web 前端 `/compact` 斜杠命令 | 用户手动调用 | MessageInput 拦截，显示确认对话框（警告 Prompt Cache 清除） |
 | Pipeline SummarizeProcessor | token 超阈值自动触发 | 通过 `on_summary_persist` 回调异步写入 DB |
@@ -212,9 +213,9 @@ Chat 表新增多个字段用于支撑高级功能：
 1. 用户输入 `/compact`
 2. 前端显示确认对话框（warning 样式）
 3. 提示：手动压缩会清除 Prompt Cache，建议等待自动压缩
-4. 用户确认后调用 `POST /api/chats/{chat_id}/compact`
-5. 后端执行 `compact_chat()`：先读取并提交，调用摘要模型时不持有数据库快照，再落库（起手取写锁）并提交（分段见下文「事务模型与并发安全」）
-6. 前端重新加载消息列表，显示压缩结果
+4. 用户确认后调用 `POST /api/chats/{chat_id}/compact`：服务端受理并立即返回 202（压缩由模型摘要整段历史，耗时远超代理链上一个请求能活的时间）；同一聊天已有压缩在跑时加入它，不再起第二个
+5. 后端在后台运行 `compact_chat()`（运行自带数据库会话）：先读取并提交，调用摘要模型时不持有数据库快照，再落库（起手取写锁）并提交（分段见下文「事务模型与并发安全」）
+6. 前端 `compactChat` 按间隔查询 `GET /api/chats/{chat_id}/compact/run` 直到运行结束；`runManualCompaction` 把省下 token 的结果交给 store（摘要横幅、策略面板与用量环据此更新），压缩不改消息行，所以不重载消息列表
 
 **自动压缩（Pipeline）**:
 1. Pipeline 检测到 token 超过阈值（如 90%）
@@ -223,10 +224,11 @@ Chat 表新增多个字段用于支撑高级功能：
 4. 创建独立 session，fire-and-forget 模式
 
 **事务模型与并发安全**：
-- **同步路径**（API/IM `/compact`、回复前门禁、空闲压缩）：使用调用方 session，`compact_chat` 分三段。读段读取会话与待压缩消息后立即提交，让读快照在模型调用之前结束；模型调用段（秒到分钟级）不持有任何数据库快照，否则期间别处的任何一次提交都会让随后的写入以 `SQLITE_BUSY_SNAPSHOT` 失败（`busy_timeout` 不覆盖这一种），摘要白付费；写段调用 `do_persist_to_db` 并提交，它先读压缩边界再写，所以起手 `acquire_write_lock`，读与写之间没有别的写入者可插入的空档。压缩后的连续无效次数由守卫记录函数经存储自带的连接写进 Chat 行，不在调用方会话里留下未提交的写，会话在落库提交后保持无事务。
+- **同步路径**（IM `/compact`、回复前门禁、空闲压缩）：使用调用方 session，`compact_chat` 分三段。读段读取会话与待压缩消息后立即提交，让读快照在模型调用之前结束；模型调用段（秒到分钟级）不持有任何数据库快照，否则期间别处的任何一次提交都会让随后的写入以 `SQLITE_BUSY_SNAPSHOT` 失败（`busy_timeout` 不覆盖这一种），摘要白付费；写段调用 `do_persist_to_db` 并提交，它先读压缩边界再写，所以起手 `acquire_write_lock`，读与写之间没有别的写入者可插入的空档。压缩后的连续无效次数由守卫记录函数经存储自带的连接写进 Chat 行，不在调用方会话里留下未提交的写，会话在落库提交后保持无事务。
+- **Web API 路径**（`POST /compact`）：请求只受理，压缩在 `compact/run.py` 登记的后台任务里跑，任务用 `get_session()` 自带会话，不借已随请求关闭的会话（拒绝路径上借用它会留下未结束的读事务与被占用的连接）。每个聊天只登记最近一次运行，下一次运行替换它，进行中的再来请求就加入它；运行失败时带着与原同步路由相同的状态、业务码与消息（异常文本经脱敏），任务被取消或结束时没有结果的运行记为失败。登记在进程内，单进程部署是前提，重启后查询返回 404。进程停机时 `_shutdown` 与 Agent gateway 排空并行、有界（`COMPACT_RUN_DRAIN_TIMEOUT_S`）地等进行中的运行做完：受理后请求已结束，uvicorn 不再替它等，不排空则事件循环收尾时任务被取消、摘要不落库。
 - **失败冷却**：摘要超时、摘要失败与落库失败（`ValueError`，先回滚）都会写入失败冷却并立即提交（会话不提交就关闭会把它回滚，下一次空闲回合会为同一个失败的摘要再付一次费）。
 - **异步路径**（Pipeline 自动触发）：`persist_compaction` 创建新 session，fire-and-forget，不阻塞 Agent；它与进行中的回合并行，期间别处随时可能提交，同样靠 `do_persist_to_db` 起手的写锁保住摘要，否则读与写之间的一次提交就会让落库以 `database is locked` 失败（只记日志，摘要丢失）。
-- **防并发控制**：`compact_chat` 层有按 `chat_id` 的内存 `asyncio.Lock`，同一会话已有压缩在进行时直接返回 `concurrent_compaction_in_progress`，不会出现并发的持久化归档覆盖或历史损坏。
+- **防并发控制**：`compact_chat` 层有按 `chat_id` 的内存 `asyncio.Lock`，同一会话已有压缩在进行时直接返回 `concurrent_compaction_in_progress`，不会出现并发的持久化归档覆盖或历史损坏；Web 入口在它之前先加入进行中的运行，只有 IM `/compact`、回复前门禁与空闲压缩这些不经登记的调用方会撞上这把锁。
 - **与历史变更一致**：摘要是它所覆盖消息的派生物，消息被改写时摘要在同一事务里跟着结算（见 `compact/history_change.py`）：摘要写于变更点之后（含没有写入时间）就清空三个压缩字段，更早写入的摘要仍有效、保留；摘要生成期间边界被删掉或被停用（重新生成、兄弟切换、Focus & Flush），`do_persist_to_db` 拒绝落库，所以变更之后才落库的摘要也不会留下。
 
 **架构特点**：
