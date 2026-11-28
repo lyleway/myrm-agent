@@ -15,7 +15,7 @@ Agent 流式传输辅助工具层，供 orchestrator、reconnect、API 流式路
 | `evicted_output.py` | 辅助 | evicted 工具输出引用的纯函数：载荷规范化（`stdout` / `stderr` 分 stream，预览截断到 8000 字符）、按 `tool_call_id` 优先匹配 progress step（其次同名未认领步骤，最后落到 `bash_code_execute_tool`）、把引用/预览/存储指标写入步骤、判定先于步骤到达的 pending 载荷由哪个步骤认领 | ✅ |
 | `citation_persistence.py` | 辅助 | finalize 阶段 citation fallback：当 collector 未写入 `citedMemoryIds` 时，从 harness `MemoryManager.last_cited_memory_ids` 回填 | ✅ |
 | `takeover_live_assist.py` | 辅助 | browser takeover 事件的签名 live-assist 链接注入：`inject_takeover_live_assist_url` 给 `browser_takeover_requested` 与 `browser_takeover` 类 `approval_required` 事件写入手机端可打开的 `live_assist_url`（相同请求复用上一条链接，托管浏览器不签发），其余事件原样放行；`TakeoverLiveAssistCache` 由单条流携带 | ✅ |
-| `outbound_scrub.py` | 核心 | `scrub_outbound_event`：网关放出每个事件前，遮蔽其中每个字符串里的主机路径（`/Users/x`→`<HOME>`、`/tmp`、`/var` 等→`<ABS_PATH>`）与凭据；审批请求里每个动作请求的 `grantDirectories`（审批卡提供的授权文件夹）是客户端原样回传、服务端照它打开的数据，原样放行，否则勾选授权后授下的是一个不存在的 `<HOME>/x`；只放行这一个位置，紧挨着它、来自模型的工具参数以及别的事件里的同名键照常脱敏 | ✅ |
+| `outbound_scrub.py` | 核心 | `scrub_outbound_event`：网关放出每个事件前，遮蔽其中每个字符串里的主机路径（`/Users/x`→`<HOME>`、`/tmp`、`/var` 等→`<ABS_PATH>`）与凭据；审批请求里每个动作请求的两处是数据、不是文字，主机路径原样放行：`grantDirectories`（审批卡提供的授权文件夹）由客户端原样回传、服务端照它打开，否则勾选授权后授下的是一个不存在的 `<HOME>/x`；`args`（这次调用的参数）在编辑后批准时整份回传并成为要执行的调用，shell 卡的命令高亮 `command_spans` 又按字符偏移指向 `args.command`，改写路径会让回传的路径落空、让高亮错位，`args` 里的凭据仍被遮蔽；动作请求的其余字符串与别的事件里的同名键照常脱敏 | ✅ |
 | `multiplexer.py` | 核心 | `WorkspaceMultiplexer` — 全局 SSE 事件总线，单连接把所有会话的状态变化（`session_status`：generating / awaiting_approval / idle）广播给每个标签页，绕过浏览器 6 连接限制；回合正文不经此总线 | ✅ |
 
 ## 依赖关系
