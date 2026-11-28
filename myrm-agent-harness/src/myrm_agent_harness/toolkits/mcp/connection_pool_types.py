@@ -2,6 +2,7 @@
 
 [INPUT]
 - session_actor::MCPSessionActor (POS: MCP persistent-session layer)
+- server_identity::mcp_server_component (POS: The identity a server carries in its tool names, which a lookup by that name resolves back to the server)
 
 [OUTPUT]
 - ConnectionStatus: connection lifecycle state enum
@@ -20,6 +21,8 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
+
+from .server_identity import mcp_server_component
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -186,12 +189,22 @@ class MCPConnection:
         return {name: actor.instructions for name, actor in self._actors.items()}
 
     def _resolve_actor(self, server_name: str) -> MCPSessionActor | None:
+        """Return the session *server_name* names: its configured name, a ``-``/``_`` spelling of it, or its identity.
+
+        The model, the MCP App resource route and auth refresh name a server by the ``{server}`` segment of its tool
+        names. That identity differs from the configured name once folding or the identity bound changed it
+        (``Hello World``, ``天气``, a name past the bound), and it is unique among the servers of one prepared config
+        set, so matching it last cannot shadow an exact name.
+        """
         actor = self._actors.get(server_name)
         if actor is not None:
             return actor
         for variant in (server_name.replace("-", "_"), server_name.replace("_", "-")):
             actor = self._actors.get(variant)
             if actor is not None:
+                return actor
+        for name, actor in self._actors.items():
+            if mcp_server_component(name) == server_name:
                 return actor
         return None
 
