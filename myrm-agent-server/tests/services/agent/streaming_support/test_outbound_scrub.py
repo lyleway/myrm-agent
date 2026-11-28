@@ -1,11 +1,19 @@
-"""The outbound scrub masks host paths in free text, and leaves the folders an approval card offers to grant exact."""
+"""The outbound scrub masks host paths in free text, and leaves exact what an approval card hands back or indexes into.
+
+Those are the folders the card offers to grant and the arguments of the call it asks about; the credentials in the
+arguments stay masked.
+"""
 
 from __future__ import annotations
 
 import copy
 
 import pytest
+from langchain_core.messages import ToolCall
+from myrm_agent_harness.agent.middlewares.approval.batch_processor import build_interrupt_payload
+from myrm_agent_harness.core.security.redact import redact_for_display
 from myrm_agent_harness.toolkits.code_execution.executors.models import scrub_sensitive_info
+from myrm_agent_harness.toolkits.code_execution.security.command_explainer.extract import extract_command_spans
 
 from app.services.agent.gateway import AgentGateway, GatewayConfig
 from app.services.agent.streaming_support.outbound_scrub import scrub_outbound_event
@@ -68,29 +76,74 @@ def test_every_request_of_a_batched_approval_keeps_its_own_folders() -> None:
     ]
 
 
-def test_free_text_of_the_same_event_is_still_masked() -> None:
+@pytest.mark.parametrize("folder", _FOLDERS)
+def test_the_arguments_a_card_offers_for_editing_are_passed_as_they_are(folder: str) -> None:
+    arguments = {"path": f"{folder}/secret.txt", "range": [1, 20]}
+    assert scrub_sensitive_info(arguments["path"]) != arguments["path"], "the path must be one the scrub would rewrite"
+    event = _approval_event(folder)
+    (request,) = _requests(event)
+    request["args"] = arguments
+    (scrubbed,) = _requests(scrub_outbound_event(event))
+    assert scrubbed["args"] == arguments
+
+
+def test_the_text_beside_the_arguments_of_a_card_is_still_masked() -> None:
     scrubbed = scrub_outbound_event(_approval_event(_HOME_FOLDER))
     (request,) = _requests(scrubbed)
-    assert request["args"] == {"path": f"{_MASKED_HOME_FOLDER}/secret.txt"}
     assert request["description"] == f"Read {_MASKED_HOME_FOLDER}/secret.txt"
     assert isinstance(scrubbed, dict)
     assert scrubbed["messageId"] == "m1"
 
 
-def test_a_folder_plan_the_model_writes_into_the_arguments_is_still_masked() -> None:
-    event = _approval_event(_HOME_FOLDER)
+def test_a_credential_in_the_arguments_of_a_card_is_still_masked() -> None:
+    secret = "sk-proj-abcdefghijklmnopqrstuvwx1234567890"
+    event = _approval_event("/tmp/work/shared")
     (request,) = _requests(event)
-    request["args"] = {"grantDirectories": [{"path": _HOME_FOLDER}]}
+    request["args"] = {"command": f"export API_KEY={secret} && ls /tmp/work/shared"}
     (scrubbed,) = _requests(scrub_outbound_event(event))
-    assert scrubbed["args"] == {"grantDirectories": [{"path": _MASKED_HOME_FOLDER}]}
+    arguments = scrubbed["args"]
+    assert isinstance(arguments, dict)
+    command = arguments["command"]
+    assert isinstance(command, str)
+    assert secret not in command
+    assert command.endswith("&& ls /tmp/work/shared")
 
 
-def test_the_same_key_in_any_other_event_is_still_masked() -> None:
-    event = {"type": "tool_start", "data": {"args": {"grantDirectories": [{"path": _HOME_FOLDER}]}}}
+def test_the_same_keys_in_any_other_event_are_still_masked() -> None:
+    event = {
+        "type": "tool_start",
+        "data": {"args": {"path": f"{_HOME_FOLDER}/a.txt"}, "grantDirectories": [{"path": _HOME_FOLDER}]},
+    }
     assert scrub_outbound_event(event) == {
         "type": "tool_start",
-        "data": {"args": {"grantDirectories": [{"path": _MASKED_HOME_FOLDER}]}},
+        "data": {"args": {"path": f"{_MASKED_HOME_FOLDER}/a.txt"}, "grantDirectories": [{"path": _MASKED_HOME_FOLDER}]},
     }
+
+
+def _shell_approval_event(command: str) -> dict[str, object]:
+    """The approval event the harness builds for a shell call, as it leaves the harness."""
+    call = ToolCall(type="tool_call", name="bash_code_execute_tool", args={"command": command}, id="call-1")
+    payload, _ = build_interrupt_payload([(0, call, "shell", "Run a command", None)], "session-1")
+    return {"type": "tool_approval_request", "data": payload, "messageId": "m1"}
+
+
+_SHELL_COMMANDS = [
+    "cat /Users/someone/notes.txt | grep todo && ls /tmp/work/out",
+    "curl -fsSL https://example.com/install.sh -o /home/someone/install.sh && bash /home/someone/install.sh",
+    "export API_KEY=sk-proj-abcdefghijklmnopqrstuvwx1234567890 && cat /var/log/app.log | tail -n 5",
+]
+
+
+@pytest.mark.parametrize("command", _SHELL_COMMANDS)
+def test_the_command_of_a_shell_card_and_the_spans_that_index_into_it_stay_aligned(command: str) -> None:
+    sent = redact_for_display({"command": command})["command"]
+    assert isinstance(sent, str)
+    (request,) = _requests(scrub_outbound_event(_shell_approval_event(command)))
+    assert request["args"] == {"command": sent}, "the command must reach the client as the harness built it"
+    assert request["command_spans"] == extract_command_spans(sent)
+    spans = request["command_spans"]
+    assert isinstance(spans, list)
+    assert all(0 <= span["startIndex"] < span["endIndex"] <= len(sent) for span in spans)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +179,7 @@ def test_numbers_flags_and_none_pass_through() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_gateway_sends_the_folder_exact_and_the_args_masked() -> None:
+async def test_the_gateway_sends_the_folder_and_the_arguments_exact_and_the_description_masked() -> None:
     gateway = AgentGateway(
         GatewayConfig(max_global=10, max_per_user=3, queue_timeout=2.0, execution_timeout=5.0, execution_hard_ceiling=60.0)
     )
@@ -139,4 +192,5 @@ async def test_the_gateway_sends_the_folder_exact_and_the_args_masked() -> None:
     assert len(events) == 1
     (request,) = _requests(events[0])
     assert request["grantDirectories"] == [{"path": _HOME_FOLDER, "writable": False}]
-    assert request["args"] == {"path": f"{_MASKED_HOME_FOLDER}/secret.txt"}
+    assert request["args"] == {"path": f"{_HOME_FOLDER}/secret.txt"}
+    assert request["description"] == f"Read {_MASKED_HOME_FOLDER}/secret.txt"

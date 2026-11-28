@@ -9,7 +9,7 @@ shutdown, and structured logging.
 - app.services.agent.streaming_support.outbound_scrub::scrub_outbound_event (POS: the last text filter before an agent event leaves the server)
 
 [OUTPUT]
-- AsyncGenerator[dict, None]: same events, wrapped with lifecycle management; host paths and credentials in their strings are masked, except the folder plan of an approval card
+- AsyncGenerator[dict, None]: same events, wrapped with lifecycle management; host paths and credentials in their strings are masked, except the host paths in the folder plan and arguments of an approval card
 - AgentDrainingError: raised when gateway is draining (graceful shutdown)
 - AgentQueueTimeout: raised when queue wait exceeds limit
 - AgentExecutionTimeout: raised when execution exceeds limit
